@@ -10,7 +10,7 @@
 #include "fft/nlo_complex.h"
 #include <stddef.h>
 
-// void solve_rk4(simulation_state &state)
-// {
-//     // apply dispersion
-// };
+void solve_rk4(simulation_state* state)
+{
+    // apply dispersion
+};

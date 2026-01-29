@@ -3,6 +3,7 @@ PROJECT_BRIEF          = "Nonlinear Optics Library"
 OUTPUT_DIRECTORY       = "@DOXYGEN_OUTPUT_DIRECTORY@"
 GENERATE_HTML          = YES
 GENERATE_LATEX         = NO
+GENERATE_TREEVIEW      = YES
 RECURSIVE              = YES
 QUIET                  = YES
 
@@ -13,9 +14,14 @@ EXTRACT_STATIC         = YES
 EXTRACT_PRIVATE        = YES
 CREATE_SUBDIRS         = YES
 CREATE_SUBDIRS_LEVEL   = 8
+HAVE_DOT               = YES
+CALL_GRAPH             = YES
+DIRECTORY_GRAPH        = YES
 
 
 WARN_IF_UNDOCUMENTED   = NO
 WARN_IF_DOC_ERROR      = YES
 
+DISABLE_INDEX = NO
+FULL_SIDEBAR = NO
 HTML_EXTRA_STYLESHEET  = "@AWESOME_CSS_DIR@/doxygen-awesome.css"

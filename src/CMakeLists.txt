@@ -5,6 +5,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/core/state.c
   ${CMAKE_CURRENT_LIST_DIR}/core/init.c
   ${CMAKE_CURRENT_LIST_DIR}/physics/operators.c
+  ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_ops.c
 )
 
 add_library(nlolib SHARED ${NLOLIB_SOURCES})

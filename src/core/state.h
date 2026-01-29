@@ -34,10 +34,12 @@ typedef struct {
  * 
  * @param num_dispersion_terms Number of dispersion terms used
  * @param betas Array of dispersion coefficients (s^n/m)
+ * @param alpha Attenuation coefficient (1/m)
  */
 typedef struct {
     size_t num_dispersion_terms;
     double betas[NT_MAX];
+    double alpha;
 } dispersion_params;
 
 /**
