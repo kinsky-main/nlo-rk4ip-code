@@ -1,0 +1,21 @@
+PROJECT_NAME           = nlolib
+PROJECT_BRIEF          = "Nonlinear Optics Library"
+OUTPUT_DIRECTORY       = "@DOXYGEN_OUTPUT_DIRECTORY@"
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+RECURSIVE              = YES
+QUIET                  = YES
+
+INPUT                  = "@CMAKE_SOURCE_DIR@/src"
+FILE_PATTERNS          = *.h *.c
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+EXTRACT_PRIVATE        = YES
+CREATE_SUBDIRS         = YES
+CREATE_SUBDIRS_LEVEL   = 8
+
+
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+
+HTML_EXTRA_STYLESHEET  = "@AWESOME_CSS_DIR@/doxygen-awesome.css"

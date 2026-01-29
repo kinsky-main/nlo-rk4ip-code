@@ -1,0 +1,15 @@
+add_library(nlo_fft_backend INTERFACE)
+
+if(NLO_FFT_BACKEND_FFTW AND NLO_FFT_BACKEND_CUFFT)
+  message(FATAL_ERROR "Only one FFT backend can be enabled at a time.")
+endif()
+
+if(NLO_FFT_BACKEND_FFTW)
+  find_package(FFTW3 REQUIRED)
+  target_link_libraries(nlo_fft_backend INTERFACE FFTW3::fftw3)
+  target_compile_definitions(nlo_fft_backend INTERFACE NLO_FFT_BACKEND_FFTW)
+elseif(NLO_FFT_BACKEND_CUFFT)
+  target_compile_definitions(nlo_fft_backend INTERFACE NLO_FFT_BACKEND_CUFFT)
+else()
+  message(FATAL_ERROR "No FFT backend enabled. Set NLO_FFT_BACKEND_FFTW or NLO_FFT_BACKEND_CUFFT.")
+endif()
