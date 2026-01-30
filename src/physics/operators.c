@@ -30,6 +30,7 @@ nlo_complex* dispersion_operator(
         return freq_domain_envelope;
     }
 
+    // TODO: Remove need for temporary allocations here 
     nlo_complex* dispersion = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
     double* omega_power = (double*)malloc(num_time_samples * sizeof(double));
     if (dispersion == NULL || omega_power == NULL) {
@@ -46,6 +47,7 @@ nlo_complex* dispersion_operator(
     double inv_factorial = 1.0;
     for (size_t term_idx = 0; term_idx < disp_params->num_dispersion_terms; ++term_idx) {
         const size_t order = term_idx + 2;
+        // FIXME: That is not a factorial
         inv_factorial /= (double)order;
 
         const double beta = disp_params->betas[term_idx];
