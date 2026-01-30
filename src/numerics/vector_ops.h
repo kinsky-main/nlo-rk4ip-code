@@ -48,3 +48,8 @@ void nlo_complex_axpy_real(nlo_complex *dst, const double *src, nlo_complex alph
  * @brief Element-wise complex multiply: dst[i] *= src[i].
  */
 void nlo_complex_mul_inplace(nlo_complex *dst, const nlo_complex *src, size_t n);
+
+/**
+ * @brief Element-wise complex power: out[i] = base[i] ^ exponent.
+ */
+void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsigned int exponent);

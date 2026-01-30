@@ -90,7 +90,7 @@ typedef struct {
  * @param num_time_samples Number of time-domain samples
  * @param field_buffer Buffer for the electric field in time domain
  * @param ip_field_buffer Intermediate buffer for calculations
- * @param current_dispersion Buffer for current dispersion values
+ * @param current_dispersion_factors Buffer for current dispersion factors
  * @param current_z Current propagation distance
  * @param current_step_size Current step size for propagation
  */
@@ -99,7 +99,7 @@ typedef struct {
     size_t num_time_samples;
     nlo_complex* field_buffer;
     nlo_complex* ip_field_buffer;
-    nlo_complex* current_dispersion;
+    nlo_complex* current_dispersion_factors;
     double current_z;
     double current_step_size;
 } simulation_state;

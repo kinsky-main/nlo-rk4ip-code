@@ -100,3 +100,22 @@ void nlo_complex_mul_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
         dst[i] = nlo_mul(dst[i], src[i]);
     }
 }
+
+void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsigned int exponent)
+{
+    if (base == NULL || out == NULL) {
+        return;
+    }
+
+    if (exponent == 0U) {
+        nlo_complex_fill(out, n, nlo_make(1.0, 0.0));
+        return;
+    }
+
+    nlo_complex_fill(out, n, nlo_make(1.0, 0.0));
+    for (unsigned int p = 0; p < exponent; ++p) {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = nlo_mul(out[i], base[i]);
+        }
+    }
+}
