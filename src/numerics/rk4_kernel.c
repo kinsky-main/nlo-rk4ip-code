@@ -32,5 +32,5 @@ void solve_rk4(simulation_state *state) {
 
 void step_rk4(simulation_state *state)
 {
-    
+    state->ip_field_buffer = 
 };

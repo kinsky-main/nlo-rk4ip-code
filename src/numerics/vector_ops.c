@@ -8,6 +8,7 @@
 
 #include "numerics/vector_ops.h"
 #include "vector_ops.h"
+#include <math.h>
 #include <stdlib.h>
 
 void nlo_real_fill(double *dst, size_t n, double value)
@@ -179,6 +180,20 @@ void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
 
     for (size_t i = 0; i < n; ++i) {
         dst[i] = nlo_add(dst[i], src[i]);
+    }
+}
+
+void nlo_complex_exp_inplace(nlo_complex *dst, size_t n)
+{
+    if (dst == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        const double re = NLO_RE(dst[i]);
+        const double im = NLO_IM(dst[i]);
+        const double exp_re = exp(re);
+        dst[i] = nlo_make(exp_re * cos(im), exp_re * sin(im));
     }
 }
 

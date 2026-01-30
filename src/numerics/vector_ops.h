@@ -73,3 +73,8 @@ void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent);
  * @brief Element-wise sum of two complex vectors inplace: dst[i] += src[i].
  */
 void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n);
+
+/**
+ * @brief Exponent of complex vector: dst[i] = exp(dst[i]).
+ */
+void nlo_complex_exp_inplace(nlo_complex *dst, size_t n);
