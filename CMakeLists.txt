@@ -1,9 +1,9 @@
-cmake_minimum_required(VERSION 4.1.2)
+cmake_minimum_required(VERSION 3.28.3)
 # TODO: Add automatic build version increment when build and tests pass, minor version increment on commit to main
 project(nlolib VERSION 0.0.1 LANGUAGES C)
 
 # Set C standard
-set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD 99)
 
 option(NLO_FFT_BACKEND_FFTW "Use FFTW backend" ON)
 option(NLO_FFT_BACKEND_CUFFT "Use CUFFT backend" OFF)

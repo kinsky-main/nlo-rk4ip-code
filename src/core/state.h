@@ -101,6 +101,10 @@ typedef struct {
     nlo_complex* ip_field_buffer;
     nlo_complex* field_magnitude_buffer;
     nlo_complex* field_working_buffer;
+        nlo_complex* k_1_buffer;
+        nlo_complex* k_2_buffer;
+        nlo_complex* k_3_buffer;
+        nlo_complex* k_4_buffer;
     nlo_complex* current_dispersion_factor;
     double current_z;
     double current_step_size;
