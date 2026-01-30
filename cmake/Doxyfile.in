@@ -17,7 +17,8 @@ CREATE_SUBDIRS_LEVEL   = 8
 HAVE_DOT               = YES
 CALL_GRAPH             = YES
 DIRECTORY_GRAPH        = YES
-
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = ../..
 
 WARN_IF_UNDOCUMENTED   = NO
 WARN_IF_DOC_ERROR      = YES

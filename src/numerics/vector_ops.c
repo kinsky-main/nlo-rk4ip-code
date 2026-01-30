@@ -7,6 +7,8 @@
  */
 
 #include "numerics/vector_ops.h"
+#include "vector_ops.h"
+#include <stdlib.h>
 
 void nlo_real_fill(double *dst, size_t n, double value)
 {
@@ -74,6 +76,17 @@ void nlo_complex_fill(nlo_complex *dst, size_t n, nlo_complex value)
     }
 }
 
+void nlo_complex_copy(nlo_complex *dst, const nlo_complex *src, size_t n)
+{
+    if (dst == NULL || src == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        dst[i] = src[i];
+    }
+}
+
 void nlo_complex_axpy_real(nlo_complex *dst, const double *src, nlo_complex alpha, size_t n)
 {
     if (dst == NULL || src == NULL) {
@@ -87,6 +100,17 @@ void nlo_complex_axpy_real(nlo_complex *dst, const double *src, nlo_complex alph
         const double term = src[i];
         dst[i] = nlo_make(NLO_RE(dst[i]) + alpha_re * term,
                           NLO_IM(dst[i]) + alpha_im * term);
+    }
+}
+
+void nlo_complex_scalar_mul_inplace(nlo_complex *dst, nlo_complex alpha, size_t n)
+{
+    if (dst == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        dst[i] = nlo_mul(dst[i], alpha);
     }
 }
 
@@ -119,3 +143,42 @@ void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsign
         }
     }
 }
+
+void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent)
+{
+    if (dst == NULL) {
+        return;
+    }
+
+    if (exponent == 0U) {
+        nlo_complex_fill(dst, n, nlo_make(1.0, 0.0));
+        return;
+    }
+
+    nlo_complex *temp = (nlo_complex *)malloc(n * sizeof(*temp));
+    if (temp == NULL) {
+        return;
+    }
+
+    nlo_complex_copy(temp, dst, n);
+
+    for (unsigned int p = 1; p < exponent; ++p) {
+        for (size_t i = 0; i < n; ++i) {
+            dst[i] = nlo_mul(dst[i], temp[i]);
+        }
+    }
+
+    free(temp);
+}
+
+void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
+{
+    if (dst == NULL || src == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        dst[i] = nlo_add(dst[i], src[i]);
+    }
+}
+

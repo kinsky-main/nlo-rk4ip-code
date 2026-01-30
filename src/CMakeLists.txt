@@ -5,6 +5,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/core/state.c
   ${CMAKE_CURRENT_LIST_DIR}/core/init.c
   ${CMAKE_CURRENT_LIST_DIR}/physics/operators.c
+  ${CMAKE_CURRENT_LIST_DIR}/numerics/math_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_ops.c
 )
 

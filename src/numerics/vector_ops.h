@@ -40,9 +40,19 @@ void nlo_real_pow_int(const double *base, double *out, size_t n, unsigned int po
 void nlo_complex_fill(nlo_complex *dst, size_t n, nlo_complex value);
 
 /**
+ * @brief Copy complex vectors.
+ */
+void nlo_complex_copy(nlo_complex *dst, const nlo_complex *src, size_t n);
+
+/**
  * @brief Complex axpy with real input: dst[i] += alpha * src[i].
  */
 void nlo_complex_axpy_real(nlo_complex *dst, const double *src, nlo_complex alpha, size_t n);
+
+/**
+ * @brief Element-wise multiply by complex constant value: dst[i] *= alpha.
+ */
+void nlo_complex_scalar_mul_inplace(nlo_complex *dst, nlo_complex alpha, size_t n);
 
 /**
  * @brief Element-wise complex multiply: dst[i] *= src[i].
@@ -53,3 +63,13 @@ void nlo_complex_mul_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
  * @brief Element-wise complex power: out[i] = base[i] ^ exponent.
  */
 void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsigned int exponent);
+
+/**
+ * @brief Element-wise complex power inplace: dst[i] ^= exponent.
+ */
+void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent);
+
+/**
+ * @brief Element-wise sum of two complex vectors inplace: dst[i] += src[i].
+ */
+void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n);

@@ -27,23 +27,9 @@ simulation_state* create_simulation_state(const sim_config* config, size_t num_t
 
     state->field_buffer = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
     state->ip_field_buffer = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
-    {
-        const size_t num_betas = config->dispersion.num_dispersion_terms;
-
-        free(state->current_dispersion_factors);
-        state->current_dispersion_factors = (config->dispersion.num_dispersion_terms > 0)
-            ? (nlo_complex*)calloc(config->dispersion.num_dispersion_terms, sizeof(nlo_complex))
-            : nlo_create(0.0, 0.0);
-    }
-    if (state->ip_field_buffer == NULL ||
-        state->field_buffer == NULL ||
-        state->current_dispersion_factors == NULL ||
-        state->current_step_size == 0.0 ||
-        state->num_time_samples == 0
-        ) {
-        free_simulation_state(state);
-        return NULL;
-    }
+    state->field_magnitude_buffer = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
+    state->field_working_buffer = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
+    state->current_dispersion_factor = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
 
     return state;
 }
@@ -53,7 +39,7 @@ void free_simulation_state(simulation_state* state)
     if (state != NULL) {
         free(state->field_buffer);
         free(state->ip_field_buffer);
-        free(state->current_dispersion_factors);
+        free(state->current_dispersion_factor);
         free(state);
     }
 }

@@ -21,27 +21,31 @@
 /**
  * @brief Pre-calculates the factors of the dispersion operator in the frequency domain to operate on field envelopes
  * for a given step size in propagation.
- * @param disp_params Pointer to dispersion parameters
- * @param dispersion_factors Pointer to output buffer for dispersion factors (length: num_time_samples)
+ * @param num_dispersion_terms Pointer to number of dispersion terms
+ * @param betas Pointer to array of dispersion coefficients
+ * @param dispersion_factor Pointer to output buffer for dispersion factors (length: num_time_samples)
  * @param frequency_grid Pointer to frequency grid (length: num_time_samples)
  * @param num_time_samples Number of time-domain samples
  */
-void calculate_dispersion_factors(
-    const dispersion_params *disp_params,
-    nlo_complex* dispersion_factors,
-    const double *frequency_grid,
-    size_t num_time_samples);
+void calculate_dispersion_factor(
+    const size_t *num_dispersion_terms,
+    const double *betas,
+    nlo_complex *dispersion_factor,
+    const nlo_complex *frequency_grid,
+    const size_t num_time_samples);
 
 /**
  * @brief Applies the dispersion operator factors to the frequency-domain envelope.
- * @param dispersion_factors Pointer to dispersion factors (length: num_time_samples)
+ * @param dispersion_factor Pointer to dispersion factors (length: num_time_samples)
  * @param freq_domain_envelope Pointer to frequency-domain envelope to be modified (length: num_time_samples)
  */
 void dispersion_operator(
-    const nlo_complex* dispersion_factors,
-    nlo_complex* freq_domain_envelope,
+    const nlo_complex *dispersion_factor,
+    nlo_complex *freq_domain_envelope,
     size_t num_time_samples);
 
 void nonlinear_operator(
-    const nonlinear_params *nonlin_params,
-    const nlo_complex *time_domain_envelope);
+    const double *gamma,
+    const nlo_complex *time_domain_envelope,
+    const nlo_complex *time_domain_magnitude_squared,
+    size_t num_time_samples);
