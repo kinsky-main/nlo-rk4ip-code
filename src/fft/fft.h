@@ -11,13 +11,20 @@
 // MARK: Includes
 
 #include "nlo_complex.h"
-#include <cstddef>
+#include <stddef.h>
 
 // MARK: Const & Macros
 
 // MARK: Typedefs
 
 // MARK: Function Declarations
+
+/**
+ * @brief Initialize FFT plans for a given signal size.
+ * @param signal_size Size of the input signal.
+ * @return 0 on success, non-zero on failure.
+ */
+int fft_init(size_t signal_size);
 
 /**
  * @brief Performs a forward Fast Fourier Transform (FFT) on the input time-domain signal.
@@ -28,7 +35,7 @@
 void forward_fft(
     const nlo_complex* time_domain_signal,
     nlo_complex* frequency_domain_signal,
-    std::size_t signal_size);
+    size_t signal_size);
 
 /**
  * @brief Performs an inverse Fast Fourier Transform (IFFT) on the input frequency-domain signal
@@ -40,4 +47,4 @@ void forward_fft(
 void inverse_fft(
     const nlo_complex* frequency_domain_signal,
     nlo_complex* time_domain_signal,
-    std::size_t signal_size);
+    size_t signal_size);

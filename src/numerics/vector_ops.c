@@ -88,6 +88,19 @@ void nlo_complex_copy(nlo_complex *dst, const nlo_complex *src, size_t n)
     }
 }
 
+void calculate_magnitude_squared(const nlo_complex *src, nlo_complex *dst, size_t n)
+{
+    if (src == NULL || dst == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        const double re = NLO_RE(src[i]);
+        const double im = NLO_IM(src[i]);
+        dst[i] = nlo_make(re * re + im * im, 0.0);
+    }
+}
+
 void nlo_complex_axpy_real(nlo_complex *dst, const double *src, nlo_complex alpha, size_t n)
 {
     if (dst == NULL || src == NULL) {

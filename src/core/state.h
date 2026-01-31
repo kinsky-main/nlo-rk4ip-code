@@ -69,6 +69,13 @@ typedef struct {
 } time_grid;
 
 /**
+ * @brief Parameters and a buffer for the frequency grid
+ */
+typedef struct {
+    nlo_complex* frequency_grid;
+} frequency_grid;
+
+/**
  * @brief Overall simulation configuration parameters
  * 
  * @param nonlinear Nonlinear parameters
@@ -81,6 +88,7 @@ typedef struct {
     dispersion_params dispersion;
     propagation_params propagation;
     time_grid time;
+    frequency_grid frequency;
 } sim_config;
 
 /**
@@ -101,10 +109,11 @@ typedef struct {
     nlo_complex* ip_field_buffer;
     nlo_complex* field_magnitude_buffer;
     nlo_complex* field_working_buffer;
-        nlo_complex* k_1_buffer;
-        nlo_complex* k_2_buffer;
-        nlo_complex* k_3_buffer;
-        nlo_complex* k_4_buffer;
+    nlo_complex* field_freq_buffer;
+    nlo_complex* k_1_buffer;
+    nlo_complex* k_2_buffer;
+    nlo_complex* k_3_buffer;
+    nlo_complex* k_4_buffer;
     nlo_complex* current_dispersion_factor;
     double current_z;
     double current_step_size;
@@ -124,3 +133,16 @@ simulation_state* create_simulation_state(const sim_config* config, size_t num_t
  * @param state Pointer to simulation state to free
  */
 void free_simulation_state(simulation_state* state);
+
+/**
+ * @brief Create and initialize a new simulation configuration
+ * @param num_dispersion_terms Number of dispersion terms to initialize
+ * @param num_time_samples Number of time-domain samples for frequency grid allocation
+ */
+sim_config* create_sim_config(size_t num_dispersion_terms, size_t num_time_samples);
+
+/**
+ * @brief Free resources associated with a simulation configuration
+ * @param config Pointer to simulation configuration to free
+ */
+void free_sim_config(sim_config* config);

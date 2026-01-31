@@ -45,6 +45,11 @@ void nlo_complex_fill(nlo_complex *dst, size_t n, nlo_complex value);
 void nlo_complex_copy(nlo_complex *dst, const nlo_complex *src, size_t n);
 
 /**
+ * @brief Compute magnitude squared for each complex element: dst[i] = |src[i]|^2.
+ */
+void calculate_magnitude_squared(const nlo_complex *src, nlo_complex *dst, size_t n);
+
+/**
  * @brief Complex axpy with real input: dst[i] += alpha * src[i].
  */
 void nlo_complex_axpy_real(nlo_complex *dst, const double *src, nlo_complex alpha, size_t n);

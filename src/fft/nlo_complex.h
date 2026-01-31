@@ -12,14 +12,23 @@
 
 // MARK: Typedefs
 
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+  #define NLO_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#else
+  #define NLO_STATIC_ASSERT_CONCAT_(a, b) a##b
+  #define NLO_STATIC_ASSERT_CONCAT(a, b) NLO_STATIC_ASSERT_CONCAT_(a, b)
+  #define NLO_STATIC_ASSERT(cond, msg) \
+    typedef char NLO_STATIC_ASSERT_CONCAT(nlo_static_assert_, __LINE__)[(cond) ? 1 : -1]
+#endif
+
 #if defined(NLO_FFT_BACKEND_FFTW)
 
   #include <fftw3.h>
   typedef struct { double re, im; } nlo_complex;
   #define NLO_RE(z) ((z).re)
   #define NLO_IM(z) ((z).im)
-  _Static_assert(sizeof(nlo_complex) == sizeof(fftw_complex),
-                 "nlo_complex must match fftw_complex layout");
+  NLO_STATIC_ASSERT(sizeof(nlo_complex) == sizeof(fftw_complex),
+                    "nlo_complex must match fftw_complex layout");
 
 #elif defined(NLO_FFT_BACKEND_CUFFT)
 

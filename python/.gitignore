@@ -10,6 +10,7 @@ __pycache__/
 .Python
 build/
 Debug/
+Release/
 develop-eggs/
 dist/
 downloads/

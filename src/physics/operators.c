@@ -25,6 +25,7 @@ static inline nlo_complex i_factor(size_t power);
 void calculate_dispersion_factor(
     const size_t *num_dispersion_terms,
     const double *betas,
+    const double step_size,
     nlo_complex *dispersion_factor,
     const nlo_complex *frequency_grid,
     const size_t num_time_samples)
@@ -62,6 +63,11 @@ void calculate_dispersion_factor(
             term = nlo_mul(term, factorial_component);
             dispersion_factor[j] = nlo_add(dispersion_factor[j], term);
         }
+
+        nlo_complex_scalar_mul_inplace(
+            dispersion_factor, nlo_make(step_size / 2.0, 0.0), num_time_samples);
+        
+        nlo_complex_exp_inplace(dispersion_factor, num_time_samples);
     }
 
     free(omega_power);
@@ -81,7 +87,7 @@ void dispersion_operator(
 
 void nonlinear_operator(
     const double *gamma,
-    const nlo_complex *time_domain_envelope,
+    nlo_complex *time_domain_envelope,
     const nlo_complex *time_domain_magnitude_squared,
     size_t num_time_samples)
 {
