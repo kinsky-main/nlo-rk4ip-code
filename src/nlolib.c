@@ -24,10 +24,18 @@ NLOLIB_API nlolib_status nlolib_propagate(const sim_config* config,
         return NLOLIB_STATUS_INVALID_ARGUMENT;
     }
 
-    simulation_state* state = create_simulation_state(config, num_time_samples);
+    simulation_state* state = create_simulation_state(config, num_time_samples, 1u);
     if (state == NULL) {
         return NLOLIB_STATUS_ALLOCATION_FAILED;
     }
+
+    nlo_complex* initial_field = simulation_state_current_field(state);
+    if (initial_field == NULL) {
+        free_simulation_state(state);
+        return NLOLIB_STATUS_ALLOCATION_FAILED;
+    }
+
+    memcpy(initial_field, input_field, num_time_samples * sizeof(nlo_complex));
 
     if (input_field != output_field) {
         memcpy(output_field, input_field, num_time_samples * sizeof(nlo_complex));

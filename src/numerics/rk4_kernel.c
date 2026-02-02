@@ -12,6 +12,7 @@
 #include "fft/fft.h"
 #include "physics/operators.h"
 #include <stddef.h>
+#include <string.h>
 
 void solve_rk4(simulation_state *state) {
     
@@ -19,6 +20,7 @@ void solve_rk4(simulation_state *state) {
     double max_step = state->config->propagation.max_step_size;
     double min_step = state->config->propagation.min_step_size;
     state->current_step_size = state->config->propagation.starting_step_size;
+    const size_t num_time_samples = state->num_time_samples;
 
     calculate_dispersion_factor(
         &state->config->dispersion.num_dispersion_terms,
@@ -26,7 +28,7 @@ void solve_rk4(simulation_state *state) {
         state->current_step_size,
         state->current_dispersion_factor,
         state->config->frequency.frequency_grid,
-        state->num_time_samples);
+        num_time_samples);
 
     while (state->current_z < z_end) {
         if (state->current_z + state->current_step_size > z_end) {
@@ -34,6 +36,19 @@ void solve_rk4(simulation_state *state) {
         }
 
         step_rk4(state);
+
+        // Persist the updated field into the next record slot if capacity allows.
+        if (state->current_record_index + 1u < state->num_recorded_samples) {
+            nlo_complex* next_record = simulation_state_get_field_record(
+                state, state->current_record_index + 1u);
+            if (next_record != NULL) {
+                memcpy(next_record,
+                       simulation_state_current_field(state),
+                       num_time_samples * sizeof(nlo_complex));
+                state->current_record_index += 1u;
+                state->current_field = next_record;
+            }
+        }
 
         state->current_z += state->current_step_size;
 
@@ -46,7 +61,7 @@ void step_rk4(simulation_state *state)
     const nlo_complex *dispersion_factor = state->current_dispersion_factor;
     const double *gamma = &state->config->nonlinear.gamma;
     double step_size = state->current_step_size;
-    nlo_complex *field = state->field_buffer;
+    nlo_complex *field = simulation_state_current_field(state);
     nlo_complex *field_freq = state->field_freq_buffer;
     nlo_complex *ip_field = state->ip_field_buffer;
     nlo_complex *field_magnitude = state->field_magnitude_buffer;

@@ -96,7 +96,9 @@ typedef struct {
  * 
  * @param config Pointer to simulation configuration
  * @param num_time_samples Number of time-domain samples
- * @param field_buffer Buffer for the electric field in time domain
+ * @param num_recorded_samples Number of field iterations retained
+ * @param field_buffer Contiguous buffer holding all recorded electric fields
+ * @param current_field Pointer to the currently active field record
  * @param ip_field_buffer Intermediate buffer for calculations
  * @param current_dispersion_factor Buffer for current dispersion factors
  * @param current_z Current propagation distance
@@ -105,7 +107,12 @@ typedef struct {
 typedef struct {
     const sim_config* config;
     size_t num_time_samples;
-    nlo_complex* field_buffer;
+    size_t num_recorded_samples;
+    size_t current_record_index;
+    nlo_complex* field_buffer;            // Contiguous storage for all recorded fields
+    nlo_complex* current_field;           // Pointer to the active record inside field_buffer
+    double current_z;
+    double current_step_size;
     nlo_complex* ip_field_buffer;
     nlo_complex* field_magnitude_buffer;
     nlo_complex* field_working_buffer;
@@ -115,9 +122,22 @@ typedef struct {
     nlo_complex* k_3_buffer;
     nlo_complex* k_4_buffer;
     nlo_complex* current_dispersion_factor;
-    double current_z;
-    double current_step_size;
 } simulation_state;
+
+/**
+ * @brief Working buffers for intermediate calculations during simulation
+ */
+typedef struct {
+    nlo_complex* ip_field_buffer;
+    nlo_complex* field_magnitude_buffer;
+    nlo_complex* field_working_buffer;
+    nlo_complex* field_freq_buffer;
+    nlo_complex* k_1_buffer;
+    nlo_complex* k_2_buffer;
+    nlo_complex* k_3_buffer;
+    nlo_complex* k_4_buffer;
+    nlo_complex* current_dispersion_factor;
+} simulation_working_buffers;
 
 // MARK: Function Declarations
 
@@ -125,14 +145,40 @@ typedef struct {
  * @brief Create and initialize a new simulation state
  * @param config Pointer to simulation configuration
  * @param num_time_samples Number of time-domain samples
+ * @param num_recorded_samples Number of field snapshots to retain during propagation
  */
-simulation_state* create_simulation_state(const sim_config* config, size_t num_time_samples);
+simulation_state* create_simulation_state(const sim_config* config, size_t num_time_samples, size_t num_recorded_samples);
 
 /**
  * @brief Free resources associated with a simulation state
  * @param state Pointer to simulation state to free
  */
 void free_simulation_state(simulation_state* state);
+
+/**
+ * @brief Get a pointer to a recorded field slice.
+ *        Returned pointer is within the contiguous field_buffer and sized to num_time_samples.
+ */
+static inline nlo_complex* simulation_state_get_field_record(simulation_state* state, size_t record_index)
+{
+    if (state == NULL || record_index >= state->num_recorded_samples) {
+        return NULL;
+    }
+
+    return state->field_buffer + (record_index * state->num_time_samples);
+}
+
+/**
+ * @brief Convenience accessor for the currently active field record.
+ */
+static inline nlo_complex* simulation_state_current_field(const simulation_state* state)
+{
+    if (state == NULL) {
+        return NULL;
+    }
+
+    return state->current_field;
+}
 
 /**
  * @brief Create and initialize a new simulation configuration

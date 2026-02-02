@@ -11,6 +11,22 @@ option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
+# SIMD dependency (SIMDe header-only) for vectorized kernels
+find_package(simd QUIET)
+if(NOT simd_FOUND)
+  include(FetchContent)
+  FetchContent_Declare(
+    simd
+    URL https://github.com/simd-everywhere/simde/archive/refs/heads/master.zip
+  )
+  FetchContent_MakeAvailable(simd)
+  if(NOT TARGET simd::simd)
+    add_library(simd INTERFACE)
+    add_library(simd::simd ALIAS simd)
+    target_include_directories(simd INTERFACE ${simd_SOURCE_DIR})
+  endif()
+endif()
+
 add_subdirectory(src)
 add_subdirectory(python)
 

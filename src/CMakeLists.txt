@@ -20,7 +20,7 @@ if(WIN32)
 endif()
 
 add_subdirectory(fft)
-target_link_libraries(nlolib PUBLIC nlo_fft_backend)
+target_link_libraries(nlolib PUBLIC nlo_fft_backend simd::simd)
 
 if(WIN32 AND NLO_FFT_BACKEND_FFTW AND FFTW3_LIBRARY)
   get_filename_component(_FFTW3_DIR "${FFTW3_LIBRARY}" DIRECTORY)
