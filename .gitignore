@@ -49,3 +49,6 @@ temp_*
 # Vcpkg installed libraries
 vcpkg_installed/
 
+# Docker related artifacts
+.nvmrc
+

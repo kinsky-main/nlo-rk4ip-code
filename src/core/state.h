@@ -145,7 +145,8 @@ typedef struct {
  * @brief Create and initialize a new simulation state
  * @param config Pointer to simulation configuration
  * @param num_time_samples Number of time-domain samples
- * @param num_recorded_samples Number of field snapshots to retain during propagation
+ * @param num_recorded_samples Number of field snapshots to retain during propagation.
+ *        The requested value may be capped based on available system memory.
  */
 simulation_state* create_simulation_state(const sim_config* config, size_t num_time_samples, size_t num_recorded_samples);
 

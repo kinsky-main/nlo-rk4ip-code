@@ -23,14 +23,16 @@ extern "C" {
 // MARK: Const & Macros
 
 // DLL export/import for Windows builds.
-#if defined(_WIN32)
-  #if defined(NLOLIB_EXPORTS)
-    #define NLOLIB_API __declspec(dllexport)
+#ifndef NLOLIB_API
+  #if defined(_WIN32)
+    #if defined(NLOLIB_EXPORTS)
+      #define NLOLIB_API __declspec(dllexport)
+    #else
+      #define NLOLIB_API __declspec(dllimport)
+    #endif
   #else
-    #define NLOLIB_API __declspec(dllimport)
+    #define NLOLIB_API
   #endif
-#else
-  #define NLOLIB_API
 #endif
 
 // MARK: Typedefs

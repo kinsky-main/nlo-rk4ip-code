@@ -18,20 +18,21 @@ static inline size_t nlo_simd_aligned_end(size_t n, size_t width)
 }
 
 // Complex multiplication for two complex numbers packed as [re0, im0, re1, im1].
-static inline simde__m256d nlo_complex_mul_vec(simde__m256d a, simde__m256d b)
+static inline void nlo_complex_mul_vec(const simde__m256d *a,
+                                       const simde__m256d *b,
+                                       simde__m256d *out)
 {
     // Duplicate real parts of a: [re0, re0, re1, re1]
-    const simde__m256d a_re = simde_mm256_movedup_pd(a);
+    const simde__m256d a_re = simde_mm256_movedup_pd(*a);
     // Duplicate imag parts of a: [im0, im0, im1, im1]
-    const simde__m256d a_im = simde_mm256_permute_pd(a, 0xF);
+    const simde__m256d a_im = simde_mm256_permute_pd(*a, 0xF);
     // b with swapped lanes to pair re with im: [im0, re0, im1, re1]
-    const simde__m256d b_swapped = simde_mm256_permute_pd(b, 0x5);
+    const simde__m256d b_swapped = simde_mm256_permute_pd(*b, 0x5);
 
     // res_even lanes: a_re * b_re - a_im * b_im
     // res_odd  lanes: a_re * b_im + a_im * b_re
-    const simde__m256d res = simde_mm256_addsub_pd(simde_mm256_mul_pd(a_re, b),
-                                                   simde_mm256_mul_pd(a_im, b_swapped));
-    return res;
+    *out = simde_mm256_addsub_pd(simde_mm256_mul_pd(a_re, *b),
+                                 simde_mm256_mul_pd(a_im, b_swapped));
 }
 
 void nlo_real_fill(double *dst, size_t n, double value)
@@ -206,7 +207,8 @@ void nlo_complex_scalar_mul_inplace(nlo_complex *dst, nlo_complex alpha, size_t 
     size_t i = 0;
     for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
         const simde__m256d a = simde_mm256_loadu_pd((double *)(dst + i));
-        const simde__m256d res = nlo_complex_mul_vec(a, alpha_vec);
+        simde__m256d res;
+        nlo_complex_mul_vec(&a, &alpha_vec, &res);
         simde_mm256_storeu_pd((double *)(dst + i), res);
     }
     for (; i < n; ++i) {
@@ -224,7 +226,9 @@ void nlo_complex_mul_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
     for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
         const simde__m256d a = simde_mm256_loadu_pd((double *)(dst + i));
         const simde__m256d b = simde_mm256_loadu_pd((const double *)(src + i));
-        simde_mm256_storeu_pd((double *)(dst + i), nlo_complex_mul_vec(a, b));
+        simde__m256d res;
+        nlo_complex_mul_vec(&a, &b, &res);
+        simde_mm256_storeu_pd((double *)(dst + i), res);
     }
     for (; i < n; ++i) {
         dst[i] = nlo_mul(dst[i], src[i]);
@@ -248,7 +252,9 @@ void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsign
         for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
             const simde__m256d a = simde_mm256_loadu_pd((double *)(out + i));
             const simde__m256d b = simde_mm256_loadu_pd((const double *)(base + i));
-            simde_mm256_storeu_pd((double *)(out + i), nlo_complex_mul_vec(a, b));
+            simde__m256d res;
+            nlo_complex_mul_vec(&a, &b, &res);
+            simde_mm256_storeu_pd((double *)(out + i), res);
         }
         for (; i < n; ++i) {
             out[i] = nlo_mul(out[i], base[i]);
@@ -279,7 +285,9 @@ void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent)
         for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
             const simde__m256d a = simde_mm256_loadu_pd((double *)(dst + i));
             const simde__m256d b = simde_mm256_loadu_pd((const double *)(temp + i));
-            simde_mm256_storeu_pd((double *)(dst + i), nlo_complex_mul_vec(a, b));
+            simde__m256d res;
+            nlo_complex_mul_vec(&a, &b, &res);
+            simde_mm256_storeu_pd((double *)(dst + i), res);
         }
         for (; i < n; ++i) {
             dst[i] = nlo_mul(dst[i], temp[i]);

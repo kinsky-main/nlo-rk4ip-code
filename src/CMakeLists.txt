@@ -7,6 +7,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/physics/operators.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/math_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_ops.c
+  ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_backend.c
   ${CMAKE_CURRENT_LIST_DIR}/fft/fft.c
 )
 
@@ -21,6 +22,16 @@ endif()
 
 add_subdirectory(fft)
 target_link_libraries(nlolib PUBLIC nlo_fft_backend simd::simd)
+
+if(UNIX)
+  target_link_libraries(nlolib PUBLIC m)
+endif()
+
+if(NLO_VECTOR_BACKEND_VULKAN)
+  find_package(Vulkan REQUIRED)
+  target_compile_definitions(nlolib PUBLIC NLO_VECTOR_BACKEND_VULKAN=1)
+  target_link_libraries(nlolib PUBLIC Vulkan::Vulkan)
+endif()
 
 if(WIN32 AND NLO_FFT_BACKEND_FFTW AND FFTW3_LIBRARY)
   get_filename_component(_FFTW3_DIR "${FFTW3_LIBRARY}" DIRECTORY)

@@ -24,8 +24,8 @@ NLOLIB_API nlolib_status nlolib_propagate(const sim_config* config,
         return NLOLIB_STATUS_INVALID_ARGUMENT;
     }
 
-    simulation_state* state = create_simulation_state(config, num_time_samples, 1u);
-    if (state == NULL) {
+    simulation_state* state = NULL;
+    if (nlo_init_simulation_state(config, num_time_samples, 1u, NULL, &state) != 0 || state == NULL) {
         return NLOLIB_STATUS_ALLOCATION_FAILED;
     }
 

@@ -7,6 +7,7 @@ set(CMAKE_C_STANDARD 99)
 
 option(NLO_FFT_BACKEND_FFTW "Use FFTW backend" ON)
 option(NLO_FFT_BACKEND_CUFFT "Use CUFFT backend" OFF)
+option(NLO_VECTOR_BACKEND_VULKAN "Enable Vulkan backend for vector operations" OFF)
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
