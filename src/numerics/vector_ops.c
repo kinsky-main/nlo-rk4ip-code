@@ -154,11 +154,13 @@ void calculate_magnitude_squared(const nlo_complex *src, nlo_complex *dst, size_
     for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
         const simde__m256d v = simde_mm256_loadu_pd((const double *)(src + i));
         const simde__m256d squared = simde_mm256_mul_pd(v, v);
-        // horizontal add within each complex: [re0^2 + im0^2, re1^2 + im1^2, ...]
+        // Pairwise sum re^2 + im^2 for each complex.
+        const simde__m256d swapped = simde_mm256_permute_pd(squared, 0x5);
+        const simde__m256d sums = simde_mm256_add_pd(squared, swapped);
         double mags[4];
-        simde_mm256_storeu_pd(mags, simde_mm256_hadd_pd(squared, squared));
+        simde_mm256_storeu_pd(mags, sums);
         dst[i] = nlo_make(mags[0], 0.0);
-        dst[i + 1u] = nlo_make(mags[1], 0.0);
+        dst[i + 1u] = nlo_make(mags[2], 0.0);
     }
     for (; i < n; ++i) {
         const double re = NLO_RE(src[i]);
