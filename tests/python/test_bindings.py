@@ -5,15 +5,15 @@ print("test_python_bindings: loaded nlolib CFFI bindings.")
 cfg = ffi.new("sim_config*")
 cfg.nonlinear.gamma = 1.0
 cfg.dispersion.num_dispersion_terms = 0
-cfg.propagation.starting_step_size = 0.1
+cfg.propagation.starting_step_size = 0.01
 cfg.propagation.max_step_size = 0.1
-cfg.propagation.min_step_size = 0.1
-cfg.propagation.propagation_distance = 1.0
+cfg.propagation.min_step_size = 0.001
+cfg.propagation.propagation_distance = 100.0
 cfg.time.pulse_period = 1.0
-cfg.time.delta_time = 0.01
+cfg.time.delta_time = 0.001
 print("test_python_bindings: configured sim_config scalar fields.")
 
-n = 8
+n = 1024
 inp = ffi.new("nlo_complex[]", n)
 out = ffi.new("nlo_complex[]", n)
 

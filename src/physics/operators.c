@@ -64,9 +64,6 @@ void calculate_dispersion_factor(
             dispersion_factor[j] = nlo_add(dispersion_factor[j], term);
         }
 
-        nlo_complex_scalar_mul_inplace(
-            dispersion_factor, nlo_make(step_size / 2.0, 0.0), num_time_samples);
-        
         nlo_complex_exp_inplace(dispersion_factor, num_time_samples);
     }
 
@@ -76,13 +73,18 @@ void calculate_dispersion_factor(
 void dispersion_operator(
     const nlo_complex* dispersion_factor,
     nlo_complex* freq_domain_envelope,
-    size_t num_time_samples)
+    size_t num_time_samples,
+    double exp_step_size)
 {
     if (dispersion_factor == NULL || freq_domain_envelope == NULL) {
         return;
     }
 
     nlo_complex_mul_inplace(freq_domain_envelope, dispersion_factor, num_time_samples);
+    nlo_complex_scalar_mul_inplace(
+        freq_domain_envelope,
+        nlo_make(exp_step_size, 0.0),
+        num_time_samples);
 }
 
 void nonlinear_operator(
@@ -94,6 +96,15 @@ void nonlinear_operator(
     if (gamma == NULL || time_domain_envelope == NULL || time_domain_magnitude_squared == NULL) {
         return;
     }
+
+    nlo_complex_scalar_mul_inplace(
+        time_domain_magnitude_squared,
+        nlo_make(*gamma, 0.0),
+        num_time_samples);
+    nlo_complex_mul_inplace(
+        time_domain_envelope,
+        time_domain_magnitude_squared,
+        num_time_samples);
 }
 
 

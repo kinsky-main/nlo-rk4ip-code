@@ -48,12 +48,14 @@ typedef struct {
  * @param starting_step_size Initial step size for propagation (m)
  * @param max_step_size Maximum allowable step size (m)
  * @param min_step_size Minimum allowable step size (m)
+ * @param error_tolerance Relative error tolerance for adaptive RK4 stepping
  * @param propagation_distance Total distance to propagate (m)
  */
 typedef struct {
     double starting_step_size;
     double max_step_size;
     double min_step_size;
+    double error_tolerance;
     double propagation_distance;
 } propagation_params;
 
@@ -109,23 +111,22 @@ typedef struct {
     size_t num_time_samples;
     size_t num_recorded_samples;
     size_t current_record_index;
-    nlo_complex* field_buffer;            // Contiguous storage for all recorded fields
-    nlo_complex* current_field;           // Pointer to the active record inside field_buffer
+    nlo_complex* field_buffer;
+    nlo_complex* current_field;
     double current_z;
     double current_step_size;
-    nlo_complex* ip_field_buffer;
-    nlo_complex* field_magnitude_buffer;
-    nlo_complex* field_working_buffer;
-    nlo_complex* field_freq_buffer;
-    nlo_complex* k_1_buffer;
-    nlo_complex* k_2_buffer;
-    nlo_complex* k_3_buffer;
-    nlo_complex* k_4_buffer;
-    nlo_complex* current_dispersion_factor;
 } simulation_state;
 
 /**
  * @brief Working buffers for intermediate calculations during simulation
+ * @param ip_field_buffer Interaction picture field buffer
+ * @param field_magnitude_buffer Buffer for field magnitude squared
+ * @param field_working_buffer General working buffer
+ * @param field_freq_buffer Frequency domain buffer
+ * @param k_1_buffer RK4 k1 buffer
+ * @param k_2_buffer RK4 k2 buffer
+ * @param k_3_buffer RK4 k3 buffer
+ * @param k_4_buffer RK4 k4 buffer
  */
 typedef struct {
     nlo_complex* ip_field_buffer;

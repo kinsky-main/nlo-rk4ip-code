@@ -22,6 +22,7 @@ typedef struct {
     double starting_step_size;
     double max_step_size;
     double min_step_size;
+    double error_tolerance;
     double propagation_distance;
 } propagation_params;
 

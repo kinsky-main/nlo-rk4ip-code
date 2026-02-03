@@ -23,7 +23,7 @@ NLOLIB_API nlolib_status nlolib_propagate(const sim_config* config,
     if (num_time_samples == 0 || num_time_samples > NT_MAX) {
         return NLOLIB_STATUS_INVALID_ARGUMENT;
     }
-
+    // TODO: simulation state num recorded samples should be derived from config or passed separately
     simulation_state* state = NULL;
     if (nlo_init_simulation_state(config, num_time_samples, 1u, NULL, &state) != 0 || state == NULL) {
         return NLOLIB_STATUS_ALLOCATION_FAILED;

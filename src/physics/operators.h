@@ -44,7 +44,8 @@ void calculate_dispersion_factor(
 void dispersion_operator(
     const nlo_complex *dispersion_factor,
     nlo_complex *freq_domain_envelope,
-    size_t num_time_samples);
+    size_t num_time_samples,
+    double exp_step_size);
 
 void nonlinear_operator(
     const double *gamma,

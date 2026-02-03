@@ -49,6 +49,7 @@ sim_config *create_sim_config(size_t num_dispersion_terms, size_t num_time_sampl
         return NULL;
     }
 
+    config->propagation.error_tolerance = 1e-6;
     config->dispersion.num_dispersion_terms = num_dispersion_terms;
     config->frequency.frequency_grid = (nlo_complex *)calloc(num_time_samples, sizeof(nlo_complex));
     if (config->frequency.frequency_grid == NULL)
