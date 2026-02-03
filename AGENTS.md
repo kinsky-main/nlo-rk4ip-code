@@ -13,6 +13,7 @@
 - Do preserve existing style and conventions
 - Don’t reformat unrelated code
 - Don’t change public APIs without explicit request
+- Don't make per step memory allocations; keep all allocations static 
 
 ## Workflow
 - Read relevant files before editing

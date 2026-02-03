@@ -1,6 +1,6 @@
 /**
  * @file vector_backend.c
- * @dir src/numerics
+ * @dir src/backend
  * @brief Backend abstraction for vector operations (CPU or Vulkan).
  * @author Wenzel Kinsky
  * @date 2026-02-02

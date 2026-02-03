@@ -8,7 +8,7 @@
 #include "numerics/rk4_kernel.h"
 #include "numerics/vector_ops.h"
 #include "core/state.h"
-#include "fft/nlo_complex.h"
+#include "backend/nlo_complex.h"
 #include "fft/fft.h"
 #include "physics/operators.h"
 #include <math.h>
@@ -42,17 +42,7 @@ static simulation_working_buffers bind_working_buffers(const simulation_state *s
         return buffers;
     }
 
-    buffers.ip_field_buffer = state->ip_field_buffer;
-    buffers.field_magnitude_buffer = state->field_magnitude_buffer;
-    buffers.field_working_buffer = state->field_working_buffer;
-    buffers.field_freq_buffer = state->field_freq_buffer;
-    buffers.k_1_buffer = state->k_1_buffer;
-    buffers.k_2_buffer = state->k_2_buffer;
-    buffers.k_3_buffer = state->k_3_buffer;
-    buffers.k_4_buffer = state->k_4_buffer;
-    buffers.current_dispersion_factor = state->current_dispersion_factor;
-
-    return buffers;
+    return state->working_buffers;
 }
 
 static void step_rk4_with_buffers(simulation_state *state,
@@ -245,7 +235,10 @@ static void step_rk4_with_buffers(simulation_state *state,
 }
 
 void solve_rk4(simulation_state *state) {
-    
+    if (state == NULL) {
+        return;
+    }
+
     double z_end = state->config->propagation.propagation_distance;
     double max_step = state->config->propagation.max_step_size;
     double min_step = state->config->propagation.min_step_size;
@@ -299,10 +292,15 @@ void solve_rk4(simulation_state *state) {
         }
 
     }
+
 };
 
 void step_rk4(simulation_state *state)
 {
+    if (state == NULL) {
+        return;
+    }
+
     simulation_working_buffers work = bind_working_buffers(state);
     step_rk4_with_buffers(state, &work);
 };

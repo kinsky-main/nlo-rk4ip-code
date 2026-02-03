@@ -7,7 +7,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/physics/operators.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/math_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_ops.c
-  ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_backend.c
+  ${CMAKE_CURRENT_LIST_DIR}/backend/vector_backend.c
   ${CMAKE_CURRENT_LIST_DIR}/fft/fft.c
 )
 

@@ -26,8 +26,6 @@
 #define NLO_MEMORY_HEADROOM_DEN 10u
 #endif
 
-#define NLO_WORK_BUFFER_COUNT 9u // Keep in sync with work_buffers list in create_simulation_state.
-
 static int allocate_nlo_complex_buffer(nlo_complex **buffer, size_t num_elements);
 static int checked_mul_size_t(size_t a, size_t b, size_t *out);
 static size_t query_available_system_memory_bytes(void);
@@ -122,15 +120,15 @@ simulation_state *create_simulation_state(const sim_config *config, size_t num_t
     state->current_field = state->field_buffer;
 
     nlo_complex **work_buffers[] = {
-        &state->ip_field_buffer,
-        &state->field_magnitude_buffer,
-        &state->field_working_buffer,
-        &state->field_freq_buffer,
-        &state->k_1_buffer,
-        &state->k_2_buffer,
-        &state->k_3_buffer,
-        &state->k_4_buffer,
-        &state->current_dispersion_factor};
+        &state->working_buffers.ip_field_buffer,
+        &state->working_buffers.field_magnitude_buffer,
+        &state->working_buffers.field_working_buffer,
+        &state->working_buffers.field_freq_buffer,
+        &state->working_buffers.k_1_buffer,
+        &state->working_buffers.k_2_buffer,
+        &state->working_buffers.k_3_buffer,
+        &state->working_buffers.k_4_buffer,
+        &state->working_buffers.current_dispersion_factor};
 
     const size_t num_work_buffers = sizeof(work_buffers) / sizeof(work_buffers[0]);
     for (size_t i = 0; i < num_work_buffers; ++i)
@@ -150,15 +148,15 @@ void free_simulation_state(simulation_state *state)
     if (state != NULL)
     {
         free(state->field_buffer);
-        free(state->ip_field_buffer);
-        free(state->field_magnitude_buffer);
-        free(state->field_working_buffer);
-        free(state->field_freq_buffer);
-        free(state->k_1_buffer);
-        free(state->k_2_buffer);
-        free(state->k_3_buffer);
-        free(state->k_4_buffer);
-        free(state->current_dispersion_factor);
+        free(state->working_buffers.ip_field_buffer);
+        free(state->working_buffers.field_magnitude_buffer);
+        free(state->working_buffers.field_working_buffer);
+        free(state->working_buffers.field_freq_buffer);
+        free(state->working_buffers.k_1_buffer);
+        free(state->working_buffers.k_2_buffer);
+        free(state->working_buffers.k_3_buffer);
+        free(state->working_buffers.k_4_buffer);
+        free(state->working_buffers.current_dispersion_factor);
         free(state);
     }
 }

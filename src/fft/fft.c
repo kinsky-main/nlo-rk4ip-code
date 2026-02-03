@@ -9,7 +9,7 @@
 // MARK: Includes
 
 #include "fft/fft.h"
-#include "fft/nlo_complex.h"
+#include "backend/nlo_complex.h"
 #include <stddef.h>
 
 #if defined(NLO_FFT_BACKEND_FFTW)

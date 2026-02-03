@@ -7,7 +7,7 @@
  */
 
 #include "nlolib.h"
-#include "fft/nlo_complex.h"
+#include "backend/nlo_complex.h"
 #include <string.h>
 #include <stddef.h>
 

@@ -14,7 +14,7 @@
 
 #include "core/state.h"
 #include "core/init.h"
-#include "fft/nlo_complex.h"
+#include "backend/nlo_complex.h"
 
 #ifdef __cplusplus
 extern "C" {

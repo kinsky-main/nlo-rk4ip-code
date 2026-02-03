@@ -1,9 +1,10 @@
 /**
- * @brief Definition of nlo_complex type used in FFT operations
  * @file nlo_complex.h
+ * @dir src/backend
+ * @brief Definition of the nlo_complex type for backend implementations.
  * @author Wenzel Kinsky
  * @date 2026-01-27
- */ 
+ */
 #pragma once
 
 // MARK: Includes

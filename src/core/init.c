@@ -8,14 +8,12 @@
 
 #include "core/init.h"
 #include "core/state.h"
-#include "fft/nlo_complex.h"
+#include "backend/nlo_complex.h"
 #include <stdio.h>
 #include <stdint.h>
 
 static int checked_mul_size_t(size_t a, size_t b, size_t *out);
 static int checked_add_size_t(size_t a, size_t b, size_t *out);
-static size_t count_work_buffers(const simulation_state *state);
-
 NLOLIB_API int nlo_init_simulation_state(const sim_config *config,
                               size_t num_time_samples,
                               size_t num_recorded_samples,
@@ -71,7 +69,7 @@ NLOLIB_API int nlo_init_simulation_state(const sim_config *config,
         field_bytes = 0;
     }
 
-    work_buffers = count_work_buffers(state);
+    work_buffers = NLO_WORK_BUFFER_COUNT;
     if (checked_mul_size_t(per_record_bytes, work_buffers, &work_bytes) != 0)
     {
         work_bytes = 0;
@@ -147,53 +145,4 @@ static int checked_add_size_t(size_t a, size_t b, size_t *out)
 
     *out = a + b;
     return 0;
-}
-
-static size_t count_work_buffers(const simulation_state *state)
-{
-    size_t count = 0;
-
-    if (state == NULL)
-    {
-        return 0;
-    }
-
-    if (state->ip_field_buffer != NULL)
-    {
-        ++count;
-    }
-    if (state->field_magnitude_buffer != NULL)
-    {
-        ++count;
-    }
-    if (state->field_working_buffer != NULL)
-    {
-        ++count;
-    }
-    if (state->field_freq_buffer != NULL)
-    {
-        ++count;
-    }
-    if (state->k_1_buffer != NULL)
-    {
-        ++count;
-    }
-    if (state->k_2_buffer != NULL)
-    {
-        ++count;
-    }
-    if (state->k_3_buffer != NULL)
-    {
-        ++count;
-    }
-    if (state->k_4_buffer != NULL)
-    {
-        ++count;
-    }
-    if (state->current_dispersion_factor != NULL)
-    {
-        ++count;
-    }
-
-    return count;
 }

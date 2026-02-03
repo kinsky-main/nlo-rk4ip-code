@@ -14,7 +14,7 @@ add_test(NAME test_nlo_numerics COMMAND test_nlo_numerics)
 
 add_executable(test_nlo_vector_backend
   ${CMAKE_CURRENT_LIST_DIR}/test_nlo_vector_backend.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vector_backend.c
+  ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
 )
 

@@ -10,12 +10,16 @@
 // MARK: Includes
 
 #include <stddef.h>
-#include "fft/nlo_complex.h"
+#include "backend/nlo_complex.h"
 
 // MARK: Const & Macros
 
 #ifndef NT_MAX
 #define NT_MAX (1u<<20)
+#endif
+
+#ifndef NLO_WORK_BUFFER_COUNT
+#define NLO_WORK_BUFFER_COUNT 9u
 #endif
 
 // MARK: Typedefs
@@ -94,30 +98,6 @@ typedef struct {
 } sim_config;
 
 /**
- * @brief Simulation state during propagation
- * 
- * @param config Pointer to simulation configuration
- * @param num_time_samples Number of time-domain samples
- * @param num_recorded_samples Number of field iterations retained
- * @param field_buffer Contiguous buffer holding all recorded electric fields
- * @param current_field Pointer to the currently active field record
- * @param ip_field_buffer Intermediate buffer for calculations
- * @param current_dispersion_factor Buffer for current dispersion factors
- * @param current_z Current propagation distance
- * @param current_step_size Current step size for propagation
- */
-typedef struct {
-    const sim_config* config;
-    size_t num_time_samples;
-    size_t num_recorded_samples;
-    size_t current_record_index;
-    nlo_complex* field_buffer;
-    nlo_complex* current_field;
-    double current_z;
-    double current_step_size;
-} simulation_state;
-
-/**
  * @brief Working buffers for intermediate calculations during simulation
  * @param ip_field_buffer Interaction picture field buffer
  * @param field_magnitude_buffer Buffer for field magnitude squared
@@ -127,6 +107,7 @@ typedef struct {
  * @param k_2_buffer RK4 k2 buffer
  * @param k_3_buffer RK4 k3 buffer
  * @param k_4_buffer RK4 k4 buffer
+ * @param current_dispersion_factor Buffer for current dispersion factors
  */
 typedef struct {
     nlo_complex* ip_field_buffer;
@@ -139,6 +120,30 @@ typedef struct {
     nlo_complex* k_4_buffer;
     nlo_complex* current_dispersion_factor;
 } simulation_working_buffers;
+
+/**
+ * @brief Simulation state during propagation
+ * 
+ * @param config Pointer to simulation configuration
+ * @param num_time_samples Number of time-domain samples
+ * @param num_recorded_samples Number of field iterations retained
+ * @param field_buffer Contiguous buffer holding all recorded electric fields
+ * @param current_field Pointer to the currently active field record
+ * @param working_buffers Cached working buffers for intermediate calculations
+ * @param current_z Current propagation distance
+ * @param current_step_size Current step size for propagation
+ */
+typedef struct {
+    const sim_config* config;
+    size_t num_time_samples;
+    size_t num_recorded_samples;
+    size_t current_record_index;
+    nlo_complex* field_buffer;
+    nlo_complex* current_field;
+    simulation_working_buffers working_buffers;
+    double current_z;
+    double current_step_size;
+} simulation_state;
 
 // MARK: Function Declarations
 
