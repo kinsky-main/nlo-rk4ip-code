@@ -17,6 +17,12 @@
 #define NLO_TEST_EPS 1e-12
 #endif
 
+static void assert_complex_close(nlo_complex value, nlo_complex expected, double eps)
+{
+    assert(fabs(NLO_RE(value) - NLO_RE(expected)) < eps);
+    assert(fabs(NLO_IM(value) - NLO_IM(expected)) < eps);
+}
+
 static void test_nlo_real_factorial(void)
 {
     assert(nlo_real_factorial(0) == 1);
@@ -27,6 +33,46 @@ static void test_nlo_real_factorial(void)
     assert(nlo_real_factorial(6) == 720);
     assert(nlo_real_factorial(10) == 3628800);
     printf("test_nlo_real_factorial: validates factorial lookup.\n");
+}
+
+static void test_nlo_real_fill_copy_mul_pow(void)
+{
+    double values[5] = {0.0, 1.0, 2.0, 3.0, 4.0};
+    double copy[5] = {0.0};
+    double out[5] = {0.0};
+    const double factors[5] = {2.0, -1.0, 0.5, 4.0, -3.0};
+
+    nlo_real_fill(values, 5, -2.5);
+    for (size_t i = 0; i < 5; ++i) {
+        assert(fabs(values[i] + 2.5) < NLO_TEST_EPS);
+    }
+
+    nlo_real_copy(copy, values, 5);
+    for (size_t i = 0; i < 5; ++i) {
+        assert(fabs(copy[i] - values[i]) < NLO_TEST_EPS);
+    }
+
+    nlo_real_copy(values, factors, 5);
+    nlo_real_mul_inplace(values, factors, 5);
+    assert(fabs(values[0] - 4.0) < NLO_TEST_EPS);
+    assert(fabs(values[1] - 1.0) < NLO_TEST_EPS);
+    assert(fabs(values[2] - 0.25) < NLO_TEST_EPS);
+    assert(fabs(values[3] - 16.0) < NLO_TEST_EPS);
+    assert(fabs(values[4] - 9.0) < NLO_TEST_EPS);
+
+    nlo_real_pow_int(factors, out, 5, 3);
+    assert(fabs(out[0] - 8.0) < NLO_TEST_EPS);
+    assert(fabs(out[1] + 1.0) < NLO_TEST_EPS);
+    assert(fabs(out[2] - 0.125) < NLO_TEST_EPS);
+    assert(fabs(out[3] - 64.0) < NLO_TEST_EPS);
+    assert(fabs(out[4] + 27.0) < NLO_TEST_EPS);
+
+    nlo_real_pow_int(factors, out, 5, 0);
+    for (size_t i = 0; i < 5; ++i) {
+        assert(fabs(out[i] - 1.0) < NLO_TEST_EPS);
+    }
+
+    printf("test_nlo_real_fill_copy_mul_pow: validates real vector ops.\n");
 }
 
 static void test_nlo_complex_fill(void)
@@ -42,6 +88,45 @@ static void test_nlo_complex_fill(void)
     }
 
     printf("test_nlo_complex_fill: validates complex fill helper.\n");
+}
+
+static void test_nlo_complex_copy_add_axpy_scalar_mul(void)
+{
+    nlo_complex values[3] = {
+        nlo_make(1.0, -2.0),
+        nlo_make(-3.5, 4.5),
+        nlo_make(0.0, -1.0)
+    };
+    nlo_complex copy[3] = {0};
+    nlo_complex increment[3] = {
+        nlo_make(0.5, 1.0),
+        nlo_make(-1.5, 2.0),
+        nlo_make(3.0, -4.0)
+    };
+    const double real_terms[3] = {2.0, -1.0, 0.5};
+    const nlo_complex alpha = nlo_make(-0.5, 1.5);
+
+    nlo_complex_copy(copy, values, 3);
+    for (size_t i = 0; i < 3; ++i) {
+        assert_complex_close(copy[i], values[i], NLO_TEST_EPS);
+    }
+
+    nlo_complex_add_inplace(copy, increment, 3);
+    assert_complex_close(copy[0], nlo_make(1.5, -1.0), NLO_TEST_EPS);
+    assert_complex_close(copy[1], nlo_make(-5.0, 6.5), NLO_TEST_EPS);
+    assert_complex_close(copy[2], nlo_make(3.0, -5.0), NLO_TEST_EPS);
+
+    nlo_complex_axpy_real(copy, real_terms, alpha, 3);
+    assert_complex_close(copy[0], nlo_make(0.5, 2.0), NLO_TEST_EPS);
+    assert_complex_close(copy[1], nlo_make(-4.5, 5.0), NLO_TEST_EPS);
+    assert_complex_close(copy[2], nlo_make(2.75, -4.25), NLO_TEST_EPS);
+
+    nlo_complex_scalar_mul_inplace(copy, nlo_make(0.0, 2.0), 3);
+    assert_complex_close(copy[0], nlo_make(-4.0, 1.0), NLO_TEST_EPS);
+    assert_complex_close(copy[1], nlo_make(-10.0, -9.0), NLO_TEST_EPS);
+    assert_complex_close(copy[2], nlo_make(8.5, 5.5), NLO_TEST_EPS);
+
+    printf("test_nlo_complex_copy_add_axpy_scalar_mul: validates complex combine ops.\n");
 }
 
 static void test_nlo_complex_mul_inplace(void)
@@ -69,6 +154,41 @@ static void test_nlo_complex_mul_inplace(void)
     assert(NLO_IM(dst[2]) == 2.5);
 
     printf("test_nlo_complex_mul_inplace: validates elementwise complex multiply.\n");
+}
+
+static void test_nlo_complex_pow_variants(void)
+{
+    const nlo_complex base[3] = {
+        nlo_make(2.0, 0.0),
+        nlo_make(0.0, 1.0),
+        nlo_make(1.0, 1.0)
+    };
+    nlo_complex out[3];
+    nlo_complex inplace[3];
+
+    nlo_complex_pow(base, out, 3, 3);
+    assert_complex_close(out[0], nlo_make(8.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(out[1], nlo_make(0.0, -1.0), NLO_TEST_EPS);
+    assert_complex_close(out[2], nlo_make(-2.0, 2.0), NLO_TEST_EPS);
+
+    nlo_complex_pow(base, out, 3, 0);
+    for (size_t i = 0; i < 3; ++i) {
+        assert_complex_close(out[i], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    }
+
+    nlo_complex_copy(inplace, base, 3);
+    nlo_complex_pow_inplace(inplace, 3, 4);
+    assert_complex_close(inplace[0], nlo_make(16.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(inplace[1], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(inplace[2], nlo_make(-4.0, 0.0), NLO_TEST_EPS);
+
+    nlo_complex_copy(inplace, base, 3);
+    nlo_complex_pow_inplace(inplace, 3, 0);
+    for (size_t i = 0; i < 3; ++i) {
+        assert_complex_close(inplace[i], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    }
+
+    printf("test_nlo_complex_pow_variants: validates complex power helpers.\n");
 }
 
 static void test_calculate_magnitude_squared(void)
@@ -119,8 +239,11 @@ static void test_nlo_complex_exp_inplace(void)
 int main(void)
 {
     test_nlo_real_factorial();
+    test_nlo_real_fill_copy_mul_pow();
     test_nlo_complex_fill();
+    test_nlo_complex_copy_add_axpy_scalar_mul();
     test_nlo_complex_mul_inplace();
+    test_nlo_complex_pow_variants();
     test_calculate_magnitude_squared();
     test_nlo_complex_exp_inplace();
     printf("test_nlo_numerics: all subtests completed.\n");
