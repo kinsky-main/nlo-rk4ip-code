@@ -222,7 +222,7 @@ static void step_rk4_with_buffers(simulation_state *state,
         num_time_samples);
     nonlinear_operator(
         gamma,
-        field_working, // Figure out if nonlinear operator can be inplace, I suspect not
+        field_working,
         field_magnitude,
         num_time_samples);
     forward_fft(field_working, field_freq, num_time_samples);

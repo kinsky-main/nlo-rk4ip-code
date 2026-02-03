@@ -8,7 +8,6 @@
 
 #include "numerics/vector_ops.h"
 #include <math.h>
-#include <stdlib.h>
 #include <simde/x86/avx.h>
 
 // SIMD helpers
@@ -273,28 +272,50 @@ void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent)
         return;
     }
 
-    nlo_complex *temp = (nlo_complex *)malloc(n * sizeof(*temp));
-    if (temp == NULL) {
-        return;
-    }
+    const simde__m256d ones = simde_mm256_setr_pd(1.0, 0.0, 1.0, 0.0);
+    size_t i = 0;
+    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
+        simde__m256d base = simde_mm256_loadu_pd((double *)(dst + i));
+        simde__m256d result = ones;
+        unsigned int exp = exponent;
 
-    nlo_complex_copy(temp, dst, n);
-
-    for (unsigned int p = 1; p < exponent; ++p) {
-        size_t i = 0;
-        for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
-            const simde__m256d a = simde_mm256_loadu_pd((double *)(dst + i));
-            const simde__m256d b = simde_mm256_loadu_pd((const double *)(temp + i));
-            simde__m256d res;
-            nlo_complex_mul_vec(&a, &b, &res);
-            simde_mm256_storeu_pd((double *)(dst + i), res);
+        while (exp > 0U) {
+            if ((exp & 1U) != 0U) {
+                simde__m256d res;
+                nlo_complex_mul_vec(&result, &base, &res);
+                result = res;
+            }
+            exp >>= 1U;
+            if (exp == 0U) {
+                break;
+            }
+            {
+                simde__m256d base_sq;
+                nlo_complex_mul_vec(&base, &base, &base_sq);
+                base = base_sq;
+            }
         }
-        for (; i < n; ++i) {
-            dst[i] = nlo_mul(dst[i], temp[i]);
-        }
-    }
 
-    free(temp);
+        simde_mm256_storeu_pd((double *)(dst + i), result);
+    }
+    for (; i < n; ++i) {
+        nlo_complex base = dst[i];
+        nlo_complex result = nlo_make(1.0, 0.0);
+        unsigned int exp = exponent;
+
+        while (exp > 0U) {
+            if ((exp & 1U) != 0U) {
+                result = nlo_mul(result, base);
+            }
+            exp >>= 1U;
+            if (exp == 0U) {
+                break;
+            }
+            base = nlo_mul(base, base);
+        }
+
+        dst[i] = result;
+    }
 }
 
 void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
