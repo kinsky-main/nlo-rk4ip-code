@@ -6,7 +6,7 @@
  * @date 2026-02-02
  */
 
-#include "numerics/vector_backend.h"
+#include "backend/vector_backend.h"
 #include "backend/nlo_complex.h"
 #include <assert.h>
 #include <math.h>

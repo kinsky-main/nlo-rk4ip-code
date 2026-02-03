@@ -143,6 +143,7 @@ typedef struct {
     simulation_working_buffers working_buffers;
     double current_z;
     double current_step_size;
+    double current_half_step_exp;
 } simulation_state;
 
 // MARK: Function Declarations

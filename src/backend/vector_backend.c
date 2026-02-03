@@ -6,7 +6,7 @@
  * @date 2026-02-02
  */
 
-#include "numerics/vector_backend.h"
+#include "backend/vector_backend.h"
 #include "numerics/vector_ops.h"
 #include <stdbool.h>
 #include <stdlib.h>

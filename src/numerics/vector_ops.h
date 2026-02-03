@@ -60,9 +60,19 @@ void nlo_complex_axpy_real(nlo_complex *dst, const double *src, nlo_complex alph
 void nlo_complex_scalar_mul_inplace(nlo_complex *dst, nlo_complex alpha, size_t n);
 
 /**
+ * @brief Element-wise complex scalar multiply helper: out[i] = dst[i] * alpha.
+ */
+void nlo_complex_scalar_mul(nlo_complex *dst, const nlo_complex *src, nlo_complex alpha, size_t n);
+
+/**
  * @brief Element-wise complex multiply: dst[i] *= src[i].
  */
 void nlo_complex_mul_inplace(nlo_complex *dst, const nlo_complex *src, size_t n);
+
+/**
+ * @brief Element-wise complex multiply helper: out[i] = a[i] * b[i].
+ */
+void nlo_complex_mul_vec(nlo_complex *dst, const nlo_complex *a, const nlo_complex *b, size_t n);
 
 /**
  * @brief Element-wise complex power: out[i] = base[i] ^ exponent.
@@ -78,6 +88,11 @@ void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent);
  * @brief Element-wise sum of two complex vectors inplace: dst[i] += src[i].
  */
 void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n);
+
+/**
+ * @brief Element-wise complex add helper: out[i] = a[i] + b[i].
+ */
+void nlo_complex_add_vec(nlo_complex *dst, const nlo_complex *a, const nlo_complex *b, size_t n);
 
 /**
  * @brief Exponent of complex vector: dst[i] = exp(dst[i]).

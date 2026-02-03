@@ -90,7 +90,7 @@ void dispersion_operator(
 void nonlinear_operator(
     const double *gamma,
     nlo_complex *time_domain_envelope,
-    const nlo_complex *time_domain_magnitude_squared,
+    nlo_complex *time_domain_magnitude_squared,
     size_t num_time_samples)
 {
     if (gamma == NULL || time_domain_envelope == NULL || time_domain_magnitude_squared == NULL) {

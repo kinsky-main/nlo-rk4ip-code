@@ -9,6 +9,7 @@
 #include "numerics/vector_ops.h"
 #include <math.h>
 #include <simde/x86/avx.h>
+#include "vector_ops.h"
 
 // SIMD helpers
 static inline size_t nlo_simd_aligned_end(size_t n, size_t width)
@@ -17,9 +18,9 @@ static inline size_t nlo_simd_aligned_end(size_t n, size_t width)
 }
 
 // Complex multiplication for two complex numbers packed as [re0, im0, re1, im1].
-static inline void nlo_complex_mul_vec(const simde__m256d *a,
-                                       const simde__m256d *b,
-                                       simde__m256d *out)
+static inline void nlo_complex_mul_packed(const simde__m256d *a,
+                                          const simde__m256d *b,
+                                          simde__m256d *out)
 {
     // Duplicate real parts of a: [re0, re0, re1, re1]
     const simde__m256d a_re = simde_mm256_movedup_pd(*a);
@@ -207,11 +208,32 @@ void nlo_complex_scalar_mul_inplace(nlo_complex *dst, nlo_complex alpha, size_t 
     for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
         const simde__m256d a = simde_mm256_loadu_pd((double *)(dst + i));
         simde__m256d res;
-        nlo_complex_mul_vec(&a, &alpha_vec, &res);
+        nlo_complex_mul_packed(&a, &alpha_vec, &res);
         simde_mm256_storeu_pd((double *)(dst + i), res);
     }
     for (; i < n; ++i) {
         dst[i] = nlo_mul(dst[i], alpha);
+    }
+}
+
+void nlo_complex_scalar_mul(nlo_complex *dst, const nlo_complex *src, nlo_complex alpha, size_t n)
+{
+    if (dst == NULL || src == NULL) {
+        return;
+    }
+
+    const simde__m256d alpha_vec = simde_mm256_set_pd(NLO_IM(alpha), NLO_RE(alpha),
+                                                      NLO_IM(alpha), NLO_RE(alpha));
+
+    size_t i = 0;
+    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
+        const simde__m256d a = simde_mm256_loadu_pd((const double *)(src + i));
+        simde__m256d res;
+        nlo_complex_mul_packed(&a, &alpha_vec, &res);
+        simde_mm256_storeu_pd((double *)(dst + i), res);
+    }
+    for (; i < n; ++i) {
+        dst[i] = nlo_mul(src[i], alpha);
     }
 }
 
@@ -226,11 +248,30 @@ void nlo_complex_mul_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
         const simde__m256d a = simde_mm256_loadu_pd((double *)(dst + i));
         const simde__m256d b = simde_mm256_loadu_pd((const double *)(src + i));
         simde__m256d res;
-        nlo_complex_mul_vec(&a, &b, &res);
+        nlo_complex_mul_packed(&a, &b, &res);
         simde_mm256_storeu_pd((double *)(dst + i), res);
     }
     for (; i < n; ++i) {
         dst[i] = nlo_mul(dst[i], src[i]);
+    }
+}
+
+void nlo_complex_mul_vec(nlo_complex *dst, const nlo_complex *a, const nlo_complex *b, size_t n)
+{
+    if (dst == NULL || a == NULL || b == NULL) {
+        return;
+    }
+
+    size_t i = 0;
+    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
+        const simde__m256d va = simde_mm256_loadu_pd((const double *)(a + i));
+        const simde__m256d vb = simde_mm256_loadu_pd((const double *)(b + i));
+        simde__m256d res;
+        nlo_complex_mul_packed(&va, &vb, &res);
+        simde_mm256_storeu_pd((double *)(dst + i), res);
+    }
+    for (; i < n; ++i) {
+        dst[i] = nlo_mul(a[i], b[i]);
     }
 }
 
@@ -252,7 +293,7 @@ void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsign
             const simde__m256d a = simde_mm256_loadu_pd((double *)(out + i));
             const simde__m256d b = simde_mm256_loadu_pd((const double *)(base + i));
             simde__m256d res;
-            nlo_complex_mul_vec(&a, &b, &res);
+            nlo_complex_mul_packed(&a, &b, &res);
             simde_mm256_storeu_pd((double *)(out + i), res);
         }
         for (; i < n; ++i) {
@@ -282,7 +323,7 @@ void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent)
         while (exp > 0U) {
             if ((exp & 1U) != 0U) {
                 simde__m256d res;
-                nlo_complex_mul_vec(&result, &base, &res);
+                nlo_complex_mul_packed(&result, &base, &res);
                 result = res;
             }
             exp >>= 1U;
@@ -291,7 +332,7 @@ void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent)
             }
             {
                 simde__m256d base_sq;
-                nlo_complex_mul_vec(&base, &base, &base_sq);
+                nlo_complex_mul_packed(&base, &base, &base_sq);
                 base = base_sq;
             }
         }
@@ -332,6 +373,23 @@ void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
     }
     for (; i < n; ++i) {
         dst[i] = nlo_add(dst[i], src[i]);
+    }
+}
+
+void nlo_complex_add_vec(nlo_complex *dst, const nlo_complex *a, const nlo_complex *b, size_t n)
+{
+    if (dst == NULL || a == NULL || b == NULL) {
+        return;
+    }
+
+    size_t i = 0;
+    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2) {
+        const simde__m256d va = simde_mm256_loadu_pd((const double *)(a + i));
+        const simde__m256d vb = simde_mm256_loadu_pd((const double *)(b + i));
+        simde_mm256_storeu_pd((double *)(dst + i), simde_mm256_add_pd(va, vb));
+    }
+    for (; i < n; ++i) {
+        dst[i] = nlo_add(a[i], b[i]);
     }
 }
 

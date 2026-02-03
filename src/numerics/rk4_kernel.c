@@ -190,6 +190,7 @@ static void step_rk4_with_buffers(simulation_state *state,
     const nlo_complex *dispersion_factor = work->current_dispersion_factor;
     const double *gamma = &state->config->nonlinear.gamma;
     double step_size = state->current_step_size;
+    double half_step_exp = state->current_half_step_exp;
     nlo_complex *field = simulation_state_current_field(state);
     nlo_complex *field_freq = work->field_freq_buffer;
     nlo_complex *ip_field = work->ip_field_buffer;
@@ -202,7 +203,7 @@ static void step_rk4_with_buffers(simulation_state *state,
 
     // Calculate Interaction Picture Field
     forward_fft(field, field_freq, num_time_samples);
-    dispersion_operator(dispersion_factor, field_freq, num_time_samples, exp(step_size / 2.0));
+    dispersion_operator(dispersion_factor, field_freq, num_time_samples, half_step_exp);
     inverse_fft(field_freq, ip_field, num_time_samples);
 
     // Calculate k1
@@ -215,22 +216,23 @@ static void step_rk4_with_buffers(simulation_state *state,
         field_working,
         field_magnitude,
         num_time_samples);
+    nlo_complex_scalar_mul_inplace(
+        field_working,
+        nlo_make(step_size, 0.0),
+        num_time_samples);
     forward_fft(field_working, field_freq, num_time_samples);
-    dispersion_operator(dispersion_factor, field_freq, num_time_samples);
+    dispersion_operator(dispersion_factor, field_freq, num_time_samples, half_step_exp);
     inverse_fft(field_freq, k_1, num_time_samples);
+    nlo_complex_mul_inplace(k_1, field, num_time_samples);
 
     // Calculate k2
-    nlo_complex_scalar_mul_inplace(k_1, nlo_make(step_size / 2.0, 0.0), num_time_samples);
-    nlo_complex_add_inplace(k_2, ip_field, num_time_samples);
-    nlo_complex_add_inplace(k_2, k_1, num_time_samples);
-    calculate_magnitude_squared(
-        k_2,
-        field_magnitude,
-        num_time_samples);
-    nonlinear_operator(
-        gamma,
+    nlo_complex_scalar_mul(
+        field_working
+    )
+    nlo_complex_add_vec(
         field_working,
-        field_magnitude,
+        ip_field,
+        k_1,
         num_time_samples);
 }
 

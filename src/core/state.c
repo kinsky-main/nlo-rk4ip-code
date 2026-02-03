@@ -104,6 +104,7 @@ simulation_state *create_simulation_state(const sim_config *config, size_t num_t
     state->current_record_index = 0u;
     state->current_z = 0.0;
     state->current_step_size = config->propagation.starting_step_size;
+    state->current_half_step_exp = exp(state->current_step_size / 2.0);
 
     if (checked_mul_size_t(num_time_samples, state->num_recorded_samples, &field_buffer_elements) != 0)
     {
