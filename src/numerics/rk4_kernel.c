@@ -227,8 +227,9 @@ static void step_rk4_with_buffers(simulation_state *state,
 
     // Calculate k2
     nlo_complex_scalar_mul(
-        field_working
-    )
+        field_working,
+        
+    );
     nlo_complex_add_vec(
         field_working,
         ip_field,
