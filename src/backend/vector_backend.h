@@ -58,11 +58,14 @@ void nlo_vector_backend_destroy(nlo_vector_backend* backend);
  */
 nlo_vector_backend_type nlo_vector_backend_get_type(const nlo_vector_backend* backend);
 
-#ifdef NLO_VECTOR_BACKEND_VULKAN
+#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
 #include <vulkan/vulkan.h>
 
 /**
- * @brief Vulkan backend configuration (expects externally-created device/queue/pool).
+ * @brief Vulkan backend configuration (expects externally-created device/queue).
+ *        If command_pool is provided, it will be reused; otherwise an internal
+ *        pool is created for backend submissions.
+ *        Requires shaderFloat64 support for complex<double> kernels.
  */
 typedef struct {
     VkPhysicalDevice physical_device;
@@ -144,3 +147,4 @@ nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_
 #ifdef __cplusplus
 }
 #endif
+

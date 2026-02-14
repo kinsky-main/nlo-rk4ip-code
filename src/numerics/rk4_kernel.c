@@ -226,10 +226,6 @@ static void step_rk4_with_buffers(simulation_state *state,
     nlo_complex_mul_inplace(k_1, field, num_time_samples);
 
     // Calculate k2
-    nlo_complex_scalar_mul(
-        field_working,
-        
-    );
     nlo_complex_add_vec(
         field_working,
         ip_field,

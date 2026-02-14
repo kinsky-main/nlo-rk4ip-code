@@ -1,0 +1,30 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+
+layout(local_size_x = 64) in;
+
+layout(push_constant) uniform PushConstants {
+    uint count;
+    uint _pad;
+    double scalar0;
+    double scalar1;
+} pc;
+
+layout(set = 0, binding = 0, std430) buffer DstBuffer {
+    double dst[];
+};
+
+layout(set = 0, binding = 1, std430) readonly buffer SrcBuffer {
+    double src[];
+};
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.count) {
+        return;
+    }
+    dst[idx] *= src[idx];
+}
+
+

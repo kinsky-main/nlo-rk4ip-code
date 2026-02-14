@@ -1,0 +1,1026 @@
+/**
+ * @file vk_vector_ops.c
+ * @dir src/numerics
+ * @brief Vulkan vector operation implementation details.
+ */
+
+#include "numerics/vk_vector_ops.h"
+
+#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
+
+#include "nlo_vk_shader_paths.h"
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static VkDeviceSize nlo_vk_min_size(VkDeviceSize a, VkDeviceSize b)
+{
+    return (a < b) ? a : b;
+}
+
+static bool nlo_vk_supports_required_features(VkPhysicalDevice physical_device,
+                                              VkPhysicalDeviceLimits* out_limits)
+{
+    if (physical_device == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkPhysicalDeviceFeatures features;
+    vkGetPhysicalDeviceFeatures(physical_device, &features);
+    if (features.shaderFloat64 != VK_TRUE) {
+        return false;
+    }
+
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(physical_device, &properties);
+    if (out_limits != NULL) {
+        *out_limits = properties.limits;
+    }
+
+    return true;
+}
+
+static uint32_t nlo_vk_find_memory_type(nlo_vector_backend* backend,
+                                        uint32_t type_filter,
+                                        VkMemoryPropertyFlags properties)
+{
+    VkPhysicalDeviceMemoryProperties mem_props;
+    vkGetPhysicalDeviceMemoryProperties(backend->vk.physical_device, &mem_props);
+
+    for (uint32_t i = 0; i < mem_props.memoryTypeCount; ++i) {
+        if ((type_filter & (1u << i)) != 0u &&
+            (mem_props.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+
+    return UINT32_MAX;
+}
+
+static nlo_vec_status nlo_vk_create_buffer_raw(nlo_vector_backend* backend,
+                                               VkDeviceSize size,
+                                               VkBufferUsageFlags usage,
+                                               VkMemoryPropertyFlags properties,
+                                               VkBuffer* out_buffer,
+                                               VkDeviceMemory* out_memory)
+{
+    if (backend == NULL || out_buffer == NULL || out_memory == NULL || size == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    VkBufferCreateInfo buffer_info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+    };
+    if (vkCreateBuffer(backend->vk.device, &buffer_info, NULL, out_buffer) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkMemoryRequirements mem_req;
+    vkGetBufferMemoryRequirements(backend->vk.device, *out_buffer, &mem_req);
+    uint32_t type_index = nlo_vk_find_memory_type(backend, mem_req.memoryTypeBits, properties);
+    if (type_index == UINT32_MAX) {
+        vkDestroyBuffer(backend->vk.device, *out_buffer, NULL);
+        *out_buffer = VK_NULL_HANDLE;
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkMemoryAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = mem_req.size,
+        .memoryTypeIndex = type_index
+    };
+    if (vkAllocateMemory(backend->vk.device, &alloc_info, NULL, out_memory) != VK_SUCCESS) {
+        vkDestroyBuffer(backend->vk.device, *out_buffer, NULL);
+        *out_buffer = VK_NULL_HANDLE;
+        return NLO_VEC_STATUS_ALLOCATION_FAILED;
+    }
+
+    if (vkBindBufferMemory(backend->vk.device, *out_buffer, *out_memory, 0u) != VK_SUCCESS) {
+        vkDestroyBuffer(backend->vk.device, *out_buffer, NULL);
+        vkFreeMemory(backend->vk.device, *out_memory, NULL);
+        *out_buffer = VK_NULL_HANDLE;
+        *out_memory = VK_NULL_HANDLE;
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+static void nlo_vk_destroy_buffer_raw(nlo_vector_backend* backend, VkBuffer* buffer, VkDeviceMemory* memory)
+{
+    if (backend == NULL) {
+        return;
+    }
+    if (buffer != NULL && *buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(backend->vk.device, *buffer, NULL);
+        *buffer = VK_NULL_HANDLE;
+    }
+    if (memory != NULL && *memory != VK_NULL_HANDLE) {
+        vkFreeMemory(backend->vk.device, *memory, NULL);
+        *memory = VK_NULL_HANDLE;
+    }
+}
+
+static nlo_vec_status nlo_vk_read_binary_file(const char* path, uint32_t** out_words, size_t* out_size)
+{
+    if (path == NULL || out_words == NULL || out_size == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    FILE* fp = fopen(path, "rb");
+    if (fp == NULL) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    long file_size_long = ftell(fp);
+    if (file_size_long <= 0) {
+        fclose(fp);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    const size_t file_size = (size_t)file_size_long;
+    if ((file_size % sizeof(uint32_t)) != 0u) {
+        fclose(fp);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    uint32_t* words = (uint32_t*)malloc(file_size);
+    if (words == NULL) {
+        fclose(fp);
+        return NLO_VEC_STATUS_ALLOCATION_FAILED;
+    }
+
+    size_t nread = fread(words, 1u, file_size, fp);
+    fclose(fp);
+    if (nread != file_size) {
+        free(words);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    *out_words = words;
+    *out_size = file_size;
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vk_create_compute_pipeline(nlo_vector_backend* backend,
+                                                      const char* shader_path,
+                                                      VkPipeline* out_pipeline)
+{
+    uint32_t* shader_words = NULL;
+    size_t shader_size = 0u;
+    nlo_vec_status status = nlo_vk_read_binary_file(shader_path, &shader_words, &shader_size);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    VkShaderModuleCreateInfo module_info = {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = shader_size,
+        .pCode = shader_words
+    };
+    VkShaderModule module = VK_NULL_HANDLE;
+    if (vkCreateShaderModule(backend->vk.device, &module_info, NULL, &module) != VK_SUCCESS) {
+        free(shader_words);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+    free(shader_words);
+
+    VkPipelineShaderStageCreateInfo stage_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+        .module = module,
+        .pName = "main"
+    };
+    VkComputePipelineCreateInfo pipeline_info = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = stage_info,
+        .layout = backend->vk.pipeline_layout
+    };
+
+    if (vkCreateComputePipelines(backend->vk.device,
+                                 backend->vk.pipeline_cache,
+                                 1u,
+                                 &pipeline_info,
+                                 NULL,
+                                 out_pipeline) != VK_SUCCESS) {
+        vkDestroyShaderModule(backend->vk.device, module, NULL);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    vkDestroyShaderModule(backend->vk.device, module, NULL);
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vk_create_command_resources(nlo_vector_backend* backend, const nlo_vk_backend_config* config)
+{
+    if (config->command_pool != VK_NULL_HANDLE) {
+        backend->vk.command_pool = config->command_pool;
+        backend->vk.owns_command_pool = false;
+    } else {
+        VkCommandPoolCreateInfo pool_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .queueFamilyIndex = backend->vk.queue_family_index,
+            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
+        };
+        if (vkCreateCommandPool(backend->vk.device, &pool_info, NULL, &backend->vk.command_pool) != VK_SUCCESS) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+        backend->vk.owns_command_pool = true;
+    }
+
+    VkCommandBufferAllocateInfo alloc_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = backend->vk.command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1u
+    };
+    if (vkAllocateCommandBuffers(backend->vk.device, &alloc_info, &backend->vk.command_buffer) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkFenceCreateInfo fence_info = {
+        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
+    };
+    if (vkCreateFence(backend->vk.device, &fence_info, NULL, &backend->vk.submit_fence) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vk_create_descriptor_resources(nlo_vector_backend* backend)
+{
+    VkDescriptorSetLayoutBinding bindings[2] = {0};
+    bindings[0].binding = 0u;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[0].descriptorCount = 1u;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[1].binding = 1u;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].descriptorCount = 1u;
+    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo layout_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 2u,
+        .pBindings = bindings
+    };
+    if (vkCreateDescriptorSetLayout(backend->vk.device, &layout_info, NULL, &backend->vk.descriptor_set_layout) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkPushConstantRange push_range = {
+        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+        .offset = 0u,
+        .size = (uint32_t)sizeof(nlo_vk_push_constants)
+    };
+    VkPipelineLayoutCreateInfo pipeline_layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = 1u,
+        .pSetLayouts = &backend->vk.descriptor_set_layout,
+        .pushConstantRangeCount = 1u,
+        .pPushConstantRanges = &push_range
+    };
+    if (vkCreatePipelineLayout(backend->vk.device, &pipeline_layout_info, NULL, &backend->vk.pipeline_layout) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkDescriptorPoolSize pool_size = {
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .descriptorCount = 2u
+    };
+    VkDescriptorPoolCreateInfo pool_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1u,
+        .pPoolSizes = &pool_size,
+        .maxSets = 1u
+    };
+    if (vkCreateDescriptorPool(backend->vk.device, &pool_info, NULL, &backend->vk.descriptor_pool) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkDescriptorSetAllocateInfo set_info = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = backend->vk.descriptor_pool,
+        .descriptorSetCount = 1u,
+        .pSetLayouts = &backend->vk.descriptor_set_layout
+    };
+    if (vkAllocateDescriptorSets(backend->vk.device, &set_info, &backend->vk.descriptor_set) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkPipelineCacheCreateInfo cache_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO
+    };
+    if (vkCreatePipelineCache(backend->vk.device, &cache_info, NULL, &backend->vk.pipeline_cache) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vk_create_kernels(nlo_vector_backend* backend)
+{
+    const char* shader_paths[NLO_VK_KERNEL_COUNT] = {
+        NLO_VK_SHADER_REAL_FILL_PATH,
+        NLO_VK_SHADER_REAL_MUL_INPLACE_PATH,
+        NLO_VK_SHADER_COMPLEX_FILL_PATH,
+        NLO_VK_SHADER_COMPLEX_SCALAR_MUL_INPLACE_PATH,
+        NLO_VK_SHADER_COMPLEX_ADD_INPLACE_PATH,
+        NLO_VK_SHADER_COMPLEX_MUL_INPLACE_PATH,
+        NLO_VK_SHADER_COMPLEX_MAGNITUDE_SQUARED_PATH
+    };
+
+    for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
+        nlo_vec_status status = nlo_vk_create_compute_pipeline(backend, shader_paths[i], &backend->vk.kernels[i].pipeline);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
+{
+    if (backend == NULL) {
+        return;
+    }
+
+    if (backend->vk.staging_mapped_ptr != NULL && backend->vk.staging_memory != VK_NULL_HANDLE) {
+        vkUnmapMemory(backend->vk.device, backend->vk.staging_memory);
+        backend->vk.staging_mapped_ptr = NULL;
+    }
+    nlo_vk_destroy_buffer_raw(backend, &backend->vk.staging_buffer, &backend->vk.staging_memory);
+
+    for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
+        if (backend->vk.kernels[i].pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(backend->vk.device, backend->vk.kernels[i].pipeline, NULL);
+            backend->vk.kernels[i].pipeline = VK_NULL_HANDLE;
+        }
+    }
+
+    if (backend->vk.pipeline_cache != VK_NULL_HANDLE) {
+        vkDestroyPipelineCache(backend->vk.device, backend->vk.pipeline_cache, NULL);
+        backend->vk.pipeline_cache = VK_NULL_HANDLE;
+    }
+    if (backend->vk.descriptor_pool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(backend->vk.device, backend->vk.descriptor_pool, NULL);
+        backend->vk.descriptor_pool = VK_NULL_HANDLE;
+    }
+    if (backend->vk.pipeline_layout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(backend->vk.device, backend->vk.pipeline_layout, NULL);
+        backend->vk.pipeline_layout = VK_NULL_HANDLE;
+    }
+    if (backend->vk.descriptor_set_layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(backend->vk.device, backend->vk.descriptor_set_layout, NULL);
+        backend->vk.descriptor_set_layout = VK_NULL_HANDLE;
+    }
+    if (backend->vk.command_buffer != VK_NULL_HANDLE &&
+        backend->vk.command_pool != VK_NULL_HANDLE) {
+        vkFreeCommandBuffers(backend->vk.device,
+                             backend->vk.command_pool,
+                             1u,
+                             &backend->vk.command_buffer);
+        backend->vk.command_buffer = VK_NULL_HANDLE;
+    }
+    if (backend->vk.submit_fence != VK_NULL_HANDLE) {
+        vkDestroyFence(backend->vk.device, backend->vk.submit_fence, NULL);
+        backend->vk.submit_fence = VK_NULL_HANDLE;
+    }
+    if (backend->vk.command_pool != VK_NULL_HANDLE && backend->vk.owns_command_pool) {
+        vkDestroyCommandPool(backend->vk.device, backend->vk.command_pool, NULL);
+        backend->vk.command_pool = VK_NULL_HANDLE;
+    }
+}
+
+static nlo_vec_status nlo_vk_ensure_staging_capacity(nlo_vector_backend* backend, VkDeviceSize min_bytes)
+{
+    if (backend->vk.staging_buffer != VK_NULL_HANDLE && backend->vk.staging_capacity >= min_bytes) {
+        return NLO_VEC_STATUS_OK;
+    }
+
+    VkDeviceSize capacity = backend->vk.staging_capacity;
+    if (capacity == 0u) {
+        capacity = (VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES;
+    }
+    while (capacity < min_bytes) {
+        capacity *= 2u;
+    }
+
+    VkBuffer new_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory new_memory = VK_NULL_HANDLE;
+    nlo_vec_status status = nlo_vk_create_buffer_raw(
+        backend,
+        capacity,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        &new_buffer,
+        &new_memory);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    void* mapped = NULL;
+    if (vkMapMemory(backend->vk.device, new_memory, 0u, capacity, 0u, &mapped) != VK_SUCCESS) {
+        nlo_vk_destroy_buffer_raw(backend, &new_buffer, &new_memory);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    if (backend->vk.staging_mapped_ptr != NULL && backend->vk.staging_memory != VK_NULL_HANDLE) {
+        vkUnmapMemory(backend->vk.device, backend->vk.staging_memory);
+        backend->vk.staging_mapped_ptr = NULL;
+    }
+    nlo_vk_destroy_buffer_raw(backend, &backend->vk.staging_buffer, &backend->vk.staging_memory);
+
+    backend->vk.staging_buffer = new_buffer;
+    backend->vk.staging_memory = new_memory;
+    backend->vk.staging_mapped_ptr = mapped;
+    backend->vk.staging_capacity = capacity;
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vk_begin_commands(nlo_vector_backend* backend)
+{
+    if (vkWaitForFences(backend->vk.device, 1u, &backend->vk.submit_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+    if (vkResetFences(backend->vk.device, 1u, &backend->vk.submit_fence) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+    if (vkResetCommandBuffer(backend->vk.command_buffer, 0u) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkCommandBufferBeginInfo begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    if (vkBeginCommandBuffer(backend->vk.command_buffer, &begin_info) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vk_submit_commands(nlo_vector_backend* backend)
+{
+    if (vkEndCommandBuffer(backend->vk.command_buffer) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    VkSubmitInfo submit_info = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1u,
+        .pCommandBuffers = &backend->vk.command_buffer
+    };
+    if (vkQueueSubmit(backend->vk.queue, 1u, &submit_info, backend->vk.submit_fence) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    if (vkWaitForFences(backend->vk.device, 1u, &backend->vk.submit_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+static void nlo_vk_cmd_buffer_barrier(VkCommandBuffer cmd,
+                                      VkBuffer buffer,
+                                      VkDeviceSize offset,
+                                      VkDeviceSize size,
+                                      VkPipelineStageFlags src_stage,
+                                      VkAccessFlags src_access,
+                                      VkPipelineStageFlags dst_stage,
+                                      VkAccessFlags dst_access)
+{
+    VkBufferMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = src_access,
+        .dstAccessMask = dst_access,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buffer,
+        .offset = offset,
+        .size = size
+    };
+    vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0u, 0u, NULL, 1u, &barrier, 0u, NULL);
+}
+
+static void nlo_vk_cmd_transfer_to_compute(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size)
+{
+    nlo_vk_cmd_buffer_barrier(cmd,
+                              buffer,
+                              offset,
+                              size,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              VK_ACCESS_TRANSFER_WRITE_BIT,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+}
+
+static void nlo_vk_cmd_compute_to_compute(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size)
+{
+    nlo_vk_cmd_buffer_barrier(cmd,
+                              buffer,
+                              offset,
+                              size,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              VK_ACCESS_SHADER_WRITE_BIT,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+}
+
+static void nlo_vk_cmd_compute_to_transfer(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size)
+{
+    nlo_vk_cmd_buffer_barrier(cmd,
+                              buffer,
+                              offset,
+                              size,
+                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                              VK_ACCESS_SHADER_WRITE_BIT,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
+}
+
+static void nlo_vk_cmd_transfer_to_host(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize size)
+{
+    nlo_vk_cmd_buffer_barrier(cmd,
+                              buffer,
+                              offset,
+                              size,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              VK_ACCESS_TRANSFER_WRITE_BIT,
+                              VK_PIPELINE_STAGE_HOST_BIT,
+                              VK_ACCESS_HOST_READ_BIT);
+}
+
+static size_t nlo_vk_max_chunk_elements(const nlo_vector_backend* backend, size_t elem_size)
+{
+    uint64_t by_storage = (uint64_t)backend->vk.limits.maxStorageBufferRange / (uint64_t)elem_size;
+    uint64_t by_dispatch = (uint64_t)backend->vk.limits.maxComputeWorkGroupCount[0] * (uint64_t)NLO_VK_LOCAL_SIZE_X;
+    uint64_t max_elems = (by_storage < by_dispatch) ? by_storage : by_dispatch;
+    if (max_elems > (uint64_t)UINT32_MAX) {
+        max_elems = (uint64_t)UINT32_MAX;
+    }
+    return (size_t)max_elems;
+}
+
+static void nlo_vk_update_descriptor_set(nlo_vector_backend* backend,
+                                         VkBuffer dst_buffer,
+                                         VkDeviceSize dst_offset,
+                                         VkDeviceSize dst_size,
+                                         VkBuffer src_buffer,
+                                         VkDeviceSize src_offset,
+                                         VkDeviceSize src_size)
+{
+    VkDescriptorBufferInfo dst_info = {
+        .buffer = dst_buffer,
+        .offset = dst_offset,
+        .range = dst_size
+    };
+    VkDescriptorBufferInfo src_info = {
+        .buffer = src_buffer,
+        .offset = src_offset,
+        .range = src_size
+    };
+    VkWriteDescriptorSet writes[2] = {0};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = backend->vk.descriptor_set;
+    writes[0].dstBinding = 0u;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].descriptorCount = 1u;
+    writes[0].pBufferInfo = &dst_info;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = backend->vk.descriptor_set;
+    writes[1].dstBinding = 1u;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].descriptorCount = 1u;
+    writes[1].pBufferInfo = &src_info;
+
+    vkUpdateDescriptorSets(backend->vk.device, 2u, writes, 0u, NULL);
+}
+
+static nlo_vec_status nlo_vk_dispatch_kernel(nlo_vector_backend* backend,
+                                             nlo_vk_kernel_id kernel_id,
+                                             nlo_vec_buffer* dst,
+                                             const nlo_vec_buffer* src,
+                                             size_t elem_size,
+                                             size_t length,
+                                             double scalar0,
+                                             double scalar1)
+{
+    const size_t max_chunk_elems = nlo_vk_max_chunk_elements(backend, elem_size);
+    if (max_chunk_elems == 0u) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    size_t offset_elems = 0u;
+    while (offset_elems < length) {
+        size_t chunk_elems = length - offset_elems;
+        if (chunk_elems > max_chunk_elems) {
+            chunk_elems = max_chunk_elems;
+        }
+
+        VkBuffer src_buffer = (src != NULL) ? src->vk_buffer : dst->vk_buffer;
+        VkDeviceSize byte_offset = (VkDeviceSize)(offset_elems * elem_size);
+        VkDeviceSize chunk_bytes = (VkDeviceSize)(chunk_elems * elem_size);
+
+        nlo_vk_update_descriptor_set(backend,
+                                     dst->vk_buffer,
+                                     byte_offset,
+                                     chunk_bytes,
+                                     src_buffer,
+                                     byte_offset,
+                                     chunk_bytes);
+
+        nlo_vec_status status = nlo_vk_begin_commands(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        VkCommandBuffer cmd = backend->vk.command_buffer;
+        nlo_vk_cmd_transfer_to_compute(cmd, dst->vk_buffer, byte_offset, chunk_bytes);
+        nlo_vk_cmd_compute_to_compute(cmd, dst->vk_buffer, byte_offset, chunk_bytes);
+        if (src_buffer != dst->vk_buffer) {
+            nlo_vk_cmd_transfer_to_compute(cmd, src_buffer, byte_offset, chunk_bytes);
+            nlo_vk_cmd_compute_to_compute(cmd, src_buffer, byte_offset, chunk_bytes);
+        }
+
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, backend->vk.kernels[kernel_id].pipeline);
+        vkCmdBindDescriptorSets(cmd,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                backend->vk.pipeline_layout,
+                                0u,
+                                1u,
+                                &backend->vk.descriptor_set,
+                                0u,
+                                NULL);
+
+        nlo_vk_push_constants push = {
+            .count = (uint32_t)chunk_elems,
+            .pad = 0u,
+            .scalar0 = scalar0,
+            .scalar1 = scalar1
+        };
+        vkCmdPushConstants(cmd,
+                           backend->vk.pipeline_layout,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0u,
+                           (uint32_t)sizeof(push),
+                           &push);
+
+        uint32_t groups = (uint32_t)((chunk_elems + (size_t)NLO_VK_LOCAL_SIZE_X - 1u) / (size_t)NLO_VK_LOCAL_SIZE_X);
+        vkCmdDispatch(cmd, groups, 1u, 1u);
+
+        nlo_vk_cmd_compute_to_compute(cmd, dst->vk_buffer, byte_offset, chunk_bytes);
+        nlo_vk_cmd_compute_to_transfer(cmd, dst->vk_buffer, byte_offset, chunk_bytes);
+
+        status = nlo_vk_submit_commands(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        offset_elems += chunk_elems;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vk_copy_buffer_chunked(nlo_vector_backend* backend,
+                                                 VkBuffer src_buffer,
+                                                 VkBuffer dst_buffer,
+                                                 size_t bytes)
+{
+    VkDeviceSize remaining = (VkDeviceSize)bytes;
+    VkDeviceSize offset = 0u;
+
+    while (remaining > 0u) {
+        VkDeviceSize chunk = nlo_vk_min_size(remaining, backend->vk.max_kernel_chunk_bytes);
+        nlo_vec_status status = nlo_vk_begin_commands(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        VkCommandBuffer cmd = backend->vk.command_buffer;
+        nlo_vk_cmd_compute_to_transfer(cmd, src_buffer, offset, chunk);
+        nlo_vk_cmd_compute_to_transfer(cmd, dst_buffer, offset, chunk);
+
+        VkBufferCopy copy = {
+            .srcOffset = offset,
+            .dstOffset = offset,
+            .size = chunk
+        };
+        vkCmdCopyBuffer(cmd, src_buffer, dst_buffer, 1u, &copy);
+        nlo_vk_cmd_transfer_to_compute(cmd, dst_buffer, offset, chunk);
+
+        status = nlo_vk_submit_commands(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        offset += chunk;
+        remaining -= chunk;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_backend_config* config)
+{
+    if (backend == NULL || config == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (config->physical_device == VK_NULL_HANDLE ||
+        config->device == VK_NULL_HANDLE ||
+        config->queue == VK_NULL_HANDLE) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    VkPhysicalDeviceLimits limits;
+    if (!nlo_vk_supports_required_features(config->physical_device, &limits)) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+    if (limits.maxPushConstantsSize < sizeof(nlo_vk_push_constants)) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+    if (limits.maxComputeWorkGroupInvocations < NLO_VK_LOCAL_SIZE_X ||
+        limits.maxComputeWorkGroupSize[0] < NLO_VK_LOCAL_SIZE_X ||
+        limits.maxComputeWorkGroupCount[0] == 0u ||
+        limits.maxStorageBufferRange == 0u) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    backend->vk.physical_device = config->physical_device;
+    backend->vk.device = config->device;
+    backend->vk.queue = config->queue;
+    backend->vk.queue_family_index = config->queue_family_index;
+    backend->vk.shader_float64_supported = true;
+    backend->vk.limits = limits;
+    backend->vk.max_kernel_chunk_bytes = (VkDeviceSize)limits.maxStorageBufferRange;
+
+    nlo_vec_status status = nlo_vk_create_command_resources(backend, config);
+    if (status != NLO_VEC_STATUS_OK) {
+        nlo_vk_destroy_resources(backend);
+        return status;
+    }
+
+    status = nlo_vk_create_descriptor_resources(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        nlo_vk_destroy_resources(backend);
+        return status;
+    }
+
+    status = nlo_vk_create_kernels(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        nlo_vk_destroy_resources(backend);
+        return status;
+    }
+
+    VkDeviceSize initial_staging = nlo_vk_min_size((VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES, backend->vk.max_kernel_chunk_bytes);
+    if (initial_staging == 0u) {
+        initial_staging = (VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES;
+    }
+    status = nlo_vk_ensure_staging_capacity(backend, initial_staging);
+    if (status != NLO_VEC_STATUS_OK) {
+        nlo_vk_destroy_resources(backend);
+        return status;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+void nlo_vk_backend_shutdown(nlo_vector_backend* backend)
+{
+    if (backend == NULL) {
+        return;
+    }
+    if (backend->vk.queue != VK_NULL_HANDLE) {
+        (void)vkQueueWaitIdle(backend->vk.queue);
+    }
+    nlo_vk_destroy_resources(backend);
+}
+
+nlo_vec_status nlo_vk_buffer_create(nlo_vector_backend* backend, nlo_vec_buffer* buffer)
+{
+    return nlo_vk_create_buffer_raw(backend,
+                                    (VkDeviceSize)buffer->bytes,
+                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                        VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                    &buffer->vk_buffer,
+                                    &buffer->vk_memory);
+}
+
+void nlo_vk_buffer_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer)
+{
+    nlo_vk_destroy_buffer_raw(backend, &buffer->vk_buffer, &buffer->vk_memory);
+}
+
+nlo_vec_status nlo_vk_upload(nlo_vector_backend* backend,
+                             nlo_vec_buffer* buffer,
+                             const void* data,
+                             size_t bytes)
+{
+    nlo_vec_status status = nlo_vk_ensure_staging_capacity(backend, (VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    const uint8_t* src = (const uint8_t*)data;
+    VkDeviceSize remaining = (VkDeviceSize)bytes;
+    VkDeviceSize offset = 0u;
+
+    while (remaining > 0u) {
+        VkDeviceSize chunk = nlo_vk_min_size(remaining, backend->vk.staging_capacity);
+        memcpy(backend->vk.staging_mapped_ptr, src + (size_t)offset, (size_t)chunk);
+
+        status = nlo_vk_begin_commands(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        VkBufferCopy copy = {
+            .srcOffset = 0u,
+            .dstOffset = offset,
+            .size = chunk
+        };
+        vkCmdCopyBuffer(backend->vk.command_buffer, backend->vk.staging_buffer, buffer->vk_buffer, 1u, &copy);
+        nlo_vk_cmd_transfer_to_compute(backend->vk.command_buffer, buffer->vk_buffer, offset, chunk);
+
+        status = nlo_vk_submit_commands(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        remaining -= chunk;
+        offset += chunk;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+nlo_vec_status nlo_vk_download(nlo_vector_backend* backend,
+                               const nlo_vec_buffer* buffer,
+                               void* data,
+                               size_t bytes)
+{
+    nlo_vec_status status = nlo_vk_ensure_staging_capacity(backend, (VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    uint8_t* dst = (uint8_t*)data;
+    VkDeviceSize remaining = (VkDeviceSize)bytes;
+    VkDeviceSize offset = 0u;
+
+    while (remaining > 0u) {
+        VkDeviceSize chunk = nlo_vk_min_size(remaining, backend->vk.staging_capacity);
+        status = nlo_vk_begin_commands(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        nlo_vk_cmd_compute_to_transfer(backend->vk.command_buffer, buffer->vk_buffer, offset, chunk);
+        VkBufferCopy copy = {
+            .srcOffset = offset,
+            .dstOffset = 0u,
+            .size = chunk
+        };
+        vkCmdCopyBuffer(backend->vk.command_buffer, buffer->vk_buffer, backend->vk.staging_buffer, 1u, &copy);
+        nlo_vk_cmd_transfer_to_host(backend->vk.command_buffer, backend->vk.staging_buffer, 0u, chunk);
+
+        status = nlo_vk_submit_commands(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        memcpy(dst + (size_t)offset, backend->vk.staging_mapped_ptr, (size_t)chunk);
+        remaining -= chunk;
+        offset += chunk;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
+nlo_vec_status nlo_vk_op_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, double value)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_REAL_FILL,
+                                  dst,
+                                  NULL,
+                                  sizeof(double),
+                                  dst->length,
+                                  value,
+                                  0.0);
+}
+
+nlo_vec_status nlo_vk_op_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+{
+    return nlo_vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
+}
+
+nlo_vec_status nlo_vk_op_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_REAL_MUL_INPLACE,
+                                  dst,
+                                  src,
+                                  sizeof(double),
+                                  dst->length,
+                                  0.0,
+                                  0.0);
+}
+
+nlo_vec_status nlo_vk_op_complex_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, nlo_complex value)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_FILL,
+                                  dst,
+                                  NULL,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  NLO_RE(value),
+                                  NLO_IM(value));
+}
+
+nlo_vec_status nlo_vk_op_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+{
+    return nlo_vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
+}
+
+nlo_vec_status nlo_vk_op_complex_magnitude_squared(nlo_vector_backend* backend,
+                                                   const nlo_vec_buffer* src,
+                                                   nlo_vec_buffer* dst)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_MAGNITUDE_SQUARED,
+                                  dst,
+                                  src,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  0.0,
+                                  0.0);
+}
+
+nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(nlo_vector_backend* backend,
+                                                    nlo_vec_buffer* dst,
+                                                    nlo_complex alpha)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_SCALAR_MUL_INPLACE,
+                                  dst,
+                                  NULL,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  NLO_RE(alpha),
+                                  NLO_IM(alpha));
+}
+
+nlo_vec_status nlo_vk_op_complex_mul_inplace(nlo_vector_backend* backend,
+                                             nlo_vec_buffer* dst,
+                                             const nlo_vec_buffer* src)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_MUL_INPLACE,
+                                  dst,
+                                  src,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  0.0,
+                                  0.0);
+}
+
+nlo_vec_status nlo_vk_op_complex_add_inplace(nlo_vector_backend* backend,
+                                             nlo_vec_buffer* dst,
+                                             const nlo_vec_buffer* src)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_ADD_INPLACE,
+                                  dst,
+                                  src,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  0.0,
+                                  0.0);
+}
+
+#endif
+
