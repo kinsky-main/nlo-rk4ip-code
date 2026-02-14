@@ -40,6 +40,12 @@ nlo_vec_status nlo_vk_op_complex_mul_inplace(nlo_vector_backend* backend,
 nlo_vec_status nlo_vk_op_complex_add_inplace(nlo_vector_backend* backend,
                                              nlo_vec_buffer* dst,
                                              const nlo_vec_buffer* src);
+nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+nlo_vec_status nlo_vk_op_complex_relative_error(nlo_vector_backend* backend,
+                                                const nlo_vec_buffer* current,
+                                                const nlo_vec_buffer* previous,
+                                                double epsilon,
+                                                double* out_error);
 #endif
 
 

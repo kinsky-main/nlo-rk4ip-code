@@ -1,0 +1,64 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#extension GL_GOOGLE_include_directive : require
+
+#include "nlo_complex_device.glslinc"
+
+layout(local_size_x = 64) in;
+
+layout(push_constant) uniform PushConstants {
+    uint count;
+    uint _pad;
+    double scalar0;
+    double scalar1;
+} pc;
+
+layout(set = 0, binding = 0, std430) buffer DstBuffer {
+    double partial_ratio[];
+};
+
+layout(set = 0, binding = 1, std430) readonly buffer CurrentBuffer {
+    nlo_vk_complex64 current_vals[];
+};
+
+layout(set = 0, binding = 2, std430) readonly buffer PreviousBuffer {
+    nlo_vk_complex64 previous_vals[];
+};
+
+shared double shared_max[64];
+
+void main()
+{
+    uint global_idx = gl_GlobalInvocationID.x;
+    uint local_idx = gl_LocalInvocationID.x;
+    uint group_idx = gl_WorkGroupID.x;
+
+    double ratio = 0.0;
+    if (global_idx < pc.count) {
+        double curr_re = current_vals[global_idx].re;
+        double curr_im = current_vals[global_idx].im;
+        double prev_re = previous_vals[global_idx].re;
+        double prev_im = previous_vals[global_idx].im;
+
+        double diff_re = curr_re - prev_re;
+        double diff_im = curr_im - prev_im;
+        double diff_sq = diff_re * diff_re + diff_im * diff_im;
+        double prev_sq = prev_re * prev_re + prev_im * prev_im;
+        double denom = max(prev_sq, pc.scalar0);
+        ratio = diff_sq / denom;
+    }
+
+    shared_max[local_idx] = ratio;
+    barrier();
+
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (local_idx < stride) {
+            shared_max[local_idx] = max(shared_max[local_idx], shared_max[local_idx + stride]);
+        }
+        barrier();
+    }
+
+    if (local_idx == 0u) {
+        partial_ratio[group_idx] = shared_max[0u];
+    }
+}

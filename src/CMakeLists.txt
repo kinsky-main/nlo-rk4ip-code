@@ -7,6 +7,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/physics/operators.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/math_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_ops.c
+  ${CMAKE_CURRENT_LIST_DIR}/numerics/rk4_kernel.c
   ${CMAKE_CURRENT_LIST_DIR}/backend/vector_backend.c
   ${CMAKE_CURRENT_LIST_DIR}/fft/fft.c
 )
@@ -73,6 +74,9 @@ if(NLO_VECTOR_BACKEND_VULKAN)
     nlo_complex_add_inplace
     nlo_complex_mul_inplace
     nlo_complex_magnitude_squared
+    nlo_complex_exp_inplace
+    nlo_complex_relative_error_reduce
+    nlo_real_max_reduce
   )
 
   set(_nlo_vk_spv_outputs "")
@@ -106,6 +110,9 @@ if(NLO_VECTOR_BACKEND_VULKAN)
   set(NLO_VK_SHADER_COMPLEX_ADD_INPLACE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_add_inplace.spv")
   set(NLO_VK_SHADER_COMPLEX_MUL_INPLACE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_mul_inplace.spv")
   set(NLO_VK_SHADER_COMPLEX_MAGNITUDE_SQUARED_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_magnitude_squared.spv")
+  set(NLO_VK_SHADER_COMPLEX_EXP_INPLACE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_exp_inplace.spv")
+  set(NLO_VK_SHADER_COMPLEX_RELATIVE_ERROR_REDUCE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_relative_error_reduce.spv")
+  set(NLO_VK_SHADER_REAL_MAX_REDUCE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_real_max_reduce.spv")
 
   configure_file(
     "${CMAKE_CURRENT_LIST_DIR}/backend/vulkan/nlo_vk_shader_paths.h.in"

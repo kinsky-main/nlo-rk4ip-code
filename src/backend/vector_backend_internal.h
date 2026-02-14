@@ -25,7 +25,10 @@ typedef enum {
     NLO_VK_KERNEL_COMPLEX_ADD_INPLACE = 4,
     NLO_VK_KERNEL_COMPLEX_MUL_INPLACE = 5,
     NLO_VK_KERNEL_COMPLEX_MAGNITUDE_SQUARED = 6,
-    NLO_VK_KERNEL_COUNT = 7
+    NLO_VK_KERNEL_COMPLEX_EXP_INPLACE = 7,
+    NLO_VK_KERNEL_COMPLEX_RELATIVE_ERROR_REDUCE = 8,
+    NLO_VK_KERNEL_REAL_MAX_REDUCE = 9,
+    NLO_VK_KERNEL_COUNT = 10
 } nlo_vk_kernel_id;
 
 typedef struct {
@@ -63,6 +66,12 @@ typedef struct {
     VkDeviceMemory staging_memory;
     void* staging_mapped_ptr;
     VkDeviceSize staging_capacity;
+
+    VkBuffer reduction_buffer_a;
+    VkDeviceMemory reduction_memory_a;
+    VkBuffer reduction_buffer_b;
+    VkDeviceMemory reduction_memory_b;
+    VkDeviceSize reduction_capacity;
 
     VkDeviceSize max_kernel_chunk_bytes;
 } nlo_vk_backend;

@@ -10,10 +10,15 @@ add_test(NAME test_nlo_complex COMMAND test_nlo_complex)
 add_executable(test_fft
   ${CMAKE_CURRENT_LIST_DIR}/test_fft.c
   ${CMAKE_SOURCE_DIR}/src/fft/fft.c
+  ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
 )
 
 target_include_directories(test_fft PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(test_fft PRIVATE nlo_fft_backend)
+target_link_libraries(test_fft PRIVATE nlo_fft_backend simd::simd)
+if(UNIX)
+  target_link_libraries(test_fft PRIVATE m)
+endif()
 
 add_test(NAME test_fft COMMAND test_fft)
 

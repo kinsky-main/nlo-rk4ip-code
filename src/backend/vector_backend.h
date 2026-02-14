@@ -10,6 +10,7 @@
 // MARK: Includes
 
 #include "backend/nlo_complex.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -41,6 +42,14 @@ typedef enum {
 typedef struct nlo_vector_backend nlo_vector_backend;
 typedef struct nlo_vec_buffer nlo_vec_buffer;
 
+typedef struct {
+    size_t device_local_total_bytes;
+    size_t device_local_available_bytes;
+    size_t max_storage_buffer_range;
+    size_t max_compute_workgroups_x;
+    size_t max_kernel_chunk_bytes;
+} nlo_vec_backend_memory_info;
+
 // MARK: Backend Lifecycle
 
 /**
@@ -57,6 +66,11 @@ void nlo_vector_backend_destroy(nlo_vector_backend* backend);
  * @brief Get the backend type.
  */
 nlo_vector_backend_type nlo_vector_backend_get_type(const nlo_vector_backend* backend);
+
+/**
+ * @brief Returns true while backend transfers are guarded by simulation mode.
+ */
+bool nlo_vec_is_in_simulation(const nlo_vector_backend* backend);
 
 #ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
 #include <vulkan/vulkan.h>
@@ -93,6 +107,12 @@ nlo_vec_status nlo_vec_begin_simulation(nlo_vector_backend* backend);
  */
 nlo_vec_status nlo_vec_end_simulation(nlo_vector_backend* backend);
 
+/**
+ * @brief Query backend memory and dispatch limits used for chunk planning.
+ */
+nlo_vec_status nlo_vec_query_memory_info(const nlo_vector_backend* backend,
+                                         nlo_vec_backend_memory_info* out_info);
+
 // MARK: Buffer Lifecycle
 
 /**
@@ -126,6 +146,22 @@ nlo_vec_status nlo_vec_download(nlo_vector_backend* backend,
                                 void* data,
                                 size_t bytes);
 
+/**
+ * @brief Get a direct host pointer for CPU buffers.
+ *        Returns NLO_VEC_STATUS_UNSUPPORTED on non-CPU backends.
+ */
+nlo_vec_status nlo_vec_get_host_ptr(nlo_vector_backend* backend,
+                                    nlo_vec_buffer* buffer,
+                                    void** out_ptr);
+
+/**
+ * @brief Get a direct const host pointer for CPU buffers.
+ *        Returns NLO_VEC_STATUS_UNSUPPORTED on non-CPU backends.
+ */
+nlo_vec_status nlo_vec_get_const_host_ptr(const nlo_vector_backend* backend,
+                                          const nlo_vec_buffer* buffer,
+                                          const void** out_ptr);
+
 // MARK: Vector Operations
 
 nlo_vec_status nlo_vec_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, double value);
@@ -143,6 +179,16 @@ nlo_vec_status nlo_vec_complex_pow(nlo_vector_backend* backend, const nlo_vec_bu
 nlo_vec_status nlo_vec_complex_pow_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, unsigned int exponent);
 nlo_vec_status nlo_vec_complex_add_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
 nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+
+/**
+ * @brief Compute relative L-infinity complex error:
+ *        sqrt(max(|current-prev|^2) / max(max(|prev|^2), epsilon)).
+ */
+nlo_vec_status nlo_vec_complex_relative_error(nlo_vector_backend* backend,
+                                              const nlo_vec_buffer* current,
+                                              const nlo_vec_buffer* previous,
+                                              double epsilon,
+                                              double* out_error);
 
 #ifdef __cplusplus
 }

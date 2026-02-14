@@ -10,6 +10,7 @@
 
 #include "nlo_vk_shader_paths.h"
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -265,7 +266,7 @@ static nlo_vec_status nlo_vk_create_command_resources(nlo_vector_backend* backen
 
 static nlo_vec_status nlo_vk_create_descriptor_resources(nlo_vector_backend* backend)
 {
-    VkDescriptorSetLayoutBinding bindings[2] = {0};
+    VkDescriptorSetLayoutBinding bindings[3] = {0};
     bindings[0].binding = 0u;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[0].descriptorCount = 1u;
@@ -274,10 +275,14 @@ static nlo_vec_status nlo_vk_create_descriptor_resources(nlo_vector_backend* bac
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[1].descriptorCount = 1u;
     bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    bindings[2].binding = 2u;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[2].descriptorCount = 1u;
+    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo layout_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 2u,
+        .bindingCount = 3u,
         .pBindings = bindings
     };
     if (vkCreateDescriptorSetLayout(backend->vk.device, &layout_info, NULL, &backend->vk.descriptor_set_layout) != VK_SUCCESS) {
@@ -302,7 +307,7 @@ static nlo_vec_status nlo_vk_create_descriptor_resources(nlo_vector_backend* bac
 
     VkDescriptorPoolSize pool_size = {
         .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = 2u
+        .descriptorCount = 3u
     };
     VkDescriptorPoolCreateInfo pool_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -343,7 +348,10 @@ static nlo_vec_status nlo_vk_create_kernels(nlo_vector_backend* backend)
         NLO_VK_SHADER_COMPLEX_SCALAR_MUL_INPLACE_PATH,
         NLO_VK_SHADER_COMPLEX_ADD_INPLACE_PATH,
         NLO_VK_SHADER_COMPLEX_MUL_INPLACE_PATH,
-        NLO_VK_SHADER_COMPLEX_MAGNITUDE_SQUARED_PATH
+        NLO_VK_SHADER_COMPLEX_MAGNITUDE_SQUARED_PATH,
+        NLO_VK_SHADER_COMPLEX_EXP_INPLACE_PATH,
+        NLO_VK_SHADER_COMPLEX_RELATIVE_ERROR_REDUCE_PATH,
+        NLO_VK_SHADER_REAL_MAX_REDUCE_PATH
     };
 
     for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
@@ -367,6 +375,9 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
         backend->vk.staging_mapped_ptr = NULL;
     }
     nlo_vk_destroy_buffer_raw(backend, &backend->vk.staging_buffer, &backend->vk.staging_memory);
+    nlo_vk_destroy_buffer_raw(backend, &backend->vk.reduction_buffer_a, &backend->vk.reduction_memory_a);
+    nlo_vk_destroy_buffer_raw(backend, &backend->vk.reduction_buffer_b, &backend->vk.reduction_memory_b);
+    backend->vk.reduction_capacity = 0u;
 
     for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
         if (backend->vk.kernels[i].pipeline != VK_NULL_HANDLE) {
@@ -452,6 +463,66 @@ static nlo_vec_status nlo_vk_ensure_staging_capacity(nlo_vector_backend* backend
     backend->vk.staging_memory = new_memory;
     backend->vk.staging_mapped_ptr = mapped;
     backend->vk.staging_capacity = capacity;
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vk_ensure_reduction_capacity(nlo_vector_backend* backend, VkDeviceSize min_elements)
+{
+    if (min_elements == 0u) {
+        min_elements = 1u;
+    }
+
+    if (backend->vk.reduction_buffer_a != VK_NULL_HANDLE &&
+        backend->vk.reduction_buffer_b != VK_NULL_HANDLE &&
+        backend->vk.reduction_capacity >= min_elements) {
+        return NLO_VEC_STATUS_OK;
+    }
+
+    VkDeviceSize capacity = backend->vk.reduction_capacity;
+    if (capacity == 0u) {
+        capacity = 64u;
+    }
+    while (capacity < min_elements) {
+        capacity *= 2u;
+    }
+
+    VkDeviceSize bytes = capacity * (VkDeviceSize)sizeof(double);
+    VkBuffer new_a = VK_NULL_HANDLE;
+    VkDeviceMemory mem_a = VK_NULL_HANDLE;
+    VkBuffer new_b = VK_NULL_HANDLE;
+    VkDeviceMemory mem_b = VK_NULL_HANDLE;
+
+    nlo_vec_status status = nlo_vk_create_buffer_raw(
+        backend,
+        bytes,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        &new_a,
+        &mem_a);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vk_create_buffer_raw(
+        backend,
+        bytes,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        &new_b,
+        &mem_b);
+    if (status != NLO_VEC_STATUS_OK) {
+        nlo_vk_destroy_buffer_raw(backend, &new_a, &mem_a);
+        return status;
+    }
+
+    nlo_vk_destroy_buffer_raw(backend, &backend->vk.reduction_buffer_a, &backend->vk.reduction_memory_a);
+    nlo_vk_destroy_buffer_raw(backend, &backend->vk.reduction_buffer_b, &backend->vk.reduction_memory_b);
+
+    backend->vk.reduction_buffer_a = new_a;
+    backend->vk.reduction_memory_a = mem_a;
+    backend->vk.reduction_buffer_b = new_b;
+    backend->vk.reduction_memory_b = mem_b;
+    backend->vk.reduction_capacity = capacity;
     return NLO_VEC_STATUS_OK;
 }
 
@@ -587,7 +658,10 @@ static void nlo_vk_update_descriptor_set(nlo_vector_backend* backend,
                                          VkDeviceSize dst_size,
                                          VkBuffer src_buffer,
                                          VkDeviceSize src_offset,
-                                         VkDeviceSize src_size)
+                                         VkDeviceSize src_size,
+                                         VkBuffer src2_buffer,
+                                         VkDeviceSize src2_offset,
+                                         VkDeviceSize src2_size)
 {
     VkDescriptorBufferInfo dst_info = {
         .buffer = dst_buffer,
@@ -599,7 +673,12 @@ static void nlo_vk_update_descriptor_set(nlo_vector_backend* backend,
         .offset = src_offset,
         .range = src_size
     };
-    VkWriteDescriptorSet writes[2] = {0};
+    VkDescriptorBufferInfo src2_info = {
+        .buffer = src2_buffer,
+        .offset = src2_offset,
+        .range = src2_size
+    };
+    VkWriteDescriptorSet writes[3] = {0};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = backend->vk.descriptor_set;
     writes[0].dstBinding = 0u;
@@ -614,7 +693,14 @@ static void nlo_vk_update_descriptor_set(nlo_vector_backend* backend,
     writes[1].descriptorCount = 1u;
     writes[1].pBufferInfo = &src_info;
 
-    vkUpdateDescriptorSets(backend->vk.device, 2u, writes, 0u, NULL);
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = backend->vk.descriptor_set;
+    writes[2].dstBinding = 2u;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[2].descriptorCount = 1u;
+    writes[2].pBufferInfo = &src2_info;
+
+    vkUpdateDescriptorSets(backend->vk.device, 3u, writes, 0u, NULL);
 }
 
 static nlo_vec_status nlo_vk_dispatch_kernel(nlo_vector_backend* backend,
@@ -644,6 +730,9 @@ static nlo_vec_status nlo_vk_dispatch_kernel(nlo_vector_backend* backend,
 
         nlo_vk_update_descriptor_set(backend,
                                      dst->vk_buffer,
+                                     byte_offset,
+                                     chunk_bytes,
+                                     src_buffer,
                                      byte_offset,
                                      chunk_bytes,
                                      src_buffer,
@@ -700,6 +789,165 @@ static nlo_vec_status nlo_vk_dispatch_kernel(nlo_vector_backend* backend,
         offset_elems += chunk_elems;
     }
 
+    return NLO_VEC_STATUS_OK;
+}
+
+static uint32_t nlo_vk_dispatch_groups_for_count(size_t count)
+{
+    if (count == 0u) {
+        return 1u;
+    }
+    return (uint32_t)((count + (size_t)NLO_VK_LOCAL_SIZE_X - 1u) / (size_t)NLO_VK_LOCAL_SIZE_X);
+}
+
+static nlo_vec_status nlo_vk_dispatch_complex_relative_error(nlo_vector_backend* backend,
+                                                             const nlo_vec_buffer* current,
+                                                             const nlo_vec_buffer* previous,
+                                                             double epsilon,
+                                                             double* out_error)
+{
+    if (backend == NULL || current == NULL || previous == NULL || out_error == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (current->length != previous->length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (current->length > (size_t)UINT32_MAX) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    uint32_t groups = nlo_vk_dispatch_groups_for_count(current->length);
+    nlo_vec_status status = nlo_vk_ensure_reduction_capacity(backend, (VkDeviceSize)groups);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vk_ensure_staging_capacity(backend, (VkDeviceSize)sizeof(double));
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vk_begin_commands(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    VkCommandBuffer cmd = backend->vk.command_buffer;
+    VkDeviceSize complex_bytes = (VkDeviceSize)current->bytes;
+    VkDeviceSize partial_bytes = (VkDeviceSize)groups * (VkDeviceSize)sizeof(double);
+
+    nlo_vk_cmd_compute_to_compute(cmd, current->vk_buffer, 0u, complex_bytes);
+    nlo_vk_cmd_compute_to_compute(cmd, previous->vk_buffer, 0u, complex_bytes);
+    nlo_vk_cmd_compute_to_compute(cmd, backend->vk.reduction_buffer_a, 0u, partial_bytes);
+    nlo_vk_cmd_compute_to_compute(cmd, backend->vk.reduction_buffer_b, 0u, partial_bytes);
+
+    nlo_vk_update_descriptor_set(backend,
+                                 backend->vk.reduction_buffer_a,
+                                 0u,
+                                 partial_bytes,
+                                 current->vk_buffer,
+                                 0u,
+                                 complex_bytes,
+                                 previous->vk_buffer,
+                                 0u,
+                                 complex_bytes);
+
+    vkCmdBindPipeline(cmd,
+                      VK_PIPELINE_BIND_POINT_COMPUTE,
+                      backend->vk.kernels[NLO_VK_KERNEL_COMPLEX_RELATIVE_ERROR_REDUCE].pipeline);
+    vkCmdBindDescriptorSets(cmd,
+                            VK_PIPELINE_BIND_POINT_COMPUTE,
+                            backend->vk.pipeline_layout,
+                            0u,
+                            1u,
+                            &backend->vk.descriptor_set,
+                            0u,
+                            NULL);
+
+    nlo_vk_push_constants push = {
+        .count = (uint32_t)current->length,
+        .pad = 0u,
+        .scalar0 = epsilon,
+        .scalar1 = 0.0
+    };
+    vkCmdPushConstants(cmd,
+                       backend->vk.pipeline_layout,
+                       VK_SHADER_STAGE_COMPUTE_BIT,
+                       0u,
+                       (uint32_t)sizeof(push),
+                       &push);
+    vkCmdDispatch(cmd, groups, 1u, 1u);
+    nlo_vk_cmd_compute_to_compute(cmd, backend->vk.reduction_buffer_a, 0u, partial_bytes);
+
+    VkBuffer src_buffer = backend->vk.reduction_buffer_a;
+    VkBuffer dst_buffer = backend->vk.reduction_buffer_b;
+    uint32_t count = groups;
+    while (count > 1u) {
+        uint32_t next_groups = nlo_vk_dispatch_groups_for_count((size_t)count);
+        VkDeviceSize src_bytes = (VkDeviceSize)count * (VkDeviceSize)sizeof(double);
+        VkDeviceSize dst_bytes = (VkDeviceSize)next_groups * (VkDeviceSize)sizeof(double);
+
+        nlo_vk_update_descriptor_set(backend,
+                                     dst_buffer,
+                                     0u,
+                                     dst_bytes,
+                                     src_buffer,
+                                     0u,
+                                     src_bytes,
+                                     src_buffer,
+                                     0u,
+                                     src_bytes);
+
+        vkCmdBindPipeline(cmd,
+                          VK_PIPELINE_BIND_POINT_COMPUTE,
+                          backend->vk.kernels[NLO_VK_KERNEL_REAL_MAX_REDUCE].pipeline);
+        vkCmdBindDescriptorSets(cmd,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                backend->vk.pipeline_layout,
+                                0u,
+                                1u,
+                                &backend->vk.descriptor_set,
+                                0u,
+                                NULL);
+
+        push.count = count;
+        push.scalar0 = 0.0;
+        push.scalar1 = 0.0;
+        vkCmdPushConstants(cmd,
+                           backend->vk.pipeline_layout,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0u,
+                           (uint32_t)sizeof(push),
+                           &push);
+        vkCmdDispatch(cmd, next_groups, 1u, 1u);
+        nlo_vk_cmd_compute_to_compute(cmd, dst_buffer, 0u, dst_bytes);
+
+        VkBuffer tmp = src_buffer;
+        src_buffer = dst_buffer;
+        dst_buffer = tmp;
+        count = next_groups;
+    }
+
+    nlo_vk_cmd_compute_to_transfer(cmd, src_buffer, 0u, (VkDeviceSize)sizeof(double));
+
+    VkBufferCopy copy = {
+        .srcOffset = 0u,
+        .dstOffset = 0u,
+        .size = (VkDeviceSize)sizeof(double)
+    };
+    vkCmdCopyBuffer(cmd, src_buffer, backend->vk.staging_buffer, 1u, &copy);
+    nlo_vk_cmd_transfer_to_host(cmd, backend->vk.staging_buffer, 0u, (VkDeviceSize)sizeof(double));
+
+    status = nlo_vk_submit_commands(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    double ratio = 0.0;
+    memcpy(&ratio, backend->vk.staging_mapped_ptr, sizeof(double));
+    if (ratio < 0.0) {
+        ratio = 0.0;
+    }
+    *out_error = sqrt(ratio);
     return NLO_VEC_STATUS_OK;
 }
 
@@ -1020,6 +1268,30 @@ nlo_vec_status nlo_vk_op_complex_add_inplace(nlo_vector_backend* backend,
                                   dst->length,
                                   0.0,
                                   0.0);
+}
+
+nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_EXP_INPLACE,
+                                  dst,
+                                  NULL,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  0.0,
+                                  0.0);
+}
+
+nlo_vec_status nlo_vk_op_complex_relative_error(nlo_vector_backend* backend,
+                                                const nlo_vec_buffer* current,
+                                                const nlo_vec_buffer* previous,
+                                                double epsilon,
+                                                double* out_error)
+{
+    if (epsilon <= 0.0) {
+        epsilon = 1e-12;
+    }
+    return nlo_vk_dispatch_complex_relative_error(backend, current, previous, epsilon, out_error);
 }
 
 #endif

@@ -8,7 +8,7 @@
 
 #include "nlolib.h"
 #include "backend/nlo_complex.h"
-#include <string.h>
+#include "numerics/rk4_kernel.h"
 #include <stddef.h>
 
 NLOLIB_API nlolib_status nlolib_propagate(const sim_config* config,
@@ -23,24 +23,29 @@ NLOLIB_API nlolib_status nlolib_propagate(const sim_config* config,
     if (num_time_samples == 0 || num_time_samples > NT_MAX) {
         return NLOLIB_STATUS_INVALID_ARGUMENT;
     }
-    // TODO: simulation state num recorded samples should be derived from config or passed separately
+
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
     simulation_state* state = NULL;
-    if (nlo_init_simulation_state(config, num_time_samples, 1u, NULL, &state) != 0 || state == NULL) {
+    if (nlo_init_simulation_state(config,
+                                  num_time_samples,
+                                  1u,
+                                  &exec_options,
+                                  NULL,
+                                  &state) != 0 || state == NULL) {
         return NLOLIB_STATUS_ALLOCATION_FAILED;
     }
 
-    nlo_complex* initial_field = simulation_state_current_field(state);
-    if (initial_field == NULL) {
+    if (simulation_state_upload_initial_field(state, input_field) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NLOLIB_STATUS_ALLOCATION_FAILED;
     }
 
-    memcpy(initial_field, input_field, num_time_samples * sizeof(nlo_complex));
-
-    if (input_field != output_field) {
-        memcpy(output_field, input_field, num_time_samples * sizeof(nlo_complex));
+    solve_rk4(state);
+    if (simulation_state_download_current_field(state, output_field) != NLO_VEC_STATUS_OK) {
+        free_simulation_state(state);
+        return NLOLIB_STATUS_ALLOCATION_FAILED;
     }
 
     free_simulation_state(state);
-    return NLOLIB_STATUS_NOT_IMPLEMENTED;
+    return NLOLIB_STATUS_OK;
 }
