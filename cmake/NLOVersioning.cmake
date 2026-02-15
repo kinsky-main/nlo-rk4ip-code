@@ -38,7 +38,14 @@ function(nlo_install_minor_version_hook)
 
   set(_nlo_hook_marker "nlolib-auto-minor-version-hook")
   set(_nlo_pre_commit_hook "${_nlo_git_dir}/hooks/pre-commit")
+  get_filename_component(_nlo_hook_dir "${_nlo_pre_commit_hook}" DIRECTORY)
   set(_nlo_install_hook TRUE)
+
+  if((EXISTS "${_nlo_pre_commit_hook}" AND NOT IS_WRITABLE "${_nlo_pre_commit_hook}") OR
+     (NOT EXISTS "${_nlo_pre_commit_hook}" AND NOT IS_WRITABLE "${_nlo_hook_dir}"))
+    message(STATUS "Pre-commit hook path is not writable; skipping automatic minor version hook installation.")
+    return()
+  endif()
 
   if(EXISTS "${_nlo_pre_commit_hook}")
     file(READ "${_nlo_pre_commit_hook}" _nlo_existing_hook)

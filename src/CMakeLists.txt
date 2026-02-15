@@ -8,6 +8,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/numerics/math_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/rk4_kernel.c
+  ${CMAKE_CURRENT_LIST_DIR}/utility/rk4_debug.c
   ${CMAKE_CURRENT_LIST_DIR}/backend/vector_backend.c
   ${CMAKE_CURRENT_LIST_DIR}/fft/fft.c
 )
@@ -25,6 +26,12 @@ target_include_directories(nlolib PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 
 if(WIN32)
   target_compile_definitions(nlolib PRIVATE NLOLIB_EXPORTS)
+endif()
+
+if(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS)
+  target_compile_definitions(nlolib PRIVATE
+    $<$<CONFIG:Debug>:NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS=1>
+  )
 endif()
 
 add_subdirectory(fft)

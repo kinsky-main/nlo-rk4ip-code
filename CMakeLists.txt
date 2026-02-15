@@ -13,7 +13,10 @@ option(NLO_ENABLE_FFTW "Enable FFTW integration for CPU FFT execution" ON)
 option(NLO_ENABLE_VKFFT "Enable VkFFT integration for Vulkan FFT execution" ON)
 option(NLO_VECTOR_BACKEND_VULKAN "Enable Vulkan backend for vector operations" ON)
 option(NLO_VULKAN_FETCH_HEADERS "Fetch Vulkan headers when not found locally" ON)
+option(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS "Enable debug-only RK4/dispersion diagnostics in Debug builds" OFF)
+option(NLO_INSTALL_GIT_HOOKS "Install repository git hooks during CMake configure" ON)
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
+option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" OFF)
 set(NLO_VULKAN_HEADERS_URL
   "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/heads/main.zip"
   CACHE STRING "URL used to fetch Vulkan headers when local headers are unavailable")
@@ -22,7 +25,9 @@ set_property(CACHE NLO_CPU_SIMD_LEVEL PROPERTY STRINGS AUTO AVX2 AVX SCALAR)
 
 include(NLOVersioning)
 include(NLODocs)
-nlo_install_minor_version_hook(VERSION_FILE "${CMAKE_CURRENT_LIST_FILE}")
+if(NLO_INSTALL_GIT_HOOKS)
+  nlo_install_minor_version_hook(VERSION_FILE "${CMAKE_CURRENT_LIST_FILE}")
+endif()
 
 include(simd)
 
@@ -33,6 +38,10 @@ include(CTest)
 if(BUILD_TESTING)
   add_subdirectory(tests)
   nlo_add_build_test_patch_target(VERSION_FILE "${CMAKE_CURRENT_LIST_FILE}")
+endif()
+
+if(NLOLIB_BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()
 
 nlo_configure_docs_target()

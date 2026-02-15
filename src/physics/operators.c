@@ -6,6 +6,7 @@
 #include "physics/operators.h"
 #include "backend/nlo_complex.h"
 #include "numerics/math_ops.h"
+#include "utility/rk4_debug.h"
 
 static inline nlo_complex nlo_i_factor(size_t power)
 {
@@ -32,8 +33,6 @@ nlo_vec_status nlo_calculate_dispersion_factor_vec(
     nlo_vec_buffer* term_buffer
 )
 {
-    (void)step_size;
-
     if (backend == NULL || betas == NULL || dispersion_factor == NULL ||
         frequency_grid == NULL || omega_power == NULL || term_buffer == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -78,7 +77,14 @@ nlo_vec_status nlo_calculate_dispersion_factor_vec(
         }
     }
 
-    return nlo_vec_complex_exp_inplace(backend, dispersion_factor);
+    status = nlo_vec_complex_exp_inplace(backend, dispersion_factor);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    nlo_rk4_debug_log_dispersion_factor(backend, dispersion_factor, num_dispersion_terms, step_size);
+
+    return NLO_VEC_STATUS_OK;
 }
 
 nlo_vec_status nlo_apply_dispersion_operator_vec(
@@ -134,3 +140,4 @@ nlo_vec_status nlo_apply_nonlinear_operator_vec(
 
     return nlo_vec_complex_mul_inplace(backend, out_field, magnitude_squared);
 }
+

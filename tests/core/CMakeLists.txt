@@ -7,6 +7,7 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/numerics/math_ops.c
   ${CMAKE_SOURCE_DIR}/src/physics/operators.c
   ${CMAKE_SOURCE_DIR}/src/numerics/rk4_kernel.c
+  ${CMAKE_SOURCE_DIR}/src/utility/rk4_debug.c
   ${CMAKE_SOURCE_DIR}/src/fft/fft.c
 )
 

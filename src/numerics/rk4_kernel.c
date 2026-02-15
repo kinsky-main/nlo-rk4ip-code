@@ -6,6 +6,7 @@
 #include "numerics/rk4_kernel.h"
 #include "fft/fft.h"
 #include "physics/operators.h"
+#include "utility/rk4_debug.h"
 #include <assert.h>
 #include <math.h>
 
@@ -71,7 +72,7 @@ static double nlo_clamp_step(double value, double min_step, double max_step)
     return out;
 }
 
-static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
+static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_index)
 {
     if (state == NULL || state->backend == NULL || state->fft_plan == NULL)
     {
@@ -82,6 +83,13 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
     simulation_working_vectors *work = &state->working_vectors;
     const double step = state->current_step_size;
 
+    nlo_rk4_debug_log_vec_stats(state,
+                                state->current_field_vec,
+                                "current_field_start",
+                                step_index,
+                                state->current_z,
+                                step);
+
     // Calculate Interaction Picture Field
     NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, state->current_field_vec, work->field_freq_vec));
     NLO_RK4_CALL(nlo_apply_dispersion_operator_vec(backend,
@@ -89,6 +97,7 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
                                                    work->field_freq_vec,
                                                    state->current_half_step_exp));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->ip_field_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->ip_field_vec, "ip_field", step_index, state->current_z, step);
 
     // Calculate k1
     NLO_RK4_CALL(nlo_apply_nonlinear_operator_vec(
@@ -105,6 +114,7 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
                                                    state->current_half_step_exp));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_working_vec, work->k_1_vec));
     NLO_RK4_CALL(nlo_vec_complex_mul_inplace(backend, work->k_1_vec, state->current_field_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_1_vec, "k1", step_index, state->current_z, step);
     
     // Calculate working field term for k2 nonlinearity
     NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->field_working_vec, work->k_1_vec));
@@ -119,6 +129,7 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
                                                   work->k_2_vec));
     NLO_RK4_CALL(nlo_vec_complex_mul_inplace(backend, work->k_2_vec, work->field_working_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_2_vec, nlo_make(step, 0.0)));
+    nlo_rk4_debug_log_vec_stats(state, work->k_2_vec, "k2", step_index, state->current_z, step);
     
     // Calculate Magnitude squared term for k3 nonlinearity
     NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->field_working_vec, work->k_2_vec));
@@ -133,6 +144,7 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
                                                   work->k_3_vec));
     NLO_RK4_CALL(nlo_vec_complex_mul_inplace(backend, work->k_3_vec, work->field_working_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_3_vec, nlo_make(step, 0.0)));
+    nlo_rk4_debug_log_vec_stats(state, work->k_3_vec, "k3", step_index, state->current_z, step);
 
     // Calculate working field term for k4 nonlinearity
     NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->field_working_vec, work->k_3_vec));
@@ -152,6 +164,7 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
                                                   work->k_4_vec));
     NLO_RK4_CALL(nlo_vec_complex_mul_inplace(backend, work->k_4_vec, work->field_working_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_4_vec, nlo_make(step, 0.0)));
+    nlo_rk4_debug_log_vec_stats(state, work->k_4_vec, "k4", step_index, state->current_z, step);
 
     // Scale and combine k terms to update field
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_1_vec, nlo_make(1.0 / 6.0, 0.0)));
@@ -171,6 +184,12 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_1_vec, work->k_4_vec));
 
     NLO_RK4_CALL(nlo_vec_complex_copy(backend, state->current_field_vec, work->k_1_vec));
+    nlo_rk4_debug_log_vec_stats(state,
+                                state->current_field_vec,
+                                "current_field_end",
+                                step_index,
+                                state->current_z + step,
+                                step);
 
     return NLO_VEC_STATUS_OK;
 }
@@ -203,6 +222,8 @@ void solve_rk4(simulation_state *state)
         state->current_step_size = state->config->propagation.starting_step_size;
     }
 
+    nlo_rk4_debug_reset_run();
+
     if (nlo_vec_begin_simulation(state->backend) != NLO_VEC_STATUS_OK)
     {
         return;
@@ -225,6 +246,7 @@ void solve_rk4(simulation_state *state)
         next_record_z = record_spacing * (double)state->current_record_index;
     }
 
+    size_t rk4_step_index = 0u;
     while (state->current_z < z_end)
     {
         double step = nlo_clamp_step(state->current_step_size, min_step, max_step);
@@ -265,7 +287,7 @@ void solve_rk4(simulation_state *state)
             break;
         }
 
-        if (nlo_rk4_step_device(state) != NLO_VEC_STATUS_OK)
+        if (nlo_rk4_step_device(state, rk4_step_index) != NLO_VEC_STATUS_OK)
         {
             break;
         }
@@ -297,6 +319,12 @@ void solve_rk4(simulation_state *state)
         }
 
         state->current_step_size = nlo_clamp_step(step * scale, min_step, max_step);
+        nlo_rk4_debug_log_error_control(rk4_step_index,
+                                        state->current_z,
+                                        step,
+                                        error,
+                                        scale,
+                                        state->current_step_size);
 
         while (record_spacing > 0.0 &&
                state->current_record_index < state->num_recorded_samples &&
@@ -308,6 +336,8 @@ void solve_rk4(simulation_state *state)
             }
             next_record_z += record_spacing;
         }
+
+        rk4_step_index += 1u;
     }
 
     (void)simulation_state_flush_snapshots(state);
@@ -330,11 +360,14 @@ void step_rk4(simulation_state *state)
         return;
     }
 
+    nlo_rk4_debug_reset_run();
+
     state->current_half_step_exp = exp(0.5 * state->current_step_size);
-    if (nlo_rk4_step_device(state) == NLO_VEC_STATUS_OK)
+    if (nlo_rk4_step_device(state, 0u) == NLO_VEC_STATUS_OK)
     {
         state->current_z += state->current_step_size;
     }
 
     (void)nlo_vec_end_simulation(state->backend);
 }
+

@@ -153,7 +153,8 @@ def compute_wavelength_spectral_map(
     spec_map = np.empty((z_samples.size, valid.sum()), dtype=np.float64)
     for i, z in enumerate(z_samples):
         field_z = np.asarray(A0, dtype=np.complex128) if z == 0.0 else rk4ip_solver(A0, float(z), params)
-        spec_map[i, :] = _spectral_intensity(field_z)[valid]
+        spec = _spectral_intensity(field_z)
+        spec_map[i, :] = spec[valid]
 
     order = np.argsort(lambda_nm)
     lambda_nm = lambda_nm[order]
@@ -213,9 +214,9 @@ def save_plots(
     saved_paths.append(p2)
 
     fig_3, ax_3 = plt.subplots(figsize=(9.0, 5.5))
-    img = ax_3.pcolormesh(z_samples, lambda_nm, spectral_map.T, shading="auto", cmap="magma")
-    ax_3.set_xlabel("Propagation distance z (m)")
-    ax_3.set_ylabel("Wavelength (nm)")
+    img = ax_3.pcolormesh(lambda_nm, z_samples, spectral_map, shading="auto", cmap="magma")
+    ax_3.set_xlabel("Wavelength (nm)")
+    ax_3.set_ylabel("Propagation distance z (m)")
     ax_3.set_title("Spectral Intensity Envelope vs Propagation Distance")
     colorbar = fig_3.colorbar(img, ax=ax_3)
     colorbar.set_label("Normalized spectral intensity")
@@ -225,6 +226,18 @@ def save_plots(
     saved_paths.append(p3)
 
     return saved_paths
+
+
+def diagnose_first_nonfinite_z(A0: np.ndarray, params: dict, z_final: float) -> tuple[float | None, float]:
+    z_probe = np.linspace(0.0, z_final, 41)
+    max_finite_amplitude = 0.0
+    for z in z_probe:
+        field_z = np.asarray(A0, dtype=np.complex128) if z == 0.0 else rk4ip_solver(A0, float(z), params)
+        finite_mask = np.isfinite(field_z.real) & np.isfinite(field_z.imag)
+        if not finite_mask.all():
+            return float(z), max_finite_amplitude
+        max_finite_amplitude = max(max_finite_amplitude, float(np.max(np.abs(field_z))))
+    return None, max_finite_amplitude
 
 
 def main() -> float:
@@ -258,6 +271,15 @@ def main() -> float:
     A_true = second_order_soliton_field(T, z_final, beta2, gamma, t0)
     A_num = rk4ip_solver(A0, z_final, params)
     epsilon = average_relative_intensity_error(A_num, A_true)
+    if not np.isfinite(epsilon):
+        first_bad_z, max_finite_amplitude = diagnose_first_nonfinite_z(A0, params, z_final)
+        print("warning: epsilon is non-finite because numerical field contains non-finite values.")
+        if first_bad_z is not None:
+            print(
+                "diagnostic: first non-finite numerical value detected near "
+                f"z = {first_bad_z:.6e} m; max finite |A| before divergence = "
+                f"{max_finite_amplitude:.6e}."
+            )
 
     lambda0_nm = 1550.0
     z_samples = np.linspace(0.0, z_final, 40)
