@@ -6,7 +6,7 @@ set(CMAKE_C_STANDARD 99)
 
 option(NLO_FFT_BACKEND_FFTW "Use FFTW backend" ON)
 option(NLO_FFT_BACKEND_CUFFT "Use CUFFT backend" OFF)
-option(NLO_VECTOR_BACKEND_VULKAN "Enable Vulkan backend for vector operations" OFF)
+option(NLO_VECTOR_BACKEND_VULKAN "Enable Vulkan backend for vector operations" ON)
 option(NLO_VULKAN_FETCH_HEADERS "Fetch Vulkan headers when not found locally" ON)
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 set(NLO_VULKAN_HEADERS_URL

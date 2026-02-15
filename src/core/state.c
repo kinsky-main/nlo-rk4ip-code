@@ -225,7 +225,7 @@ simulation_state* create_simulation_state(
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_2_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_3_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_4_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.current_dispersion_factor_vec) != NLO_VEC_STATUS_OK ||
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.dispersion_factor_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.previous_field_vec) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
@@ -254,7 +254,7 @@ simulation_state* create_simulation_state(
                                                  config->dispersion.num_dispersion_terms,
                                                  config->dispersion.betas,
                                                  state->current_step_size,
-                                                 state->working_vectors.current_dispersion_factor_vec,
+                                                 state->working_vectors.dispersion_factor_vec,
                                                  state->frequency_grid_vec,
                                                  state->working_vectors.omega_power_vec,
                                                  state->working_vectors.field_working_vec);
@@ -314,7 +314,7 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_2_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_3_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_4_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.current_dispersion_factor_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_factor_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.previous_field_vec);
 
         if (state->record_ring_vec != NULL) {
