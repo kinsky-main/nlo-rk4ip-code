@@ -26,12 +26,14 @@ static int checked_mul_size_t(size_t a, size_t b, size_t* out)
     return 0;
 }
 
-NLOLIB_API int nlo_init_simulation_state(const sim_config* config,
-                                         size_t num_time_samples,
-                                         size_t num_recorded_samples,
-                                         const nlo_execution_options* exec_options,
-                                         nlo_allocation_info* allocation_info,
-                                         simulation_state** out_state)
+NLOLIB_API int nlo_init_simulation_state(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t num_recorded_samples,
+    const nlo_execution_options* exec_options,
+    nlo_allocation_info* allocation_info,
+    simulation_state** out_state
+)
 {
     if (out_state == NULL) {
         return -1;

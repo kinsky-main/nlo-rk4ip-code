@@ -46,9 +46,11 @@ nlo_vec_status nlo_vec_validate_backend(const nlo_vector_backend* backend)
     return NLO_VEC_STATUS_OK;
 }
 
-nlo_vec_status nlo_vec_validate_buffer(const nlo_vector_backend* backend,
-                                       const nlo_vec_buffer* buffer,
-                                       nlo_vec_kind kind)
+nlo_vec_status nlo_vec_validate_buffer(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* buffer,
+    nlo_vec_kind kind
+)
 {
     if (backend == NULL || buffer == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -59,10 +61,12 @@ nlo_vec_status nlo_vec_validate_buffer(const nlo_vector_backend* backend,
     return NLO_VEC_STATUS_OK;
 }
 
-nlo_vec_status nlo_vec_validate_pair(const nlo_vector_backend* backend,
-                                     const nlo_vec_buffer* a,
-                                     const nlo_vec_buffer* b,
-                                     nlo_vec_kind kind)
+nlo_vec_status nlo_vec_validate_pair(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    nlo_vec_kind kind
+)
 {
     nlo_vec_status status = nlo_vec_validate_buffer(backend, a, kind);
     if (status != NLO_VEC_STATUS_OK) {
@@ -180,8 +184,10 @@ nlo_vec_status nlo_vec_end_simulation(nlo_vector_backend* backend)
     return NLO_VEC_STATUS_OK;
 }
 
-nlo_vec_status nlo_vec_query_memory_info(const nlo_vector_backend* backend,
-                                         nlo_vec_backend_memory_info* out_info)
+nlo_vec_status nlo_vec_query_memory_info(
+    const nlo_vector_backend* backend,
+    nlo_vec_backend_memory_info* out_info
+)
 {
     if (backend == NULL || out_info == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -223,10 +229,12 @@ nlo_vec_status nlo_vec_query_memory_info(const nlo_vector_backend* backend,
 
 // MARK: Buffer Lifecycle
 
-nlo_vec_status nlo_vec_create(nlo_vector_backend* backend,
-                              nlo_vec_kind kind,
-                              size_t length,
-                              nlo_vec_buffer** out_buffer)
+nlo_vec_status nlo_vec_create(
+    nlo_vector_backend* backend,
+    nlo_vec_kind kind,
+    size_t length,
+    nlo_vec_buffer** out_buffer
+)
 {
     if (backend == NULL || out_buffer == NULL || length == 0u) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -297,10 +305,12 @@ void nlo_vec_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer)
 
 // MARK: Host Transfers
 
-nlo_vec_status nlo_vec_upload(nlo_vector_backend* backend,
-                              nlo_vec_buffer* buffer,
-                              const void* data,
-                              size_t bytes)
+nlo_vec_status nlo_vec_upload(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* buffer,
+    const void* data,
+    size_t bytes
+)
 {
     if (backend == NULL || buffer == NULL || data == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -325,10 +335,12 @@ nlo_vec_status nlo_vec_upload(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_download(nlo_vector_backend* backend,
-                                const nlo_vec_buffer* buffer,
-                                void* data,
-                                size_t bytes)
+nlo_vec_status nlo_vec_download(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* buffer,
+    void* data,
+    size_t bytes
+)
 {
     if (backend == NULL || buffer == NULL || data == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -353,9 +365,11 @@ nlo_vec_status nlo_vec_download(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_get_host_ptr(nlo_vector_backend* backend,
-                                    nlo_vec_buffer* buffer,
-                                    void** out_ptr)
+nlo_vec_status nlo_vec_get_host_ptr(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* buffer,
+    void** out_ptr
+)
 {
     if (backend == NULL || buffer == NULL || out_ptr == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -371,9 +385,11 @@ nlo_vec_status nlo_vec_get_host_ptr(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_OK;
 }
 
-nlo_vec_status nlo_vec_get_const_host_ptr(const nlo_vector_backend* backend,
-                                          const nlo_vec_buffer* buffer,
-                                          const void** out_ptr)
+nlo_vec_status nlo_vec_get_const_host_ptr(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* buffer,
+    const void** out_ptr
+)
 {
     if (backend == NULL || buffer == NULL || out_ptr == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -451,10 +467,12 @@ nlo_vec_status nlo_vec_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buf
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_real_pow_int(nlo_vector_backend* backend,
-                                    const nlo_vec_buffer* base,
-                                    nlo_vec_buffer* out,
-                                    unsigned int power)
+nlo_vec_status nlo_vec_real_pow_int(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* base,
+    nlo_vec_buffer* out,
+    unsigned int power
+)
 {
     nlo_vec_status status = nlo_vec_validate_pair(backend, base, out, NLO_VEC_KIND_REAL64);
     if (status != NLO_VEC_STATUS_OK) {
@@ -509,9 +527,11 @@ nlo_vec_status nlo_vec_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer*
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_complex_magnitude_squared(nlo_vector_backend* backend,
-                                                 const nlo_vec_buffer* src,
-                                                 nlo_vec_buffer* dst)
+nlo_vec_status nlo_vec_complex_magnitude_squared(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* src,
+    nlo_vec_buffer* dst
+)
 {
     nlo_vec_status status = nlo_vec_validate_pair(backend, src, dst, NLO_VEC_KIND_COMPLEX64);
     if (status != NLO_VEC_STATUS_OK) {
@@ -531,10 +551,12 @@ nlo_vec_status nlo_vec_complex_magnitude_squared(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_complex_axpy_real(nlo_vector_backend* backend,
-                                         nlo_vec_buffer* dst,
-                                         const nlo_vec_buffer* src,
-                                         nlo_complex alpha)
+nlo_vec_status nlo_vec_complex_axpy_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src,
+    nlo_complex alpha
+)
 {
     if (backend == NULL || dst == NULL || src == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -555,9 +577,11 @@ nlo_vec_status nlo_vec_complex_axpy_real(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_complex_scalar_mul_inplace(nlo_vector_backend* backend,
-                                                  nlo_vec_buffer* dst,
-                                                  nlo_complex alpha)
+nlo_vec_status nlo_vec_complex_scalar_mul_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    nlo_complex alpha
+)
 {
     nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
     if (status != NLO_VEC_STATUS_OK) {
@@ -577,9 +601,11 @@ nlo_vec_status nlo_vec_complex_scalar_mul_inplace(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_complex_mul_inplace(nlo_vector_backend* backend,
-                                           nlo_vec_buffer* dst,
-                                           const nlo_vec_buffer* src)
+nlo_vec_status nlo_vec_complex_mul_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src
+)
 {
     nlo_vec_status status = nlo_vec_validate_pair(backend, dst, src, NLO_VEC_KIND_COMPLEX64);
     if (status != NLO_VEC_STATUS_OK) {
@@ -599,10 +625,12 @@ nlo_vec_status nlo_vec_complex_mul_inplace(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_complex_pow(nlo_vector_backend* backend,
-                                   const nlo_vec_buffer* base,
-                                   nlo_vec_buffer* out,
-                                   unsigned int exponent)
+nlo_vec_status nlo_vec_complex_pow(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* base,
+    nlo_vec_buffer* out,
+    unsigned int exponent
+)
 {
     nlo_vec_status status = nlo_vec_validate_pair(backend, base, out, NLO_VEC_KIND_COMPLEX64);
     if (status != NLO_VEC_STATUS_OK) {
@@ -617,9 +645,11 @@ nlo_vec_status nlo_vec_complex_pow(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_complex_pow_inplace(nlo_vector_backend* backend,
-                                           nlo_vec_buffer* dst,
-                                           unsigned int exponent)
+nlo_vec_status nlo_vec_complex_pow_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    unsigned int exponent
+)
 {
     nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
     if (status != NLO_VEC_STATUS_OK) {
@@ -634,9 +664,11 @@ nlo_vec_status nlo_vec_complex_pow_inplace(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_complex_add_inplace(nlo_vector_backend* backend,
-                                           nlo_vec_buffer* dst,
-                                           const nlo_vec_buffer* src)
+nlo_vec_status nlo_vec_complex_add_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src
+)
 {
     nlo_vec_status status = nlo_vec_validate_pair(backend, dst, src, NLO_VEC_KIND_COMPLEX64);
     if (status != NLO_VEC_STATUS_OK) {
@@ -677,11 +709,13 @@ nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_vec_complex_relative_error(nlo_vector_backend* backend,
-                                              const nlo_vec_buffer* current,
-                                              const nlo_vec_buffer* previous,
-                                              double epsilon,
-                                              double* out_error)
+nlo_vec_status nlo_vec_complex_relative_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* current,
+    const nlo_vec_buffer* previous,
+    double epsilon,
+    double* out_error
+)
 {
     if (backend == NULL || current == NULL || previous == NULL || out_error == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;

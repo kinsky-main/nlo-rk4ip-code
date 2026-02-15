@@ -20,8 +20,10 @@ static VkDeviceSize nlo_vk_min_size(VkDeviceSize a, VkDeviceSize b)
     return (a < b) ? a : b;
 }
 
-static bool nlo_vk_supports_required_features(VkPhysicalDevice physical_device,
-                                              VkPhysicalDeviceLimits* out_limits)
+static bool nlo_vk_supports_required_features(
+    VkPhysicalDevice physical_device,
+    VkPhysicalDeviceLimits* out_limits
+)
 {
     if (physical_device == VK_NULL_HANDLE) {
         return false;
@@ -42,9 +44,11 @@ static bool nlo_vk_supports_required_features(VkPhysicalDevice physical_device,
     return true;
 }
 
-static uint32_t nlo_vk_find_memory_type(nlo_vector_backend* backend,
-                                        uint32_t type_filter,
-                                        VkMemoryPropertyFlags properties)
+static uint32_t nlo_vk_find_memory_type(
+    nlo_vector_backend* backend,
+    uint32_t type_filter,
+    VkMemoryPropertyFlags properties
+)
 {
     VkPhysicalDeviceMemoryProperties mem_props;
     vkGetPhysicalDeviceMemoryProperties(backend->vk.physical_device, &mem_props);
@@ -59,12 +63,14 @@ static uint32_t nlo_vk_find_memory_type(nlo_vector_backend* backend,
     return UINT32_MAX;
 }
 
-static nlo_vec_status nlo_vk_create_buffer_raw(nlo_vector_backend* backend,
-                                               VkDeviceSize size,
-                                               VkBufferUsageFlags usage,
-                                               VkMemoryPropertyFlags properties,
-                                               VkBuffer* out_buffer,
-                                               VkDeviceMemory* out_memory)
+static nlo_vec_status nlo_vk_create_buffer_raw(
+    nlo_vector_backend* backend,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags properties,
+    VkBuffer* out_buffer,
+    VkDeviceMemory* out_memory
+)
 {
     if (backend == NULL || out_buffer == NULL || out_memory == NULL || size == 0u) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -177,9 +183,11 @@ static nlo_vec_status nlo_vk_read_binary_file(const char* path, uint32_t** out_w
     return NLO_VEC_STATUS_OK;
 }
 
-static nlo_vec_status nlo_vk_create_compute_pipeline(nlo_vector_backend* backend,
-                                                      const char* shader_path,
-                                                      VkPipeline* out_pipeline)
+static nlo_vec_status nlo_vk_create_compute_pipeline(
+    nlo_vector_backend* backend,
+    const char* shader_path,
+    VkPipeline* out_pipeline
+)
 {
     uint32_t* shader_words = NULL;
     size_t shader_size = 0u;
@@ -571,14 +579,16 @@ static nlo_vec_status nlo_vk_submit_commands(nlo_vector_backend* backend)
     return NLO_VEC_STATUS_OK;
 }
 
-static void nlo_vk_cmd_buffer_barrier(VkCommandBuffer cmd,
-                                      VkBuffer buffer,
-                                      VkDeviceSize offset,
-                                      VkDeviceSize size,
-                                      VkPipelineStageFlags src_stage,
-                                      VkAccessFlags src_access,
-                                      VkPipelineStageFlags dst_stage,
-                                      VkAccessFlags dst_access)
+static void nlo_vk_cmd_buffer_barrier(
+    VkCommandBuffer cmd,
+    VkBuffer buffer,
+    VkDeviceSize offset,
+    VkDeviceSize size,
+    VkPipelineStageFlags src_stage,
+    VkAccessFlags src_access,
+    VkPipelineStageFlags dst_stage,
+    VkAccessFlags dst_access
+)
 {
     VkBufferMemoryBarrier barrier = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
@@ -652,16 +662,18 @@ static size_t nlo_vk_max_chunk_elements(const nlo_vector_backend* backend, size_
     return (size_t)max_elems;
 }
 
-static void nlo_vk_update_descriptor_set(nlo_vector_backend* backend,
-                                         VkBuffer dst_buffer,
-                                         VkDeviceSize dst_offset,
-                                         VkDeviceSize dst_size,
-                                         VkBuffer src_buffer,
-                                         VkDeviceSize src_offset,
-                                         VkDeviceSize src_size,
-                                         VkBuffer src2_buffer,
-                                         VkDeviceSize src2_offset,
-                                         VkDeviceSize src2_size)
+static void nlo_vk_update_descriptor_set(
+    nlo_vector_backend* backend,
+    VkBuffer dst_buffer,
+    VkDeviceSize dst_offset,
+    VkDeviceSize dst_size,
+    VkBuffer src_buffer,
+    VkDeviceSize src_offset,
+    VkDeviceSize src_size,
+    VkBuffer src2_buffer,
+    VkDeviceSize src2_offset,
+    VkDeviceSize src2_size
+)
 {
     VkDescriptorBufferInfo dst_info = {
         .buffer = dst_buffer,
@@ -703,14 +715,16 @@ static void nlo_vk_update_descriptor_set(nlo_vector_backend* backend,
     vkUpdateDescriptorSets(backend->vk.device, 3u, writes, 0u, NULL);
 }
 
-static nlo_vec_status nlo_vk_dispatch_kernel(nlo_vector_backend* backend,
-                                             nlo_vk_kernel_id kernel_id,
-                                             nlo_vec_buffer* dst,
-                                             const nlo_vec_buffer* src,
-                                             size_t elem_size,
-                                             size_t length,
-                                             double scalar0,
-                                             double scalar1)
+static nlo_vec_status nlo_vk_dispatch_kernel(
+    nlo_vector_backend* backend,
+    nlo_vk_kernel_id kernel_id,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src,
+    size_t elem_size,
+    size_t length,
+    double scalar0,
+    double scalar1
+)
 {
     const size_t max_chunk_elems = nlo_vk_max_chunk_elements(backend, elem_size);
     if (max_chunk_elems == 0u) {
@@ -800,11 +814,13 @@ static uint32_t nlo_vk_dispatch_groups_for_count(size_t count)
     return (uint32_t)((count + (size_t)NLO_VK_LOCAL_SIZE_X - 1u) / (size_t)NLO_VK_LOCAL_SIZE_X);
 }
 
-static nlo_vec_status nlo_vk_dispatch_complex_relative_error(nlo_vector_backend* backend,
-                                                             const nlo_vec_buffer* current,
-                                                             const nlo_vec_buffer* previous,
-                                                             double epsilon,
-                                                             double* out_error)
+static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* current,
+    const nlo_vec_buffer* previous,
+    double epsilon,
+    double* out_error
+)
 {
     if (backend == NULL || current == NULL || previous == NULL || out_error == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -951,10 +967,12 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(nlo_vector_backend*
     return NLO_VEC_STATUS_OK;
 }
 
-static nlo_vec_status nlo_vk_copy_buffer_chunked(nlo_vector_backend* backend,
-                                                 VkBuffer src_buffer,
-                                                 VkBuffer dst_buffer,
-                                                 size_t bytes)
+static nlo_vec_status nlo_vk_copy_buffer_chunked(
+    nlo_vector_backend* backend,
+    VkBuffer src_buffer,
+    VkBuffer dst_buffer,
+    size_t bytes
+)
 {
     VkDeviceSize remaining = (VkDeviceSize)bytes;
     VkDeviceSize offset = 0u;
@@ -1082,10 +1100,12 @@ void nlo_vk_buffer_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer)
     nlo_vk_destroy_buffer_raw(backend, &buffer->vk_buffer, &buffer->vk_memory);
 }
 
-nlo_vec_status nlo_vk_upload(nlo_vector_backend* backend,
-                             nlo_vec_buffer* buffer,
-                             const void* data,
-                             size_t bytes)
+nlo_vec_status nlo_vk_upload(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* buffer,
+    const void* data,
+    size_t bytes
+)
 {
     nlo_vec_status status = nlo_vk_ensure_staging_capacity(backend, (VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES);
     if (status != NLO_VEC_STATUS_OK) {
@@ -1125,10 +1145,12 @@ nlo_vec_status nlo_vk_upload(nlo_vector_backend* backend,
     return NLO_VEC_STATUS_OK;
 }
 
-nlo_vec_status nlo_vk_download(nlo_vector_backend* backend,
-                               const nlo_vec_buffer* buffer,
-                               void* data,
-                               size_t bytes)
+nlo_vec_status nlo_vk_download(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* buffer,
+    void* data,
+    size_t bytes
+)
 {
     nlo_vec_status status = nlo_vk_ensure_staging_capacity(backend, (VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES);
     if (status != NLO_VEC_STATUS_OK) {
@@ -1214,9 +1236,11 @@ nlo_vec_status nlo_vk_op_complex_copy(nlo_vector_backend* backend, nlo_vec_buffe
     return nlo_vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
 }
 
-nlo_vec_status nlo_vk_op_complex_magnitude_squared(nlo_vector_backend* backend,
-                                                   const nlo_vec_buffer* src,
-                                                   nlo_vec_buffer* dst)
+nlo_vec_status nlo_vk_op_complex_magnitude_squared(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* src,
+    nlo_vec_buffer* dst
+)
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_MAGNITUDE_SQUARED,
@@ -1228,9 +1252,11 @@ nlo_vec_status nlo_vk_op_complex_magnitude_squared(nlo_vector_backend* backend,
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(nlo_vector_backend* backend,
-                                                    nlo_vec_buffer* dst,
-                                                    nlo_complex alpha)
+nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    nlo_complex alpha
+)
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_SCALAR_MUL_INPLACE,
@@ -1242,9 +1268,11 @@ nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(nlo_vector_backend* backend,
                                   NLO_IM(alpha));
 }
 
-nlo_vec_status nlo_vk_op_complex_mul_inplace(nlo_vector_backend* backend,
-                                             nlo_vec_buffer* dst,
-                                             const nlo_vec_buffer* src)
+nlo_vec_status nlo_vk_op_complex_mul_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src
+)
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_MUL_INPLACE,
@@ -1256,9 +1284,11 @@ nlo_vec_status nlo_vk_op_complex_mul_inplace(nlo_vector_backend* backend,
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_add_inplace(nlo_vector_backend* backend,
-                                             nlo_vec_buffer* dst,
-                                             const nlo_vec_buffer* src)
+nlo_vec_status nlo_vk_op_complex_add_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src
+)
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_ADD_INPLACE,
@@ -1282,11 +1312,13 @@ nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_ve
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_relative_error(nlo_vector_backend* backend,
-                                                const nlo_vec_buffer* current,
-                                                const nlo_vec_buffer* previous,
-                                                double epsilon,
-                                                double* out_error)
+nlo_vec_status nlo_vk_op_complex_relative_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* current,
+    const nlo_vec_buffer* previous,
+    double epsilon,
+    double* out_error
+)
 {
     if (epsilon <= 0.0) {
         epsilon = 1e-12;

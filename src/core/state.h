@@ -113,10 +113,12 @@ typedef struct {
 
 nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type);
 
-simulation_state* create_simulation_state(const sim_config* config,
-                                          size_t num_time_samples,
-                                          size_t num_recorded_samples,
-                                          const nlo_execution_options* exec_options);
+simulation_state* create_simulation_state(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t num_recorded_samples,
+    const nlo_execution_options* exec_options
+);
 
 void free_simulation_state(simulation_state* state);
 

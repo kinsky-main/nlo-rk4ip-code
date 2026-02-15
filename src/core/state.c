@@ -151,10 +151,12 @@ void free_sim_config(sim_config* config)
     free(config);
 }
 
-simulation_state* create_simulation_state(const sim_config* config,
-                                          size_t num_time_samples,
-                                          size_t num_recorded_samples,
-                                          const nlo_execution_options* exec_options)
+simulation_state* create_simulation_state(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t num_recorded_samples,
+    const nlo_execution_options* exec_options
+)
 {
     if (config == NULL || exec_options == NULL ||
         num_time_samples == 0 || num_time_samples > NT_MAX ||

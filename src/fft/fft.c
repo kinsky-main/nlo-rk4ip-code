@@ -124,9 +124,11 @@ static void nlo_fft_vk_cmd_compute_barrier(VkCommandBuffer cmd, VkBuffer buffer,
                          NULL);
 }
 
-static nlo_vec_status nlo_fft_vk_execute_inplace(nlo_fft_plan* plan,
-                                                  nlo_vec_buffer* target,
-                                                  int inverse)
+static nlo_vec_status nlo_fft_vk_execute_inplace(
+    nlo_fft_plan* plan,
+    nlo_vec_buffer* target,
+    int inverse
+)
 {
     if (plan == NULL || target == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -156,9 +158,11 @@ static nlo_vec_status nlo_fft_vk_execute_inplace(nlo_fft_plan* plan,
 }
 #endif
 
-nlo_vec_status nlo_fft_plan_create(nlo_vector_backend* backend,
-                                   size_t signal_size,
-                                   nlo_fft_plan** out_plan)
+nlo_vec_status nlo_fft_plan_create(
+    nlo_vector_backend* backend,
+    size_t signal_size,
+    nlo_fft_plan** out_plan
+)
 {
     if (backend == NULL || out_plan == NULL || signal_size == 0u) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -298,9 +302,11 @@ void nlo_fft_plan_destroy(nlo_fft_plan* plan)
     free(plan);
 }
 
-nlo_vec_status nlo_fft_forward_vec(nlo_fft_plan* plan,
-                                   const nlo_vec_buffer* input,
-                                   nlo_vec_buffer* output)
+nlo_vec_status nlo_fft_forward_vec(
+    nlo_fft_plan* plan,
+    const nlo_vec_buffer* input,
+    nlo_vec_buffer* output
+)
 {
     if (plan == NULL || input == NULL || output == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -347,9 +353,11 @@ nlo_vec_status nlo_fft_forward_vec(nlo_fft_plan* plan,
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
-nlo_vec_status nlo_fft_inverse_vec(nlo_fft_plan* plan,
-                                   const nlo_vec_buffer* input,
-                                   nlo_vec_buffer* output)
+nlo_vec_status nlo_fft_inverse_vec(
+    nlo_fft_plan* plan,
+    const nlo_vec_buffer* input,
+    nlo_vec_buffer* output
+)
 {
     if (plan == NULL || input == NULL || output == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;

@@ -50,7 +50,9 @@ typedef enum {
     NLOLIB_STATUS_NOT_IMPLEMENTED = 3
 } nlolib_status;
 
-nlolib_status nlolib_propagate(const sim_config* config,
-                               size_t num_time_samples,
-                               const nlo_complex* input_field,
-                               nlo_complex* output_field);
+nlolib_status nlolib_propagate(
+    const sim_config* config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    nlo_complex* output_field
+);
