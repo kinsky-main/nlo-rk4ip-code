@@ -21,14 +21,16 @@ static inline nlo_complex nlo_i_factor(size_t power)
     }
 }
 
-nlo_vec_status nlo_calculate_dispersion_factor_vec(nlo_vector_backend* backend,
-                                                   size_t num_dispersion_terms,
-                                                   const double* betas,
-                                                   double step_size,
-                                                   nlo_vec_buffer* dispersion_factor,
-                                                   const nlo_vec_buffer* frequency_grid,
-                                                   nlo_vec_buffer* omega_power,
-                                                   nlo_vec_buffer* term_buffer)
+nlo_vec_status nlo_calculate_dispersion_factor_vec(
+    nlo_vector_backend* backend,
+    size_t num_dispersion_terms,
+    const double* betas,
+    double step_size,
+    nlo_vec_buffer* dispersion_factor,
+    const nlo_vec_buffer* frequency_grid,
+    nlo_vec_buffer* omega_power,
+    nlo_vec_buffer* term_buffer
+)
 {
     (void)step_size;
 
@@ -79,10 +81,12 @@ nlo_vec_status nlo_calculate_dispersion_factor_vec(nlo_vector_backend* backend,
     return nlo_vec_complex_exp_inplace(backend, dispersion_factor);
 }
 
-nlo_vec_status nlo_apply_dispersion_operator_vec(nlo_vector_backend* backend,
-                                                 const nlo_vec_buffer* dispersion_factor,
-                                                 nlo_vec_buffer* freq_domain_envelope,
-                                                 double exp_step_size)
+nlo_vec_status nlo_apply_dispersion_operator_vec(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* dispersion_factor,
+    nlo_vec_buffer* freq_domain_envelope,
+    double exp_step_size
+)
 {
     if (backend == NULL || dispersion_factor == NULL || freq_domain_envelope == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -98,11 +102,13 @@ nlo_vec_status nlo_apply_dispersion_operator_vec(nlo_vector_backend* backend,
                                               nlo_make(exp_step_size, 0.0));
 }
 
-nlo_vec_status nlo_apply_nonlinear_operator_vec(nlo_vector_backend* backend,
-                                                double gamma,
-                                                const nlo_vec_buffer* field,
-                                                nlo_vec_buffer* magnitude_squared,
-                                                nlo_vec_buffer* out_field)
+nlo_vec_status nlo_apply_nonlinear_operator_vec(
+    nlo_vector_backend* backend,
+    double gamma,
+    const nlo_vec_buffer* field,
+    nlo_vec_buffer* magnitude_squared,
+    nlo_vec_buffer* out_field
+)
 {
     if (backend == NULL || field == NULL || magnitude_squared == NULL || out_field == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;

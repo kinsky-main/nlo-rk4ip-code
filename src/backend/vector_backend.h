@@ -110,18 +110,22 @@ nlo_vec_status nlo_vec_end_simulation(nlo_vector_backend* backend);
 /**
  * @brief Query backend memory and dispatch limits used for chunk planning.
  */
-nlo_vec_status nlo_vec_query_memory_info(const nlo_vector_backend* backend,
-                                         nlo_vec_backend_memory_info* out_info);
+nlo_vec_status nlo_vec_query_memory_info(
+    const nlo_vector_backend* backend,
+    nlo_vec_backend_memory_info* out_info
+);
 
 // MARK: Buffer Lifecycle
 
 /**
  * @brief Create a vector buffer of the requested kind and length.
  */
-nlo_vec_status nlo_vec_create(nlo_vector_backend* backend,
-                              nlo_vec_kind kind,
-                              size_t length,
-                              nlo_vec_buffer** out_buffer);
+nlo_vec_status nlo_vec_create(
+    nlo_vector_backend* backend,
+    nlo_vec_kind kind,
+    size_t length,
+    nlo_vec_buffer** out_buffer
+);
 
 /**
  * @brief Destroy a previously created vector buffer.
@@ -133,34 +137,42 @@ void nlo_vec_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer);
 /**
  * @brief Upload host data into a backend buffer.
  */
-nlo_vec_status nlo_vec_upload(nlo_vector_backend* backend,
-                              nlo_vec_buffer* buffer,
-                              const void* data,
-                              size_t bytes);
+nlo_vec_status nlo_vec_upload(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* buffer,
+    const void* data,
+    size_t bytes
+);
 
 /**
  * @brief Download backend buffer data into host memory.
  */
-nlo_vec_status nlo_vec_download(nlo_vector_backend* backend,
-                                const nlo_vec_buffer* buffer,
-                                void* data,
-                                size_t bytes);
+nlo_vec_status nlo_vec_download(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* buffer,
+    void* data,
+    size_t bytes
+);
 
 /**
  * @brief Get a direct host pointer for CPU buffers.
  *        Returns NLO_VEC_STATUS_UNSUPPORTED on non-CPU backends.
  */
-nlo_vec_status nlo_vec_get_host_ptr(nlo_vector_backend* backend,
-                                    nlo_vec_buffer* buffer,
-                                    void** out_ptr);
+nlo_vec_status nlo_vec_get_host_ptr(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* buffer,
+    void** out_ptr
+);
 
 /**
  * @brief Get a direct const host pointer for CPU buffers.
  *        Returns NLO_VEC_STATUS_UNSUPPORTED on non-CPU backends.
  */
-nlo_vec_status nlo_vec_get_const_host_ptr(const nlo_vector_backend* backend,
-                                          const nlo_vec_buffer* buffer,
-                                          const void** out_ptr);
+nlo_vec_status nlo_vec_get_const_host_ptr(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* buffer,
+    const void** out_ptr
+);
 
 // MARK: Vector Operations
 
@@ -184,11 +196,13 @@ nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_
  * @brief Compute relative L-infinity complex error:
  *        sqrt(max(|current-prev|^2) / max(max(|prev|^2), epsilon)).
  */
-nlo_vec_status nlo_vec_complex_relative_error(nlo_vector_backend* backend,
-                                              const nlo_vec_buffer* current,
-                                              const nlo_vec_buffer* previous,
-                                              double epsilon,
-                                              double* out_error);
+nlo_vec_status nlo_vec_complex_relative_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* current,
+    const nlo_vec_buffer* previous,
+    double epsilon,
+    double* out_error
+);
 
 #ifdef __cplusplus
 }
