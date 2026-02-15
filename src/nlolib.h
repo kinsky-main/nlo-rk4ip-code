@@ -55,10 +55,12 @@ typedef enum {
  * @param output_field Pointer to output field buffer (length: num_time_samples).
  * @return nlolib_status status code.
  */
-NLOLIB_API nlolib_status nlolib_propagate(const sim_config* config,
-                                         size_t num_time_samples,
-                                         const nlo_complex* input_field,
-                                         nlo_complex* output_field);
+NLOLIB_API nlolib_status nlolib_propagate(
+    const sim_config* config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    nlo_complex* output_field
+);
 
 #ifdef __cplusplus
 }

@@ -99,12 +99,16 @@ struct nlo_vec_buffer {
 
 size_t nlo_vec_element_size(nlo_vec_kind kind);
 nlo_vec_status nlo_vec_validate_backend(const nlo_vector_backend* backend);
-nlo_vec_status nlo_vec_validate_buffer(const nlo_vector_backend* backend,
-                                      const nlo_vec_buffer* buffer,
-                                      nlo_vec_kind kind);
-nlo_vec_status nlo_vec_validate_pair(const nlo_vector_backend* backend,
-                                    const nlo_vec_buffer* a,
-                                    const nlo_vec_buffer* b,
-                                    nlo_vec_kind kind);
+nlo_vec_status nlo_vec_validate_buffer(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* buffer,
+    nlo_vec_kind kind
+);
+nlo_vec_status nlo_vec_validate_pair(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    nlo_vec_kind kind
+);
 
 
