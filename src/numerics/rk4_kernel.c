@@ -157,6 +157,10 @@ void solve_rk4(simulation_state *state)
     {
         return;
     }
+    if (!state->dispersion_valid)
+    {
+        return;
+    }
 
     const double z_end = state->config->propagation.propagation_distance;
     if (z_end <= 0.0)
@@ -230,26 +234,6 @@ void solve_rk4(simulation_state *state)
         state->current_step_size = step;
         state->current_half_step_exp = exp(0.5 * step);
 
-        if (!state->dispersion_valid || fabs(state->last_dispersion_step_size - step) > 0.0)
-        {
-            nlo_vec_status status = nlo_calculate_dispersion_factor_vec(
-                state->backend,
-                state->config->dispersion.num_dispersion_terms,
-                state->config->dispersion.betas,
-                step,
-                state->working_vectors.current_dispersion_factor_vec,
-                state->frequency_grid_vec,
-                state->working_vectors.omega_power_vec,
-                state->working_vectors.field_working_vec);
-            if (status != NLO_VEC_STATUS_OK)
-            {
-                break;
-            }
-
-            state->last_dispersion_step_size = step;
-            state->dispersion_valid = 1;
-        }
-
         if (nlo_vec_complex_copy(state->backend,
                                  state->working_vectors.previous_field_vec,
                                  state->current_field_vec) != NLO_VEC_STATUS_OK)
@@ -312,6 +296,10 @@ void step_rk4(simulation_state *state)
     {
         return;
     }
+    if (!state->dispersion_valid)
+    {
+        return;
+    }
 
     if (nlo_vec_begin_simulation(state->backend) != NLO_VEC_STATUS_OK)
     {
@@ -319,22 +307,6 @@ void step_rk4(simulation_state *state)
     }
 
     state->current_half_step_exp = exp(0.5 * state->current_step_size);
-    if (!state->dispersion_valid || fabs(state->last_dispersion_step_size - state->current_step_size) > 0.0)
-    {
-        if (nlo_calculate_dispersion_factor_vec(state->backend,
-                                                state->config->dispersion.num_dispersion_terms,
-                                                state->config->dispersion.betas,
-                                                state->current_step_size,
-                                                state->working_vectors.current_dispersion_factor_vec,
-                                                state->frequency_grid_vec,
-                                                state->working_vectors.omega_power_vec,
-                                                state->working_vectors.field_working_vec) == NLO_VEC_STATUS_OK)
-        {
-            state->last_dispersion_step_size = state->current_step_size;
-            state->dispersion_valid = 1;
-        }
-    }
-
     if (nlo_rk4_step_device(state) == NLO_VEC_STATUS_OK)
     {
         state->current_z += state->current_step_size;

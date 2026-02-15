@@ -5,6 +5,7 @@
 
 #include "core/state.h"
 #include "fft/fft.h"
+#include "physics/operators.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -246,6 +247,22 @@ simulation_state* create_simulation_state(const sim_config* config,
         free_simulation_state(state);
         return NULL;
     }
+
+    status = nlo_calculate_dispersion_factor_vec(state->backend,
+                                                 config->dispersion.num_dispersion_terms,
+                                                 config->dispersion.betas,
+                                                 state->current_step_size,
+                                                 state->working_vectors.current_dispersion_factor_vec,
+                                                 state->frequency_grid_vec,
+                                                 state->working_vectors.omega_power_vec,
+                                                 state->working_vectors.field_working_vec);
+    if (status != NLO_VEC_STATUS_OK) {
+        free_simulation_state(state);
+        return NULL;
+    }
+
+    state->last_dispersion_step_size = state->current_step_size;
+    state->dispersion_valid = 1;
 
     if (nlo_fft_plan_create(state->backend, num_time_samples, &state->fft_plan) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
