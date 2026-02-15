@@ -13,7 +13,11 @@
 - Do preserve existing style and conventions
 - Don’t reformat unrelated code
 - Don’t change public APIs without explicit request
-- Don't make per step memory allocations; keep all allocations static 
+- Don't make per step memory allocations; keep all allocations static
+
+## Formatting
+- Put doxygen docstrings in function declarations in header files
+- Follow hanging indent with vertical alignment not column alignment
 
 ## Workflow
 - Read relevant files before editing
