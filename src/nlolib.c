@@ -18,6 +18,21 @@ NLOLIB_API nlolib_status nlolib_propagate(
     nlo_complex* output_field
 )
 {
+    return nlolib_propagate_with_options(config,
+                                         num_time_samples,
+                                         input_field,
+                                         output_field,
+                                         NULL);
+}
+
+NLOLIB_API nlolib_status nlolib_propagate_with_options(
+    const sim_config* config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    nlo_complex* output_field,
+    const nlo_execution_options* exec_options
+)
+{
     if (config == NULL || input_field == NULL || output_field == NULL) {
         return NLOLIB_STATUS_INVALID_ARGUMENT;
     }
@@ -26,12 +41,15 @@ NLOLIB_API nlolib_status nlolib_propagate(
         return NLOLIB_STATUS_INVALID_ARGUMENT;
     }
 
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    nlo_execution_options local_exec_options =
+        (exec_options != NULL)
+            ? *exec_options
+            : nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
     simulation_state* state = NULL;
     if (nlo_init_simulation_state(config,
                                   num_time_samples,
                                   1u,
-                                  &exec_options,
+                                  &local_exec_options,
                                   NULL,
                                   &state) != 0 || state == NULL) {
         return NLOLIB_STATUS_ALLOCATION_FAILED;

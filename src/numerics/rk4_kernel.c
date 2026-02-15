@@ -168,7 +168,7 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state)
                                                    work->k_1_vec,
                                                    state->current_half_step_exp));
 
-    NLO_RK4_add_inplace(backend, work->k_1_vec, work->k_4_vec);
+    NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_1_vec, work->k_4_vec));
 
     NLO_RK4_CALL(nlo_vec_complex_copy(backend, state->current_field_vec, work->k_1_vec));
 

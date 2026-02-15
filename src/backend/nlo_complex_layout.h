@@ -22,15 +22,8 @@
 NLO_STATIC_ASSERT(sizeof(nlo_complex) == (2u * sizeof(double)),
                   "nlo_complex must store exactly two doubles");
 
-#if defined(NLO_FFT_BACKEND_CUFFT)
-NLO_STATIC_ASSERT(offsetof(nlo_complex, x) == 0u,
-                  "nlo_complex real component offset mismatch");
-NLO_STATIC_ASSERT(offsetof(nlo_complex, y) == sizeof(double),
-                  "nlo_complex imag component offset mismatch");
-#else
 NLO_STATIC_ASSERT(offsetof(nlo_complex, re) == 0u,
                   "nlo_complex real component offset mismatch");
 NLO_STATIC_ASSERT(offsetof(nlo_complex, im) == sizeof(double),
                   "nlo_complex imag component offset mismatch");
-#endif
 

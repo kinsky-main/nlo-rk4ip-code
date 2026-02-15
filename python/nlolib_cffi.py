@@ -13,29 +13,8 @@ from cffi import FFI
 NT_MAX = 1 << 20
 
 
-def _complex_rewrite(kind: str, cdef_text: str) -> str:
-    if kind == "struct":
-        return cdef_text
-    if kind == "fftw":
-        return cdef_text.replace(
-            "typedef struct { double re; double im; } nlo_complex;",
-            "typedef double nlo_complex[2];",
-        )
-    if kind == "cufft":
-        return cdef_text.replace(
-            "typedef struct { double re; double im; } nlo_complex;",
-            "typedef struct { double x; double y; } nlo_complex;",
-        )
-    raise ValueError(
-        "Unknown NLOLIB_COMPLEX_KIND. Use 'struct', 'fftw', or 'cufft'."
-    )
-
-
-_COMPLEX_KIND = os.environ.get("NLOLIB_COMPLEX_KIND", "struct").lower()
-
 _CDEF_PATH = Path(__file__).with_name("nlolib.cdef.h")
 _CDEF_TEXT = _CDEF_PATH.read_text(encoding="utf-8")
-_CDEF_TEXT = _complex_rewrite(_COMPLEX_KIND, _CDEF_TEXT)
 
 ffi = FFI()
 ffi.cdef(_CDEF_TEXT)
@@ -77,8 +56,7 @@ def load(path: str | None = None):
     """
     Load the shared library and return the CFFI lib handle.
 
-    Set NLOLIB_LIBRARY to override discovery, or NLOLIB_COMPLEX_KIND to match
-    the compiled nlo_complex representation: 'struct', 'fftw', or 'cufft'.
+    Set NLOLIB_LIBRARY to override discovery.
     """
     if path is None:
         for candidate in _candidate_library_paths():

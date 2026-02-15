@@ -22,27 +22,9 @@
     typedef char NLO_STATIC_ASSERT_CONCAT(nlo_static_assert_, __LINE__)[(cond) ? 1 : -1]
 #endif
 
-#if defined(NLO_FFT_BACKEND_FFTW)
-
-  #include <fftw3.h>
-  typedef struct { double re, im; } nlo_complex;
-  #define NLO_RE(z) ((z).re)
-  #define NLO_IM(z) ((z).im)
-  NLO_STATIC_ASSERT(sizeof(nlo_complex) == sizeof(fftw_complex),
-                    "nlo_complex must match fftw_complex layout");
-
-#elif defined(NLO_FFT_BACKEND_CUFFT)
-
-  #include <cuComplex.h>
-  typedef cuDoubleComplex nlo_complex;
-  #define NLO_RE(z) ((z).x)
-  #define NLO_IM(z) ((z).y)
-
-#else
-  typedef struct { double re, im; } nlo_complex;
-  #define NLO_RE(z) ((z).re)
-  #define NLO_IM(z) ((z).im)
-#endif
+typedef struct { double re, im; } nlo_complex;
+#define NLO_RE(z) ((z).re)
+#define NLO_IM(z) ((z).im)
 
 // MARK: Function Declarations
 
@@ -50,11 +32,7 @@ static inline nlo_complex nlo_make(double re, double im)
 {
     nlo_complex z;
 
-#if defined(NLO_FFT_BACKEND_CUFFT)
-    z.x = re; z.y = im;
-#else
     z.re = re; z.im = im;
-#endif
     return z;
 }
 

@@ -62,8 +62,9 @@ fi
 
 cmake -S "${repo_root}" -B "${repo_root}/${build_dir}" \
   "${generator[@]}" \
-  -D NLO_FFT_BACKEND_FFTW=ON \
-  -D NLO_FFT_BACKEND_CUFFT=OFF \
+  -D NLO_ENABLE_FFTW=ON \
+  -D NLO_ENABLE_VKFFT=ON \
+  -D NLO_VECTOR_BACKEND_VULKAN=ON \
   "${cmake_args[@]}"
 
 if [[ "${do_build}" -eq 1 ]]; then

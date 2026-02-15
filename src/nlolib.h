@@ -62,6 +62,24 @@ NLOLIB_API nlolib_status nlolib_propagate(
     nlo_complex* output_field
 );
 
+/**
+ * @brief Propagate an input field with explicit execution backend options.
+ *
+ * @param config Simulation configuration parameters.
+ * @param num_time_samples Number of time-domain samples in the input/output arrays.
+ * @param input_field Pointer to input field buffer (length: num_time_samples).
+ * @param output_field Pointer to output field buffer (length: num_time_samples).
+ * @param exec_options Runtime backend selection/options (NULL uses CPU defaults).
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_propagate_with_options(
+    const sim_config* config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    nlo_complex* output_field,
+    const nlo_execution_options* exec_options
+);
+
 #ifdef __cplusplus
 }
 #endif

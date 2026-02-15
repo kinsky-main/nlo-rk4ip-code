@@ -114,6 +114,7 @@ nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type back
     nlo_execution_options options;
     memset(&options, 0, sizeof(options));
     options.backend_type = backend_type;
+    options.fft_backend = NLO_FFT_BACKEND_AUTO;
     options.device_heap_fraction = NLO_DEFAULT_DEVICE_HEAP_FRACTION;
     options.record_ring_target = 0u;
     options.forced_device_budget_bytes = 0u;
@@ -266,7 +267,10 @@ simulation_state* create_simulation_state(
     state->last_dispersion_step_size = state->current_step_size;
     state->dispersion_valid = 1;
 
-    if (nlo_fft_plan_create(state->backend, num_time_samples, &state->fft_plan) != NLO_VEC_STATUS_OK) {
+    if (nlo_fft_plan_create_with_backend(state->backend,
+                                         num_time_samples,
+                                         state->exec_options.fft_backend,
+                                         &state->fft_plan) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
     }

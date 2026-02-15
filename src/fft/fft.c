@@ -10,11 +10,11 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#if defined(NLO_FFT_BACKEND_FFTW)
+#if defined(NLO_ENABLE_FFTW_BACKEND)
 #include <fftw3.h>
 #endif
 
-#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT)
+#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT_BACKEND)
 #ifndef VKFFT_BACKEND
 #define VKFFT_BACKEND 0
 #endif
@@ -25,9 +25,10 @@
 struct nlo_fft_plan {
     nlo_vector_backend* backend;
     nlo_vector_backend_type backend_type;
+    nlo_fft_backend_type fft_backend;
     size_t signal_size;
 
-#if defined(NLO_FFT_BACKEND_FFTW)
+#if defined(NLO_ENABLE_FFTW_BACKEND)
     fftw_plan forward_plan;
     fftw_plan inverse_plan;
     fftw_complex* plan_in;
@@ -35,7 +36,7 @@ struct nlo_fft_plan {
     double inverse_scale;
 #endif
 
-#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT)
+#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT_BACKEND)
     VkFFTApplication vk_app;
     nlo_vec_buffer* vk_placeholder_vec;
     VkBuffer vk_buffer_binding;
@@ -43,7 +44,7 @@ struct nlo_fft_plan {
 #endif
 };
 
-#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT)
+#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT_BACKEND)
 static nlo_vec_status nlo_fft_vk_begin_commands(nlo_fft_plan* plan)
 {
     if (plan == NULL || plan->backend == NULL) {
@@ -158,9 +159,41 @@ static nlo_vec_status nlo_fft_vk_execute_inplace(
 }
 #endif
 
+static nlo_fft_backend_type nlo_fft_resolve_backend(
+    nlo_vector_backend_type backend_type,
+    nlo_fft_backend_type fft_backend
+)
+{
+    if (fft_backend != NLO_FFT_BACKEND_AUTO) {
+        return fft_backend;
+    }
+
+    if (backend_type == NLO_VECTOR_BACKEND_CPU) {
+        return NLO_FFT_BACKEND_FFTW;
+    }
+    if (backend_type == NLO_VECTOR_BACKEND_VULKAN) {
+        return NLO_FFT_BACKEND_VKFFT;
+    }
+
+    return NLO_FFT_BACKEND_AUTO;
+}
+
 nlo_vec_status nlo_fft_plan_create(
     nlo_vector_backend* backend,
     size_t signal_size,
+    nlo_fft_plan** out_plan
+)
+{
+    return nlo_fft_plan_create_with_backend(backend,
+                                            signal_size,
+                                            NLO_FFT_BACKEND_AUTO,
+                                            out_plan);
+}
+
+nlo_vec_status nlo_fft_plan_create_with_backend(
+    nlo_vector_backend* backend,
+    size_t signal_size,
+    nlo_fft_backend_type fft_backend,
     nlo_fft_plan** out_plan
 )
 {
@@ -177,12 +210,17 @@ nlo_vec_status nlo_fft_plan_create(
 
     plan->backend = backend;
     plan->backend_type = nlo_vector_backend_get_type(backend);
+    plan->fft_backend = nlo_fft_resolve_backend(plan->backend_type, fft_backend);
     plan->signal_size = signal_size;
 
-    if (plan->backend_type == NLO_VECTOR_BACKEND_CPU) {
-#if defined(NLO_FFT_BACKEND_FFTW)
+    if (plan->fft_backend == NLO_FFT_BACKEND_FFTW) {
+        if (plan->backend_type != NLO_VECTOR_BACKEND_CPU) {
+            nlo_fft_plan_destroy(plan);
+            return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        }
+#if defined(NLO_ENABLE_FFTW_BACKEND)
         if (signal_size > (size_t)INT_MAX) {
-            free(plan);
+            nlo_fft_plan_destroy(plan);
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
         }
 
@@ -213,13 +251,18 @@ nlo_vec_status nlo_fft_plan_create(
         *out_plan = plan;
         return NLO_VEC_STATUS_OK;
 #else
-        free(plan);
+        nlo_fft_plan_destroy(plan);
         return NLO_VEC_STATUS_UNSUPPORTED;
 #endif
     }
 
-#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT)
-    if (plan->backend_type == NLO_VECTOR_BACKEND_VULKAN) {
+#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT_BACKEND)
+    if (plan->fft_backend == NLO_FFT_BACKEND_VKFFT) {
+        if (plan->backend_type != NLO_VECTOR_BACKEND_VULKAN) {
+            nlo_fft_plan_destroy(plan);
+            return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        }
+
         nlo_vec_status status = nlo_vec_create(backend,
                                                NLO_VEC_KIND_COMPLEX64,
                                                signal_size,
@@ -256,8 +299,6 @@ nlo_vec_status nlo_fft_plan_create(
         *out_plan = plan;
         return NLO_VEC_STATUS_OK;
     }
-#else
-    (void)signal_size;
 #endif
 
     nlo_fft_plan_destroy(plan);
@@ -270,27 +311,29 @@ void nlo_fft_plan_destroy(nlo_fft_plan* plan)
         return;
     }
 
-#if defined(NLO_FFT_BACKEND_FFTW)
-    if (plan->forward_plan != NULL) {
-        fftw_destroy_plan(plan->forward_plan);
-        plan->forward_plan = NULL;
-    }
-    if (plan->inverse_plan != NULL) {
-        fftw_destroy_plan(plan->inverse_plan);
-        plan->inverse_plan = NULL;
-    }
-    if (plan->plan_in != NULL) {
-        fftw_free(plan->plan_in);
-        plan->plan_in = NULL;
-    }
-    if (plan->plan_out != NULL) {
-        fftw_free(plan->plan_out);
-        plan->plan_out = NULL;
+#if defined(NLO_ENABLE_FFTW_BACKEND)
+    if (plan->fft_backend == NLO_FFT_BACKEND_FFTW) {
+        if (plan->forward_plan != NULL) {
+            fftw_destroy_plan(plan->forward_plan);
+            plan->forward_plan = NULL;
+        }
+        if (plan->inverse_plan != NULL) {
+            fftw_destroy_plan(plan->inverse_plan);
+            plan->inverse_plan = NULL;
+        }
+        if (plan->plan_in != NULL) {
+            fftw_free(plan->plan_in);
+            plan->plan_in = NULL;
+        }
+        if (plan->plan_out != NULL) {
+            fftw_free(plan->plan_out);
+            plan->plan_out = NULL;
+        }
     }
 #endif
 
-#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT)
-    if (plan->backend_type == NLO_VECTOR_BACKEND_VULKAN) {
+#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT_BACKEND)
+    if (plan->fft_backend == NLO_FFT_BACKEND_VKFFT) {
         deleteVkFFT(&plan->vk_app);
     }
     if (plan->backend != NULL && plan->vk_placeholder_vec != NULL) {
@@ -317,8 +360,8 @@ nlo_vec_status nlo_fft_forward_vec(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    if (plan->backend_type == NLO_VECTOR_BACKEND_CPU) {
-#if defined(NLO_FFT_BACKEND_FFTW)
+    if (plan->fft_backend == NLO_FFT_BACKEND_FFTW) {
+#if defined(NLO_ENABLE_FFTW_BACKEND)
         const void* in_ptr = NULL;
         void* out_ptr = NULL;
         nlo_vec_status status = nlo_vec_get_const_host_ptr(plan->backend, input, &in_ptr);
@@ -337,8 +380,8 @@ nlo_vec_status nlo_fft_forward_vec(
 #endif
     }
 
-#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT)
-    if (plan->backend_type == NLO_VECTOR_BACKEND_VULKAN) {
+#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT_BACKEND)
+    if (plan->fft_backend == NLO_FFT_BACKEND_VKFFT) {
         nlo_vec_status status = NLO_VEC_STATUS_OK;
         if (input != output) {
             status = nlo_vec_complex_copy(plan->backend, output, input);
@@ -368,8 +411,8 @@ nlo_vec_status nlo_fft_inverse_vec(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    if (plan->backend_type == NLO_VECTOR_BACKEND_CPU) {
-#if defined(NLO_FFT_BACKEND_FFTW)
+    if (plan->fft_backend == NLO_FFT_BACKEND_FFTW) {
+#if defined(NLO_ENABLE_FFTW_BACKEND)
         const void* in_ptr = NULL;
         void* out_ptr = NULL;
         nlo_vec_status status = nlo_vec_get_const_host_ptr(plan->backend, input, &in_ptr);
@@ -394,8 +437,8 @@ nlo_vec_status nlo_fft_inverse_vec(
 #endif
     }
 
-#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT)
-    if (plan->backend_type == NLO_VECTOR_BACKEND_VULKAN) {
+#if defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN) && defined(NLO_ENABLE_VKFFT_BACKEND)
+    if (plan->fft_backend == NLO_FFT_BACKEND_VKFFT) {
         nlo_vec_status status = NLO_VEC_STATUS_OK;
         if (input != output) {
             status = nlo_vec_complex_copy(plan->backend, output, input);

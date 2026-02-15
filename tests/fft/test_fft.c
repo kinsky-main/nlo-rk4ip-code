@@ -15,7 +15,7 @@
 #define NLO_TEST_EPS 1e-10
 #endif
 
-#if defined(NLO_FFT_BACKEND_FFTW)
+#if defined(NLO_ENABLE_FFTW_BACKEND)
 
 #define TEST_FFT_SIZE 16
 
@@ -42,7 +42,10 @@ static void test_fft_round_trip(void)
     assert(nlo_vec_upload(backend, in, time_domain, sizeof(time_domain)) == NLO_VEC_STATUS_OK);
 
     nlo_fft_plan* plan = NULL;
-    assert(nlo_fft_plan_create(backend, n, &plan) == NLO_VEC_STATUS_OK);
+    assert(nlo_fft_plan_create_with_backend(backend,
+                                            n,
+                                            NLO_FFT_BACKEND_FFTW,
+                                            &plan) == NLO_VEC_STATUS_OK);
     assert(plan != NULL);
 
     assert(nlo_fft_forward_vec(plan, in, freq) == NLO_VEC_STATUS_OK);
@@ -63,9 +66,37 @@ static void test_fft_round_trip(void)
     printf("test_fft_round_trip: validates forward/inverse FFT consistency.\n");
 }
 
+static void test_fft_backend_selection_validation(void)
+{
+    const size_t n = TEST_FFT_SIZE;
+    nlo_vector_backend* backend = nlo_vector_backend_create_cpu();
+    assert(backend != NULL);
+
+    nlo_fft_plan* auto_plan = NULL;
+    assert(nlo_fft_plan_create_with_backend(backend,
+                                            n,
+                                            NLO_FFT_BACKEND_AUTO,
+                                            &auto_plan) == NLO_VEC_STATUS_OK);
+    assert(auto_plan != NULL);
+    nlo_fft_plan_destroy(auto_plan);
+
+#if defined(NLO_ENABLE_VKFFT_BACKEND)
+    nlo_fft_plan* vk_plan = NULL;
+    assert(nlo_fft_plan_create_with_backend(backend,
+                                            n,
+                                            NLO_FFT_BACKEND_VKFFT,
+                                            &vk_plan) == NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(vk_plan == NULL);
+#endif
+
+    nlo_vector_backend_destroy(backend);
+    printf("test_fft_backend_selection_validation: validates runtime FFT selection guards.\n");
+}
+
 int main(void)
 {
     test_fft_round_trip();
+    test_fft_backend_selection_validation();
     printf("test_fft: all subtests completed.\n");
     return 0;
 }

@@ -6,6 +6,7 @@
 
 #include "backend/nlo_complex.h"
 #include "backend/vector_backend.h"
+#include "fft/fft_backend.h"
 #include <stddef.h>
 
 #ifndef NT_MAX
@@ -57,6 +58,7 @@ typedef struct {
 
 typedef struct {
     nlo_vector_backend_type backend_type;
+    nlo_fft_backend_type fft_backend;
     double device_heap_fraction;
     size_t record_ring_target;
     size_t forced_device_budget_bytes;
