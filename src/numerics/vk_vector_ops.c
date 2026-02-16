@@ -313,25 +313,30 @@ static nlo_vec_status nlo_vk_create_descriptor_resources(nlo_vector_backend* bac
 
     VkDescriptorPoolSize pool_size = {
         .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = 3u
+        .descriptorCount = 3u * (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT
     };
     VkDescriptorPoolCreateInfo pool_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
         .poolSizeCount = 1u,
         .pPoolSizes = &pool_size,
-        .maxSets = 1u
+        .maxSets = (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT
     };
     if (vkCreateDescriptorPool(backend->vk.device, &pool_info, NULL, &backend->vk.descriptor_pool) != VK_SUCCESS) {
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
 
+    VkDescriptorSetLayout set_layouts[NLO_VK_DESCRIPTOR_SET_COUNT];
+    for (size_t i = 0u; i < (size_t)NLO_VK_DESCRIPTOR_SET_COUNT; ++i) {
+        set_layouts[i] = backend->vk.descriptor_set_layout;
+    }
+
     VkDescriptorSetAllocateInfo set_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
         .descriptorPool = backend->vk.descriptor_pool,
-        .descriptorSetCount = 1u,
-        .pSetLayouts = &backend->vk.descriptor_set_layout
+        .descriptorSetCount = (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT,
+        .pSetLayouts = set_layouts
     };
-    if (vkAllocateDescriptorSets(backend->vk.device, &set_info, &backend->vk.descriptor_set) != VK_SUCCESS) {
+    if (vkAllocateDescriptorSets(backend->vk.device, &set_info, backend->vk.descriptor_sets) != VK_SUCCESS) {
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
 
@@ -400,6 +405,9 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
     if (backend->vk.descriptor_pool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(backend->vk.device, backend->vk.descriptor_pool, NULL);
         backend->vk.descriptor_pool = VK_NULL_HANDLE;
+    }
+    for (size_t i = 0u; i < (size_t)NLO_VK_DESCRIPTOR_SET_COUNT; ++i) {
+        backend->vk.descriptor_sets[i] = VK_NULL_HANDLE;
     }
     if (backend->vk.pipeline_layout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(backend->vk.device, backend->vk.pipeline_layout, NULL);
@@ -663,6 +671,7 @@ static size_t nlo_vk_max_chunk_elements(const nlo_vector_backend* backend, size_
 
 static void nlo_vk_update_descriptor_set(
     nlo_vector_backend* backend,
+    VkDescriptorSet descriptor_set,
     VkBuffer dst_buffer,
     VkDeviceSize dst_offset,
     VkDeviceSize dst_size,
@@ -691,21 +700,21 @@ static void nlo_vk_update_descriptor_set(
     };
     VkWriteDescriptorSet writes[3] = {0};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = backend->vk.descriptor_set;
+    writes[0].dstSet = descriptor_set;
     writes[0].dstBinding = 0u;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writes[0].descriptorCount = 1u;
     writes[0].pBufferInfo = &dst_info;
 
     writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = backend->vk.descriptor_set;
+    writes[1].dstSet = descriptor_set;
     writes[1].dstBinding = 1u;
     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writes[1].descriptorCount = 1u;
     writes[1].pBufferInfo = &src_info;
 
     writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = backend->vk.descriptor_set;
+    writes[2].dstSet = descriptor_set;
     writes[2].dstBinding = 2u;
     writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     writes[2].descriptorCount = 1u;
@@ -732,6 +741,7 @@ static nlo_vec_status nlo_vk_dispatch_kernel(
 
     size_t offset_elems = 0u;
     while (offset_elems < length) {
+        VkDescriptorSet descriptor_set = backend->vk.descriptor_sets[0];
         size_t chunk_elems = length - offset_elems;
         if (chunk_elems > max_chunk_elems) {
             chunk_elems = max_chunk_elems;
@@ -742,6 +752,7 @@ static nlo_vec_status nlo_vk_dispatch_kernel(
         VkDeviceSize chunk_bytes = (VkDeviceSize)(chunk_elems * elem_size);
 
         nlo_vk_update_descriptor_set(backend,
+                                     descriptor_set,
                                      dst->vk_buffer,
                                      byte_offset,
                                      chunk_bytes,
@@ -771,7 +782,7 @@ static nlo_vec_status nlo_vk_dispatch_kernel(
                                 backend->vk.pipeline_layout,
                                 0u,
                                 1u,
-                                &backend->vk.descriptor_set,
+                                &descriptor_set,
                                 0u,
                                 NULL);
 
@@ -832,6 +843,19 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     }
 
     uint32_t groups = nlo_vk_dispatch_groups_for_count(current->length);
+    uint32_t required_sets = 1u;
+    uint32_t reduce_count = groups;
+    while (reduce_count > 1u) {
+        reduce_count = nlo_vk_dispatch_groups_for_count((size_t)reduce_count);
+        required_sets += 1u;
+    }
+    if (required_sets > (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    uint32_t descriptor_set_index = 0u;
+    VkDescriptorSet descriptor_set = backend->vk.descriptor_sets[descriptor_set_index];
+
     nlo_vec_status status = nlo_vk_ensure_reduction_capacity(backend, (VkDeviceSize)groups);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
@@ -856,6 +880,7 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     nlo_vk_cmd_compute_to_compute(cmd, backend->vk.reduction_buffer_b, 0u, partial_bytes);
 
     nlo_vk_update_descriptor_set(backend,
+                                 descriptor_set,
                                  backend->vk.reduction_buffer_a,
                                  0u,
                                  partial_bytes,
@@ -874,7 +899,7 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
                             backend->vk.pipeline_layout,
                             0u,
                             1u,
-                            &backend->vk.descriptor_set,
+                            &descriptor_set,
                             0u,
                             NULL);
 
@@ -897,11 +922,15 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     VkBuffer dst_buffer = backend->vk.reduction_buffer_b;
     uint32_t count = groups;
     while (count > 1u) {
+        descriptor_set_index += 1u;
+        descriptor_set = backend->vk.descriptor_sets[descriptor_set_index];
+
         uint32_t next_groups = nlo_vk_dispatch_groups_for_count((size_t)count);
         VkDeviceSize src_bytes = (VkDeviceSize)count * (VkDeviceSize)sizeof(double);
         VkDeviceSize dst_bytes = (VkDeviceSize)next_groups * (VkDeviceSize)sizeof(double);
 
         nlo_vk_update_descriptor_set(backend,
+                                     descriptor_set,
                                      dst_buffer,
                                      0u,
                                      dst_bytes,
@@ -920,7 +949,7 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
                                 backend->vk.pipeline_layout,
                                 0u,
                                 1u,
-                                &backend->vk.descriptor_set,
+                                &descriptor_set,
                                 0u,
                                 NULL);
 
