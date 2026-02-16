@@ -115,7 +115,6 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->omega_power_vec,
                                                    state->current_half_step_exp));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_working_vec, work->k_1_vec));
-    NLO_RK4_CALL(nlo_vec_complex_mul_inplace(backend, work->k_1_vec, state->current_field_vec));
     nlo_rk4_debug_log_vec_stats(state, work->k_1_vec, "k1", step_index, state->current_z, step);
     
     // Calculate working field term for k2 nonlinearity
@@ -129,7 +128,6 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                   work->field_working_vec,
                                                   work->field_magnitude_vec,
                                                   work->k_2_vec));
-    NLO_RK4_CALL(nlo_vec_complex_mul_inplace(backend, work->k_2_vec, work->field_working_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_2_vec, nlo_make(step, 0.0)));
     nlo_rk4_debug_log_vec_stats(state, work->k_2_vec, "k2", step_index, state->current_z, step);
     
@@ -144,7 +142,6 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                   work->field_working_vec,
                                                   work->field_magnitude_vec,
                                                   work->k_3_vec));
-    NLO_RK4_CALL(nlo_vec_complex_mul_inplace(backend, work->k_3_vec, work->field_working_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_3_vec, nlo_make(step, 0.0)));
     nlo_rk4_debug_log_vec_stats(state, work->k_3_vec, "k3", step_index, state->current_z, step);
 
@@ -165,7 +162,6 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                   work->field_working_vec,
                                                   work->field_magnitude_vec,
                                                   work->k_4_vec));
-    NLO_RK4_CALL(nlo_vec_complex_mul_inplace(backend, work->k_4_vec, work->field_working_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_4_vec, nlo_make(step, 0.0)));
     nlo_rk4_debug_log_vec_stats(state, work->k_4_vec, "k4", step_index, state->current_z, step);
 
@@ -178,12 +174,14 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_1_vec, work->k_2_vec));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_1_vec, work->k_3_vec));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_1_vec, work->ip_field_vec));
-
+    
+    NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->k_1_vec, work->field_freq_vec));
     NLO_RK4_CALL(nlo_apply_dispersion_operator_vec(backend,
                                                    work->dispersion_factor_vec,
-                                                   work->k_1_vec,
+                                                   work->field_freq_vec,
                                                    work->omega_power_vec,
                                                    state->current_half_step_exp));
+    NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_1_vec));
 
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_1_vec, work->k_4_vec));
 

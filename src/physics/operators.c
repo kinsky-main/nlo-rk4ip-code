@@ -126,21 +126,13 @@ nlo_vec_status nlo_apply_nonlinear_operator_vec(
 
     // TODO: Replace this with a single custom kernel that computes a not in place multiplication of the field with the magnitude squared, to avoid redundant copying and temporary storage.
     nlo_vec_status status = nlo_vec_complex_copy(backend, out_field, field);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
 
     status = nlo_vec_complex_magnitude_squared(backend, field, magnitude_squared);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
 
     status = nlo_vec_complex_scalar_mul_inplace(backend,
                                                 magnitude_squared,
                                                 nlo_make(gamma, 0.0));
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
+    status = nlo_vec_complex_scalar_mul_inplace(backend, magnitude_squared, nlo_make(0.0, 1.0));
 
     return nlo_vec_complex_mul_inplace(backend, out_field, magnitude_squared);
 }
