@@ -45,13 +45,13 @@ if [[ "${install_deps}" -eq 1 ]]; then
         exit 1
       fi
       sudo apt-get update
-      sudo apt-get install -y cmake ninja-build build-essential pkg-config libfftw3-dev
+      sudo apt-get install -y cmake ninja-build build-essential pkg-config libfftw3-dev libvulkan-dev glslang-tools
     else
       apt-get update
-      apt-get install -y cmake ninja-build build-essential pkg-config libfftw3-dev
+      apt-get install -y cmake ninja-build build-essential pkg-config libfftw3-dev libvulkan-dev glslang-tools
     fi
   else
-    echo "apt-get not found; install cmake, build tools, and FFTW3 dev headers manually."
+    echo "apt-get not found; install cmake, build tools, Vulkan SDK/loader+glslangValidator, and FFTW prerequisites manually."
   fi
 fi
 
@@ -62,9 +62,6 @@ fi
 
 cmake -S "${repo_root}" -B "${repo_root}/${build_dir}" \
   "${generator[@]}" \
-  -D NLO_ENABLE_FFTW=ON \
-  -D NLO_ENABLE_VKFFT=ON \
-  -D NLO_VECTOR_BACKEND_VULKAN=ON \
   "${cmake_args[@]}"
 
 if [[ "${do_build}" -eq 1 ]]; then

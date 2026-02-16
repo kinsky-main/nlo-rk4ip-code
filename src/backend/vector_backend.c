@@ -101,11 +101,9 @@ void nlo_vector_backend_destroy(nlo_vector_backend* backend)
         return;
     }
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         nlo_vk_backend_shutdown(backend);
     }
-#endif
 
     free(backend);
 }
@@ -126,7 +124,6 @@ bool nlo_vec_is_in_simulation(const nlo_vector_backend* backend)
     return backend->in_simulation;
 }
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
 nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config* config)
 {
     if (config == NULL ||
@@ -151,7 +148,6 @@ nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config
 
     return backend;
 }
-#endif
 
 // MARK: Simulation Guard
 
@@ -163,13 +159,11 @@ nlo_vec_status nlo_vec_begin_simulation(nlo_vector_backend* backend)
     }
 
     backend->in_simulation = true;
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         if (vkQueueWaitIdle(backend->vk.queue) != VK_SUCCESS) {
             return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
         }
     }
-#endif
     return NLO_VEC_STATUS_OK;
 }
 
@@ -198,7 +192,6 @@ nlo_vec_status nlo_vec_query_memory_info(
         return NLO_VEC_STATUS_OK;
     }
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         VkPhysicalDeviceMemoryProperties memory_properties;
         vkGetPhysicalDeviceMemoryProperties(backend->vk.physical_device, &memory_properties);
@@ -222,7 +215,6 @@ nlo_vec_status nlo_vec_query_memory_info(
         out_info->max_kernel_chunk_bytes = (size_t)backend->vk.max_kernel_chunk_bytes;
         return NLO_VEC_STATUS_OK;
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -267,7 +259,6 @@ nlo_vec_status nlo_vec_create(
             return NLO_VEC_STATUS_ALLOCATION_FAILED;
         }
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         nlo_vec_status status = nlo_vk_buffer_create(backend, buffer);
         if (status != NLO_VEC_STATUS_OK) {
@@ -275,7 +266,6 @@ nlo_vec_status nlo_vec_create(
             return status;
         }
     }
-#endif
     else {
         free(buffer);
         return NLO_VEC_STATUS_UNSUPPORTED;
@@ -294,11 +284,9 @@ void nlo_vec_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer)
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         free(buffer->host_ptr);
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         nlo_vk_buffer_destroy(backend, buffer);
     }
-#endif
 
     free(buffer);
 }
@@ -326,11 +314,9 @@ nlo_vec_status nlo_vec_upload(
         memcpy(buffer->host_ptr, data, bytes);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_upload(backend, buffer, data, bytes);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -356,11 +342,9 @@ nlo_vec_status nlo_vec_download(
         memcpy(data, buffer->host_ptr, bytes);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_download(backend, buffer, data, bytes);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -418,11 +402,9 @@ nlo_vec_status nlo_vec_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* ds
         nlo_real_fill((double*)dst->host_ptr, dst->length, value);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_real_fill(backend, dst, value);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -438,11 +420,9 @@ nlo_vec_status nlo_vec_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* ds
         nlo_real_copy((double*)dst->host_ptr, (const double*)src->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_real_copy(backend, dst, src);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -458,11 +438,9 @@ nlo_vec_status nlo_vec_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buf
         nlo_real_mul_inplace((double*)dst->host_ptr, (const double*)src->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_real_mul_inplace(backend, dst, src);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -498,11 +476,9 @@ nlo_vec_status nlo_vec_complex_fill(nlo_vector_backend* backend, nlo_vec_buffer*
         nlo_complex_fill((nlo_complex*)dst->host_ptr, dst->length, value);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_fill(backend, dst, value);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -518,11 +494,9 @@ nlo_vec_status nlo_vec_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer*
         nlo_complex_copy((nlo_complex*)dst->host_ptr, (const nlo_complex*)src->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_copy(backend, dst, src);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -542,11 +516,9 @@ nlo_vec_status nlo_vec_complex_magnitude_squared(
         calculate_magnitude_squared((const nlo_complex*)src->host_ptr, (nlo_complex*)dst->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_magnitude_squared(backend, src, dst);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -592,11 +564,9 @@ nlo_vec_status nlo_vec_complex_scalar_mul_inplace(
         nlo_complex_scalar_mul_inplace((nlo_complex*)dst->host_ptr, alpha, dst->length);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_scalar_mul_inplace(backend, dst, alpha);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -616,11 +586,9 @@ nlo_vec_status nlo_vec_complex_mul_inplace(
         nlo_complex_mul_inplace((nlo_complex*)dst->host_ptr, (const nlo_complex*)src->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_mul_inplace(backend, dst, src);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -680,11 +648,9 @@ nlo_vec_status nlo_vec_complex_real_pow_inplace(
         return NLO_VEC_STATUS_OK;
     }
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_real_pow_inplace(backend, dst, exponent);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -704,11 +670,9 @@ nlo_vec_status nlo_vec_complex_add_inplace(
         nlo_complex_add_inplace((nlo_complex*)dst->host_ptr, (const nlo_complex*)src->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_add_inplace(backend, dst, src);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -725,11 +689,9 @@ nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_
         return NLO_VEC_STATUS_OK;
     }
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_exp_inplace(backend, dst);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -779,11 +741,9 @@ nlo_vec_status nlo_vec_complex_relative_error(
         return NLO_VEC_STATUS_OK;
     }
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_relative_error(backend, current, previous, epsilon, out_error);
     }
-#endif
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }

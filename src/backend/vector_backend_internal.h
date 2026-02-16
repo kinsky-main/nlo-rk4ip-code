@@ -9,7 +9,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
 #include <vulkan/vulkan.h>
 
 enum {
@@ -76,14 +75,11 @@ typedef struct {
 
     VkDeviceSize max_kernel_chunk_bytes;
 } nlo_vk_backend;
-#endif
 
 struct nlo_vector_backend {
     nlo_vector_backend_type type;
     bool in_simulation;
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     nlo_vk_backend vk;
-#endif
 };
 
 struct nlo_vec_buffer {
@@ -92,10 +88,8 @@ struct nlo_vec_buffer {
     size_t length;
     size_t bytes;
     void* host_ptr;
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     VkBuffer vk_buffer;
     VkDeviceMemory vk_memory;
-#endif
 };
 
 size_t nlo_vec_element_size(nlo_vec_kind kind);

@@ -6,7 +6,7 @@
 #
 # Behavior:
 #   1) Tries CMake's FindVulkan module first.
-#   2) If headers are not found and NLO_VULKAN_FETCH_HEADERS=ON, fetches Vulkan-Headers.
+#   2) If headers are not found, fetches Vulkan-Headers.
 #   3) Tries to locate Vulkan loader library if not provided by FindVulkan.
 
 include_guard(GLOBAL)
@@ -83,7 +83,7 @@ function(nlo_resolve_vulkan out_headers_available out_loader_available)
       set(_header_include_dir "${_nlo_vulkan_header_dir}")
       set(_headers_available ON)
       _nlo_define_vulkan_headers_target("${_header_include_dir}")
-    elseif(NLO_VULKAN_FETCH_HEADERS)
+    else()
       include(FetchContent)
       FetchContent_Declare(
         vulkan_headers

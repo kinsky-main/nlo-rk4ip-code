@@ -15,8 +15,6 @@
 #define NLO_TEST_EPS 1e-10
 #endif
 
-#if defined(NLO_ENABLE_FFTW_BACKEND)
-
 #define TEST_FFT_SIZE 16
 
 static void test_fft_round_trip(void)
@@ -80,7 +78,6 @@ static void test_fft_backend_selection_validation(void)
     assert(auto_plan != NULL);
     nlo_fft_plan_destroy(auto_plan);
 
-#if defined(NLO_ENABLE_VKFFT_BACKEND) && defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN)
     /* Explicit VKFFT requests are a type-mismatch on CPU backends. */
     nlo_fft_plan* vk_plan = NULL;
     assert(nlo_fft_plan_create_with_backend(backend,
@@ -88,17 +85,6 @@ static void test_fft_backend_selection_validation(void)
                                             NLO_FFT_BACKEND_VKFFT,
                                             &vk_plan) == NLO_VEC_STATUS_INVALID_ARGUMENT);
     assert(vk_plan == NULL);
-#endif
-
-#if defined(NLO_ENABLE_VKFFT_BACKEND) && !defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN)
-    /* VKFFT symbol is present, but Vulkan vector backend support is not compiled in. */
-    nlo_fft_plan* vk_plan = NULL;
-    assert(nlo_fft_plan_create_with_backend(backend,
-                                            n,
-                                            NLO_FFT_BACKEND_VKFFT,
-                                            &vk_plan) == NLO_VEC_STATUS_UNSUPPORTED);
-    assert(vk_plan == NULL);
-#endif
 
     nlo_vector_backend_destroy(backend);
     printf("test_fft_backend_selection_validation: validates runtime FFT selection guards.\n");
@@ -111,13 +97,3 @@ int main(void)
     printf("test_fft: all subtests completed.\n");
     return 0;
 }
-
-#else
-
-int main(void)
-{
-    printf("test_fft: FFTW backend disabled; no subtests executed.\n");
-    return 0;
-}
-
-#endif

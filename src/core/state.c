@@ -201,11 +201,9 @@ simulation_state* create_simulation_state(
     if (exec_options->backend_type == NLO_VECTOR_BACKEND_CPU) {
         state->backend = nlo_vector_backend_create_cpu();
     }
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     else if (exec_options->backend_type == NLO_VECTOR_BACKEND_VULKAN) {
         state->backend = nlo_vector_backend_create_vulkan(&exec_options->vulkan);
     }
-#endif
     else {
         state->backend = NULL;
     }

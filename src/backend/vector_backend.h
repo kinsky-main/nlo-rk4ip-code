@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <vulkan/vulkan.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -72,9 +73,6 @@ nlo_vector_backend_type nlo_vector_backend_get_type(const nlo_vector_backend* ba
  */
 bool nlo_vec_is_in_simulation(const nlo_vector_backend* backend);
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
-#include <vulkan/vulkan.h>
-
 /**
  * @brief Vulkan backend configuration (expects externally-created device/queue).
  *        If command_pool is provided, it will be reused; otherwise an internal
@@ -93,7 +91,6 @@ typedef struct {
  * @brief Create a Vulkan backend (device-resident buffers).
  */
 nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config* config);
-#endif
 
 // MARK: Simulation Guard
 

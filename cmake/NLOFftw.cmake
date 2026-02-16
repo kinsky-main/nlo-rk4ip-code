@@ -9,48 +9,38 @@ function(_nlo_get_target_interface_includes target out_var)
 endfunction()
 
 function(nlo_configure_fftw out_target out_include_dirs)
-  if(NOT NLO_ENABLE_FFTW)
-    set(${out_target} "" PARENT_SCOPE)
-    set(${out_include_dirs} "" PARENT_SCOPE)
-    return()
-  endif()
-
   if(NOT TARGET FFTW3::fftw3)
-    if(NLO_BUILD_FFTW_FROM_SOURCE)
-      include(FetchContent)
+    include(FetchContent)
 
-      if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
-        set(CMAKE_POLICY_VERSION_MINIMUM "3.5")
-      endif()
+    if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+      set(CMAKE_POLICY_VERSION_MINIMUM "3.5")
+    endif()
 
-      set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
-      set(BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
-      set(ENABLE_FLOAT OFF CACHE BOOL "single-precision" FORCE)
-      set(ENABLE_LONG_DOUBLE OFF CACHE BOOL "long-double precision" FORCE)
-      set(ENABLE_QUAD_PRECISION OFF CACHE BOOL "quadruple-precision" FORCE)
-      set(ENABLE_OPENMP OFF CACHE BOOL "Use OpenMP for multithreading" FORCE)
-      set(ENABLE_THREADS OFF CACHE BOOL "Use pthread for multithreading" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
+    set(BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
+    set(ENABLE_FLOAT OFF CACHE BOOL "single-precision" FORCE)
+    set(ENABLE_LONG_DOUBLE OFF CACHE BOOL "long-double precision" FORCE)
+    set(ENABLE_QUAD_PRECISION OFF CACHE BOOL "quadruple-precision" FORCE)
+    set(ENABLE_OPENMP OFF CACHE BOOL "Use OpenMP for multithreading" FORCE)
+    set(ENABLE_THREADS OFF CACHE BOOL "Use pthread for multithreading" FORCE)
 
-      FetchContent_Declare(
-        fftw
-        URL "https://www.fftw.org/${NLO_FFTW_GIT_TAG}.tar.gz"
-      )
-      FetchContent_MakeAvailable(fftw)
+    FetchContent_Declare(
+      fftw
+      URL "https://www.fftw.org/${NLO_FFTW_GIT_TAG}.tar.gz"
+    )
+    FetchContent_MakeAvailable(fftw)
 
-      if(NOT TARGET fftw3)
-        message(FATAL_ERROR "Expected FFTW target 'fftw3' was not created.")
-      endif()
+    if(NOT TARGET fftw3)
+      message(FATAL_ERROR "Expected FFTW target 'fftw3' was not created.")
+    endif()
 
-      # FFTW upstream only exports install-time include paths. Add a build-time path.
-      target_include_directories(fftw3 INTERFACE
-        "$<BUILD_INTERFACE:${fftw_SOURCE_DIR}/api>"
-      )
+    # FFTW upstream only exports install-time include paths. Add a build-time path.
+    target_include_directories(fftw3 INTERFACE
+      "$<BUILD_INTERFACE:${fftw_SOURCE_DIR}/api>"
+    )
 
-      if(NOT TARGET FFTW3::fftw3)
-        add_library(FFTW3::fftw3 ALIAS fftw3)
-      endif()
-    else()
-      find_package(FFTW3 REQUIRED)
+    if(NOT TARGET FFTW3::fftw3)
+      add_library(FFTW3::fftw3 ALIAS fftw3)
     endif()
   endif()
 

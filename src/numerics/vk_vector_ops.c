@@ -6,8 +6,6 @@
 
 #include "numerics/vk_vector_ops.h"
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
-
 #include "nlo_vk_shader_paths.h"
 #include <limits.h>
 #include <math.h>
@@ -1343,5 +1341,4 @@ nlo_vec_status nlo_vk_op_complex_relative_error(
     return nlo_vk_dispatch_complex_relative_error(backend, current, previous, epsilon, out_error);
 }
 
-#endif
 

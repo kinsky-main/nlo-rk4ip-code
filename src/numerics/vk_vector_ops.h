@@ -7,7 +7,6 @@
 
 #include "backend/vector_backend_internal.h"
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
 nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_backend_config* config);
 void nlo_vk_backend_shutdown(nlo_vector_backend* backend);
 
@@ -65,6 +64,5 @@ nlo_vec_status nlo_vk_op_complex_relative_error(
     double epsilon,
     double* out_error
 );
-#endif
 
 

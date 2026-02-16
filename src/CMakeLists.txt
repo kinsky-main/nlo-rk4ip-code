@@ -11,13 +11,8 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/utility/rk4_debug.c
   ${CMAKE_CURRENT_LIST_DIR}/backend/vector_backend.c
   ${CMAKE_CURRENT_LIST_DIR}/fft/fft.c
+  ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_vector_ops.c
 )
-
-if(NLO_VECTOR_BACKEND_VULKAN)
-  list(APPEND NLOLIB_SOURCES
-    ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_vector_ops.c
-  )
-endif()
 
 add_library(nlolib SHARED ${NLOLIB_SOURCES})
 set_target_properties(nlolib PROPERTIES OUTPUT_NAME nlolib)
@@ -41,13 +36,11 @@ if(UNIX)
   target_link_libraries(nlolib PUBLIC m)
 endif()
 
-if(NLO_VECTOR_BACKEND_VULKAN)
-  include(NLOVulkanBackend)
-  nlo_configure_vulkan_backend(
-    nlolib
-    "${CMAKE_CURRENT_LIST_DIR}"
-    "${CMAKE_CURRENT_BINARY_DIR}"
-  )
-endif()
+include(NLOVulkanBackend)
+nlo_configure_vulkan_backend(
+  nlolib
+  "${CMAKE_CURRENT_LIST_DIR}"
+  "${CMAKE_CURRENT_BINARY_DIR}"
+)
 
 

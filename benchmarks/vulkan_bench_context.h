@@ -6,8 +6,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
 #include <vulkan/vulkan.h>
 
 #ifdef __cplusplus
@@ -46,5 +44,4 @@ void nlo_bench_vk_context_destroy(nlo_bench_vk_context* context);
 
 #ifdef __cplusplus
 }
-#endif
 #endif

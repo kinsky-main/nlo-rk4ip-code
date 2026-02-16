@@ -5,8 +5,6 @@
 
 #include "vulkan_bench_context.h"
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -242,5 +240,3 @@ void nlo_bench_vk_context_destroy(nlo_bench_vk_context* context)
     context->queue = VK_NULL_HANDLE;
     context->queue_family_index = 0u;
 }
-
-#endif

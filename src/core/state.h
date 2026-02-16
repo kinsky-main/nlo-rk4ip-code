@@ -62,9 +62,7 @@ typedef struct {
     double device_heap_fraction;
     size_t record_ring_target;
     size_t forced_device_budget_bytes;
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     nlo_vk_backend_config vulkan;
-#endif
 } nlo_execution_options;
 
 typedef struct {

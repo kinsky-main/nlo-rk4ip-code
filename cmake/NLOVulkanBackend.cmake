@@ -4,7 +4,7 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
   if(NOT _nlo_vk_headers_available)
     message(FATAL_ERROR
       "Vulkan headers were not found and could not be fetched. "
-      "Set NLO_VULKAN_FETCH_HEADERS=ON or provide VULKAN_SDK/include.")
+      "Provide VULKAN_SDK/include or ensure network access for fetching Vulkan-Headers.")
   endif()
   if(NOT _nlo_vk_loader_available)
     message(FATAL_ERROR
@@ -87,6 +87,5 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
   )
 
   target_include_directories(${target} PRIVATE "${target_binary_dir}/generated")
-  target_compile_definitions(${target} PUBLIC NLO_ENABLE_VECTOR_BACKEND_VULKAN=1)
   target_link_libraries(${target} PUBLIC Vulkan::Headers Vulkan::Vulkan)
 endfunction()

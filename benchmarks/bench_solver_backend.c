@@ -7,10 +7,7 @@
 #include "core/init.h"
 #include "core/state.h"
 #include "numerics/rk4_kernel.h"
-
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
 #include "vulkan_bench_context.h"
-#endif
 
 #include <errno.h>
 #include <math.h>
@@ -816,9 +813,7 @@ static int nlo_bench_run_backend_case(
     size_t sample_count,
     FILE* csv_file,
     const char* skip_reason,
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     const nlo_bench_vk_context* vk_context,
-#endif
     int* out_error_count
 )
 {
@@ -872,7 +867,6 @@ static int nlo_bench_run_backend_case(
     if (backend == NLO_BENCH_RUNTIME_CPU) {
         exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
     } else {
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
         if (vk_context == NULL) {
             nlo_bench_destroy_case_data(&case_data);
             nlo_bench_copy_note(note, sizeof(note), "Missing Vulkan context.");
@@ -897,22 +891,6 @@ static int nlo_bench_run_backend_case(
         exec_options.vulkan.queue = vk_context->queue;
         exec_options.vulkan.queue_family_index = vk_context->queue_family_index;
         exec_options.vulkan.command_pool = VK_NULL_HANDLE;
-#else
-        nlo_bench_destroy_case_data(&case_data);
-        nlo_bench_copy_note(note, sizeof(note), "GPU benchmark requested but Vulkan is disabled.");
-        if (nlo_bench_write_csv_row(csv_file,
-                                    backend_label,
-                                    sample_count,
-                                    options->warmup_runs,
-                                    options->measured_runs,
-                                    0u,
-                                    &empty_metrics,
-                                    "SKIPPED",
-                                    note) != 0) {
-            *out_error_count += 1;
-        }
-        return 0;
-#endif
     }
 
     const size_t total_runs = options->warmup_runs + options->measured_runs;
@@ -1060,13 +1038,10 @@ int main(int argc, char** argv)
     char gpu_skip_reason[NLO_BENCH_NOTE_CAP];
     nlo_bench_copy_note(gpu_skip_reason, sizeof(gpu_skip_reason), "");
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     nlo_bench_vk_context vk_context;
     memset(&vk_context, 0, sizeof(vk_context));
-#endif
 
     if (run_gpu) {
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
         if (nlo_bench_vk_context_init(&vk_context,
                                       gpu_skip_reason,
                                       sizeof(gpu_skip_reason)) == 0) {
@@ -1074,12 +1049,6 @@ int main(int argc, char** argv)
         } else {
             gpu_available = false;
         }
-#else
-        nlo_bench_copy_note(gpu_skip_reason,
-                            sizeof(gpu_skip_reason),
-                            "GPU backend skipped: benchmark built without Vulkan support.");
-        gpu_available = false;
-#endif
     }
 
     for (size_t i = 0u; i < options.size_count; ++i) {
@@ -1092,9 +1061,7 @@ int main(int argc, char** argv)
                                              sample_count,
                                              csv_file,
                                              NULL,
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
                                              NULL,
-#endif
                                              &error_count);
         }
 
@@ -1105,9 +1072,7 @@ int main(int argc, char** argv)
                                                  sample_count,
                                                  csv_file,
                                                  gpu_skip_reason,
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
                                                  NULL,
-#endif
                                                  &error_count);
             } else {
                 (void)nlo_bench_run_backend_case(NLO_BENCH_RUNTIME_GPU,
@@ -1115,19 +1080,15 @@ int main(int argc, char** argv)
                                                  sample_count,
                                                  csv_file,
                                                  NULL,
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
                                                  &vk_context,
-#endif
                                                  &error_count);
             }
         }
     }
 
-#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
     if (run_gpu && gpu_available) {
         nlo_bench_vk_context_destroy(&vk_context);
     }
-#endif
 
     fclose(csv_file);
     printf("\nBenchmark completed with %d error(s).\n", error_count);

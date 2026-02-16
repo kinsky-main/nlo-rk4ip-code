@@ -8,17 +8,12 @@
 
 ## FFTW
 
-When `NLO_ENABLE_FFTW=ON`, FFTW is built from source and linked statically by default.
+FFTW is a required dependency and is always built from source and linked statically.
+Vulkan (including loader, headers, and `glslangValidator`) is also required.
 
 ```powershell
 cmake -S . -B build -DNLO_INSTALL_GIT_HOOKS=OFF
 cmake --build build --config Debug
-```
-
-To use a preinstalled FFTW instead, disable the in-tree static build:
-
-```powershell
-cmake -S . -B build -DNLO_BUILD_FFTW_FROM_SOURCE=OFF -DFFTW3_ROOT=C:/libs/fftw
 ```
 
 ## Benchmarks
