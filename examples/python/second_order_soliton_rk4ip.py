@@ -86,6 +86,87 @@ def _read_complex_buffer(src, n: int) -> np.ndarray:
     return out
 
 
+def _parse_pointer_value(value: int | str) -> int:
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text.startswith("0x"):
+            return int(text, 16)
+        return int(text, 10)
+    return int(value)
+
+
+def _to_vk_handle(ffi, value: int | str | None, ctype: str):
+    if value is None:
+        return ffi.NULL
+    parsed = _parse_pointer_value(value)
+    if parsed == 0:
+        return ffi.NULL
+    return ffi.cast(ctype, parsed)
+
+
+def _build_execution_options(ffi, params: dict):
+    backend_cfg = params.get("backend")
+    if backend_cfg is None:
+        return None
+
+    opts = ffi.new("nlo_execution_options*")
+    opts.backend_type = 0  # NLO_VECTOR_BACKEND_CPU
+    opts.fft_backend = 0  # NLO_FFT_BACKEND_AUTO
+    opts.device_heap_fraction = float(params.get("device_heap_fraction", 0.70))
+    opts.record_ring_target = int(params.get("record_ring_target", 0))
+    opts.forced_device_budget_bytes = int(params.get("forced_device_budget_bytes", 0))
+    opts.vulkan.physical_device = ffi.NULL
+    opts.vulkan.device = ffi.NULL
+    opts.vulkan.queue = ffi.NULL
+    opts.vulkan.queue_family_index = 0
+    opts.vulkan.command_pool = ffi.NULL
+    opts.vulkan.descriptor_set_budget_bytes = 0
+    opts.vulkan.descriptor_set_count_override = 0
+
+    fft_backend = str(params.get("fft_backend", "auto")).strip().lower()
+    fft_backend_map = {"auto": 0, "fftw": 1, "vkfft": 2}
+    if fft_backend not in fft_backend_map:
+        raise ValueError("fft_backend must be one of: auto, fftw, vkfft.")
+    opts.fft_backend = fft_backend_map[fft_backend]
+
+    if isinstance(backend_cfg, str):
+        backend_type = backend_cfg.strip().lower()
+        cfg = {}
+    elif isinstance(backend_cfg, dict):
+        backend_type = str(backend_cfg.get("type", "cpu")).strip().lower()
+        cfg = backend_cfg
+    else:
+        raise TypeError("backend must be a string or dict when provided.")
+
+    if backend_type == "cpu":
+        opts.backend_type = 0
+        return opts
+
+    if backend_type != "vulkan":
+        raise ValueError("backend type must be either 'cpu' or 'vulkan'.")
+
+    vk_cfg = cfg.get("vulkan", cfg)
+    required = ("physical_device", "device", "queue", "queue_family_index")
+    missing = [name for name in required if name not in vk_cfg]
+    if missing:
+        raise ValueError(
+            "vulkan backend requires handle fields: "
+            + ", ".join(required)
+            + ". Missing: "
+            + ", ".join(missing)
+        )
+
+    opts.backend_type = 1  # NLO_VECTOR_BACKEND_VULKAN
+    opts.vulkan.physical_device = _to_vk_handle(ffi, vk_cfg.get("physical_device"), "VkPhysicalDevice")
+    opts.vulkan.device = _to_vk_handle(ffi, vk_cfg.get("device"), "VkDevice")
+    opts.vulkan.queue = _to_vk_handle(ffi, vk_cfg.get("queue"), "VkQueue")
+    opts.vulkan.queue_family_index = int(vk_cfg.get("queue_family_index", 0))
+    opts.vulkan.command_pool = _to_vk_handle(ffi, vk_cfg.get("command_pool"), "VkCommandPool")
+    opts.vulkan.descriptor_set_budget_bytes = int(vk_cfg.get("descriptor_set_budget_bytes", 0))
+    opts.vulkan.descriptor_set_count_override = int(vk_cfg.get("descriptor_set_count_override", 0))
+    return opts
+
+
 def rk4ip_solver(A0: np.ndarray, z_final: float, params: dict) -> np.ndarray:
     """Thin Python wrapper around nlolib_propagate."""
     try:
@@ -131,7 +212,9 @@ def rk4ip_solver(A0: np.ndarray, z_final: float, params: dict) -> np.ndarray:
     out = ffi.new("nlo_complex[]", n)
     _write_complex_buffer(inp, np.asarray(A0, dtype=np.complex128))
 
-    status = int(lib.nlolib_propagate(cfg, n, inp, out))
+    exec_opts = _build_execution_options(ffi, params)
+    exec_opts_ptr = exec_opts if exec_opts is not None else ffi.NULL
+    status = int(lib.nlolib_propagate(cfg, n, inp, out, exec_opts_ptr))
     if status != 0:
         raise RuntimeError(f"nlolib_propagate failed with status={status}.")
 
@@ -141,14 +224,29 @@ def rk4ip_solver(A0: np.ndarray, z_final: float, params: dict) -> np.ndarray:
 def average_relative_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
     intensity_num = np.abs(A_num) ** 2
     intensity_true = np.abs(A_true) ** 2
-    numerator = np.mean(np.abs(intensity_num - intensity_true))
-    denominator = float(np.max(intensity_true))
+    finite = np.isfinite(intensity_num) & np.isfinite(intensity_true)
+    if not np.any(finite):
+        return float("nan")
+    numerator = np.mean(np.abs(intensity_num[finite] - intensity_true[finite]))
+    denominator = float(np.max(intensity_true[finite]))
+    if denominator <= 0.0 or not np.isfinite(denominator):
+        return float("nan")
     return float(numerator / denominator)
 
 
 def _spectral_intensity(field_t: np.ndarray) -> np.ndarray:
     spectrum = np.fft.fftshift(np.fft.fft(field_t))
     return np.abs(spectrum) ** 2
+
+
+def analytical_initial_condition_error(
+    t: np.ndarray,
+    beta2: float,
+    T0: float,
+) -> float:
+    u_ref = 2.0 * sech(t)
+    u_analytic = second_order_soliton_normalized_envelope(t, 0.0, beta2, T0)
+    return float(np.max(np.abs(u_ref - u_analytic)))
 
 
 def compute_wavelength_spectral_map(
@@ -169,12 +267,14 @@ def compute_wavelength_spectral_map(
     spec_map = np.empty((z_samples.size, valid.sum()), dtype=np.float64)
     for i, z in enumerate(z_samples):
         field_z = np.asarray(A0, dtype=np.complex128) if z == 0.0 else rk4ip_solver(A0, float(z), params)
-        spec = _spectral_intensity(field_z)
+        spec = np.nan_to_num(_spectral_intensity(field_z), nan=0.0, posinf=0.0, neginf=0.0)
         spec_map[i, :] = spec[valid]
 
     order = np.argsort(lambda_nm)
     lambda_nm = lambda_nm[order]
     spec_map = spec_map[:, order]
+    spec_map = np.nan_to_num(spec_map, nan=0.0, posinf=0.0, neginf=0.0)
+    spec_map = np.clip(spec_map, 0.0, None)
 
     max_value = float(np.max(spec_map))
     if max_value > 0.0:
@@ -201,8 +301,8 @@ def save_plots(
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
-    intensity_num = np.abs(U_num) ** 2
-    intensity_true = np.abs(U_true) ** 2
+    intensity_num = np.nan_to_num(np.abs(U_num) ** 2, nan=0.0, posinf=0.0, neginf=0.0)
+    intensity_true = np.nan_to_num(np.abs(U_true) ** 2, nan=0.0, posinf=0.0, neginf=0.0)
     abs_intensity_error = np.abs(intensity_num - intensity_true)
 
     fig_1, ax_1 = plt.subplots(figsize=(9.0, 5.0))
@@ -211,6 +311,8 @@ def save_plots(
     ax_1.set_xlabel("Dimensionless time t = T/T0")
     ax_1.set_ylabel("Normalized intensity |U|^2")
     ax_1.set_title(f"Second-Order Soliton at z = {z_final:.3f} m (Normalized)")
+    if np.max(intensity_true) > 0.0:
+        ax_1.set_ylim(0.0, 1.1 * float(np.max(intensity_true)))
     ax_1.grid(True, alpha=0.3)
     ax_1.legend()
     p1 = output_dir / "intensity_comparison.png"
@@ -229,17 +331,21 @@ def save_plots(
     plt.close(fig_2)
     saved_paths.append(p2)
 
-    fig_3, ax_3 = plt.subplots(figsize=(9.0, 5.5))
-    img = ax_3.pcolormesh(lambda_nm, z_samples, spectral_map, shading="auto", cmap="magma")
-    ax_3.set_xlabel("Wavelength (nm)")
-    ax_3.set_ylabel("Propagation distance z (m)")
-    ax_3.set_title("Spectral Intensity Envelope vs Propagation Distance")
-    colorbar = fig_3.colorbar(img, ax=ax_3)
-    colorbar.set_label("Normalized spectral intensity")
-    p3 = output_dir / "wavelength_intensity_colormap.png"
-    fig_3.savefig(p3, dpi=200, bbox_inches="tight")
-    plt.close(fig_3)
-    saved_paths.append(p3)
+    if spectral_map.size > 0 and lambda_nm.size > 0 and z_samples.size > 0:
+        fig_3, ax_3 = plt.subplots(figsize=(9.0, 5.5))
+        safe_map = np.nan_to_num(spectral_map, nan=0.0, posinf=0.0, neginf=0.0)
+        safe_map = np.clip(safe_map, 0.0, None)
+        spectral_db = 10.0 * np.log10(np.maximum(safe_map, 1e-12))
+        img = ax_3.pcolormesh(lambda_nm, z_samples, spectral_db, shading="auto", cmap="magma", vmin=-80.0, vmax=0.0)
+        ax_3.set_xlabel("Wavelength (nm)")
+        ax_3.set_ylabel("Propagation distance z (m)")
+        ax_3.set_title("Spectral Intensity Envelope vs Propagation Distance")
+        colorbar = fig_3.colorbar(img, ax=ax_3)
+        colorbar.set_label("Normalized spectral intensity (dB)")
+        p3 = output_dir / "wavelength_intensity_colormap.png"
+        fig_3.savefig(p3, dpi=200, bbox_inches="tight")
+        plt.close(fig_3)
+        saved_paths.append(p3)
 
     return saved_paths
 
@@ -258,7 +364,7 @@ def diagnose_first_nonfinite_z(A0: np.ndarray, params: dict, z_final: float) -> 
 
 def main() -> float:
     beta2 = -0.01
-    gamma = 0.0
+    gamma = 0.01
     alpha = 0.0
     tfwhm = 100e-3
     t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
@@ -280,6 +386,8 @@ def main() -> float:
         "beta2": beta2,
         "gamma": gamma,
         "alpha": alpha,
+        "backend": "cpu",
+        "fft_backend": "auto",
         "dt": dt,
         "omega": omega,
         "pulse_period": n * dt,
@@ -293,6 +401,7 @@ def main() -> float:
     A_num = rk4ip_solver(A0, z_final, params)
     U_num = to_normalized_envelope(A_num, z_final, p0, alpha)
     epsilon = average_relative_intensity_error(U_num, U_true)
+    z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):
         first_bad_z, max_finite_amplitude = diagnose_first_nonfinite_z(A0, params, z_final)
         print("warning: epsilon is non-finite because numerical field contains non-finite values.")
@@ -331,6 +440,7 @@ def main() -> float:
         f"1/(2*LD)={0.5 / ld:.6e} 1/m, "
         f"exp(-alpha*z_final)/LNL={math.exp(-alpha * z_final) / lnl:.6e} 1/m."
     )
+    print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
     print(f"epsilon = {epsilon:.6e}")
     if saved_paths:
         print("saved plots:")

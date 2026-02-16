@@ -31,6 +31,24 @@ assert cfg.dispersion.num_dispersion_terms == 0
 assert cfg.frequency.frequency_grid != ffi.NULL
 print("test_python_bindings: verified struct field access.")
 
-status = lib.nlolib_propagate(cfg, n, inp, out)
+status = lib.nlolib_propagate(cfg, n, inp, out, ffi.NULL)
 assert int(status) == 0
 print("test_python_bindings: nlolib_propagate returned expected status.")
+
+opts = ffi.new("nlo_execution_options*")
+opts.backend_type = 0  # NLO_VECTOR_BACKEND_CPU
+opts.fft_backend = 0  # NLO_FFT_BACKEND_AUTO
+opts.device_heap_fraction = 0.70
+opts.record_ring_target = 0
+opts.forced_device_budget_bytes = 0
+opts.vulkan.physical_device = ffi.NULL
+opts.vulkan.device = ffi.NULL
+opts.vulkan.queue = ffi.NULL
+opts.vulkan.queue_family_index = 0
+opts.vulkan.command_pool = ffi.NULL
+opts.vulkan.descriptor_set_budget_bytes = 0
+opts.vulkan.descriptor_set_count_override = 0
+
+status = lib.nlolib_propagate(cfg, n, inp, out, opts)
+assert int(status) == 0
+print("test_python_bindings: nlolib_propagate with options returned expected status.")
