@@ -1,5 +1,5 @@
 /**
- * @file solve_rk4.h
+ * @file rk4_kernel.h
  * @dir src/numerics
  * @brief Header for RK4 solver implementation for nonlinear optics propagation.
  * @author Wenzel Kinsky

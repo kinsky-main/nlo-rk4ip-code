@@ -14,6 +14,8 @@
 - Don’t reformat unrelated code
 - Don’t change public APIs without explicit request
 - Don't make per step memory allocations; keep all allocations static
+- Do produce a git command that can be copy-pasted to isolate the change
+- Do ensure GPU to host transfers are minimized and efficient
 
 ## Formatting
 - Put doxygen docstrings in function declarations in header files
