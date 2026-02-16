@@ -18,6 +18,8 @@ static VkDeviceSize nlo_vk_min_size(VkDeviceSize a, VkDeviceSize b)
     return (a < b) ? a : b;
 }
 
+static nlo_vec_status nlo_vk_begin_commands_raw(nlo_vector_backend* backend);
+
 static bool nlo_vk_supports_required_features(
     VkPhysicalDevice physical_device,
     VkPhysicalDeviceLimits* out_limits
@@ -433,6 +435,9 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
         vkDestroyCommandPool(backend->vk.device, backend->vk.command_pool, NULL);
         backend->vk.command_pool = VK_NULL_HANDLE;
     }
+    backend->vk.simulation_phase_recording = false;
+    backend->vk.simulation_phase_has_commands = false;
+    backend->vk.simulation_descriptor_set_cursor = 0u;
 }
 
 static nlo_vec_status nlo_vk_ensure_staging_capacity(nlo_vector_backend* backend, VkDeviceSize min_bytes)
@@ -541,18 +546,14 @@ static nlo_vec_status nlo_vk_ensure_reduction_capacity(nlo_vector_backend* backe
     return NLO_VEC_STATUS_OK;
 }
 
-static nlo_vec_status nlo_vk_begin_commands(nlo_vector_backend* backend)
+static nlo_vec_status nlo_vk_begin_commands_raw(nlo_vector_backend* backend)
 {
     if (vkWaitForFences(backend->vk.device, 1u, &backend->vk.submit_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
-    }
-    if (vkResetFences(backend->vk.device, 1u, &backend->vk.submit_fence) != VK_SUCCESS) {
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
     if (vkResetCommandBuffer(backend->vk.command_buffer, 0u) != VK_SUCCESS) {
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
-
     VkCommandBufferBeginInfo begin_info = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
@@ -564,9 +565,121 @@ static nlo_vec_status nlo_vk_begin_commands(nlo_vector_backend* backend)
     return NLO_VEC_STATUS_OK;
 }
 
+static nlo_vec_status nlo_vk_begin_commands(nlo_vector_backend* backend)
+{
+    if (backend->in_simulation) {
+        return nlo_vk_simulation_phase_begin(backend);
+    }
+    return nlo_vk_begin_commands_raw(backend);
+}
+
+void nlo_vk_simulation_phase_mark_commands(nlo_vector_backend* backend)
+{
+    if (backend == NULL || backend->type != NLO_VECTOR_BACKEND_VULKAN) {
+        return;
+    }
+    backend->vk.simulation_phase_has_commands = true;
+}
+
+nlo_vec_status nlo_vk_simulation_phase_begin(nlo_vector_backend* backend)
+{
+    if (backend == NULL || backend->type != NLO_VECTOR_BACKEND_VULKAN) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (backend->vk.simulation_phase_recording) {
+        return NLO_VEC_STATUS_OK;
+    }
+
+    nlo_vec_status status = nlo_vk_begin_commands_raw(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    backend->vk.simulation_phase_recording = true;
+    backend->vk.simulation_phase_has_commands = false;
+    backend->vk.simulation_descriptor_set_cursor = 0u;
+    return NLO_VEC_STATUS_OK;
+}
+
+nlo_vec_status nlo_vk_simulation_phase_command_buffer(
+    nlo_vector_backend* backend,
+    VkCommandBuffer* out_command_buffer
+)
+{
+    if (backend == NULL || out_command_buffer == NULL || backend->type != NLO_VECTOR_BACKEND_VULKAN) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_vec_status status = nlo_vk_simulation_phase_begin(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    *out_command_buffer = backend->vk.command_buffer;
+    return NLO_VEC_STATUS_OK;
+}
+
+nlo_vec_status nlo_vk_simulation_phase_flush(nlo_vector_backend* backend)
+{
+    if (backend == NULL || backend->type != NLO_VECTOR_BACKEND_VULKAN) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (!backend->vk.simulation_phase_recording) {
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (vkEndCommandBuffer(backend->vk.command_buffer) != VK_SUCCESS) {
+        backend->vk.simulation_phase_recording = false;
+        backend->vk.simulation_phase_has_commands = false;
+        backend->vk.simulation_descriptor_set_cursor = 0u;
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    if (backend->vk.simulation_phase_has_commands) {
+        if (vkResetFences(backend->vk.device, 1u, &backend->vk.submit_fence) != VK_SUCCESS) {
+            backend->vk.simulation_phase_recording = false;
+            backend->vk.simulation_phase_has_commands = false;
+            backend->vk.simulation_descriptor_set_cursor = 0u;
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+
+        VkSubmitInfo submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .commandBufferCount = 1u,
+            .pCommandBuffers = &backend->vk.command_buffer
+        };
+        if (vkQueueSubmit(backend->vk.queue, 1u, &submit_info, backend->vk.submit_fence) != VK_SUCCESS) {
+            backend->vk.simulation_phase_recording = false;
+            backend->vk.simulation_phase_has_commands = false;
+            backend->vk.simulation_descriptor_set_cursor = 0u;
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+        if (vkWaitForFences(backend->vk.device, 1u, &backend->vk.submit_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+            backend->vk.simulation_phase_recording = false;
+            backend->vk.simulation_phase_has_commands = false;
+            backend->vk.simulation_descriptor_set_cursor = 0u;
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+    }
+
+    backend->vk.simulation_phase_recording = false;
+    backend->vk.simulation_phase_has_commands = false;
+    backend->vk.simulation_descriptor_set_cursor = 0u;
+    return NLO_VEC_STATUS_OK;
+}
+
 static nlo_vec_status nlo_vk_submit_commands(nlo_vector_backend* backend)
 {
+    if (backend->in_simulation) {
+        nlo_vk_simulation_phase_mark_commands(backend);
+        return NLO_VEC_STATUS_OK;
+    }
+
     if (vkEndCommandBuffer(backend->vk.command_buffer) != VK_SUCCESS) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    if (vkResetFences(backend->vk.device, 1u, &backend->vk.submit_fence) != VK_SUCCESS) {
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
 
@@ -669,6 +782,30 @@ static size_t nlo_vk_max_chunk_elements(const nlo_vector_backend* backend, size_
     return (size_t)max_elems;
 }
 
+static nlo_vec_status nlo_vk_acquire_descriptor_set(
+    nlo_vector_backend* backend,
+    VkDescriptorSet* out_descriptor_set
+)
+{
+    if (backend == NULL || out_descriptor_set == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (!backend->in_simulation) {
+        *out_descriptor_set = backend->vk.descriptor_sets[0];
+        return NLO_VEC_STATUS_OK;
+    }
+
+    const uint32_t index = backend->vk.simulation_descriptor_set_cursor;
+    if (index >= (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    *out_descriptor_set = backend->vk.descriptor_sets[index];
+    backend->vk.simulation_descriptor_set_cursor = index + 1u;
+    return NLO_VEC_STATUS_OK;
+}
+
 static void nlo_vk_update_descriptor_set(
     nlo_vector_backend* backend,
     VkDescriptorSet descriptor_set,
@@ -741,10 +878,15 @@ static nlo_vec_status nlo_vk_dispatch_kernel(
 
     size_t offset_elems = 0u;
     while (offset_elems < length) {
-        VkDescriptorSet descriptor_set = backend->vk.descriptor_sets[0];
+        VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
         size_t chunk_elems = length - offset_elems;
         if (chunk_elems > max_chunk_elems) {
             chunk_elems = max_chunk_elems;
+        }
+
+        nlo_vec_status status = nlo_vk_acquire_descriptor_set(backend, &descriptor_set);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
         }
 
         VkBuffer src_buffer = (src != NULL) ? src->vk_buffer : dst->vk_buffer;
@@ -763,7 +905,7 @@ static nlo_vec_status nlo_vk_dispatch_kernel(
                                      byte_offset,
                                      chunk_bytes);
 
-        nlo_vec_status status = nlo_vk_begin_commands(backend);
+        status = nlo_vk_begin_commands(backend);
         if (status != NLO_VEC_STATUS_OK) {
             return status;
         }
@@ -849,12 +991,17 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
         reduce_count = nlo_vk_dispatch_groups_for_count((size_t)reduce_count);
         required_sets += 1u;
     }
-    if (required_sets > (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT) {
+    uint32_t available_sets = (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT;
+    if (backend->in_simulation) {
+        const uint32_t used = backend->vk.simulation_descriptor_set_cursor;
+        if (used > available_sets) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+        available_sets -= used;
+    }
+    if (required_sets > available_sets) {
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
-
-    uint32_t descriptor_set_index = 0u;
-    VkDescriptorSet descriptor_set = backend->vk.descriptor_sets[descriptor_set_index];
 
     nlo_vec_status status = nlo_vk_ensure_reduction_capacity(backend, (VkDeviceSize)groups);
     if (status != NLO_VEC_STATUS_OK) {
@@ -866,6 +1013,12 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     }
 
     status = nlo_vk_begin_commands(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+    status = nlo_vk_acquire_descriptor_set(backend, &descriptor_set);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
     }
@@ -922,8 +1075,10 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     VkBuffer dst_buffer = backend->vk.reduction_buffer_b;
     uint32_t count = groups;
     while (count > 1u) {
-        descriptor_set_index += 1u;
-        descriptor_set = backend->vk.descriptor_sets[descriptor_set_index];
+        status = nlo_vk_acquire_descriptor_set(backend, &descriptor_set);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
 
         uint32_t next_groups = nlo_vk_dispatch_groups_for_count((size_t)count);
         VkDeviceSize src_bytes = (VkDeviceSize)count * (VkDeviceSize)sizeof(double);
@@ -984,6 +1139,12 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     status = nlo_vk_submit_commands(backend);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
+    }
+    if (backend->in_simulation) {
+        status = nlo_vk_simulation_phase_flush(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
     }
 
     double ratio = 0.0;
@@ -1068,6 +1229,9 @@ nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_bac
     backend->vk.shader_float64_supported = true;
     backend->vk.limits = limits;
     backend->vk.max_kernel_chunk_bytes = (VkDeviceSize)limits.maxStorageBufferRange;
+    backend->vk.simulation_phase_recording = false;
+    backend->vk.simulation_phase_has_commands = false;
+    backend->vk.simulation_descriptor_set_cursor = 0u;
 
     nlo_vec_status status = nlo_vk_create_command_resources(backend, config);
     if (status != NLO_VEC_STATUS_OK) {
@@ -1104,6 +1268,9 @@ void nlo_vk_backend_shutdown(nlo_vector_backend* backend)
 {
     if (backend == NULL) {
         return;
+    }
+    if (backend->vk.simulation_phase_recording) {
+        (void)nlo_vk_simulation_phase_flush(backend);
     }
     if (backend->vk.queue != VK_NULL_HANDLE) {
         (void)vkQueueWaitIdle(backend->vk.queue);

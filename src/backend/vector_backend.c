@@ -174,6 +174,14 @@ nlo_vec_status nlo_vec_end_simulation(nlo_vector_backend* backend)
         return status;
     }
 
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_simulation_phase_flush(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            backend->in_simulation = false;
+            return status;
+        }
+    }
+
     backend->in_simulation = false;
     return NLO_VEC_STATUS_OK;
 }

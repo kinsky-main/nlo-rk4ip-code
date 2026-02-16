@@ -14,7 +14,7 @@
 enum {
     NLO_VK_LOCAL_SIZE_X = 64u,
     NLO_VK_DEFAULT_STAGING_BYTES = 8u * 1024u * 1024u,
-    NLO_VK_DESCRIPTOR_SET_COUNT = 8u
+    NLO_VK_DESCRIPTOR_SET_COUNT = 256u
 };
 
 typedef enum {
@@ -75,6 +75,9 @@ typedef struct {
     VkDeviceSize reduction_capacity;
 
     VkDeviceSize max_kernel_chunk_bytes;
+    bool simulation_phase_recording;
+    bool simulation_phase_has_commands;
+    uint32_t simulation_descriptor_set_cursor;
 } nlo_vk_backend;
 
 struct nlo_vector_backend {

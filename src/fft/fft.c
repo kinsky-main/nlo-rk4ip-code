@@ -5,6 +5,7 @@
 
 #include "fft/fft.h"
 #include "backend/vector_backend_internal.h"
+#include "numerics/vk_vector_ops.h"
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -138,12 +139,18 @@ static nlo_vec_status nlo_fft_vk_execute_inplace(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    nlo_vec_status status = nlo_fft_vk_begin_commands(plan);
+    nlo_vector_backend* backend = plan->backend;
+    VkCommandBuffer cmd = plan->vk_command_buffer;
+    nlo_vec_status status = NLO_VEC_STATUS_OK;
+    if (backend != NULL && backend->in_simulation) {
+        status = nlo_vk_simulation_phase_command_buffer(backend, &cmd);
+    } else {
+        status = nlo_fft_vk_begin_commands(plan);
+    }
     if (status != NLO_VEC_STATUS_OK) {
         return status;
     }
 
-    VkCommandBuffer cmd = plan->vk_command_buffer;
     VkBuffer buffer = target->vk_buffer;
     nlo_fft_vk_cmd_compute_barrier(cmd, buffer, (VkDeviceSize)target->bytes);
 
@@ -153,11 +160,17 @@ static nlo_vec_status nlo_fft_vk_execute_inplace(
 
     VkFFTResult result = VkFFTAppend(&plan->vk_app, inverse ? 1 : -1, &launch_params);
     if (result != VKFFT_SUCCESS) {
-        (void)vkEndCommandBuffer(cmd);
+        if (backend == NULL || !backend->in_simulation) {
+            (void)vkEndCommandBuffer(cmd);
+        }
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
 
     nlo_fft_vk_cmd_compute_barrier(cmd, buffer, (VkDeviceSize)target->bytes);
+    if (backend != NULL && backend->in_simulation) {
+        nlo_vk_simulation_phase_mark_commands(backend);
+        return NLO_VEC_STATUS_OK;
+    }
     return nlo_fft_vk_submit_commands(plan);
 }
 

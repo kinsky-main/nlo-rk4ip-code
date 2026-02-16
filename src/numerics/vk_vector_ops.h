@@ -10,6 +10,29 @@
 nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_backend_config* config);
 void nlo_vk_backend_shutdown(nlo_vector_backend* backend);
 
+/**
+ * @brief Ensure a Vulkan simulation phase command buffer is actively recording.
+ */
+nlo_vec_status nlo_vk_simulation_phase_begin(nlo_vector_backend* backend);
+
+/**
+ * @brief Submit and wait for the active Vulkan simulation phase command buffer.
+ */
+nlo_vec_status nlo_vk_simulation_phase_flush(nlo_vector_backend* backend);
+
+/**
+ * @brief Retrieve the active simulation phase command buffer for command recording.
+ */
+nlo_vec_status nlo_vk_simulation_phase_command_buffer(
+    nlo_vector_backend* backend,
+    VkCommandBuffer* out_command_buffer
+);
+
+/**
+ * @brief Mark that simulation phase commands were recorded and require submission.
+ */
+void nlo_vk_simulation_phase_mark_commands(nlo_vector_backend* backend);
+
 nlo_vec_status nlo_vk_buffer_create(nlo_vector_backend* backend, nlo_vec_buffer* buffer);
 void nlo_vk_buffer_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer);
 
