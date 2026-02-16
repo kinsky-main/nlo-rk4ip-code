@@ -85,6 +85,16 @@ typedef struct {
     VkQueue queue;
     uint32_t queue_family_index;
     VkCommandPool command_pool;
+    /**
+     * @brief Optional descriptor-set memory budget used for runtime pool sizing.
+     *        Set to 0 to use backend default.
+     */
+    size_t descriptor_set_budget_bytes;
+    /**
+     * @brief Optional explicit descriptor-set count override.
+     *        Set to 0 to use runtime budget-based sizing.
+     */
+    uint32_t descriptor_set_count_override;
 } nlo_vk_backend_config;
 
 /**

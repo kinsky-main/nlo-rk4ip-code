@@ -18,7 +18,44 @@ static VkDeviceSize nlo_vk_min_size(VkDeviceSize a, VkDeviceSize b)
     return (a < b) ? a : b;
 }
 
+enum {
+    NLO_VK_DESCRIPTOR_SET_BUDGET_DEFAULT_BYTES = 16u * 1024u * 1024u,
+    NLO_VK_DESCRIPTOR_SET_ESTIMATED_BYTES = 512u,
+    NLO_VK_DESCRIPTOR_SET_MIN_COUNT = 16u,
+    NLO_VK_DESCRIPTOR_SET_MAX_COUNT = 4096u
+};
+
 static nlo_vec_status nlo_vk_begin_commands_raw(nlo_vector_backend* backend);
+
+static uint32_t nlo_vk_clamp_descriptor_set_count(uint64_t count)
+{
+    if (count < (uint64_t)NLO_VK_DESCRIPTOR_SET_MIN_COUNT) {
+        return NLO_VK_DESCRIPTOR_SET_MIN_COUNT;
+    }
+    if (count > (uint64_t)NLO_VK_DESCRIPTOR_SET_MAX_COUNT) {
+        return NLO_VK_DESCRIPTOR_SET_MAX_COUNT;
+    }
+    return (uint32_t)count;
+}
+
+static uint32_t nlo_vk_select_descriptor_set_target(const nlo_vk_backend_config* config)
+{
+    if (config != NULL && config->descriptor_set_count_override > 0u) {
+        return nlo_vk_clamp_descriptor_set_count((uint64_t)config->descriptor_set_count_override);
+    }
+
+    size_t budget_bytes = NLO_VK_DESCRIPTOR_SET_BUDGET_DEFAULT_BYTES;
+    if (config != NULL && config->descriptor_set_budget_bytes > 0u) {
+        budget_bytes = config->descriptor_set_budget_bytes;
+    }
+
+    uint64_t estimated_count = (uint64_t)(budget_bytes / (size_t)NLO_VK_DESCRIPTOR_SET_ESTIMATED_BYTES);
+    if (estimated_count == 0u) {
+        estimated_count = (uint64_t)NLO_VK_DESCRIPTOR_SET_MIN_COUNT;
+    }
+
+    return nlo_vk_clamp_descriptor_set_count(estimated_count);
+}
 
 static bool nlo_vk_supports_required_features(
     VkPhysicalDevice physical_device,
@@ -272,7 +309,10 @@ static nlo_vec_status nlo_vk_create_command_resources(nlo_vector_backend* backen
     return NLO_VEC_STATUS_OK;
 }
 
-static nlo_vec_status nlo_vk_create_descriptor_resources(nlo_vector_backend* backend)
+static nlo_vec_status nlo_vk_create_descriptor_resources(
+    nlo_vector_backend* backend,
+    const nlo_vk_backend_config* config
+)
 {
     VkDescriptorSetLayoutBinding bindings[3] = {0};
     bindings[0].binding = 0u;
@@ -313,32 +353,90 @@ static nlo_vec_status nlo_vk_create_descriptor_resources(nlo_vector_backend* bac
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
 
-    VkDescriptorPoolSize pool_size = {
-        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        .descriptorCount = 3u * (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT
-    };
-    VkDescriptorPoolCreateInfo pool_info = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-        .poolSizeCount = 1u,
-        .pPoolSizes = &pool_size,
-        .maxSets = (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT
-    };
-    if (vkCreateDescriptorPool(backend->vk.device, &pool_info, NULL, &backend->vk.descriptor_pool) != VK_SUCCESS) {
-        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    backend->vk.descriptor_set_count = 0u;
+    backend->vk.descriptor_sets = NULL;
+
+    uint32_t target_count = nlo_vk_select_descriptor_set_target(config);
+    while (target_count >= NLO_VK_DESCRIPTOR_SET_MIN_COUNT) {
+        bool attempt_failed = false;
+        VkDescriptorPoolSize pool_size = {
+            .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 3u * target_count
+        };
+        VkDescriptorPoolCreateInfo pool_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .poolSizeCount = 1u,
+            .pPoolSizes = &pool_size,
+            .maxSets = target_count
+        };
+        if (vkCreateDescriptorPool(backend->vk.device, &pool_info, NULL, &backend->vk.descriptor_pool) != VK_SUCCESS) {
+            attempt_failed = true;
+        }
+
+        if (!attempt_failed) {
+            VkDescriptorSetLayout* set_layouts =
+                (VkDescriptorSetLayout*)malloc((size_t)target_count * sizeof(*set_layouts));
+            if (set_layouts == NULL) {
+                attempt_failed = true;
+            } else {
+                for (uint32_t i = 0u; i < target_count; ++i) {
+                    set_layouts[i] = backend->vk.descriptor_set_layout;
+                }
+
+                backend->vk.descriptor_sets =
+                    (VkDescriptorSet*)calloc((size_t)target_count, sizeof(*backend->vk.descriptor_sets));
+                if (backend->vk.descriptor_sets == NULL) {
+                    attempt_failed = true;
+                } else {
+                    VkDescriptorSetAllocateInfo set_info = {
+                        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                        .descriptorPool = backend->vk.descriptor_pool,
+                        .descriptorSetCount = target_count,
+                        .pSetLayouts = set_layouts
+                    };
+                    VkResult set_alloc_result =
+                        vkAllocateDescriptorSets(backend->vk.device, &set_info, backend->vk.descriptor_sets);
+                    if (set_alloc_result == VK_SUCCESS) {
+                        backend->vk.descriptor_set_count = target_count;
+                    } else {
+                        attempt_failed = true;
+                    }
+                }
+            }
+
+            free(set_layouts);
+        }
+
+        if (backend->vk.descriptor_set_count != 0u && backend->vk.descriptor_sets != NULL) {
+            break;
+        }
+        if (backend->vk.descriptor_sets != NULL) {
+            free(backend->vk.descriptor_sets);
+            backend->vk.descriptor_sets = NULL;
+        }
+        if (backend->vk.descriptor_pool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(backend->vk.device, backend->vk.descriptor_pool, NULL);
+            backend->vk.descriptor_pool = VK_NULL_HANDLE;
+        }
+        if (target_count == NLO_VK_DESCRIPTOR_SET_MIN_COUNT) {
+            break;
+        }
+        uint32_t next_count = target_count / 2u;
+        if (next_count < NLO_VK_DESCRIPTOR_SET_MIN_COUNT) {
+            next_count = NLO_VK_DESCRIPTOR_SET_MIN_COUNT;
+        }
+        fprintf(stderr,
+                "[nlo_vk] descriptor set allocation failed at %u sets; retrying at %u sets.\n",
+                target_count,
+                next_count);
+        target_count = next_count;
     }
 
-    VkDescriptorSetLayout set_layouts[NLO_VK_DESCRIPTOR_SET_COUNT];
-    for (size_t i = 0u; i < (size_t)NLO_VK_DESCRIPTOR_SET_COUNT; ++i) {
-        set_layouts[i] = backend->vk.descriptor_set_layout;
-    }
-
-    VkDescriptorSetAllocateInfo set_info = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-        .descriptorPool = backend->vk.descriptor_pool,
-        .descriptorSetCount = (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT,
-        .pSetLayouts = set_layouts
-    };
-    if (vkAllocateDescriptorSets(backend->vk.device, &set_info, backend->vk.descriptor_sets) != VK_SUCCESS) {
+    if (backend->vk.descriptor_set_count == 0u || backend->vk.descriptor_sets == NULL) {
+        fprintf(stderr,
+                "[nlo_vk] failed to allocate descriptor sets in range [%u, %u].\n",
+                NLO_VK_DESCRIPTOR_SET_MIN_COUNT,
+                nlo_vk_select_descriptor_set_target(config));
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
 
@@ -408,9 +506,11 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
         vkDestroyDescriptorPool(backend->vk.device, backend->vk.descriptor_pool, NULL);
         backend->vk.descriptor_pool = VK_NULL_HANDLE;
     }
-    for (size_t i = 0u; i < (size_t)NLO_VK_DESCRIPTOR_SET_COUNT; ++i) {
-        backend->vk.descriptor_sets[i] = VK_NULL_HANDLE;
+    if (backend->vk.descriptor_sets != NULL) {
+        free(backend->vk.descriptor_sets);
+        backend->vk.descriptor_sets = NULL;
     }
+    backend->vk.descriptor_set_count = 0u;
     if (backend->vk.pipeline_layout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(backend->vk.device, backend->vk.pipeline_layout, NULL);
         backend->vk.pipeline_layout = VK_NULL_HANDLE;
@@ -790,6 +890,9 @@ static nlo_vec_status nlo_vk_acquire_descriptor_set(
     if (backend == NULL || out_descriptor_set == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
+    if (backend->vk.descriptor_sets == NULL || backend->vk.descriptor_set_count == 0u) {
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
 
     if (!backend->in_simulation) {
         *out_descriptor_set = backend->vk.descriptor_sets[0];
@@ -797,7 +900,7 @@ static nlo_vec_status nlo_vk_acquire_descriptor_set(
     }
 
     const uint32_t index = backend->vk.simulation_descriptor_set_cursor;
-    if (index >= (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT) {
+    if (index >= backend->vk.descriptor_set_count) {
         return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
     }
 
@@ -991,7 +1094,7 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
         reduce_count = nlo_vk_dispatch_groups_for_count((size_t)reduce_count);
         required_sets += 1u;
     }
-    uint32_t available_sets = (uint32_t)NLO_VK_DESCRIPTOR_SET_COUNT;
+    uint32_t available_sets = backend->vk.descriptor_set_count;
     if (backend->in_simulation) {
         const uint32_t used = backend->vk.simulation_descriptor_set_cursor;
         if (used > available_sets) {
@@ -1229,6 +1332,8 @@ nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_bac
     backend->vk.shader_float64_supported = true;
     backend->vk.limits = limits;
     backend->vk.max_kernel_chunk_bytes = (VkDeviceSize)limits.maxStorageBufferRange;
+    backend->vk.descriptor_sets = NULL;
+    backend->vk.descriptor_set_count = 0u;
     backend->vk.simulation_phase_recording = false;
     backend->vk.simulation_phase_has_commands = false;
     backend->vk.simulation_descriptor_set_cursor = 0u;
@@ -1239,7 +1344,7 @@ nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_bac
         return status;
     }
 
-    status = nlo_vk_create_descriptor_resources(backend);
+    status = nlo_vk_create_descriptor_resources(backend, config);
     if (status != NLO_VEC_STATUS_OK) {
         nlo_vk_destroy_resources(backend);
         return status;

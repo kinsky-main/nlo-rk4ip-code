@@ -13,8 +13,7 @@
 
 enum {
     NLO_VK_LOCAL_SIZE_X = 64u,
-    NLO_VK_DEFAULT_STAGING_BYTES = 8u * 1024u * 1024u,
-    NLO_VK_DESCRIPTOR_SET_COUNT = 256u
+    NLO_VK_DEFAULT_STAGING_BYTES = 8u * 1024u * 1024u
 };
 
 typedef enum {
@@ -58,7 +57,8 @@ typedef struct {
 
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
-    VkDescriptorSet descriptor_sets[NLO_VK_DESCRIPTOR_SET_COUNT];
+    VkDescriptorSet* descriptor_sets;
+    uint32_t descriptor_set_count;
     VkPipelineLayout pipeline_layout;
     VkPipelineCache pipeline_cache;
     nlo_vk_kernel kernels[NLO_VK_KERNEL_COUNT];
