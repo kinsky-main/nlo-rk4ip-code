@@ -24,7 +24,6 @@ add_test(NAME test_core_state_alloc COMMAND test_core_state_alloc)
 
 set(_NLOLIB_TEST_PATH "$ENV{PATH}")
 string(REPLACE ";" "\\;" _NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}")
-set(_NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}\\;C:/libs/fftw")
 
 set_tests_properties(test_core_state_alloc PROPERTIES
   ENVIRONMENT "PATH=${_NLOLIB_TEST_PATH}"

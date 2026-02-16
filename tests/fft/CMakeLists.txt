@@ -24,7 +24,6 @@ add_test(NAME test_fft COMMAND test_fft)
 
 set(_NLOLIB_TEST_PATH "$ENV{PATH}")
 string(REPLACE ";" "\\;" _NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}")
-set(_NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}\\;C:/libs/fftw")
 
 set_tests_properties(test_fft PROPERTIES
   ENVIRONMENT "PATH=${_NLOLIB_TEST_PATH}"

@@ -31,8 +31,12 @@ target_include_directories(bench_solver_backend PRIVATE
 target_link_libraries(bench_solver_backend PRIVATE simd::simd)
 
 if(NLO_ENABLE_FFTW)
-  find_package(FFTW3 REQUIRED)
-  target_link_libraries(bench_solver_backend PRIVATE FFTW3::fftw3)
+  include(NLOFftw)
+  nlo_configure_fftw(_nlo_fftw_target _nlo_fftw_include_dirs)
+  target_link_libraries(bench_solver_backend PRIVATE ${_nlo_fftw_target})
+  if(_nlo_fftw_include_dirs)
+    target_include_directories(bench_solver_backend PRIVATE ${_nlo_fftw_include_dirs})
+  endif()
   target_compile_definitions(bench_solver_backend PRIVATE NLO_ENABLE_FFTW_BACKEND=1)
 endif()
 

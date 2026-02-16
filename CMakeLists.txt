@@ -10,16 +10,20 @@ project(nlolib VERSION 0.0.1 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
 
 option(NLO_ENABLE_FFTW "Enable FFTW integration for CPU FFT execution" ON)
+option(NLO_BUILD_FFTW_FROM_SOURCE "Build FFTW from source and link it statically when FFTW is enabled" ON)
 option(NLO_ENABLE_VKFFT "Enable VkFFT integration for Vulkan FFT execution" ON)
 option(NLO_VECTOR_BACKEND_VULKAN "Enable Vulkan backend for vector operations" ON)
 option(NLO_VULKAN_FETCH_HEADERS "Fetch Vulkan headers when not found locally" ON)
-option(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS "Enable debug-only RK4/dispersion diagnostics in Debug builds" OFF)
+option(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS "Enable debug-only RK4/dispersion diagnostics in Debug builds" ON)
 option(NLO_INSTALL_GIT_HOOKS "Install repository git hooks during CMake configure" ON)
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
-option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" OFF)
+option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
 set(NLO_VULKAN_HEADERS_URL
   "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/heads/main.zip"
   CACHE STRING "URL used to fetch Vulkan headers when local headers are unavailable")
+set(NLO_FFTW_GIT_TAG
+  "fftw-3.3.10"
+  CACHE STRING "FFTW git tag used when NLO_BUILD_FFTW_FROM_SOURCE is enabled")
 set(NLO_CPU_SIMD_LEVEL "AUTO" CACHE STRING "CPU SIMD level: AUTO, AVX2, AVX, or SCALAR")
 set_property(CACHE NLO_CPU_SIMD_LEVEL PROPERTY STRINGS AUTO AVX2 AVX SCALAR)
 

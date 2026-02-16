@@ -5,8 +5,12 @@ if(NOT NLO_ENABLE_FFTW AND NOT NLO_ENABLE_VKFFT)
 endif()
 
 if(NLO_ENABLE_FFTW)
-  find_package(FFTW3 REQUIRED)
-  target_link_libraries(nlo_fft_backend INTERFACE FFTW3::fftw3)
+  include(NLOFftw)
+  nlo_configure_fftw(_nlo_fftw_target _nlo_fftw_include_dirs)
+  target_link_libraries(nlo_fft_backend INTERFACE ${_nlo_fftw_target})
+  if(_nlo_fftw_include_dirs)
+    target_include_directories(nlo_fft_backend INTERFACE ${_nlo_fftw_include_dirs})
+  endif()
   target_compile_definitions(nlo_fft_backend INTERFACE NLO_ENABLE_FFTW_BACKEND=1)
 endif()
 
@@ -51,5 +55,9 @@ if(NLO_ENABLE_VKFFT)
       $<$<CONFIG:Debug>:MachineIndependentd;OSDependentd;GenericCodeGend;SPIRVd;SPIRV-Toolsd;SPIRV-Tools-optd;glslang-default-resource-limitsd>
       $<$<NOT:$<CONFIG:Debug>>:MachineIndependent;OSDependent;GenericCodeGen;SPIRV;SPIRV-Tools;SPIRV-Tools-opt;glslang-default-resource-limits>
     )
+    if(MSVC)
+      # Vulkan/glslang static libs frequently ship without redistributable PDBs.
+      target_link_options(nlo_fft_backend INTERFACE /IGNORE:4099)
+    endif()
   endif()
 endif()

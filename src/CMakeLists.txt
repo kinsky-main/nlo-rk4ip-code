@@ -50,17 +50,4 @@ if(NLO_VECTOR_BACKEND_VULKAN)
   )
 endif()
 
-if(WIN32 AND NLO_ENABLE_FFTW AND FFTW3_LIBRARY)
-  get_filename_component(_FFTW3_DIR "${FFTW3_LIBRARY}" DIRECTORY)
-  get_filename_component(_FFTW3_NAME "${FFTW3_LIBRARY}" NAME_WE)
-  set(_FFTW3_DLL "${_FFTW3_DIR}/${_FFTW3_NAME}.dll")
-
-  if(EXISTS "${_FFTW3_DLL}")
-    add_custom_command(TARGET nlolib POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${_FFTW3_DLL}"
-      "$<TARGET_FILE_DIR:nlolib>"
-    )
-  endif()
-endif()
 
