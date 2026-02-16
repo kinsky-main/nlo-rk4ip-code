@@ -80,12 +80,23 @@ static void test_fft_backend_selection_validation(void)
     assert(auto_plan != NULL);
     nlo_fft_plan_destroy(auto_plan);
 
-#if defined(NLO_ENABLE_VKFFT_BACKEND)
+#if defined(NLO_ENABLE_VKFFT_BACKEND) && defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN)
+    /* Explicit VKFFT requests are a type-mismatch on CPU backends. */
     nlo_fft_plan* vk_plan = NULL;
     assert(nlo_fft_plan_create_with_backend(backend,
                                             n,
                                             NLO_FFT_BACKEND_VKFFT,
                                             &vk_plan) == NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(vk_plan == NULL);
+#endif
+
+#if defined(NLO_ENABLE_VKFFT_BACKEND) && !defined(NLO_ENABLE_VECTOR_BACKEND_VULKAN)
+    /* VKFFT symbol is present, but Vulkan vector backend support is not compiled in. */
+    nlo_fft_plan* vk_plan = NULL;
+    assert(nlo_fft_plan_create_with_backend(backend,
+                                            n,
+                                            NLO_FFT_BACKEND_VKFFT,
+                                            &vk_plan) == NLO_VEC_STATUS_UNSUPPORTED);
     assert(vk_plan == NULL);
 #endif
 
