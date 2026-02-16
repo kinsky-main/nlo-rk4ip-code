@@ -358,6 +358,7 @@ static nlo_vec_status nlo_vk_create_kernels(nlo_vector_backend* backend)
         NLO_VK_SHADER_COMPLEX_MUL_INPLACE_PATH,
         NLO_VK_SHADER_COMPLEX_MAGNITUDE_SQUARED_PATH,
         NLO_VK_SHADER_COMPLEX_EXP_INPLACE_PATH,
+        NLO_VK_SHADER_COMPLEX_REAL_POW_INPLACE_PATH,
         NLO_VK_SHADER_COMPLEX_RELATIVE_ERROR_REDUCE_PATH,
         NLO_VK_SHADER_REAL_MAX_REDUCE_PATH
     };
@@ -1309,6 +1310,22 @@ nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_ve
                                   sizeof(nlo_complex),
                                   dst->length,
                                   0.0,
+                                  0.0);
+}
+
+nlo_vec_status nlo_vk_op_complex_real_pow_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double exponent
+)
+{
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_REAL_POW_INPLACE,
+                                  dst,
+                                  NULL,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  exponent,
                                   0.0);
 }
 

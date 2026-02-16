@@ -24,18 +24,26 @@ void main()
         return;
     }
 
-    const float max_log_float = 88.0f;
-    const float min_log_float = -88.0f;
-
+    float exponent_f = float(pc.scalar0);
     float re_f = float(dst[idx].re);
     float im_f = float(dst[idx].im);
-    if (re_f > max_log_float) {
-        re_f = max_log_float;
-    } else if (re_f < min_log_float) {
-        re_f = min_log_float;
+    float radius_f = length(vec2(re_f, im_f));
+
+    if (radius_f == 0.0f) {
+        if (exponent_f == 0.0f) {
+            dst[idx].re = 1.0;
+            dst[idx].im = 0.0;
+        } else {
+            dst[idx].re = 0.0;
+            dst[idx].im = 0.0;
+        }
+        return;
     }
 
-    float exp_re = exp(re_f);
-    dst[idx].re = double(exp_re * cos(im_f));
-    dst[idx].im = double(exp_re * sin(im_f));
+    float angle_f = atan(im_f, re_f);
+    float scaled_angle_f = exponent_f * angle_f;
+    float scaled_radius_f = pow(radius_f, exponent_f);
+
+    dst[idx].re = double(scaled_radius_f * cos(scaled_angle_f));
+    dst[idx].im = double(scaled_radius_f * sin(scaled_angle_f));
 }

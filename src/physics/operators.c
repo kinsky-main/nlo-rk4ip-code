@@ -91,21 +91,25 @@ nlo_vec_status nlo_apply_dispersion_operator_vec(
     nlo_vector_backend* backend,
     const nlo_vec_buffer* dispersion_factor,
     nlo_vec_buffer* freq_domain_envelope,
-    double exp_step_size
+    nlo_vec_buffer* dispersion_working_vec,
+    double half_step_size
 )
 {
-    if (backend == NULL || dispersion_factor == NULL || freq_domain_envelope == NULL) {
+    if (backend == NULL || dispersion_factor == NULL || freq_domain_envelope == NULL || dispersion_working_vec == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    nlo_vec_status status = nlo_vec_complex_mul_inplace(backend, freq_domain_envelope, dispersion_factor);
+    nlo_vec_status status = nlo_vec_complex_copy(backend, dispersion_working_vec, dispersion_factor);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
     }
 
-    return nlo_vec_complex_scalar_mul_inplace(backend,
-                                              freq_domain_envelope,
-                                              nlo_make(exp_step_size, 0.0));
+    status = nlo_vec_complex_real_pow_inplace(backend, dispersion_working_vec, half_step_size);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    return nlo_vec_complex_mul_inplace(backend, freq_domain_envelope, dispersion_working_vec);
 }
 
 nlo_vec_status nlo_apply_nonlinear_operator_vec(

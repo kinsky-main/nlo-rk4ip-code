@@ -85,6 +85,16 @@ void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsign
 void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent);
 
 /**
+ * @brief Element-wise complex real power: out[i] = base[i] ^ exponent.
+ */
+void nlo_complex_real_pow(const nlo_complex *base, nlo_complex *out, size_t n, double exponent);
+
+/**
+ * @brief Element-wise complex real power inplace: dst[i] = dst[i] ^ exponent.
+ */
+void nlo_complex_real_pow_inplace(nlo_complex *dst, size_t n, double exponent);
+
+/**
  * @brief Element-wise sum of two complex vectors inplace: dst[i] += src[i].
  */
 void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n);

@@ -191,6 +191,42 @@ static void test_nlo_complex_pow_variants(void)
     printf("test_nlo_complex_pow_variants: validates complex power helpers.\n");
 }
 
+static void test_nlo_complex_real_pow_variants(void)
+{
+    const nlo_complex base[4] = {
+        nlo_make(1.0, 0.0),
+        nlo_make(0.0, 1.0),
+        nlo_make(-1.0, 0.0),
+        nlo_make(0.0, 0.0)
+    };
+    nlo_complex out[4] = {0};
+    nlo_complex inplace[4] = {0};
+
+    nlo_complex_real_pow(base, out, 4, 0.5);
+    assert_complex_close(out[0], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    assert(fabs(NLO_RE(out[1]) - sqrt(0.5)) < 1e-12);
+    assert(fabs(NLO_IM(out[1]) - sqrt(0.5)) < 1e-12);
+    assert(fabs(NLO_RE(out[2])) < 1e-10);
+    assert(fabs(NLO_IM(out[2]) - 1.0) < 1e-10);
+    assert_complex_close(out[3], nlo_make(0.0, 0.0), NLO_TEST_EPS);
+
+    nlo_complex_copy(inplace, base, 4);
+    nlo_complex_real_pow_inplace(inplace, 4, 2.0);
+    assert_complex_close(inplace[0], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(inplace[1], nlo_make(-1.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(inplace[2], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(inplace[3], nlo_make(0.0, 0.0), NLO_TEST_EPS);
+
+    nlo_complex_copy(inplace, base, 4);
+    nlo_complex_real_pow_inplace(inplace, 4, 0.0);
+    assert_complex_close(inplace[0], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(inplace[1], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(inplace[2], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+    assert_complex_close(inplace[3], nlo_make(1.0, 0.0), NLO_TEST_EPS);
+
+    printf("test_nlo_complex_real_pow_variants: validates complex real-power helpers.\n");
+}
+
 static void test_calculate_magnitude_squared(void)
 {
     const nlo_complex src[4] = {
@@ -244,6 +280,7 @@ int main(void)
     test_nlo_complex_copy_add_axpy_scalar_mul();
     test_nlo_complex_mul_inplace();
     test_nlo_complex_pow_variants();
+    test_nlo_complex_real_pow_variants();
     test_calculate_magnitude_squared();
     test_nlo_complex_exp_inplace();
     printf("test_nlo_numerics: all subtests completed.\n");

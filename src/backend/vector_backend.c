@@ -664,6 +664,31 @@ nlo_vec_status nlo_vec_complex_pow_inplace(
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
+nlo_vec_status nlo_vec_complex_real_pow_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double exponent
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex_real_pow_inplace((nlo_complex*)dst->host_ptr, dst->length, exponent);
+        return NLO_VEC_STATUS_OK;
+    }
+
+#ifdef NLO_ENABLE_VECTOR_BACKEND_VULKAN
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        return nlo_vk_op_complex_real_pow_inplace(backend, dst, exponent);
+    }
+#endif
+
+    return NLO_VEC_STATUS_UNSUPPORTED;
+}
+
 nlo_vec_status nlo_vec_complex_add_inplace(
     nlo_vector_backend* backend,
     nlo_vec_buffer* dst,

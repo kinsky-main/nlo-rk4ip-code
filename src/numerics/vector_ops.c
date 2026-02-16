@@ -315,6 +315,48 @@ void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent)
     nlo_complex_pow(dst, dst, n, exponent);
 }
 
+static inline nlo_complex nlo_complex_real_pow_scalar(nlo_complex value, double exponent)
+{
+    const double re = NLO_RE(value);
+    const double im = NLO_IM(value);
+    const double radius = hypot(re, im);
+
+    if (radius == 0.0) {
+        if (exponent == 0.0) {
+            return nlo_make(1.0, 0.0);
+        }
+        return nlo_make(0.0, 0.0);
+    }
+
+    const double angle = atan2(im, re);
+    const double scaled_angle = exponent * angle;
+    const double scaled_radius = pow(radius, exponent);
+    return nlo_make(scaled_radius * cos(scaled_angle),
+                    scaled_radius * sin(scaled_angle));
+}
+
+void nlo_complex_real_pow(const nlo_complex *base, nlo_complex *out, size_t n, double exponent)
+{
+    if (base == NULL || out == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        out[i] = nlo_complex_real_pow_scalar(base[i], exponent);
+    }
+}
+
+void nlo_complex_real_pow_inplace(nlo_complex *dst, size_t n, double exponent)
+{
+    if (dst == NULL) {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        dst[i] = nlo_complex_real_pow_scalar(dst[i], exponent);
+    }
+}
+
 void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
 {
     size_t i = 0;

@@ -182,7 +182,7 @@ simulation_state* create_simulation_state(
 
     state->current_z = 0.0;
     state->current_step_size = config->propagation.starting_step_size;
-    state->current_half_step_exp = exp(0.5 * state->current_step_size);
+    state->current_half_step_exp = 0.5 * state->current_step_size;
     state->last_dispersion_step_size = 0.0;
     state->dispersion_valid = 0;
 

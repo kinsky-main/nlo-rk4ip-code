@@ -53,6 +53,11 @@ nlo_vec_status nlo_vk_op_complex_add_inplace(
     const nlo_vec_buffer* src
 );
 nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+nlo_vec_status nlo_vk_op_complex_real_pow_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double exponent
+);
 nlo_vec_status nlo_vk_op_complex_relative_error(
     nlo_vector_backend* backend,
     const nlo_vec_buffer* current,

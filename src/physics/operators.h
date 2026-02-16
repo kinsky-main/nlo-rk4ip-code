@@ -22,7 +22,8 @@ nlo_vec_status nlo_apply_dispersion_operator_vec(
     nlo_vector_backend* backend,
     const nlo_vec_buffer* dispersion_factor,
     nlo_vec_buffer* freq_domain_envelope,
-    double exp_step_size
+    nlo_vec_buffer* dispersion_working_vec,
+    double half_step_size
 );
 
 nlo_vec_status nlo_apply_nonlinear_operator_vec(

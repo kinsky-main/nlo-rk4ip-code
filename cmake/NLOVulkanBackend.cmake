@@ -39,6 +39,7 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
     nlo_complex_mul_inplace
     nlo_complex_magnitude_squared
     nlo_complex_exp_inplace
+    nlo_complex_real_pow_inplace
     nlo_complex_relative_error_reduce
     nlo_real_max_reduce
   )
@@ -75,6 +76,7 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
   set(NLO_VK_SHADER_COMPLEX_MUL_INPLACE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_mul_inplace.spv")
   set(NLO_VK_SHADER_COMPLEX_MAGNITUDE_SQUARED_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_magnitude_squared.spv")
   set(NLO_VK_SHADER_COMPLEX_EXP_INPLACE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_exp_inplace.spv")
+  set(NLO_VK_SHADER_COMPLEX_REAL_POW_INPLACE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_real_pow_inplace.spv")
   set(NLO_VK_SHADER_COMPLEX_RELATIVE_ERROR_REDUCE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_relative_error_reduce.spv")
   set(NLO_VK_SHADER_REAL_MAX_REDUCE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_real_max_reduce.spv")
 
