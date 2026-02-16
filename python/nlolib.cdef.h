@@ -89,6 +89,7 @@ nlolib_status nlolib_propagate(
     const sim_config* config,
     size_t num_time_samples,
     const nlo_complex* input_field,
-    nlo_complex* output_field,
+    size_t num_recorded_samples,
+    nlo_complex* output_records,
     const nlo_execution_options* exec_options
 );

@@ -167,8 +167,13 @@ def _build_execution_options(ffi, params: dict):
     return opts
 
 
-def rk4ip_solver(A0: np.ndarray, z_final: float, params: dict) -> np.ndarray:
-    """Thin Python wrapper around nlolib_propagate."""
+def rk4ip_solver_recorded(
+    A0: np.ndarray,
+    z_final: float,
+    params: dict,
+    num_recorded_samples: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Run one propagation and return z records and envelope records."""
     try:
         from nlolib_cffi import ffi, load
     except ModuleNotFoundError as exc:
@@ -178,6 +183,9 @@ def rk4ip_solver(A0: np.ndarray, z_final: float, params: dict) -> np.ndarray:
         ) from exc
 
     lib = load()
+
+    if num_recorded_samples <= 0:
+        raise ValueError("num_recorded_samples must be positive.")
 
     n = int(A0.size)
     dt = float(params["dt"])
@@ -209,16 +217,22 @@ def rk4ip_solver(A0: np.ndarray, z_final: float, params: dict) -> np.ndarray:
     cfg.frequency.frequency_grid = freq
 
     inp = ffi.new("nlo_complex[]", n)
-    out = ffi.new("nlo_complex[]", n)
+    out = ffi.new("nlo_complex[]", n * int(num_recorded_samples))
     _write_complex_buffer(inp, np.asarray(A0, dtype=np.complex128))
 
     exec_opts = _build_execution_options(ffi, params)
     exec_opts_ptr = exec_opts if exec_opts is not None else ffi.NULL
-    status = int(lib.nlolib_propagate(cfg, n, inp, out, exec_opts_ptr))
+    status = int(lib.nlolib_propagate(cfg, n, inp, int(num_recorded_samples), out, exec_opts_ptr))
     if status != 0:
         raise RuntimeError(f"nlolib_propagate failed with status={status}.")
 
-    return _read_complex_buffer(out, n)
+    flat = _read_complex_buffer(out, n * int(num_recorded_samples))
+    records = flat.reshape(int(num_recorded_samples), n)
+    if int(num_recorded_samples) == 1:
+        z_records = np.asarray([float(z_final)], dtype=np.float64)
+    else:
+        z_records = np.linspace(0.0, float(z_final), int(num_recorded_samples))
+    return z_records, records
 
 
 def average_relative_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
@@ -249,14 +263,18 @@ def analytical_initial_condition_error(
     return float(np.max(np.abs(u_ref - u_analytic)))
 
 
-def compute_wavelength_spectral_map(
-    A0: np.ndarray,
+def compute_wavelength_spectral_map_from_records(
+    A_records: np.ndarray,
     z_samples: np.ndarray,
-    params: dict,
+    dt: float,
     lambda0_nm: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    n = int(A0.size)
-    dt = float(params["dt"])
+    if A_records.ndim != 2:
+        raise ValueError("A_records must be a 2D array [record, time].")
+    if A_records.shape[0] != z_samples.size:
+        raise ValueError("A_records row count must match z_samples length.")
+
+    n = int(A_records.shape[1])
     freq_shifted = np.fft.fftshift(np.fft.fftfreq(n, d=dt))
 
     nu0 = C_NM_PER_PS / lambda0_nm
@@ -265,8 +283,8 @@ def compute_wavelength_spectral_map(
     lambda_nm = C_NM_PER_PS / nu[valid]
 
     spec_map = np.empty((z_samples.size, valid.sum()), dtype=np.float64)
-    for i, z in enumerate(z_samples):
-        field_z = np.asarray(A0, dtype=np.complex128) if z == 0.0 else rk4ip_solver(A0, float(z), params)
+    for i in range(z_samples.size):
+        field_z = np.asarray(A_records[i], dtype=np.complex128)
         spec = np.nan_to_num(_spectral_intensity(field_z), nan=0.0, posinf=0.0, neginf=0.0)
         spec_map[i, :] = spec[valid]
 
@@ -350,11 +368,13 @@ def save_plots(
     return saved_paths
 
 
-def diagnose_first_nonfinite_z(A0: np.ndarray, params: dict, z_final: float) -> tuple[float | None, float]:
-    z_probe = np.linspace(0.0, z_final, 41)
+def diagnose_first_nonfinite_record(
+    A_records: np.ndarray,
+    z_samples: np.ndarray,
+) -> tuple[float | None, float]:
     max_finite_amplitude = 0.0
-    for z in z_probe:
-        field_z = np.asarray(A0, dtype=np.complex128) if z == 0.0 else rk4ip_solver(A0, float(z), params)
+    for i, z in enumerate(z_samples):
+        field_z = np.asarray(A_records[i], dtype=np.complex128)
         finite_mask = np.isfinite(field_z.real) & np.isfinite(field_z.imag)
         if not finite_mask.all():
             return float(z), max_finite_amplitude
@@ -392,18 +412,20 @@ def main() -> float:
         "omega": omega,
         "pulse_period": n * dt,
         "starting_step_size": 1e-4,
-        "max_step_size": 1e-4,
-        "min_step_size": 1e-4,
+        "max_step_size": 1e-2,
+        "min_step_size": 1e-6,
         "error_tolerance": 1e-8,
     }
 
+    num_recorded_samples = 40
+    z_records, A_records = rk4ip_solver_recorded(A0, z_final, params, num_recorded_samples)
+    A_num = np.asarray(A_records[-1], dtype=np.complex128)
     U_true = second_order_soliton_normalized_envelope(t, z_final, beta2, t0)
-    A_num = rk4ip_solver(A0, z_final, params)
     U_num = to_normalized_envelope(A_num, z_final, p0, alpha)
     epsilon = average_relative_intensity_error(U_num, U_true)
     z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):
-        first_bad_z, max_finite_amplitude = diagnose_first_nonfinite_z(A0, params, z_final)
+        first_bad_z, max_finite_amplitude = diagnose_first_nonfinite_record(A_records, z_records)
         print("warning: epsilon is non-finite because numerical field contains non-finite values.")
         if first_bad_z is not None:
             print(
@@ -413,13 +435,12 @@ def main() -> float:
             )
 
     lambda0_nm = 1550.0
-    z_samples = np.linspace(0.0, z_final, 40)
-    map_params = dict(params)
-    map_step = z_final / 400.0
-    map_params["starting_step_size"] = map_step
-    map_params["max_step_size"] = map_step
-    map_params["min_step_size"] = map_step
-    z_map, lambda_nm, spectral_map = compute_wavelength_spectral_map(A0, z_samples, map_params, lambda0_nm)
+    z_map, lambda_nm, spectral_map = compute_wavelength_spectral_map_from_records(
+        A_records,
+        z_records,
+        dt,
+        lambda0_nm,
+    )
 
     output_dir = Path(__file__).resolve().parent / "output" / "second_order_soliton"
     saved_paths = save_plots(

@@ -20,6 +20,7 @@ print("test_python_bindings: configured sim_config scalar fields.")
 n = 128
 inp = ffi.new("nlo_complex[]", n)
 out = ffi.new("nlo_complex[]", n)
+out_records = ffi.new("nlo_complex[]", n * 4)
 
 cfg.dispersion.alpha = 0.0
 
@@ -31,7 +32,7 @@ assert cfg.dispersion.num_dispersion_terms == 0
 assert cfg.frequency.frequency_grid != ffi.NULL
 print("test_python_bindings: verified struct field access.")
 
-status = lib.nlolib_propagate(cfg, n, inp, out, ffi.NULL)
+status = lib.nlolib_propagate(cfg, n, inp, 1, out, ffi.NULL)
 assert int(status) == 0
 print("test_python_bindings: nlolib_propagate returned expected status.")
 
@@ -49,6 +50,6 @@ opts.vulkan.command_pool = ffi.NULL
 opts.vulkan.descriptor_set_budget_bytes = 0
 opts.vulkan.descriptor_set_count_override = 0
 
-status = lib.nlolib_propagate(cfg, n, inp, out, opts)
+status = lib.nlolib_propagate(cfg, n, inp, 4, out_records, opts)
 assert int(status) == 0
-print("test_python_bindings: nlolib_propagate with options returned expected status.")
+print("test_python_bindings: nlolib_propagate with recorded outputs returned expected status.")
