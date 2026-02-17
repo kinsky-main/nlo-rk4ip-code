@@ -8,5 +8,9 @@ apt-get install -y --no-install-recommends \
   build-essential \
   pkg-config \
   libfftw3-dev \
+  libvulkan-dev \
+  glslang-tools \
+  vulkan-tools \
+  spirv-tools \
   python3-cffi
 rm -rf /var/lib/apt/lists/*

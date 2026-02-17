@@ -39,19 +39,32 @@ fi
 
 if [[ "${install_deps}" -eq 1 ]]; then
   if command -v apt-get >/dev/null 2>&1; then
+    apt_packages=(
+      cmake
+      ninja-build
+      build-essential
+      pkg-config
+      libfftw3-dev
+      libvulkan-dev
+      glslang-tools
+      vulkan-tools
+      spirv-tools
+    )
+
     if [[ "${EUID}" -ne 0 ]]; then
       if ! command -v sudo >/dev/null 2>&1; then
         echo "sudo not available; install dependencies manually."
         exit 1
       fi
       sudo apt-get update
-      sudo apt-get install -y cmake ninja-build build-essential pkg-config libfftw3-dev libvulkan-dev glslang-tools
+      sudo apt-get install -y "${apt_packages[@]}"
     else
       apt-get update
-      apt-get install -y cmake ninja-build build-essential pkg-config libfftw3-dev libvulkan-dev glslang-tools
+      apt-get install -y "${apt_packages[@]}"
     fi
   else
-    echo "apt-get not found; install cmake, build tools, Vulkan SDK/loader+glslangValidator, and FFTW prerequisites manually."
+    echo "apt-get not found; install cmake, build tools, Vulkan SDK components (loader+headers+tools), and FFTW prerequisites manually."
+    echo "VkFFT is fetched by CMake during configure; there is no required apt package."
   fi
 fi
 

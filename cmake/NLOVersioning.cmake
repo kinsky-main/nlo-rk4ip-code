@@ -18,6 +18,21 @@ function(_nlo_resolve_git_dir out_var)
     endif()
   endif()
 
+  # Worktrees point at "<common-git-dir>/worktrees/<name>".
+  # Hooks live in the common git dir referenced by "commondir".
+  if(IS_DIRECTORY "${_nlo_git_dir}" AND EXISTS "${_nlo_git_dir}/commondir")
+    file(READ "${_nlo_git_dir}/commondir" _nlo_common_dir_raw)
+    string(STRIP "${_nlo_common_dir_raw}" _nlo_common_dir)
+    if(_nlo_common_dir)
+      if(NOT IS_ABSOLUTE "${_nlo_common_dir}")
+        get_filename_component(_nlo_common_dir "${_nlo_common_dir}" ABSOLUTE BASE_DIR "${_nlo_git_dir}")
+      endif()
+      if(IS_DIRECTORY "${_nlo_common_dir}")
+        set(_nlo_git_dir "${_nlo_common_dir}")
+      endif()
+    endif()
+  endif()
+
   set("${out_var}" "${_nlo_git_dir}" PARENT_SCOPE)
 endfunction()
 
@@ -40,6 +55,15 @@ function(nlo_install_minor_version_hook)
   set(_nlo_pre_commit_hook "${_nlo_git_dir}/hooks/pre-commit")
   get_filename_component(_nlo_hook_dir "${_nlo_pre_commit_hook}" DIRECTORY)
   set(_nlo_install_hook TRUE)
+
+  if(NOT IS_DIRECTORY "${_nlo_hook_dir}")
+    get_filename_component(_nlo_hook_parent "${_nlo_hook_dir}" DIRECTORY)
+    if(NOT IS_DIRECTORY "${_nlo_hook_parent}" OR NOT IS_WRITABLE "${_nlo_hook_parent}")
+      message(STATUS "Pre-commit hook path is not writable; skipping automatic minor version hook installation.")
+      return()
+    endif()
+    file(MAKE_DIRECTORY "${_nlo_hook_dir}")
+  endif()
 
   if((EXISTS "${_nlo_pre_commit_hook}" AND NOT IS_WRITABLE "${_nlo_pre_commit_hook}") OR
      (NOT EXISTS "${_nlo_pre_commit_hook}" AND NOT IS_WRITABLE "${_nlo_hook_dir}"))
