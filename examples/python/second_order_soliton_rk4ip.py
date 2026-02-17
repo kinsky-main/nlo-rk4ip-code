@@ -1,5 +1,5 @@
 """
-Second-order soliton propagation check using the Python CFFI API.
+Second-order soliton propagation check using the Python ctypes API.
 
 This example compares the numerical solver output against the known analytical
 breather solution at one soliton period and reports the average relative
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import sys
+import ctypes
 from pathlib import Path
 
 import numpy as np
@@ -73,19 +74,6 @@ def second_order_soliton_normalized_envelope(
     return numerator / denominator
 
 
-def _write_complex_buffer(dst, values: np.ndarray) -> None:
-    for i, val in enumerate(values):
-        dst[i].re = float(val.real)
-        dst[i].im = float(val.imag)
-
-
-def _read_complex_buffer(src, n: int) -> np.ndarray:
-    out = np.empty(n, dtype=np.complex128)
-    for i in range(n):
-        out[i] = complex(src[i].re, src[i].im)
-    return out
-
-
 def _parse_pointer_value(value: int | str) -> int:
     if isinstance(value, str):
         text = value.strip().lower()
@@ -95,36 +83,50 @@ def _parse_pointer_value(value: int | str) -> int:
     return int(value)
 
 
-def _to_vk_handle(ffi, value: int | str | None, ctype: str):
+def _to_vk_handle(value: int | str | None):
     if value is None:
-        return ffi.NULL
+        return None
     parsed = _parse_pointer_value(value)
     if parsed == 0:
-        return ffi.NULL
-    return ffi.cast(ctype, parsed)
+        return None
+    return ctypes.c_void_p(parsed)
 
 
-def _build_execution_options(ffi, params: dict):
+def _build_execution_options(params: dict):
+    from nlolib_ctypes import (
+        NLO_FFT_BACKEND_AUTO,
+        NLO_FFT_BACKEND_FFTW,
+        NLO_FFT_BACKEND_VKFFT,
+        NLO_VECTOR_BACKEND_AUTO,
+        NLO_VECTOR_BACKEND_CPU,
+        NLO_VECTOR_BACKEND_VULKAN,
+        default_execution_options,
+    )
+
     backend_cfg = params.get("backend", "auto")
     if backend_cfg is None:
         backend_cfg = "auto"
 
-    opts = ffi.new("nlo_execution_options*")
-    opts.backend_type = 0  # NLO_VECTOR_BACKEND_CPU
-    opts.fft_backend = 0  # NLO_FFT_BACKEND_AUTO
+    opts = default_execution_options()
+    opts.backend_type = NLO_VECTOR_BACKEND_CPU
+    opts.fft_backend = NLO_FFT_BACKEND_AUTO
     opts.device_heap_fraction = float(params.get("device_heap_fraction", 0.70))
     opts.record_ring_target = int(params.get("record_ring_target", 0))
     opts.forced_device_budget_bytes = int(params.get("forced_device_budget_bytes", 0))
-    opts.vulkan.physical_device = ffi.NULL
-    opts.vulkan.device = ffi.NULL
-    opts.vulkan.queue = ffi.NULL
+    opts.vulkan.physical_device = None
+    opts.vulkan.device = None
+    opts.vulkan.queue = None
     opts.vulkan.queue_family_index = 0
-    opts.vulkan.command_pool = ffi.NULL
+    opts.vulkan.command_pool = None
     opts.vulkan.descriptor_set_budget_bytes = 0
     opts.vulkan.descriptor_set_count_override = 0
 
     fft_backend = str(params.get("fft_backend", "auto")).strip().lower()
-    fft_backend_map = {"auto": 0, "fftw": 1, "vkfft": 2}
+    fft_backend_map = {
+        "auto": NLO_FFT_BACKEND_AUTO,
+        "fftw": NLO_FFT_BACKEND_FFTW,
+        "vkfft": NLO_FFT_BACKEND_VKFFT,
+    }
     if fft_backend not in fft_backend_map:
         raise ValueError("fft_backend must be one of: auto, fftw, vkfft.")
     opts.fft_backend = fft_backend_map[fft_backend]
@@ -139,11 +141,11 @@ def _build_execution_options(ffi, params: dict):
         raise TypeError("backend must be a string or dict when provided.")
 
     if backend_type == "cpu":
-        opts.backend_type = 0
+        opts.backend_type = NLO_VECTOR_BACKEND_CPU
         return opts
 
     if backend_type == "auto":
-        opts.backend_type = 2  # NLO_VECTOR_BACKEND_AUTO
+        opts.backend_type = NLO_VECTOR_BACKEND_AUTO
         return opts
 
     if backend_type != "vulkan":
@@ -160,12 +162,12 @@ def _build_execution_options(ffi, params: dict):
             + ", ".join(missing)
         )
 
-    opts.backend_type = 1  # NLO_VECTOR_BACKEND_VULKAN
-    opts.vulkan.physical_device = _to_vk_handle(ffi, vk_cfg.get("physical_device"), "VkPhysicalDevice")
-    opts.vulkan.device = _to_vk_handle(ffi, vk_cfg.get("device"), "VkDevice")
-    opts.vulkan.queue = _to_vk_handle(ffi, vk_cfg.get("queue"), "VkQueue")
+    opts.backend_type = NLO_VECTOR_BACKEND_VULKAN
+    opts.vulkan.physical_device = _to_vk_handle(vk_cfg.get("physical_device"))
+    opts.vulkan.device = _to_vk_handle(vk_cfg.get("device"))
+    opts.vulkan.queue = _to_vk_handle(vk_cfg.get("queue"))
     opts.vulkan.queue_family_index = int(vk_cfg.get("queue_family_index", 0))
-    opts.vulkan.command_pool = _to_vk_handle(ffi, vk_cfg.get("command_pool"), "VkCommandPool")
+    opts.vulkan.command_pool = _to_vk_handle(vk_cfg.get("command_pool"))
     opts.vulkan.descriptor_set_budget_bytes = int(vk_cfg.get("descriptor_set_budget_bytes", 0))
     opts.vulkan.descriptor_set_count_override = int(vk_cfg.get("descriptor_set_count_override", 0))
     return opts
@@ -178,15 +180,9 @@ def rk4ip_solver_recorded(
     num_recorded_samples: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run one propagation and return z records and envelope records."""
-    try:
-        from nlolib_cffi import ffi, load
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "nlolib_cffi/cffi is not available. Install cffi and ensure "
-            "PYTHONPATH includes the repo's python/ directory."
-        ) from exc
+    from nlolib_ctypes import NLolib, prepare_sim_config
 
-    lib = load()
+    api = NLolib()
 
     if num_recorded_samples <= 0:
         raise ValueError("num_recorded_samples must be positive.")
@@ -197,49 +193,26 @@ def rk4ip_solver_recorded(
     if omega.size != n:
         raise ValueError("omega grid size must match A0 size.")
 
-    cfg = ffi.new("sim_config*")
-    cfg.nonlinear.gamma = float(params["gamma"])
-    cfg.dispersion.num_dispersion_terms = 3
-    cfg.dispersion.betas[0] = 0.0
-    cfg.dispersion.betas[1] = 0.0
-    cfg.dispersion.betas[2] = float(params["beta2"])
-    cfg.dispersion.alpha = float(params.get("alpha", 0.0))
+    cfg = prepare_sim_config(
+        n,
+        gamma=float(params["gamma"]),
+        betas=[0.0, 0.0, float(params["beta2"])],
+        alpha=float(params.get("alpha", 0.0)),
+        propagation_distance=float(z_final),
+        starting_step_size=float(params.get("starting_step_size", 1e-4)),
+        max_step_size=float(params.get("max_step_size", 1e-2)),
+        min_step_size=float(params.get("min_step_size", 1e-4)),
+        error_tolerance=float(params.get("error_tolerance", 1e-8)),
+        pulse_period=float(params.get("pulse_period", n * dt)),
+        delta_time=dt,
+        frequency_grid=[complex(float(om), 0.0) for om in omega],
+    )
 
-    cfg.propagation.propagation_distance = float(z_final)
-    cfg.propagation.starting_step_size = float(params.get("starting_step_size", 1e-4))
-    cfg.propagation.max_step_size = float(params.get("max_step_size", 1e-2))
-    cfg.propagation.min_step_size = float(params.get("min_step_size", 1e-4))
-    cfg.propagation.error_tolerance = float(params.get("error_tolerance", 1e-8))
-
-    cfg.time.pulse_period = float(params.get("pulse_period", n * dt))
-    cfg.time.delta_time = dt
-
-    freq = ffi.new("nlo_complex[]", n)
-    for i, om in enumerate(omega):
-        freq[i].re = float(om)
-        freq[i].im = 0.0
-    cfg.frequency.frequency_grid = freq
-    cfg.spatial.nx = n
-    cfg.spatial.ny = 1
-    cfg.spatial.delta_x = 1.0
-    cfg.spatial.delta_y = 1.0
-    cfg.spatial.grin_gx = 0.0
-    cfg.spatial.grin_gy = 0.0
-    cfg.spatial.spatial_frequency_grid = ffi.NULL
-    cfg.spatial.grin_potential_phase_grid = ffi.NULL
-
-    inp = ffi.new("nlo_complex[]", n)
-    out = ffi.new("nlo_complex[]", n * int(num_recorded_samples))
-    _write_complex_buffer(inp, np.asarray(A0, dtype=np.complex128))
-
-    exec_opts = _build_execution_options(ffi, params)
-    exec_opts_ptr = exec_opts if exec_opts is not None else ffi.NULL
-    status = int(lib.nlolib_propagate(cfg, n, inp, int(num_recorded_samples), out, exec_opts_ptr))
-    if status != 0:
-        raise RuntimeError(f"nlolib_propagate failed with status={status}.")
-
-    flat = _read_complex_buffer(out, n * int(num_recorded_samples))
-    records = flat.reshape(int(num_recorded_samples), n)
+    exec_opts = _build_execution_options(params)
+    records = np.asarray(
+        api.propagate(cfg, np.asarray(A0, dtype=np.complex128), int(num_recorded_samples), exec_opts),
+        dtype=np.complex128,
+    )
     if int(num_recorded_samples) == 1:
         z_records = np.asarray([float(z_final)], dtype=np.float64)
     else:

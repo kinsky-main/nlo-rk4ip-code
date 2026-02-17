@@ -11,6 +11,5 @@ apt-get install -y --no-install-recommends \
   libvulkan-dev \
   glslang-tools \
   vulkan-tools \
-  spirv-tools \
-  python3-cffi
+  spirv-tools
 rm -rf /var/lib/apt/lists/*

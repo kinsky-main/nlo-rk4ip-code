@@ -1,29 +1,24 @@
 import math
 
-try:
-    from nlolib_cffi import load, ffi
-except ModuleNotFoundError:
-    print("test_linear_drift: cffi bindings unavailable; skipping.")
-    raise SystemExit(0)
-
-
-def _write_complex_buffer(dst, values):
-    for i, val in enumerate(values):
-        dst[i].re = float(val.real)
-        dst[i].im = float(val.imag)
-
-
-def _read_complex_buffer(src, n):
-    out = [0j] * n
-    for i in range(n):
-        out[i] = complex(src[i].re, src[i].im)
-    return out
+from nlolib_ctypes import (
+    NLO_VECTOR_BACKEND_CPU,
+    NLolib,
+    default_execution_options,
+    prepare_sim_config,
+)
 
 
 def _omega_grid_unshifted(n, dt):
     two_pi = 2.0 * math.pi
-    return [two_pi * (float(i) / (float(n) * dt) if i <= (n - 1) // 2 else -float(n - i) / (float(n) * dt))
-            for i in range(n)]
+    return [
+        two_pi
+        * (
+            float(i) / (float(n) * dt)
+            if i <= (n - 1) // 2
+            else -float(n - i) / (float(n) * dt)
+        )
+        for i in range(n)
+    ]
 
 
 def _centered_time_grid(n, dt):
@@ -53,73 +48,25 @@ def _intensity_centroid(t, field):
     return weighted / total
 
 
-def _propagate_final_field(lib, cfg, n, inp_values, opts):
-    inp = ffi.new("nlo_complex[]", n)
-    out = ffi.new("nlo_complex[]", n * 2)
-    _write_complex_buffer(inp, inp_values)
-
-    status = int(lib.nlolib_propagate(cfg, n, inp, 2, out, opts))
-    assert status == 0
-
-    records = _read_complex_buffer(out, n * 2)
-    return records[n:]
-
-
 def _build_config(n, dt, omega, beta2, z_final):
-    cfg = ffi.new("sim_config*")
-    cfg.nonlinear.gamma = 0.0
-    cfg.dispersion.num_dispersion_terms = 3
-    cfg.dispersion.betas[0] = 0.0
-    cfg.dispersion.betas[1] = 0.0
-    cfg.dispersion.betas[2] = beta2
-    cfg.dispersion.alpha = 0.0
-
-    cfg.propagation.propagation_distance = z_final
-    cfg.propagation.starting_step_size = 1e-3
-    cfg.propagation.max_step_size = 5e-3
-    cfg.propagation.min_step_size = 1e-5
-    cfg.propagation.error_tolerance = 1e-7
-
-    cfg.time.pulse_period = float(n) * dt
-    cfg.time.delta_time = dt
-
-    freq = ffi.new("nlo_complex[]", n)
-    for i, om in enumerate(omega):
-        freq[i].re = float(om)
-        freq[i].im = 0.0
-    cfg.frequency.frequency_grid = freq
-
-    cfg.spatial.nx = n
-    cfg.spatial.ny = 1
-    cfg.spatial.delta_x = 1.0
-    cfg.spatial.delta_y = 1.0
-    cfg.spatial.grin_gx = 0.0
-    cfg.spatial.grin_gy = 0.0
-    cfg.spatial.spatial_frequency_grid = ffi.NULL
-    cfg.spatial.grin_potential_phase_grid = ffi.NULL
-
-    return cfg, freq
-
-
-def _cpu_exec_options():
-    opts = ffi.new("nlo_execution_options*")
-    opts.backend_type = 0  # NLO_VECTOR_BACKEND_CPU
-    opts.fft_backend = 0  # NLO_FFT_BACKEND_AUTO
-    opts.device_heap_fraction = 0.70
-    opts.record_ring_target = 0
-    opts.forced_device_budget_bytes = 0
-    opts.vulkan.physical_device = ffi.NULL
-    opts.vulkan.device = ffi.NULL
-    opts.vulkan.queue = ffi.NULL
-    opts.vulkan.queue_family_index = 0
-    opts.vulkan.command_pool = ffi.NULL
-    opts.vulkan.descriptor_set_budget_bytes = 0
-    opts.vulkan.descriptor_set_count_override = 0
-    return opts
+    return prepare_sim_config(
+        n,
+        gamma=0.0,
+        betas=[0.0, 0.0, beta2],
+        alpha=0.0,
+        propagation_distance=z_final,
+        starting_step_size=1e-3,
+        max_step_size=5e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+    )
 
 
 def main():
-    lib = load()
+    api = NLolib()
 
     n = 1024
     dt = 0.01
@@ -130,16 +77,16 @@ def main():
 
     t = _centered_time_grid(n, dt)
     omega = _omega_grid_unshifted(n, dt)
-    opts = _cpu_exec_options()
+    opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
 
-    cfg_pos, _freq_pos = _build_config(n, dt, omega, beta2, z_final)
-    cfg_neg, _freq_neg = _build_config(n, dt, omega, beta2, z_final)
+    cfg_pos = _build_config(n, dt, omega, beta2, z_final)
+    cfg_neg = _build_config(n, dt, omega, beta2, z_final)
 
     pulse_pos = _gaussian_with_phase(t, sigma, d)
     pulse_neg = _gaussian_with_phase(t, sigma, -d)
 
-    final_pos = _propagate_final_field(lib, cfg_pos, n, pulse_pos, opts)
-    final_neg = _propagate_final_field(lib, cfg_neg, n, pulse_neg, opts)
+    final_pos = api.propagate(cfg_pos, pulse_pos, 2, opts)[1]
+    final_neg = api.propagate(cfg_neg, pulse_neg, 2, opts)[1]
 
     shift_pos = _intensity_centroid(t, final_pos) - _intensity_centroid(t, pulse_pos)
     shift_neg = _intensity_centroid(t, final_neg) - _intensity_centroid(t, pulse_neg)

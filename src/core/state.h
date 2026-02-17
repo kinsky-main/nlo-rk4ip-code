@@ -7,6 +7,7 @@
 #include "backend/nlo_complex.h"
 #include "backend/vector_backend.h"
 #include "fft/fft_backend.h"
+#include "physics/operator_program.h"
 #include <stddef.h>
 
 #ifndef NT_MAX
@@ -19,6 +20,10 @@
 
 #ifndef NLO_DEFAULT_DEVICE_HEAP_FRACTION
 #define NLO_DEFAULT_DEVICE_HEAP_FRACTION 0.70
+#endif
+
+#ifndef NLO_RUNTIME_OPERATOR_CONSTANTS_MAX
+#define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16u
 #endif
 
 typedef struct {
@@ -60,12 +65,20 @@ typedef struct {
 } spatial_grid;
 
 typedef struct {
+    const char* dispersion_expr;
+    const char* nonlinear_expr;
+    size_t num_constants;
+    double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
+} runtime_operator_params;
+
+typedef struct {
     nonlinear_params nonlinear;
     dispersion_params dispersion;
     propagation_params propagation;
     time_grid time;
     frequency_grid frequency;
     spatial_grid spatial;
+    runtime_operator_params runtime;
 } sim_config;
 
 typedef struct {
@@ -124,6 +137,13 @@ typedef struct {
     double current_half_step_exp;
     double last_dispersion_step_size;
     int dispersion_valid;
+
+    int runtime_dispersion_enabled;
+    int runtime_nonlinear_enabled;
+    nlo_operator_program dispersion_operator_program;
+    nlo_operator_program nonlinear_operator_program;
+    size_t runtime_operator_stack_slots;
+    nlo_vec_buffer* runtime_operator_stack_vec[NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS];
 } simulation_state;
 
 nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type);
