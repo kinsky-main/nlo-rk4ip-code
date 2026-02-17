@@ -33,7 +33,13 @@ typedef enum {
     NLO_OPERATOR_OP_NEGATE = 5,
     NLO_OPERATOR_OP_ADD = 6,
     NLO_OPERATOR_OP_MUL = 7,
-    NLO_OPERATOR_OP_EXP = 8
+    NLO_OPERATOR_OP_EXP = 8,
+    NLO_OPERATOR_OP_DIV = 9,
+    NLO_OPERATOR_OP_POW = 10,
+    NLO_OPERATOR_OP_LOG = 11,
+    NLO_OPERATOR_OP_SQRT = 12,
+    NLO_OPERATOR_OP_SIN = 13,
+    NLO_OPERATOR_OP_COS = 14
 } nlo_operator_opcode;
 
 typedef struct {

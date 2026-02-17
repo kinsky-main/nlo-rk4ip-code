@@ -16,6 +16,7 @@
 - Don't make per step memory allocations; keep all allocations static
 - Do produce a git command that can be copy-pasted to isolate the change
 - Do ensure GPU to host transfers are minimized and efficient
+- Do check API changes are carried across all language bindings
 
 ## Formatting
 - Put doxygen docstrings in function declarations in header files

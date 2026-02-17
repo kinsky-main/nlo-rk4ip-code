@@ -200,6 +200,15 @@ nlo_vec_status nlo_vec_complex_mul_inplace(nlo_vector_backend* backend, nlo_vec_
 nlo_vec_status nlo_vec_complex_pow(nlo_vector_backend* backend, const nlo_vec_buffer* base, nlo_vec_buffer* out, unsigned int exponent);
 nlo_vec_status nlo_vec_complex_pow_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, unsigned int exponent);
 /**
+ * @brief Element-wise complex power with complex exponent inplace:
+ *        dst[i] = dst[i] ^ exponent[i].
+ */
+nlo_vec_status nlo_vec_complex_pow_elementwise_inplace(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* exponent
+);
+/**
  * @brief Element-wise complex real power inplace: dst[i] = dst[i] ^ exponent.
  */
 nlo_vec_status nlo_vec_complex_real_pow_inplace(
@@ -209,6 +218,18 @@ nlo_vec_status nlo_vec_complex_real_pow_inplace(
 );
 nlo_vec_status nlo_vec_complex_add_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
 nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+/**
+ * @brief Element-wise complex natural logarithm inplace: dst[i] = log(dst[i]).
+ */
+nlo_vec_status nlo_vec_complex_log_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+/**
+ * @brief Element-wise complex sine inplace: dst[i] = sin(dst[i]).
+ */
+nlo_vec_status nlo_vec_complex_sin_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+/**
+ * @brief Element-wise complex cosine inplace: dst[i] = cos(dst[i]).
+ */
+nlo_vec_status nlo_vec_complex_cos_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
 
 /**
  * @brief Compute relative L-infinity complex error:

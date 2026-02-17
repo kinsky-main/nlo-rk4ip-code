@@ -7,9 +7,23 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Mapping, Sequence
+
+try:
+    from .runtime_expr import (  # type: ignore[attr-defined]
+        RUNTIME_CONTEXT_DISPERSION,
+        RUNTIME_CONTEXT_NONLINEAR,
+        translate_callable,
+    )
+except ImportError:
+    from runtime_expr import (
+        RUNTIME_CONTEXT_DISPERSION,
+        RUNTIME_CONTEXT_NONLINEAR,
+        translate_callable,
+    )
 
 NT_MAX = 1 << 20
 NLO_RUNTIME_OPERATOR_CONSTANTS_MAX = 16
@@ -253,7 +267,21 @@ def default_execution_options(
 class RuntimeOperators:
     dispersion_expr: str | None = None
     nonlinear_expr: str | None = None
+    dispersion_fn: Callable[..., object] | None = None
+    nonlinear_fn: Callable[..., object] | None = None
     constants: Sequence[float] = ()
+    constant_bindings: Mapping[str, float] | None = None
+    auto_capture_constants: bool = True
+
+
+def _shift_constant_indices(expression: str, offset: int) -> str:
+    if offset == 0:
+        return expression
+
+    def repl(match: re.Match[str]) -> str:
+        return f"c{int(match.group(1)) + offset}"
+
+    return re.sub(r"\bc(\d+)\b", repl, expression)
 
 
 @dataclass
@@ -350,26 +378,59 @@ def prepare_sim_config(
         cfg.spatial.grin_potential_phase_grid = None
 
     if runtime is not None:
-        if runtime.dispersion_expr:
-            disp_bytes = runtime.dispersion_expr.encode("utf-8")
-            keepalive.append(disp_bytes)
-            cfg.runtime.dispersion_expr = ctypes.c_char_p(disp_bytes)
-        else:
-            cfg.runtime.dispersion_expr = None
+        constants = [float(value) for value in runtime.constants]
+        constant_bindings = runtime.constant_bindings
+        auto_capture = bool(runtime.auto_capture_constants)
 
-        if runtime.nonlinear_expr:
-            nonlin_bytes = runtime.nonlinear_expr.encode("utf-8")
-            keepalive.append(nonlin_bytes)
-            cfg.runtime.nonlinear_expr = ctypes.c_char_p(nonlin_bytes)
-        else:
-            cfg.runtime.nonlinear_expr = None
+        if runtime.dispersion_expr and runtime.dispersion_fn is not None:
+            raise ValueError("runtime.dispersion_expr and runtime.dispersion_fn are mutually exclusive")
+        if runtime.nonlinear_expr and runtime.nonlinear_fn is not None:
+            raise ValueError("runtime.nonlinear_expr and runtime.nonlinear_fn are mutually exclusive")
 
-        constants = list(runtime.constants)
+        dispersion_expr = runtime.dispersion_expr
+        if runtime.dispersion_fn is not None:
+            translated = translate_callable(
+                runtime.dispersion_fn,
+                RUNTIME_CONTEXT_DISPERSION,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            dispersion_expr = shifted
+
+        nonlinear_expr = runtime.nonlinear_expr
+        if runtime.nonlinear_fn is not None:
+            translated = translate_callable(
+                runtime.nonlinear_fn,
+                RUNTIME_CONTEXT_NONLINEAR,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            nonlinear_expr = shifted
+
         if len(constants) > NLO_RUNTIME_OPERATOR_CONSTANTS_MAX:
             raise ValueError(
                 "runtime.constants length exceeds "
                 f"{NLO_RUNTIME_OPERATOR_CONSTANTS_MAX}"
             )
+
+        if dispersion_expr:
+            disp_bytes = dispersion_expr.encode("utf-8")
+            keepalive.append(disp_bytes)
+            cfg.runtime.dispersion_expr = ctypes.c_char_p(disp_bytes)
+        else:
+            cfg.runtime.dispersion_expr = None
+
+        if nonlinear_expr:
+            nonlin_bytes = nonlinear_expr.encode("utf-8")
+            keepalive.append(nonlin_bytes)
+            cfg.runtime.nonlinear_expr = ctypes.c_char_p(nonlin_bytes)
+        else:
+            cfg.runtime.nonlinear_expr = None
+
         cfg.runtime.num_constants = len(constants)
         for i, constant in enumerate(constants):
             cfg.runtime.constants[i] = float(constant)

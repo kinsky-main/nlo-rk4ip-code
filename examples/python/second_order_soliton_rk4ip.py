@@ -11,19 +11,16 @@ from __future__ import annotations
 
 import math
 import sys
-import ctypes
 from pathlib import Path
 
 import numpy as np
+from backend.plotting import (
+    plot_final_intensity_comparison,
+    plot_final_re_im_comparison,
+    plot_intensity_colormap_vs_propagation,
+    plot_total_error_over_propagation,
+)
 from backend.runner import NloExampleRunner, SimulationOptions, TemporalSimulationConfig
-
-try:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -189,82 +186,83 @@ def compute_wavelength_spectral_map_from_records(
     return z_samples, lambda_nm, spec_map
 
 
+def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
+    if records.shape != reference_records.shape:
+        raise ValueError("records and reference_records must have the same shape.")
+
+    out = np.empty(records.shape[0], dtype=np.float64)
+    for i in range(records.shape[0]):
+        ref = np.asarray(reference_records[i], dtype=np.complex128)
+        num = np.asarray(records[i], dtype=np.complex128)
+        ref_norm = float(np.linalg.norm(ref))
+        safe_ref_norm = ref_norm if ref_norm > 0.0 else 1.0
+        out[i] = float(np.linalg.norm(num - ref) / safe_ref_norm)
+    return out
+
+
 def save_plots(
     t: np.ndarray,
     U_num: np.ndarray,
     U_true: np.ndarray,
-    epsilon: float,
+    error_curve: np.ndarray,
     z_final: float,
     z_samples: np.ndarray,
-    lambda0_nm: float,
     lambda_nm: np.ndarray,
     spectral_map: np.ndarray,
-    wavelength_plot_window_nm: float | None,
     output_dir: Path,
 ) -> list[Path]:
-    if plt is None:
-        print("matplotlib not available; skipping plot generation.")
-        return []
-
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
-    intensity_num = np.nan_to_num(np.abs(U_num) ** 2, nan=0.0, posinf=0.0, neginf=0.0)
-    intensity_true = np.nan_to_num(np.abs(U_true) ** 2, nan=0.0, posinf=0.0, neginf=0.0)
-    abs_intensity_error = np.abs(intensity_num - intensity_true)
+    p1 = plot_intensity_colormap_vs_propagation(
+        lambda_nm,
+        z_samples,
+        spectral_map,
+        output_dir / "wavelength_intensity_colormap.png",
+        x_label="Wavelength (nm)",
+        y_label="Propagation distance z (m)",
+        title="Spectral Intensity Envelope vs Propagation Distance",
+        colorbar_label="Normalized spectral intensity",
+        cmap="magma",
+    )
+    if p1 is not None:
+        saved_paths.append(p1)
 
-    fig_1, ax_1 = plt.subplots(figsize=(9.0, 5.0))
-    ax_1.plot(t, intensity_true, lw=2.0, label="Analytical |U_true|^2")
-    ax_1.plot(t, intensity_num, "--", lw=1.5, label="Numerical |U_num|^2")
-    ax_1.set_xlabel("Dimensionless time t = T/T0")
-    ax_1.set_ylabel("Normalized intensity |U|^2")
-    ax_1.set_title(f"Second-Order Soliton at z = {z_final:.3f} m (Normalized)")
-    if np.max(intensity_true) > 0.0:
-        ax_1.set_ylim(0.0, 1.1 * float(np.max(intensity_true)))
-    ax_1.grid(True, alpha=0.3)
-    ax_1.legend()
-    p1 = output_dir / "intensity_comparison.png"
-    fig_1.savefig(p1, dpi=200, bbox_inches="tight")
-    plt.close(fig_1)
-    saved_paths.append(p1)
+    p2 = plot_final_re_im_comparison(
+        t,
+        U_true,
+        U_num,
+        output_dir / "final_re_im_comparison.png",
+        x_label="Dimensionless time t = T/T0",
+        title=f"Second-Order Soliton at z = {z_final:.3f} m: Re/Im Comparison",
+        reference_label="Analytical",
+        final_label="Numerical",
+    )
+    if p2 is not None:
+        saved_paths.append(p2)
 
-    fig_2, ax_2 = plt.subplots(figsize=(9.0, 4.5))
-    ax_2.plot(t, abs_intensity_error, lw=1.5, color="tab:red")
-    ax_2.set_xlabel("Dimensionless time t = T/T0")
-    ax_2.set_ylabel(r"$||U_{num}|^2 - |U_{true}|^2|$")
-    ax_2.set_title(f"Absolute Intensity Error, epsilon = {epsilon:.3e}")
-    ax_2.grid(True, alpha=0.3)
-    p2 = output_dir / "intensity_error.png"
-    fig_2.savefig(p2, dpi=200, bbox_inches="tight")
-    plt.close(fig_2)
-    saved_paths.append(p2)
-
-    if spectral_map.size > 0 and lambda_nm.size > 0 and z_samples.size > 0:
-        plot_lambda_nm = lambda_nm
-        plot_spectral_map = spectral_map
-        if wavelength_plot_window_nm is not None and wavelength_plot_window_nm > 0.0:
-            half_window_nm = 0.5 * float(wavelength_plot_window_nm)
-            window_min_nm = float(lambda0_nm) - half_window_nm
-            window_max_nm = float(lambda0_nm) + half_window_nm
-            window_mask = (lambda_nm >= window_min_nm) & (lambda_nm <= window_max_nm)
-            if int(np.count_nonzero(window_mask)) >= 2:
-                plot_lambda_nm = lambda_nm[window_mask]
-                plot_spectral_map = spectral_map[:, window_mask]
-
-        fig_3, ax_3 = plt.subplots(figsize=(9.0, 5.5))
-        safe_map = np.nan_to_num(plot_spectral_map, nan=0.0, posinf=0.0, neginf=0.0)
-        safe_map = np.clip(safe_map, 0.0, None)
-        spectral_db = 10.0 * np.log10(np.maximum(safe_map, 1e-12))
-        img = ax_3.pcolormesh(plot_lambda_nm, z_samples, spectral_db, shading="auto", cmap="magma", vmin=-80.0, vmax=0.0)
-        ax_3.set_xlabel("Wavelength (nm)")
-        ax_3.set_ylabel("Propagation distance z (m)")
-        ax_3.set_title("Spectral Intensity Envelope vs Propagation Distance")
-        colorbar = fig_3.colorbar(img, ax=ax_3)
-        colorbar.set_label("Normalized spectral intensity (dB)")
-        p3 = output_dir / "wavelength_intensity_colormap.png"
-        fig_3.savefig(p3, dpi=200, bbox_inches="tight")
-        plt.close(fig_3)
+    p3 = plot_final_intensity_comparison(
+        t,
+        U_true,
+        U_num,
+        output_dir / "final_intensity_comparison.png",
+        x_label="Dimensionless time t = T/T0",
+        title=f"Second-Order Soliton at z = {z_final:.3f} m: Intensity Comparison",
+        reference_label="Analytical",
+        final_label="Numerical",
+    )
+    if p3 is not None:
         saved_paths.append(p3)
+
+    p4 = plot_total_error_over_propagation(
+        z_samples,
+        error_curve,
+        output_dir / "total_error_over_propagation.png",
+        title="Second-Order Soliton: Total Error Over Propagation",
+        y_label="Relative L2 error (numerical vs analytical)",
+    )
+    if p4 is not None:
+        saved_paths.append(p4)
 
     return saved_paths
 
@@ -320,10 +318,16 @@ def main() -> float:
 
     num_recorded_samples = 200
     z_records, A_records = rk4ip_solver_recorded(A0, z_final, params, num_recorded_samples)
-    A_num = np.asarray(A_records[-1], dtype=np.complex128)
-    U_true = second_order_soliton_normalized_envelope(t, z_final, beta2, t0)
-    U_num = to_normalized_envelope(A_num, z_final, p0, alpha)
+    U_num_records = np.empty_like(A_records, dtype=np.complex128)
+    U_true_records = np.empty_like(A_records, dtype=np.complex128)
+    for i, z in enumerate(z_records):
+        U_num_records[i] = to_normalized_envelope(A_records[i], float(z), p0, alpha)
+        U_true_records[i] = second_order_soliton_normalized_envelope(t, float(z), beta2, t0)
+
+    U_num = U_num_records[-1]
+    U_true = U_true_records[-1]
     epsilon = average_relative_intensity_error(U_num, U_true)
+    error_curve = relative_l2_error_curve(U_num_records, U_true_records)
     z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):
         first_bad_z, max_finite_amplitude = diagnose_first_nonfinite_record(A_records, z_records)
@@ -336,7 +340,6 @@ def main() -> float:
             )
 
     lambda0_nm = 1550.0
-    wavelength_plot_window_nm = 400.0
     z_map, lambda_nm, spectral_map = compute_wavelength_spectral_map_from_records(
         A_records,
         z_records,
@@ -349,13 +352,11 @@ def main() -> float:
         t,
         U_num,
         U_true,
-        epsilon,
+        error_curve,
         z_final,
         z_map,
-        lambda0_nm,
         lambda_nm,
         spectral_map,
-        wavelength_plot_window_nm,
         output_dir,
     )
 

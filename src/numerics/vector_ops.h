@@ -85,6 +85,12 @@ void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsign
 void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent);
 
 /**
+ * @brief Element-wise complex power with complex exponent inplace:
+ *        dst[i] = dst[i] ^ exponent[i].
+ */
+void nlo_complex_pow_elementwise_inplace(nlo_complex *dst, const nlo_complex *exponent, size_t n);
+
+/**
  * @brief Element-wise complex real power: out[i] = base[i] ^ exponent.
  */
 void nlo_complex_real_pow(const nlo_complex *base, nlo_complex *out, size_t n, double exponent);
@@ -108,3 +114,18 @@ void nlo_complex_add_vec(nlo_complex *dst, const nlo_complex *a, const nlo_compl
  * @brief Exponent of complex vector: dst[i] = exp(dst[i]).
  */
 void nlo_complex_exp_inplace(nlo_complex *dst, size_t n);
+
+/**
+ * @brief Natural logarithm of complex vector: dst[i] = log(dst[i]).
+ */
+void nlo_complex_log_inplace(nlo_complex *dst, size_t n);
+
+/**
+ * @brief Sine of complex vector: dst[i] = sin(dst[i]).
+ */
+void nlo_complex_sin_inplace(nlo_complex *dst, size_t n);
+
+/**
+ * @brief Cosine of complex vector: dst[i] = cos(dst[i]).
+ */
+void nlo_complex_cos_inplace(nlo_complex *dst, size_t n);

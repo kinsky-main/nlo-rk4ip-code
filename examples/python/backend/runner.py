@@ -1,9 +1,10 @@
-"""Reusable CFFI runner for Python examples."""
+"""Reusable ctypes runner for Python examples."""
 
 from __future__ import annotations
 
 import math
 import sys
+import ctypes
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,13 +27,13 @@ def _parse_pointer_value(value: int | str) -> int:
     return int(value)
 
 
-def _to_vk_handle(ffi, value: int | str | None, ctype: str):
+def _to_vk_handle(value: int | str | None):
     if value is None:
-        return ffi.NULL
+        return None
     parsed = _parse_pointer_value(value)
     if parsed == 0:
-        return ffi.NULL
-    return ffi.cast(ctype, parsed)
+        return None
+    return ctypes.c_void_p(parsed)
 
 
 @dataclass
@@ -43,22 +44,20 @@ class SimulationOptions:
     record_ring_target: int = 0
     forced_device_budget_bytes: int = 0
 
-    def to_cffi(self, ffi):
-        opts = ffi.new("nlo_execution_options*")
-        opts.backend_type = 2  # NLO_VECTOR_BACKEND_AUTO
-        opts.fft_backend = 0  # NLO_FFT_BACKEND_AUTO
+    def to_ctypes(self, nlo):
+        opts = nlo.default_execution_options(
+            backend_type=nlo.NLO_VECTOR_BACKEND_AUTO,
+            fft_backend=nlo.NLO_FFT_BACKEND_AUTO,
+        )
         opts.device_heap_fraction = float(self.device_heap_fraction)
         opts.record_ring_target = int(self.record_ring_target)
         opts.forced_device_budget_bytes = int(self.forced_device_budget_bytes)
-        opts.vulkan.physical_device = ffi.NULL
-        opts.vulkan.device = ffi.NULL
-        opts.vulkan.queue = ffi.NULL
-        opts.vulkan.queue_family_index = 0
-        opts.vulkan.command_pool = ffi.NULL
-        opts.vulkan.descriptor_set_budget_bytes = 0
-        opts.vulkan.descriptor_set_count_override = 0
 
-        fft_backend_map = {"auto": 0, "fftw": 1, "vkfft": 2}
+        fft_backend_map = {
+            "auto": nlo.NLO_FFT_BACKEND_AUTO,
+            "fftw": nlo.NLO_FFT_BACKEND_FFTW,
+            "vkfft": nlo.NLO_FFT_BACKEND_VKFFT,
+        }
         fft_backend = str(self.fft_backend).strip().lower()
         if fft_backend not in fft_backend_map:
             raise ValueError("fft_backend must be one of: auto, fftw, vkfft.")
@@ -75,10 +74,10 @@ class SimulationOptions:
             raise TypeError("backend must be a string or dict when provided.")
 
         if backend_type == "cpu":
-            opts.backend_type = 0
+            opts.backend_type = nlo.NLO_VECTOR_BACKEND_CPU
             return opts
         if backend_type == "auto":
-            opts.backend_type = 2
+            opts.backend_type = nlo.NLO_VECTOR_BACKEND_AUTO
             return opts
         if backend_type != "vulkan":
             raise ValueError("backend type must be one of: 'cpu', 'auto', or 'vulkan'.")
@@ -94,12 +93,12 @@ class SimulationOptions:
                 + ", ".join(missing)
             )
 
-        opts.backend_type = 1  # NLO_VECTOR_BACKEND_VULKAN
-        opts.vulkan.physical_device = _to_vk_handle(ffi, vk_cfg.get("physical_device"), "VkPhysicalDevice")
-        opts.vulkan.device = _to_vk_handle(ffi, vk_cfg.get("device"), "VkDevice")
-        opts.vulkan.queue = _to_vk_handle(ffi, vk_cfg.get("queue"), "VkQueue")
+        opts.backend_type = nlo.NLO_VECTOR_BACKEND_VULKAN
+        opts.vulkan.physical_device = _to_vk_handle(vk_cfg.get("physical_device"))
+        opts.vulkan.device = _to_vk_handle(vk_cfg.get("device"))
+        opts.vulkan.queue = _to_vk_handle(vk_cfg.get("queue"))
         opts.vulkan.queue_family_index = int(vk_cfg.get("queue_family_index", 0))
-        opts.vulkan.command_pool = _to_vk_handle(ffi, vk_cfg.get("command_pool"), "VkCommandPool")
+        opts.vulkan.command_pool = _to_vk_handle(vk_cfg.get("command_pool"))
         opts.vulkan.descriptor_set_budget_bytes = int(vk_cfg.get("descriptor_set_budget_bytes", 0))
         opts.vulkan.descriptor_set_count_override = int(vk_cfg.get("descriptor_set_count_override", 0))
         return opts
@@ -119,6 +118,7 @@ class TemporalSimulationConfig:
     max_step_size: float = 1e-2
     min_step_size: float = 1e-6
     error_tolerance: float = 1e-8
+    runtime: Any | None = None
 
     def resolved_pulse_period(self) -> float:
         if self.pulse_period is not None:
@@ -137,55 +137,15 @@ class TemporalSimulationConfig:
 class NloExampleRunner:
     def __init__(self, library_path: str | None = None):
         try:
-            from nlolib_cffi import ffi, load
+            import nlolib_ctypes as nlo
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
-                "nlolib_cffi/cffi is not available. Install cffi and ensure "
+                "nlolib_ctypes is not available. Ensure "
                 "PYTHONPATH includes the repo's python/ directory."
             ) from exc
 
-        self.ffi = ffi
-        self.lib = load(library_path)
-
-    @staticmethod
-    def _write_complex_buffer(dst, values: np.ndarray) -> None:
-        for i, val in enumerate(values):
-            dst[i].re = float(val.real)
-            dst[i].im = float(val.imag)
-
-    @staticmethod
-    def _read_complex_buffer(src, n: int) -> np.ndarray:
-        out = np.empty(n, dtype=np.complex128)
-        for i in range(n):
-            out[i] = complex(src[i].re, src[i].im)
-        return out
-
-    def _build_temporal_sim_config(self, cfg, sim_cfg: TemporalSimulationConfig, frequency_grid) -> None:
-        cfg.nonlinear.gamma = float(sim_cfg.gamma)
-        cfg.dispersion.num_dispersion_terms = 3
-        cfg.dispersion.betas[0] = 0.0
-        cfg.dispersion.betas[1] = 0.0
-        cfg.dispersion.betas[2] = float(sim_cfg.beta2)
-        cfg.dispersion.alpha = float(sim_cfg.alpha)
-
-        cfg.propagation.propagation_distance = float(sim_cfg.z_final)
-        cfg.propagation.starting_step_size = float(sim_cfg.starting_step_size)
-        cfg.propagation.max_step_size = float(sim_cfg.max_step_size)
-        cfg.propagation.min_step_size = float(sim_cfg.min_step_size)
-        cfg.propagation.error_tolerance = float(sim_cfg.error_tolerance)
-
-        cfg.time.pulse_period = float(sim_cfg.resolved_pulse_period())
-        cfg.time.delta_time = float(sim_cfg.dt)
-        cfg.frequency.frequency_grid = frequency_grid
-
-        cfg.spatial.nx = int(sim_cfg.num_time_samples)
-        cfg.spatial.ny = 1
-        cfg.spatial.delta_x = 1.0
-        cfg.spatial.delta_y = 1.0
-        cfg.spatial.grin_gx = 0.0
-        cfg.spatial.grin_gy = 0.0
-        cfg.spatial.spatial_frequency_grid = self.ffi.NULL
-        cfg.spatial.grin_potential_phase_grid = self.ffi.NULL
+        self.nlo = nlo
+        self.api = nlo.NLolib(path=library_path)
 
     def propagate_temporal_records(
         self,
@@ -203,25 +163,43 @@ class NloExampleRunner:
             raise ValueError("field length must match sim_cfg.num_time_samples.")
 
         omega = sim_cfg.resolved_omega()
-        cfg = self.ffi.new("sim_config*")
-        freq = self.ffi.new("nlo_complex[]", n)
-        for i, om in enumerate(omega):
-            freq[i].re = float(om)
-            freq[i].im = 0.0
-        self._build_temporal_sim_config(cfg, sim_cfg, freq)
-
-        inp = self.ffi.new("nlo_complex[]", n)
-        out = self.ffi.new("nlo_complex[]", n * int(num_records))
-        self._write_complex_buffer(inp, field)
+        runtime_cfg = sim_cfg.runtime
+        use_runtime_dispersion = (
+            runtime_cfg is not None
+            and (
+                getattr(runtime_cfg, "dispersion_expr", None)
+                or getattr(runtime_cfg, "dispersion_fn", None)
+            )
+        )
+        betas = [] if use_runtime_dispersion else [0.0, 0.0, float(sim_cfg.beta2)]
+        prepared = self.nlo.prepare_sim_config(
+            n,
+            gamma=float(sim_cfg.gamma),
+            betas=betas,
+            alpha=float(sim_cfg.alpha),
+            propagation_distance=float(sim_cfg.z_final),
+            starting_step_size=float(sim_cfg.starting_step_size),
+            max_step_size=float(sim_cfg.max_step_size),
+            min_step_size=float(sim_cfg.min_step_size),
+            error_tolerance=float(sim_cfg.error_tolerance),
+            pulse_period=float(sim_cfg.resolved_pulse_period()),
+            delta_time=float(sim_cfg.dt),
+            frequency_grid=[complex(float(om), 0.0) for om in omega],
+            spatial_nx=n,
+            spatial_ny=1,
+            delta_x=1.0,
+            delta_y=1.0,
+            grin_gx=0.0,
+            grin_gy=0.0,
+            runtime=runtime_cfg,
+        )
 
         options = exec_options if exec_options is not None else SimulationOptions()
-        opts_ptr = options.to_cffi(self.ffi)
-        status = int(self.lib.nlolib_propagate(cfg, n, inp, int(num_records), out, opts_ptr))
-        if status != 0:
-            raise RuntimeError(f"nlolib_propagate failed with status={status}.")
-
-        flat = self._read_complex_buffer(out, n * int(num_records))
-        records = flat.reshape(int(num_records), n)
+        opts = options.to_ctypes(self.nlo)
+        records = np.asarray(
+            self.api.propagate(prepared, field.tolist(), int(num_records), opts),
+            dtype=np.complex128,
+        ).reshape(int(num_records), n)
         if int(num_records) == 1:
             z_records = np.asarray([float(sim_cfg.z_final)], dtype=np.float64)
         else:
@@ -248,6 +226,7 @@ class NloExampleRunner:
         frequency_grid: np.ndarray | None = None,
         spatial_frequency_grid: np.ndarray | None = None,
         grin_potential_phase_grid: np.ndarray | None = None,
+        runtime: Any | None = None,
         exec_options: SimulationOptions | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         if num_records <= 0:
@@ -258,64 +237,54 @@ class NloExampleRunner:
         if int(field.size) != nxy:
             raise ValueError("field0_flat length must equal nx * ny.")
 
-        cfg = self.ffi.new("sim_config*")
-        cfg.nonlinear.gamma = float(gamma)
-        cfg.dispersion.num_dispersion_terms = 0
-        cfg.dispersion.alpha = float(alpha)
-        cfg.propagation.propagation_distance = float(propagation_distance)
-        cfg.propagation.starting_step_size = float(starting_step_size)
-        cfg.propagation.max_step_size = float(max_step_size)
-        cfg.propagation.min_step_size = float(min_step_size)
-        cfg.propagation.error_tolerance = float(error_tolerance)
-        cfg.time.pulse_period = float(nx)
-        cfg.time.delta_time = 1.0
-
         freq_values = np.zeros(nxy, dtype=np.complex128)
         if frequency_grid is not None:
             freq_values = np.asarray(frequency_grid, dtype=np.complex128).reshape(-1)
             if int(freq_values.size) != nxy:
                 raise ValueError("frequency_grid length must equal nx * ny.")
-        freq_buffer = self.ffi.new("nlo_complex[]", nxy)
-        self._write_complex_buffer(freq_buffer, freq_values)
-        cfg.frequency.frequency_grid = freq_buffer
 
-        cfg.spatial.nx = int(nx)
-        cfg.spatial.ny = int(ny)
-        cfg.spatial.delta_x = float(delta_x)
-        cfg.spatial.delta_y = float(delta_y)
-        cfg.spatial.grin_gx = float(grin_gx)
-        cfg.spatial.grin_gy = float(grin_gy)
-
-        spatial_freq_buffer = self.ffi.NULL
+        spatial_values = None
         if spatial_frequency_grid is not None:
-            spatial_freq_values = np.asarray(spatial_frequency_grid, dtype=np.complex128).reshape(-1)
-            if int(spatial_freq_values.size) != nxy:
+            spatial_values = np.asarray(spatial_frequency_grid, dtype=np.complex128).reshape(-1)
+            if int(spatial_values.size) != nxy:
                 raise ValueError("spatial_frequency_grid length must equal nx * ny.")
-            spatial_freq_buffer = self.ffi.new("nlo_complex[]", nxy)
-            self._write_complex_buffer(spatial_freq_buffer, spatial_freq_values)
-        cfg.spatial.spatial_frequency_grid = spatial_freq_buffer
 
-        grin_phase_buffer = self.ffi.NULL
+        grin_phase_values = None
         if grin_potential_phase_grid is not None:
             grin_phase_values = np.asarray(grin_potential_phase_grid, dtype=np.complex128).reshape(-1)
             if int(grin_phase_values.size) != nxy:
                 raise ValueError("grin_potential_phase_grid length must equal nx * ny.")
-            grin_phase_buffer = self.ffi.new("nlo_complex[]", nxy)
-            self._write_complex_buffer(grin_phase_buffer, grin_phase_values)
-        cfg.spatial.grin_potential_phase_grid = grin_phase_buffer
 
-        inp = self.ffi.new("nlo_complex[]", nxy)
-        out = self.ffi.new("nlo_complex[]", nxy * int(num_records))
-        self._write_complex_buffer(inp, field)
+        prepared = self.nlo.prepare_sim_config(
+            nxy,
+            gamma=float(gamma),
+            betas=[],
+            alpha=float(alpha),
+            propagation_distance=float(propagation_distance),
+            starting_step_size=float(starting_step_size),
+            max_step_size=float(max_step_size),
+            min_step_size=float(min_step_size),
+            error_tolerance=float(error_tolerance),
+            pulse_period=float(nx),
+            delta_time=1.0,
+            frequency_grid=freq_values.tolist(),
+            spatial_nx=int(nx),
+            spatial_ny=int(ny),
+            delta_x=float(delta_x),
+            delta_y=float(delta_y),
+            grin_gx=float(grin_gx),
+            grin_gy=float(grin_gy),
+            spatial_frequency_grid=(None if spatial_values is None else spatial_values.tolist()),
+            grin_potential_phase_grid=(None if grin_phase_values is None else grin_phase_values.tolist()),
+            runtime=runtime,
+        )
 
         options = exec_options if exec_options is not None else SimulationOptions()
-        opts_ptr = options.to_cffi(self.ffi)
-        status = int(self.lib.nlolib_propagate(cfg, nxy, inp, int(num_records), out, opts_ptr))
-        if status != 0:
-            raise RuntimeError(f"nlolib_propagate failed with status={status}.")
-
-        flat = self._read_complex_buffer(out, nxy * int(num_records))
-        records = flat.reshape(int(num_records), int(ny), int(nx))
+        opts = options.to_ctypes(self.nlo)
+        records = np.asarray(
+            self.api.propagate(prepared, field.tolist(), int(num_records), opts),
+            dtype=np.complex128,
+        ).reshape(int(num_records), int(ny), int(nx))
         if int(num_records) == 1:
             z_records = np.asarray([float(propagation_distance)], dtype=np.float64)
         else:
