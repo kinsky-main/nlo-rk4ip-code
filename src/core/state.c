@@ -32,6 +32,14 @@
 #define NLO_MIN_DEVICE_RING_CAPACITY 1u
 #endif
 
+#ifndef NLO_TWO_PI
+#define NLO_TWO_PI 6.283185307179586476925286766559
+#endif
+
+#ifndef NLO_FREQ_GRID_REL_TOL
+#define NLO_FREQ_GRID_REL_TOL 1e-9
+#endif
+
 static int checked_mul_size_t(size_t a, size_t b, size_t* out);
 static int nlo_resolve_spatial_dimensions(
     const sim_config* config,
@@ -48,6 +56,13 @@ static int nlo_fill_grin_phase_base_grid(
 static size_t query_available_system_memory_bytes(void);
 static size_t apply_memory_headroom(size_t available_bytes);
 static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records);
+static double nlo_resolve_delta_time(const sim_config* config, size_t num_time_samples);
+static void nlo_fill_default_omega_grid(nlo_complex* out_grid, size_t num_time_samples, double delta_time);
+static int nlo_frequency_grid_matches_expected_unshifted(
+    const nlo_complex* grid,
+    size_t num_time_samples,
+    double delta_time
+);
 
 static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer** vec)
 {
@@ -124,6 +139,78 @@ static int nlo_fill_grin_phase_base_grid(
     }
 
     return 0;
+}
+
+static double nlo_expected_omega_unshifted(size_t index, size_t num_time_samples, double omega_step)
+{
+    if (num_time_samples == 0u) {
+        return 0.0;
+    }
+
+    const size_t positive_limit = (num_time_samples - 1u) / 2u;
+    if (index <= positive_limit) {
+        return (double)index * omega_step;
+    }
+
+    return -((double)num_time_samples - (double)index) * omega_step;
+}
+
+static double nlo_resolve_delta_time(const sim_config* config, size_t num_time_samples)
+{
+    if (config == NULL || num_time_samples == 0u) {
+        return 1.0;
+    }
+
+    if (config->time.delta_time > 0.0) {
+        return config->time.delta_time;
+    }
+
+    if (config->time.pulse_period > 0.0) {
+        return config->time.pulse_period / (double)num_time_samples;
+    }
+
+    return 1.0;
+}
+
+static void nlo_fill_default_omega_grid(nlo_complex* out_grid, size_t num_time_samples, double delta_time)
+{
+    if (out_grid == NULL || num_time_samples == 0u) {
+        return;
+    }
+
+    const double safe_delta_time = (delta_time > 0.0) ? delta_time : 1.0;
+    const double omega_step = NLO_TWO_PI / ((double)num_time_samples * safe_delta_time);
+
+    for (size_t i = 0u; i < num_time_samples; ++i) {
+        out_grid[i] = nlo_make(nlo_expected_omega_unshifted(i, num_time_samples, omega_step), 0.0);
+    }
+}
+
+static int nlo_frequency_grid_matches_expected_unshifted(
+    const nlo_complex* grid,
+    size_t num_time_samples,
+    double delta_time
+)
+{
+    if (grid == NULL || num_time_samples == 0u) {
+        return 0;
+    }
+
+    const double safe_delta_time = (delta_time > 0.0) ? delta_time : 1.0;
+    const double omega_step = NLO_TWO_PI / ((double)num_time_samples * safe_delta_time);
+
+    for (size_t i = 0u; i < num_time_samples; ++i) {
+        const double expected_real = nlo_expected_omega_unshifted(i, num_time_samples, omega_step);
+        const double real_tol = NLO_FREQ_GRID_REL_TOL * fmax(1.0, fabs(expected_real));
+        if (fabs(grid[i].re - expected_real) > real_tol) {
+            return 0;
+        }
+        if (fabs(grid[i].im) > real_tol) {
+            return 0;
+        }
+    }
+
+    return 1;
 }
 
 static size_t nlo_compute_device_ring_capacity(const simulation_state* state, size_t requested_records)
@@ -334,8 +421,25 @@ simulation_state* create_simulation_state(
     }
 
     const nlo_complex* spectral_grid_source = config->spatial.spatial_frequency_grid;
+    nlo_complex* generated_frequency_grid = NULL;
     if (spectral_grid_source == NULL) {
-        spectral_grid_source = config->frequency.frequency_grid;
+        const nlo_complex* temporal_frequency_grid = config->frequency.frequency_grid;
+        const double delta_time = nlo_resolve_delta_time(config, num_time_samples);
+        if (temporal_frequency_grid != NULL &&
+            nlo_frequency_grid_matches_expected_unshifted(temporal_frequency_grid,
+                                                          num_time_samples,
+                                                          delta_time)) {
+            spectral_grid_source = temporal_frequency_grid;
+        } else {
+            generated_frequency_grid = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
+            if (generated_frequency_grid == NULL) {
+                free_simulation_state(state);
+                return NULL;
+            }
+
+            nlo_fill_default_omega_grid(generated_frequency_grid, num_time_samples, delta_time);
+            spectral_grid_source = generated_frequency_grid;
+        }
     }
 
     if (spectral_grid_source != NULL) {
@@ -345,6 +449,10 @@ simulation_state* create_simulation_state(
                                 num_time_samples * sizeof(nlo_complex));
     } else {
         status = nlo_vec_complex_fill(state->backend, state->frequency_grid_vec, nlo_make(0.0, 0.0));
+    }
+    if (generated_frequency_grid != NULL) {
+        free(generated_frequency_grid);
+        generated_frequency_grid = NULL;
     }
     if (status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
