@@ -15,7 +15,8 @@ typedef void* VkCommandPool;
 
 typedef enum {
     NLO_VECTOR_BACKEND_CPU = 0,
-    NLO_VECTOR_BACKEND_VULKAN = 1
+    NLO_VECTOR_BACKEND_VULKAN = 1,
+    NLO_VECTOR_BACKEND_AUTO = 2
 } nlo_vector_backend_type;
 
 typedef enum {

@@ -18,6 +18,7 @@ nlo_resolve_vulkan(_nlo_vk_headers_available _nlo_vk_loader_available)
 add_executable(test_nlo_vector_backend
   ${CMAKE_CURRENT_LIST_DIR}/test_nlo_vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
+  ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_vector_ops.c
 )
@@ -51,6 +52,7 @@ add_test(NAME test_nlo_simd_wrapper COMMAND test_nlo_simd_wrapper)
 add_executable(test_nlo_vector_backend_vulkan
   ${CMAKE_CURRENT_LIST_DIR}/test_nlo_vector_backend_vulkan.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
+  ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_vector_ops.c
 )

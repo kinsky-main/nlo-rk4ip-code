@@ -160,11 +160,15 @@ static void nlo_vk_destroy_buffer_raw(nlo_vector_backend* backend, VkBuffer* buf
         return;
     }
     if (buffer != NULL && *buffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(backend->vk.device, *buffer, NULL);
+        if (backend->vk.device != VK_NULL_HANDLE) {
+            vkDestroyBuffer(backend->vk.device, *buffer, NULL);
+        }
         *buffer = VK_NULL_HANDLE;
     }
     if (memory != NULL && *memory != VK_NULL_HANDLE) {
-        vkFreeMemory(backend->vk.device, *memory, NULL);
+        if (backend->vk.device != VK_NULL_HANDLE) {
+            vkFreeMemory(backend->vk.device, *memory, NULL);
+        }
         *memory = VK_NULL_HANDLE;
     }
 }
@@ -482,8 +486,11 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
         return;
     }
 
-    if (backend->vk.staging_mapped_ptr != NULL && backend->vk.staging_memory != VK_NULL_HANDLE) {
-        vkUnmapMemory(backend->vk.device, backend->vk.staging_memory);
+    const VkDevice device = backend->vk.device;
+    if (device != VK_NULL_HANDLE &&
+        backend->vk.staging_mapped_ptr != NULL &&
+        backend->vk.staging_memory != VK_NULL_HANDLE) {
+        vkUnmapMemory(device, backend->vk.staging_memory);
         backend->vk.staging_mapped_ptr = NULL;
     }
     nlo_vk_destroy_buffer_raw(backend, &backend->vk.staging_buffer, &backend->vk.staging_memory);
@@ -493,17 +500,23 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
 
     for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
         if (backend->vk.kernels[i].pipeline != VK_NULL_HANDLE) {
-            vkDestroyPipeline(backend->vk.device, backend->vk.kernels[i].pipeline, NULL);
+            if (device != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device, backend->vk.kernels[i].pipeline, NULL);
+            }
             backend->vk.kernels[i].pipeline = VK_NULL_HANDLE;
         }
     }
 
     if (backend->vk.pipeline_cache != VK_NULL_HANDLE) {
-        vkDestroyPipelineCache(backend->vk.device, backend->vk.pipeline_cache, NULL);
+        if (device != VK_NULL_HANDLE) {
+            vkDestroyPipelineCache(device, backend->vk.pipeline_cache, NULL);
+        }
         backend->vk.pipeline_cache = VK_NULL_HANDLE;
     }
     if (backend->vk.descriptor_pool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(backend->vk.device, backend->vk.descriptor_pool, NULL);
+        if (device != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(device, backend->vk.descriptor_pool, NULL);
+        }
         backend->vk.descriptor_pool = VK_NULL_HANDLE;
     }
     if (backend->vk.descriptor_sets != NULL) {
@@ -512,29 +525,44 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
     }
     backend->vk.descriptor_set_count = 0u;
     if (backend->vk.pipeline_layout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(backend->vk.device, backend->vk.pipeline_layout, NULL);
+        if (device != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(device, backend->vk.pipeline_layout, NULL);
+        }
         backend->vk.pipeline_layout = VK_NULL_HANDLE;
     }
     if (backend->vk.descriptor_set_layout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(backend->vk.device, backend->vk.descriptor_set_layout, NULL);
+        if (device != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, backend->vk.descriptor_set_layout, NULL);
+        }
         backend->vk.descriptor_set_layout = VK_NULL_HANDLE;
     }
-    if (backend->vk.command_buffer != VK_NULL_HANDLE &&
+    if (device != VK_NULL_HANDLE &&
+        backend->vk.command_buffer != VK_NULL_HANDLE &&
         backend->vk.command_pool != VK_NULL_HANDLE) {
-        vkFreeCommandBuffers(backend->vk.device,
+        vkFreeCommandBuffers(device,
                              backend->vk.command_pool,
                              1u,
                              &backend->vk.command_buffer);
-        backend->vk.command_buffer = VK_NULL_HANDLE;
     }
+    backend->vk.command_buffer = VK_NULL_HANDLE;
     if (backend->vk.submit_fence != VK_NULL_HANDLE) {
-        vkDestroyFence(backend->vk.device, backend->vk.submit_fence, NULL);
+        if (device != VK_NULL_HANDLE) {
+            vkDestroyFence(device, backend->vk.submit_fence, NULL);
+        }
         backend->vk.submit_fence = VK_NULL_HANDLE;
     }
-    if (backend->vk.command_pool != VK_NULL_HANDLE && backend->vk.owns_command_pool) {
-        vkDestroyCommandPool(backend->vk.device, backend->vk.command_pool, NULL);
+    if (device != VK_NULL_HANDLE &&
+        backend->vk.command_pool != VK_NULL_HANDLE &&
+        backend->vk.owns_command_pool) {
+        vkDestroyCommandPool(device, backend->vk.command_pool, NULL);
         backend->vk.command_pool = VK_NULL_HANDLE;
     }
+    if (!backend->vk.owns_command_pool) {
+        backend->vk.command_pool = VK_NULL_HANDLE;
+    }
+    backend->vk.owns_command_pool = false;
+    backend->vk.staging_mapped_ptr = NULL;
+    backend->vk.staging_capacity = 0u;
     backend->vk.simulation_phase_recording = false;
     backend->vk.simulation_phase_has_commands = false;
     backend->vk.simulation_descriptor_set_cursor = 0u;
@@ -1329,8 +1357,14 @@ nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_bac
     backend->vk.device = config->device;
     backend->vk.queue = config->queue;
     backend->vk.queue_family_index = config->queue_family_index;
+    backend->vk.instance = VK_NULL_HANDLE;
+    backend->vk.owns_instance = false;
+    backend->vk.owns_device = false;
     backend->vk.shader_float64_supported = true;
     backend->vk.limits = limits;
+    backend->vk.device_type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
+    backend->vk.device_local_bytes = 0u;
+    backend->vk.device_name[0] = '\0';
     backend->vk.max_kernel_chunk_bytes = (VkDeviceSize)limits.maxStorageBufferRange;
     backend->vk.descriptor_sets = NULL;
     backend->vk.descriptor_set_count = 0u;
@@ -1381,6 +1415,20 @@ void nlo_vk_backend_shutdown(nlo_vector_backend* backend)
         (void)vkQueueWaitIdle(backend->vk.queue);
     }
     nlo_vk_destroy_resources(backend);
+
+    if (backend->vk.owns_device && backend->vk.device != VK_NULL_HANDLE) {
+        vkDestroyDevice(backend->vk.device, NULL);
+    }
+    backend->vk.device = VK_NULL_HANDLE;
+    backend->vk.queue = VK_NULL_HANDLE;
+    backend->vk.physical_device = VK_NULL_HANDLE;
+    backend->vk.owns_device = false;
+
+    if (backend->vk.owns_instance && backend->vk.instance != VK_NULL_HANDLE) {
+        vkDestroyInstance(backend->vk.instance, NULL);
+    }
+    backend->vk.instance = VK_NULL_HANDLE;
+    backend->vk.owns_instance = false;
 }
 
 nlo_vec_status nlo_vk_buffer_create(nlo_vector_backend* backend, nlo_vec_buffer* buffer)

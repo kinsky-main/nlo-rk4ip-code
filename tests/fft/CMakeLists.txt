@@ -11,6 +11,7 @@ add_executable(test_fft
   ${CMAKE_CURRENT_LIST_DIR}/test_fft.c
   ${CMAKE_SOURCE_DIR}/src/fft/fft.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
+  ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_vector_ops.c
 )

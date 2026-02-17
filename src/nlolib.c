@@ -21,6 +21,9 @@ static const char* nlo_backend_type_to_string(nlo_vector_backend_type backend_ty
     if (backend_type == NLO_VECTOR_BACKEND_VULKAN) {
         return "VULKAN";
     }
+    if (backend_type == NLO_VECTOR_BACKEND_AUTO) {
+        return "AUTO";
+    }
 
     return "UNKNOWN";
 }
@@ -56,7 +59,7 @@ static void nlo_log_nlse_propagate_call(
     const nlo_execution_options local_exec_options =
         (exec_options != NULL)
             ? *exec_options
-            : nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+            : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
 
     const size_t field_bytes = nlo_compute_input_bytes(num_time_samples, sizeof(nlo_complex));
     const size_t records_bytes = nlo_compute_record_bytes(num_recorded_samples, num_time_samples);
@@ -125,7 +128,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
     nlo_execution_options local_exec_options =
         (exec_options != NULL)
             ? *exec_options
-            : nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+            : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
     simulation_state* state = NULL;
     if (nlo_init_simulation_state(config,
                                   num_time_samples,
@@ -135,6 +138,11 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                   &state) != 0 || state == NULL) {
         return NLOLIB_STATUS_ALLOCATION_FAILED;
     }
+
+    fprintf(stderr,
+            "[nlolib] nlse backend resolved requested=%s actual=%s\n",
+            nlo_backend_type_to_string(local_exec_options.backend_type),
+            nlo_backend_type_to_string(nlo_vector_backend_get_type(state->backend)));
 
     if (simulation_state_upload_initial_field(state, input_field) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);

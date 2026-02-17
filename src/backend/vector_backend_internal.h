@@ -8,6 +8,7 @@
 #include "backend/vector_backend.h"
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include <vulkan/vulkan.h>
 
@@ -43,12 +44,18 @@ typedef struct {
 } nlo_vk_kernel;
 
 typedef struct {
+    VkInstance instance;
     VkPhysicalDevice physical_device;
     VkDevice device;
     VkQueue queue;
     uint32_t queue_family_index;
+    bool owns_instance;
+    bool owns_device;
     bool shader_float64_supported;
     VkPhysicalDeviceLimits limits;
+    VkPhysicalDeviceType device_type;
+    uint64_t device_local_bytes;
+    char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
 
     VkCommandPool command_pool;
     bool owns_command_pool;

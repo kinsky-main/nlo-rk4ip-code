@@ -105,9 +105,9 @@ def _to_vk_handle(ffi, value: int | str | None, ctype: str):
 
 
 def _build_execution_options(ffi, params: dict):
-    backend_cfg = params.get("backend")
+    backend_cfg = params.get("backend", "auto")
     if backend_cfg is None:
-        return None
+        backend_cfg = "auto"
 
     opts = ffi.new("nlo_execution_options*")
     opts.backend_type = 0  # NLO_VECTOR_BACKEND_CPU
@@ -142,8 +142,12 @@ def _build_execution_options(ffi, params: dict):
         opts.backend_type = 0
         return opts
 
+    if backend_type == "auto":
+        opts.backend_type = 2  # NLO_VECTOR_BACKEND_AUTO
+        return opts
+
     if backend_type != "vulkan":
-        raise ValueError("backend type must be either 'cpu' or 'vulkan'.")
+        raise ValueError("backend type must be one of: 'cpu', 'auto', or 'vulkan'.")
 
     vk_cfg = cfg.get("vulkan", cfg)
     required = ("physical_device", "device", "queue", "queue_family_index")
@@ -406,7 +410,7 @@ def main() -> float:
         "beta2": beta2,
         "gamma": gamma,
         "alpha": alpha,
-        "backend": "cpu",
+        "backend": "auto",
         "fft_backend": "auto",
         "dt": dt,
         "omega": omega,
@@ -417,7 +421,7 @@ def main() -> float:
         "error_tolerance": 1e-8,
     }
 
-    num_recorded_samples = 40
+    num_recorded_samples = 200
     z_records, A_records = rk4ip_solver_recorded(A0, z_final, params, num_recorded_samples)
     A_num = np.asarray(A_records[-1], dtype=np.complex128)
     U_true = second_order_soliton_normalized_envelope(t, z_final, beta2, t0)

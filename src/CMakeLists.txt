@@ -10,6 +10,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/numerics/rk4_kernel.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/rk4_debug.c
   ${CMAKE_CURRENT_LIST_DIR}/backend/vector_backend.c
+  ${CMAKE_CURRENT_LIST_DIR}/backend/vk_auto_context.c
   ${CMAKE_CURRENT_LIST_DIR}/fft/fft.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_vector_ops.c
 )

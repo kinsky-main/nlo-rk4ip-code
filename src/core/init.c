@@ -51,7 +51,7 @@ NLOLIB_API int nlo_init_simulation_state(
     nlo_execution_options local_options =
         (exec_options != NULL)
             ? *exec_options
-            : nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+            : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
 
     simulation_state* state = create_simulation_state(config,
                                                       num_time_samples,

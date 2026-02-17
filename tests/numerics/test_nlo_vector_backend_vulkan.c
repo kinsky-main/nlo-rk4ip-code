@@ -10,11 +10,15 @@
 
 int main(void)
 {
-    assert(nlo_vector_backend_create_vulkan(NULL) == NULL);
+    nlo_vector_backend* auto_backend = nlo_vector_backend_create_vulkan(NULL);
+    if (auto_backend != NULL) {
+        assert(nlo_vector_backend_get_type(auto_backend) == NLO_VECTOR_BACKEND_VULKAN);
+        nlo_vector_backend_destroy(auto_backend);
+    }
 
     nlo_vk_backend_config invalid = {0};
     assert(nlo_vector_backend_create_vulkan(&invalid) == NULL);
-    printf("test_nlo_vector_backend_vulkan: validates Vulkan config guards.\n");
+    printf("test_nlo_vector_backend_vulkan: validates Vulkan explicit config guards.\n");
     return 0;
 }
 

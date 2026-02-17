@@ -9,6 +9,8 @@
 #include "utility/rk4_debug.h"
 #include <assert.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #ifndef NLO_RK4_ERROR_TOL
 #define NLO_RK4_ERROR_TOL 1e-6
@@ -72,6 +74,36 @@ static double nlo_clamp_step(double value, double min_step, double max_step)
     return out;
 }
 
+static int nlo_rk4_debug_enabled_runtime(void)
+{
+    const char* env = getenv("NLO_RK4_DEBUG");
+    return (env != NULL && *env != '\0' && *env != '0') ? 1 : 0;
+}
+
+static void nlo_rk4_debug_log_solver_config(const simulation_state* state, double tol)
+{
+    if (!nlo_rk4_debug_enabled_runtime() || state == NULL || state->config == NULL) {
+        return;
+    }
+
+    const sim_config* config = state->config;
+    const double beta2 = (config->dispersion.num_dispersion_terms > 2u)
+                             ? config->dispersion.betas[2]
+                             : 0.0;
+
+    fprintf(stderr,
+            "[NLO_RK4_DEBUG] config gamma=%.9e beta2=%.9e alpha=%.9e dt=%.9e z_end=%.9e h0=%.9e h_min=%.9e h_max=%.9e tol=%.9e\n",
+            config->nonlinear.gamma,
+            beta2,
+            config->dispersion.alpha,
+            config->time.delta_time,
+            config->propagation.propagation_distance,
+            config->propagation.starting_step_size,
+            config->propagation.min_step_size,
+            config->propagation.max_step_size,
+            tol);
+}
+
 static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_index)
 {
     if (state == NULL || state->backend == NULL || state->fft_plan == NULL)
@@ -108,13 +140,13 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
         work->field_magnitude_vec,
         work->field_working_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(step, 0.0)));
-    NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->field_working_vec, work->field_working_vec));
+    NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->field_working_vec, work->field_freq_vec));
     NLO_RK4_CALL(nlo_apply_dispersion_operator_vec(backend,
                                                    work->dispersion_factor_vec,
-                                                   work->field_working_vec,
+                                                   work->field_freq_vec,
                                                    work->omega_power_vec,
                                                    state->current_half_step_exp));
-    NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_working_vec, work->k_1_vec));
+    NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_1_vec));
     nlo_rk4_debug_log_vec_stats(state, work->k_1_vec, "k1", step_index, state->current_z, step);
     
     // Calculate working field term for k2 nonlinearity
@@ -225,6 +257,7 @@ void solve_rk4(simulation_state *state)
     }
 
     nlo_rk4_debug_reset_run();
+    nlo_rk4_debug_log_solver_config(state, tol);
 
     if (nlo_vec_begin_simulation(state->backend) != NLO_VEC_STATUS_OK)
     {

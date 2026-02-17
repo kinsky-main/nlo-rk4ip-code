@@ -5,6 +5,7 @@ add_executable(bench_solver_backend
   ${CMAKE_SOURCE_DIR}/src/core/state.c
   ${CMAKE_SOURCE_DIR}/src/core/init.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
+  ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/numerics/math_ops.c
   ${CMAKE_SOURCE_DIR}/src/physics/operators.c

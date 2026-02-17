@@ -204,6 +204,9 @@ simulation_state* create_simulation_state(
     else if (exec_options->backend_type == NLO_VECTOR_BACKEND_VULKAN) {
         state->backend = nlo_vector_backend_create_vulkan(&exec_options->vulkan);
     }
+    else if (exec_options->backend_type == NLO_VECTOR_BACKEND_AUTO) {
+        state->backend = nlo_vector_backend_create_vulkan(NULL);
+    }
     else {
         state->backend = NULL;
     }

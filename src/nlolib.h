@@ -58,7 +58,8 @@ typedef enum {
  *        output_records[record_index * num_time_samples + time_index].
  *        For num_recorded_samples == 1, record 0 is the final field at z_end.
  *        For num_recorded_samples > 1, records are evenly distributed over [0, z_end].
- * @param exec_options Runtime backend selection/options (NULL uses CPU defaults).
+ * @param exec_options Runtime backend selection/options
+ *        (NULL uses AUTO hardware-detected defaults).
  * @return nlolib_status status code.
  */
 NLOLIB_API nlolib_status nlolib_propagate(

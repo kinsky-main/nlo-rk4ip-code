@@ -7,10 +7,12 @@
  */
 
 #include "backend/vector_backend_internal.h"
+#include "backend/vk_auto_context.h"
 #include "numerics/vector_ops.h"
 #include "numerics/vk_vector_ops.h"
 #include <limits.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,6 +39,25 @@ static bool nlo_vec_multiply_size(size_t a, size_t b, size_t* out)
     }
     return false;
 }
+
+static const char* nlo_vk_device_type_to_string(VkPhysicalDeviceType device_type)
+{
+    if (device_type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+        return "discrete";
+    }
+    if (device_type == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+        return "integrated";
+    }
+    if (device_type == VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU) {
+        return "virtual";
+    }
+    if (device_type == VK_PHYSICAL_DEVICE_TYPE_CPU) {
+        return "cpu";
+    }
+    return "other";
+}
+
+static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template);
 
 nlo_vec_status nlo_vec_validate_backend(const nlo_vector_backend* backend)
 {
@@ -126,8 +147,10 @@ bool nlo_vec_is_in_simulation(const nlo_vector_backend* backend)
 
 nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config* config)
 {
-    if (config == NULL ||
-        config->physical_device == VK_NULL_HANDLE ||
+    if (config == NULL) {
+        return nlo_vector_backend_create_auto(NULL);
+    }
+    if (config->physical_device == VK_NULL_HANDLE ||
         config->device == VK_NULL_HANDLE ||
         config->queue == VK_NULL_HANDLE) {
         return NULL;
@@ -146,6 +169,67 @@ nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config
         return NULL;
     }
 
+    return backend;
+}
+
+static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template)
+{
+    char reason[256];
+    nlo_vk_auto_context auto_ctx;
+    if (nlo_vk_auto_context_init(&auto_ctx, reason, sizeof(reason)) != 0) {
+        fprintf(stderr,
+                "[nlolib] auto backend selection failed: %s\n",
+                (reason[0] != '\0') ? reason : "unknown Vulkan setup error");
+        return NULL;
+    }
+
+    nlo_vk_backend_config config = {0};
+    if (config_template != NULL) {
+        config = *config_template;
+    }
+
+    config.physical_device = auto_ctx.physical_device;
+    config.device = auto_ctx.device;
+    config.queue = auto_ctx.queue;
+    config.queue_family_index = auto_ctx.queue_family_index;
+    config.command_pool = VK_NULL_HANDLE;
+
+    nlo_vector_backend* backend = (nlo_vector_backend*)calloc(1, sizeof(*backend));
+    if (backend == NULL) {
+        nlo_vk_auto_context_destroy(&auto_ctx);
+        return NULL;
+    }
+
+    backend->type = NLO_VECTOR_BACKEND_VULKAN;
+    backend->in_simulation = false;
+    if (nlo_vk_backend_init(backend, &config) != NLO_VEC_STATUS_OK) {
+        free(backend);
+        nlo_vk_auto_context_destroy(&auto_ctx);
+        return NULL;
+    }
+
+    backend->vk.instance = auto_ctx.instance;
+    backend->vk.owns_instance = true;
+    backend->vk.owns_device = true;
+    backend->vk.device_type = auto_ctx.device_type;
+    backend->vk.device_local_bytes = auto_ctx.device_local_bytes;
+#if defined(_MSC_VER)
+    strncpy_s(backend->vk.device_name,
+              sizeof(backend->vk.device_name),
+              auto_ctx.device_name,
+              _TRUNCATE);
+#else
+    snprintf(backend->vk.device_name,
+             sizeof(backend->vk.device_name),
+             "%s",
+             auto_ctx.device_name);
+#endif
+
+    fprintf(stderr,
+            "[nlolib] auto backend selected Vulkan device='%s' type=%s device_local_bytes=%llu\n",
+            (backend->vk.device_name[0] != '\0') ? backend->vk.device_name : "unknown",
+            nlo_vk_device_type_to_string(backend->vk.device_type),
+            (unsigned long long)backend->vk.device_local_bytes);
     return backend;
 }
 
