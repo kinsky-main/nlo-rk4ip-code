@@ -8,6 +8,7 @@
 #include "physics/operators.h"
 #include "utility/rk4_debug.h"
 #include <assert.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,6 +79,12 @@ static int nlo_rk4_debug_enabled_runtime(void)
 {
     const char* env = getenv("NLO_RK4_DEBUG");
     return (env != NULL && *env != '\0' && *env != '0') ? 1 : 0;
+}
+
+static double nlo_record_capture_tolerance(double z_end)
+{
+    const double scale = fmax(1.0, fabs(z_end));
+    return 64.0 * DBL_EPSILON * scale;
 }
 
 static void nlo_rk4_debug_log_solver_config(const simulation_state* state, double tol)
@@ -318,6 +325,7 @@ void solve_rk4(simulation_state *state)
 
     double record_spacing = 0.0;
     double next_record_z = z_end;
+    const double record_capture_eps = nlo_record_capture_tolerance(z_end);
     if (state->num_recorded_samples > 1u)
     {
         record_spacing = z_end / (double)(state->num_recorded_samples - 1u);
@@ -406,16 +414,27 @@ void solve_rk4(simulation_state *state)
 
         while (record_spacing > 0.0 &&
                state->current_record_index < state->num_recorded_samples &&
-               state->current_z + 1e-15 >= next_record_z)
+               state->current_z + record_capture_eps >= next_record_z)
         {
             if (simulation_state_capture_snapshot(state) != NLO_VEC_STATUS_OK)
             {
                 break;
             }
-            next_record_z += record_spacing;
+            next_record_z = record_spacing * (double)state->current_record_index;
         }
 
         rk4_step_index += 1u;
+    }
+
+    while (record_spacing > 0.0 &&
+           state->current_record_index < state->num_recorded_samples &&
+           state->current_z + record_capture_eps >= next_record_z)
+    {
+        if (simulation_state_capture_snapshot(state) != NLO_VEC_STATUS_OK)
+        {
+            break;
+        }
+        next_record_z = record_spacing * (double)state->current_record_index;
     }
 
     (void)simulation_state_flush_snapshots(state);

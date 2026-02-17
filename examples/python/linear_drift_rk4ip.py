@@ -8,19 +8,16 @@ pulse propagates along z.
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import numpy as np
+from backend.plotting import (
+    plot_final_intensity_comparison,
+    plot_final_re_im_comparison,
+    plot_intensity_colormap_vs_propagation,
+    plot_total_error_over_propagation,
+)
 from backend.runner import NloExampleRunner, SimulationOptions, TemporalSimulationConfig
-
-try:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
 
 
 def centered_time_grid(num_samples: int, delta_time: float) -> np.ndarray:
@@ -40,64 +37,13 @@ def centroid_curve(t: np.ndarray, records: np.ndarray) -> np.ndarray:
     return weighted / safe_norm
 
 
-def save_plots(
-    t: np.ndarray,
-    z_records: np.ndarray,
-    records: np.ndarray,
-    centroid_shift: np.ndarray,
+def centroid_model_error_curve(
+    measured_shift: np.ndarray,
     theory_shift: np.ndarray,
-    output_dir: Path,
-) -> list[Path]:
-    if plt is None:
-        print("matplotlib not available; skipping plot generation.")
-        return []
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    saved_paths: list[Path] = []
-
-    intensity = np.abs(records) ** 2
-    norm = np.max(intensity)
-    intensity_map = intensity / norm if norm > 0.0 else intensity
-
-    fig_1, ax_1 = plt.subplots(figsize=(9.0, 5.0))
-    ax_1.plot(t, intensity[0], lw=2.0, label="Initial intensity")
-    ax_1.plot(t, intensity[-1], lw=1.8, ls="--", label="Final intensity")
-    ax_1.set_xlabel("Time t")
-    ax_1.set_ylabel("Intensity |A|^2")
-    ax_1.set_title("Linear Drift: Initial vs Final Pulse Intensity")
-    ax_1.grid(True, alpha=0.3)
-    ax_1.legend()
-    p1 = output_dir / "pulse_overlay.png"
-    fig_1.savefig(p1, dpi=200, bbox_inches="tight")
-    plt.close(fig_1)
-    saved_paths.append(p1)
-
-    fig_2, ax_2 = plt.subplots(figsize=(9.0, 5.2))
-    mesh = ax_2.pcolormesh(t, z_records, intensity_map, shading="auto", cmap="viridis")
-    ax_2.set_xlabel("Time t")
-    ax_2.set_ylabel("Propagation distance z")
-    ax_2.set_title("Linear Drift: Temporal Intensity Propagation")
-    cbar = fig_2.colorbar(mesh, ax=ax_2)
-    cbar.set_label("Normalized intensity")
-    p2 = output_dir / "intensity_propagation_map.png"
-    fig_2.savefig(p2, dpi=200, bbox_inches="tight")
-    plt.close(fig_2)
-    saved_paths.append(p2)
-
-    fig_3, ax_3 = plt.subplots(figsize=(9.0, 4.8))
-    ax_3.plot(z_records, centroid_shift, lw=2.0, label="Measured centroid shift")
-    ax_3.plot(z_records, theory_shift, lw=1.5, ls="--", label="Linear |beta2*d| prediction")
-    ax_3.set_xlabel("Propagation distance z")
-    ax_3.set_ylabel("Centroid shift")
-    ax_3.set_title("Linear Drift: Centroid Shift vs Propagation")
-    ax_3.grid(True, alpha=0.3)
-    ax_3.legend()
-    p3 = output_dir / "centroid_shift_vs_z.png"
-    fig_3.savefig(p3, dpi=200, bbox_inches="tight")
-    plt.close(fig_3)
-    saved_paths.append(p3)
-
-    return saved_paths
+    scale: float,
+) -> np.ndarray:
+    safe_scale = scale if scale > 0.0 else 1.0
+    return np.abs(np.asarray(measured_shift) - np.asarray(theory_shift)) / safe_scale
 
 
 def main() -> float:
@@ -131,29 +77,76 @@ def main() -> float:
 
     runner = NloExampleRunner()
     z_records, records = runner.propagate_temporal_records(field0, sim_cfg, num_records, exec_opts)
+    record_norms = np.asarray([float(np.linalg.norm(record)) for record in records], dtype=np.float64)
 
     centroid = centroid_curve(t, records)
     centroid_shift = centroid - centroid[0]
     measured_slope = float(np.polyfit(z_records, centroid_shift, 1)[0])
-    predicted_abs_slope = abs(beta2 * chirp)
-    theory_slope = math.copysign(predicted_abs_slope, measured_slope if measured_slope != 0.0 else 1.0)
-    theory_shift = theory_slope * z_records
-    slope_rel_error = abs(abs(measured_slope) - predicted_abs_slope) / max(predicted_abs_slope, 1e-12)
+    predicted_slope = beta2 * chirp
+    theory_shift = predicted_slope * z_records
+    slope_rel_error = abs(measured_slope - predicted_slope) / max(abs(predicted_slope), 1e-12)
+    end_shift_scale = abs(predicted_slope * z_final)
+    error_curve = centroid_model_error_curve(centroid_shift, theory_shift, end_shift_scale)
 
     output_dir = Path(__file__).resolve().parent / "output" / "linear_drift"
-    saved_paths = save_plots(
-        t=t,
-        z_records=z_records,
-        records=records,
-        centroid_shift=centroid_shift,
-        theory_shift=theory_shift,
-        output_dir=output_dir,
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[Path] = []
+
+    saved = plot_intensity_colormap_vs_propagation(
+        t,
+        z_records,
+        np.abs(records) ** 2,
+        output_dir / "intensity_propagation_map.png",
+        x_label="Time t",
+        title="Linear Drift: Temporal Intensity Propagation",
+        colorbar_label="Normalized intensity",
+        cmap="viridis",
     )
+    if saved is not None:
+        saved_paths.append(saved)
+
+    saved = plot_final_re_im_comparison(
+        t,
+        records[0],
+        records[-1],
+        output_dir / "final_re_im_comparison.png",
+        x_label="Time t",
+        title="Linear Drift: Final Re/Im Comparison",
+        reference_label="Initial",
+        final_label="Final",
+    )
+    if saved is not None:
+        saved_paths.append(saved)
+
+    saved = plot_final_intensity_comparison(
+        t,
+        records[0],
+        records[-1],
+        output_dir / "final_intensity_comparison.png",
+        x_label="Time t",
+        title="Linear Drift: Final Intensity Comparison",
+        reference_label="Initial",
+        final_label="Final",
+    )
+    if saved is not None:
+        saved_paths.append(saved)
+
+    saved = plot_total_error_over_propagation(
+        z_records,
+        error_curve,
+        output_dir / "total_error_over_propagation.png",
+        title="Linear Drift: Centroid Model Error Over Propagation",
+        y_label="Normalized |measured - theory|",
+    )
+    if saved is not None:
+        saved_paths.append(saved)
 
     print("linear drift example completed.")
+    print(f"record norms: first={record_norms[0]:.6e}, last={record_norms[-1]:.6e}, min={np.min(record_norms):.6e}")
     print(f"centroid shift: z0={centroid_shift[0]:.6e}, z_end={centroid_shift[-1]:.6e}")
-    print(f"slope magnitude: measured={abs(measured_slope):.6e}, predicted={predicted_abs_slope:.6e}")
+    print(f"slope (signed): measured={measured_slope:.6e}, predicted={predicted_slope:.6e}")
     print(f"slope relative error: {slope_rel_error:.6e}")
+    print(f"centroid theory final shift: {theory_shift[-1]:.6e}")
     if saved_paths:
         print("saved plots:")
         for path in saved_paths:

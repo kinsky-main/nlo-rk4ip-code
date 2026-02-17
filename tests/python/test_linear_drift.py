@@ -91,13 +91,14 @@ def main():
     shift_pos = _intensity_centroid(t, final_pos) - _intensity_centroid(t, pulse_pos)
     shift_neg = _intensity_centroid(t, final_neg) - _intensity_centroid(t, pulse_neg)
 
-    expected_abs = abs(beta2 * d * z_final)
+    expected_pos = beta2 * d * z_final
+    expected_neg = beta2 * (-d) * z_final
     assert abs(shift_pos) > 0.05
     assert abs(shift_neg) > 0.05
     assert shift_pos * shift_neg < 0.0
 
-    rel_err_pos = abs(abs(shift_pos) - expected_abs) / expected_abs
-    rel_err_neg = abs(abs(shift_neg) - expected_abs) / expected_abs
+    rel_err_pos = abs(shift_pos - expected_pos) / max(abs(expected_pos), 1e-12)
+    rel_err_neg = abs(shift_neg - expected_neg) / max(abs(expected_neg), 1e-12)
     assert rel_err_pos <= 0.30
     assert rel_err_neg <= 0.30
 
@@ -105,8 +106,9 @@ def main():
     assert mag_sym <= 0.20
 
     print(
-        "test_linear_drift: validated opposite temporal drift directions and expected drift magnitude "
-        f"(shift_pos={shift_pos:.6f}, shift_neg={shift_neg:.6f}, expected_abs={expected_abs:.6f})."
+        "test_linear_drift: validated opposite temporal drift directions and signed drift prediction "
+        f"(shift_pos={shift_pos:.6f}, expected_pos={expected_pos:.6f}, "
+        f"shift_neg={shift_neg:.6f}, expected_neg={expected_neg:.6f})."
     )
 
 
