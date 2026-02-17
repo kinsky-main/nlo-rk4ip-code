@@ -320,8 +320,10 @@ def save_plots(
     epsilon: float,
     z_final: float,
     z_samples: np.ndarray,
+    lambda0_nm: float,
     lambda_nm: np.ndarray,
     spectral_map: np.ndarray,
+    wavelength_plot_window_nm: float | None,
     output_dir: Path,
 ) -> list[Path]:
     if plt is None:
@@ -362,11 +364,22 @@ def save_plots(
     saved_paths.append(p2)
 
     if spectral_map.size > 0 and lambda_nm.size > 0 and z_samples.size > 0:
+        plot_lambda_nm = lambda_nm
+        plot_spectral_map = spectral_map
+        if wavelength_plot_window_nm is not None and wavelength_plot_window_nm > 0.0:
+            half_window_nm = 0.5 * float(wavelength_plot_window_nm)
+            window_min_nm = float(lambda0_nm) - half_window_nm
+            window_max_nm = float(lambda0_nm) + half_window_nm
+            window_mask = (lambda_nm >= window_min_nm) & (lambda_nm <= window_max_nm)
+            if int(np.count_nonzero(window_mask)) >= 2:
+                plot_lambda_nm = lambda_nm[window_mask]
+                plot_spectral_map = spectral_map[:, window_mask]
+
         fig_3, ax_3 = plt.subplots(figsize=(9.0, 5.5))
-        safe_map = np.nan_to_num(spectral_map, nan=0.0, posinf=0.0, neginf=0.0)
+        safe_map = np.nan_to_num(plot_spectral_map, nan=0.0, posinf=0.0, neginf=0.0)
         safe_map = np.clip(safe_map, 0.0, None)
         spectral_db = 10.0 * np.log10(np.maximum(safe_map, 1e-12))
-        img = ax_3.pcolormesh(lambda_nm, z_samples, spectral_db, shading="auto", cmap="magma", vmin=-80.0, vmax=0.0)
+        img = ax_3.pcolormesh(plot_lambda_nm, z_samples, spectral_db, shading="auto", cmap="magma", vmin=-80.0, vmax=0.0)
         ax_3.set_xlabel("Wavelength (nm)")
         ax_3.set_ylabel("Propagation distance z (m)")
         ax_3.set_title("Spectral Intensity Envelope vs Propagation Distance")
@@ -447,6 +460,7 @@ def main() -> float:
             )
 
     lambda0_nm = 1550.0
+    wavelength_plot_window_nm = 400.0
     z_map, lambda_nm, spectral_map = compute_wavelength_spectral_map_from_records(
         A_records,
         z_records,
@@ -462,8 +476,10 @@ def main() -> float:
         epsilon,
         z_final,
         z_map,
+        lambda0_nm,
         lambda_nm,
         spectral_map,
+        wavelength_plot_window_nm,
         output_dir,
     )
 
