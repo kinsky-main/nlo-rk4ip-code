@@ -1,5 +1,5 @@
 """
-Second-order soliton propagation check using the Python CFFI API.
+Second-order soliton propagation check using the Python ctypes API.
 
 This example compares the numerical solver output against the known analytical
 breather solution at one soliton period and reports the average relative
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import sys
+import ctypes
 from pathlib import Path
 
 import numpy as np

@@ -1,5 +1,5 @@
 """
-Minimal flattened-XY GRIN propagation example using the CFFI API.
+Minimal flattened-XY GRIN propagation example using the ctypes API.
 """
 
 from __future__ import annotations

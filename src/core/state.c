@@ -334,6 +334,9 @@ simulation_state* create_simulation_state(
         num_recorded_samples == 0 || num_recorded_samples > NT_MAX) {
         return NULL;
     }
+    if (config->runtime.num_constants > NLO_RUNTIME_OPERATOR_CONSTANTS_MAX) {
+        return NULL;
+    }
 
     size_t spatial_nx = 0u;
     size_t spatial_ny = 0u;
@@ -364,6 +367,9 @@ simulation_state* create_simulation_state(
     state->current_half_step_exp = 0.5 * state->current_step_size;
     state->last_dispersion_step_size = 0.0;
     state->dispersion_valid = 0;
+    state->runtime_dispersion_enabled = 0;
+    state->runtime_nonlinear_enabled = 0;
+    state->runtime_operator_stack_slots = 0u;
 
     size_t host_elements = 0u;
     if (checked_mul_size_t(state->num_time_samples, state->num_recorded_samples, &host_elements) != 0) {
@@ -504,14 +510,81 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
-    status = nlo_calculate_dispersion_factor_vec(state->backend,
-                                                 config->dispersion.num_dispersion_terms,
-                                                 config->dispersion.betas,
-                                                 state->current_step_size,
-                                                 state->working_vectors.dispersion_factor_vec,
-                                                 state->frequency_grid_vec,
-                                                 state->working_vectors.omega_power_vec,
-                                                 state->working_vectors.field_working_vec);
+    const char* dispersion_expr = config->runtime.dispersion_expr;
+    if (dispersion_expr != NULL && dispersion_expr[0] != '\0') {
+        status = nlo_operator_program_compile(dispersion_expr,
+                                              NLO_OPERATOR_CONTEXT_DISPERSION,
+                                              config->runtime.num_constants,
+                                              config->runtime.constants,
+                                              &state->dispersion_operator_program);
+        if (status != NLO_VEC_STATUS_OK) {
+            free_simulation_state(state);
+            return NULL;
+        }
+        state->runtime_dispersion_enabled = 1;
+    }
+
+    const char* nonlinear_expr = config->runtime.nonlinear_expr;
+    if (nonlinear_expr != NULL && nonlinear_expr[0] != '\0') {
+        status = nlo_operator_program_compile(nonlinear_expr,
+                                              NLO_OPERATOR_CONTEXT_NONLINEAR,
+                                              config->runtime.num_constants,
+                                              config->runtime.constants,
+                                              &state->nonlinear_operator_program);
+        if (status != NLO_VEC_STATUS_OK) {
+            free_simulation_state(state);
+            return NULL;
+        }
+        state->runtime_nonlinear_enabled = 1;
+    }
+
+    if (state->runtime_dispersion_enabled || state->runtime_nonlinear_enabled) {
+        const size_t dispersion_stack = state->runtime_dispersion_enabled
+                                            ? state->dispersion_operator_program.required_stack_slots
+                                            : 0u;
+        const size_t nonlinear_stack = state->runtime_nonlinear_enabled
+                                           ? state->nonlinear_operator_program.required_stack_slots
+                                           : 0u;
+        state->runtime_operator_stack_slots =
+            (dispersion_stack > nonlinear_stack) ? dispersion_stack : nonlinear_stack;
+
+        if (state->runtime_operator_stack_slots == 0u ||
+            state->runtime_operator_stack_slots > NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS) {
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        for (size_t i = 0u; i < state->runtime_operator_stack_slots; ++i) {
+            if (nlo_create_complex_vec(state->backend,
+                                       num_time_samples,
+                                       &state->runtime_operator_stack_vec[i]) != NLO_VEC_STATUS_OK) {
+                free_simulation_state(state);
+                return NULL;
+            }
+        }
+    }
+
+    if (state->runtime_dispersion_enabled) {
+        const nlo_operator_eval_context eval_ctx = {
+            .frequency_grid = state->frequency_grid_vec,
+            .field = NULL
+        };
+        status = nlo_operator_program_execute(state->backend,
+                                              &state->dispersion_operator_program,
+                                              &eval_ctx,
+                                              state->runtime_operator_stack_vec,
+                                              state->runtime_operator_stack_slots,
+                                              state->working_vectors.dispersion_factor_vec);
+    } else {
+        status = nlo_calculate_dispersion_factor_vec(state->backend,
+                                                     config->dispersion.num_dispersion_terms,
+                                                     config->dispersion.betas,
+                                                     state->current_step_size,
+                                                     state->working_vectors.dispersion_factor_vec,
+                                                     state->frequency_grid_vec,
+                                                     state->working_vectors.omega_power_vec,
+                                                     state->working_vectors.field_working_vec);
+    }
     if (status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
@@ -575,6 +648,9 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.previous_field_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.grin_phase_factor_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.grin_work_vec);
+        for (size_t i = 0u; i < NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS; ++i) {
+            nlo_destroy_vec_if_set(state->backend, &state->runtime_operator_stack_vec[i]);
+        }
 
         if (state->record_ring_vec != NULL) {
             for (size_t i = 0; i < state->record_ring_capacity; ++i) {

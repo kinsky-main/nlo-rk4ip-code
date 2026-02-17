@@ -104,6 +104,34 @@ static void nlo_rk4_debug_log_solver_config(const simulation_state* state, doubl
             tol);
 }
 
+static nlo_vec_status nlo_apply_nonlinear_operator_stage(
+    simulation_state* state,
+    const nlo_vec_buffer* field,
+    nlo_vec_buffer* magnitude_squared,
+    nlo_vec_buffer* out_field
+)
+{
+    if (state == NULL || state->backend == NULL || state->config == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (state->runtime_nonlinear_enabled) {
+        return nlo_apply_nonlinear_operator_program_vec(state->backend,
+                                                        &state->nonlinear_operator_program,
+                                                        field,
+                                                        magnitude_squared,
+                                                        out_field,
+                                                        state->runtime_operator_stack_vec,
+                                                        state->runtime_operator_stack_slots);
+    }
+
+    return nlo_apply_nonlinear_operator_vec(state->backend,
+                                            state->config->nonlinear.gamma,
+                                            field,
+                                            magnitude_squared,
+                                            out_field);
+}
+
 static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_index)
 {
     if (state == NULL || state->backend == NULL || state->fft_plan == NULL)
@@ -138,12 +166,10 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     nlo_rk4_debug_log_vec_stats(state, work->ip_field_vec, "ip_field", step_index, state->current_z, step);
 
     // Calculate k1
-    NLO_RK4_CALL(nlo_apply_nonlinear_operator_vec(
-        backend,
-        state->config->nonlinear.gamma,
-        work->ip_field_vec,
-        work->field_magnitude_vec,
-        work->field_working_vec));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state,
+                                                    work->ip_field_vec,
+                                                    work->field_magnitude_vec,
+                                                    work->field_working_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(step, 0.0)));
     NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->field_working_vec, work->field_freq_vec));
     NLO_RK4_CALL(nlo_apply_dispersion_operator_vec(backend,
@@ -165,11 +191,10 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
 
     // Calculate k2
-    NLO_RK4_CALL(nlo_apply_nonlinear_operator_vec(backend,
-                                                  state->config->nonlinear.gamma,
-                                                  work->field_working_vec,
-                                                  work->field_magnitude_vec,
-                                                  work->k_2_vec));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state,
+                                                    work->field_working_vec,
+                                                    work->field_magnitude_vec,
+                                                    work->k_2_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_2_vec, nlo_make(step, 0.0)));
     nlo_rk4_debug_log_vec_stats(state, work->k_2_vec, "k2", step_index, state->current_z, step);
     
@@ -179,11 +204,10 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
 
     // Calculate k3
-    NLO_RK4_CALL(nlo_apply_nonlinear_operator_vec(backend,
-                                                  state->config->nonlinear.gamma,
-                                                  work->field_working_vec,
-                                                  work->field_magnitude_vec,
-                                                  work->k_3_vec));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state,
+                                                    work->field_working_vec,
+                                                    work->field_magnitude_vec,
+                                                    work->k_3_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_3_vec, nlo_make(step, 0.0)));
     nlo_rk4_debug_log_vec_stats(state, work->k_3_vec, "k3", step_index, state->current_z, step);
 
@@ -204,11 +228,10 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                              state->current_half_step_exp));
 
     // Calculate k4
-    NLO_RK4_CALL(nlo_apply_nonlinear_operator_vec(backend,
-                                                  state->config->nonlinear.gamma,
-                                                  work->field_working_vec,
-                                                  work->field_magnitude_vec,
-                                                  work->k_4_vec));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state,
+                                                    work->field_working_vec,
+                                                    work->field_magnitude_vec,
+                                                    work->k_4_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_4_vec, nlo_make(step, 0.0)));
     nlo_rk4_debug_log_vec_stats(state, work->k_4_vec, "k4", step_index, state->current_z, step);
 
