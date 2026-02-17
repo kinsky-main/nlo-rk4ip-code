@@ -36,6 +36,47 @@ function(_nlo_resolve_git_dir out_var)
   set("${out_var}" "${_nlo_git_dir}" PARENT_SCOPE)
 endfunction()
 
+function(_nlo_directory_is_writable path out_var)
+  set(_nlo_can_write FALSE)
+
+  if(IS_DIRECTORY "${path}")
+    string(RANDOM LENGTH 8 ALPHABET 0123456789abcdef _nlo_probe_suffix)
+    set(_nlo_probe_file "${path}/.nlo-write-probe-${_nlo_probe_suffix}")
+    execute_process(
+      COMMAND "${CMAKE_COMMAND}" -E touch "${_nlo_probe_file}"
+      RESULT_VARIABLE _nlo_touch_result
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(_nlo_touch_result EQUAL 0)
+      set(_nlo_can_write TRUE)
+      if(EXISTS "${_nlo_probe_file}")
+        file(REMOVE "${_nlo_probe_file}")
+      endif()
+    endif()
+  endif()
+
+  set("${out_var}" "${_nlo_can_write}" PARENT_SCOPE)
+endfunction()
+
+function(_nlo_file_is_writable path out_var)
+  set(_nlo_can_write FALSE)
+
+  if(EXISTS "${path}")
+    execute_process(
+      COMMAND "${CMAKE_COMMAND}" -E touch "${path}"
+      RESULT_VARIABLE _nlo_touch_result
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(_nlo_touch_result EQUAL 0)
+      set(_nlo_can_write TRUE)
+    endif()
+  endif()
+
+  set("${out_var}" "${_nlo_can_write}" PARENT_SCOPE)
+endfunction()
+
 function(nlo_install_minor_version_hook)
   set(options)
   set(oneValueArgs VERSION_FILE)
@@ -58,15 +99,20 @@ function(nlo_install_minor_version_hook)
 
   if(NOT IS_DIRECTORY "${_nlo_hook_dir}")
     get_filename_component(_nlo_hook_parent "${_nlo_hook_dir}" DIRECTORY)
-    if(NOT IS_DIRECTORY "${_nlo_hook_parent}" OR NOT IS_WRITABLE "${_nlo_hook_parent}")
+    _nlo_directory_is_writable("${_nlo_hook_parent}" _nlo_hook_parent_writable)
+    if(NOT IS_DIRECTORY "${_nlo_hook_parent}" OR NOT _nlo_hook_parent_writable)
       message(STATUS "Pre-commit hook path is not writable; skipping automatic minor version hook installation.")
       return()
     endif()
     file(MAKE_DIRECTORY "${_nlo_hook_dir}")
   endif()
 
-  if((EXISTS "${_nlo_pre_commit_hook}" AND NOT IS_WRITABLE "${_nlo_pre_commit_hook}") OR
-     (NOT EXISTS "${_nlo_pre_commit_hook}" AND NOT IS_WRITABLE "${_nlo_hook_dir}"))
+  if(EXISTS "${_nlo_pre_commit_hook}")
+    _nlo_file_is_writable("${_nlo_pre_commit_hook}" _nlo_hook_path_writable)
+  else()
+    _nlo_directory_is_writable("${_nlo_hook_dir}" _nlo_hook_path_writable)
+  endif()
+  if(NOT _nlo_hook_path_writable)
     message(STATUS "Pre-commit hook path is not writable; skipping automatic minor version hook installation.")
     return()
   endif()
@@ -102,6 +148,41 @@ function(nlo_install_minor_version_hook)
   )
 endfunction()
 
+function(nlo_add_patch_bump_on_build)
+  set(options)
+  set(oneValueArgs VERSION_FILE TARGET_NAME)
+  set(multiValueArgs DEPENDS_ON_TARGETS)
+  cmake_parse_arguments(NLO "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+  if(NOT NLO_VERSION_FILE)
+    message(FATAL_ERROR "nlo_add_patch_bump_on_build requires VERSION_FILE.")
+  endif()
+
+  if(NOT NLO_TARGET_NAME)
+    set(NLO_TARGET_NAME "nlo_patch_bump_on_build")
+  endif()
+
+  if(TARGET "${NLO_TARGET_NAME}")
+    return()
+  endif()
+
+  add_custom_target("${NLO_TARGET_NAME}" ALL
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DVERSION_FILE=${NLO_VERSION_FILE}"
+      "-DBUMP_KIND=PATCH"
+      "-DPROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+      -P
+      "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/bump_version.cmake"
+    COMMENT "Bump patch version after successful build"
+    VERBATIM
+  )
+
+  if(NLO_DEPENDS_ON_TARGETS)
+    add_dependencies("${NLO_TARGET_NAME}" ${NLO_DEPENDS_ON_TARGETS})
+  endif()
+endfunction()
+
 function(nlo_add_build_test_patch_target)
   set(options)
   set(oneValueArgs VERSION_FILE TARGET_NAME)
@@ -121,7 +202,7 @@ function(nlo_add_build_test_patch_target)
   endif()
 
   add_custom_target("${NLO_TARGET_NAME}"
-    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --config "$<CONFIG>" --target all
+    COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --config "$<CONFIG>"
     COMMAND "${CMAKE_CTEST_COMMAND}" --output-on-failure --build-config "$<CONFIG>"
     COMMAND
       "${CMAKE_COMMAND}"

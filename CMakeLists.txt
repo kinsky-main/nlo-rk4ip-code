@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 nlo_configure_build_configurations()
 
-project(nlolib VERSION 0.0.1 LANGUAGES C)
+project(nlolib VERSION 0.0.2 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -13,6 +13,7 @@ option(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS "Enable debug-only RK4/dispersion diagno
 option(NLO_INSTALL_GIT_HOOKS "Install repository git hooks during CMake configure" ON)
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
+option(NLO_BUMP_PATCH_ON_BUILD "Bump patch version in CMakeLists.txt after successful builds" ON)
 
 set(NLO_VULKAN_HEADERS_URL
   "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/heads/main.zip"
@@ -35,6 +36,12 @@ add_subdirectory(src)
 add_subdirectory(python)
 
 include(CTest)
+if(NLO_BUMP_PATCH_ON_BUILD)
+  nlo_add_patch_bump_on_build(
+    VERSION_FILE "${CMAKE_CURRENT_LIST_FILE}"
+    DEPENDS_ON_TARGETS nlolib
+  )
+endif()
 if(BUILD_TESTING)
   add_subdirectory(tests)
   nlo_add_build_test_patch_target(VERSION_FILE "${CMAKE_CURRENT_LIST_FILE}")
