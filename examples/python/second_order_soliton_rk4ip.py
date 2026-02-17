@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from backend.runner import NloExampleRunner, SimulationOptions, TemporalSimulationConfig
 
 try:
     import matplotlib
@@ -73,104 +74,6 @@ def second_order_soliton_normalized_envelope(
     return numerator / denominator
 
 
-def _write_complex_buffer(dst, values: np.ndarray) -> None:
-    for i, val in enumerate(values):
-        dst[i].re = float(val.real)
-        dst[i].im = float(val.imag)
-
-
-def _read_complex_buffer(src, n: int) -> np.ndarray:
-    out = np.empty(n, dtype=np.complex128)
-    for i in range(n):
-        out[i] = complex(src[i].re, src[i].im)
-    return out
-
-
-def _parse_pointer_value(value: int | str) -> int:
-    if isinstance(value, str):
-        text = value.strip().lower()
-        if text.startswith("0x"):
-            return int(text, 16)
-        return int(text, 10)
-    return int(value)
-
-
-def _to_vk_handle(ffi, value: int | str | None, ctype: str):
-    if value is None:
-        return ffi.NULL
-    parsed = _parse_pointer_value(value)
-    if parsed == 0:
-        return ffi.NULL
-    return ffi.cast(ctype, parsed)
-
-
-def _build_execution_options(ffi, params: dict):
-    backend_cfg = params.get("backend", "auto")
-    if backend_cfg is None:
-        backend_cfg = "auto"
-
-    opts = ffi.new("nlo_execution_options*")
-    opts.backend_type = 0  # NLO_VECTOR_BACKEND_CPU
-    opts.fft_backend = 0  # NLO_FFT_BACKEND_AUTO
-    opts.device_heap_fraction = float(params.get("device_heap_fraction", 0.70))
-    opts.record_ring_target = int(params.get("record_ring_target", 0))
-    opts.forced_device_budget_bytes = int(params.get("forced_device_budget_bytes", 0))
-    opts.vulkan.physical_device = ffi.NULL
-    opts.vulkan.device = ffi.NULL
-    opts.vulkan.queue = ffi.NULL
-    opts.vulkan.queue_family_index = 0
-    opts.vulkan.command_pool = ffi.NULL
-    opts.vulkan.descriptor_set_budget_bytes = 0
-    opts.vulkan.descriptor_set_count_override = 0
-
-    fft_backend = str(params.get("fft_backend", "auto")).strip().lower()
-    fft_backend_map = {"auto": 0, "fftw": 1, "vkfft": 2}
-    if fft_backend not in fft_backend_map:
-        raise ValueError("fft_backend must be one of: auto, fftw, vkfft.")
-    opts.fft_backend = fft_backend_map[fft_backend]
-
-    if isinstance(backend_cfg, str):
-        backend_type = backend_cfg.strip().lower()
-        cfg = {}
-    elif isinstance(backend_cfg, dict):
-        backend_type = str(backend_cfg.get("type", "cpu")).strip().lower()
-        cfg = backend_cfg
-    else:
-        raise TypeError("backend must be a string or dict when provided.")
-
-    if backend_type == "cpu":
-        opts.backend_type = 0
-        return opts
-
-    if backend_type == "auto":
-        opts.backend_type = 2  # NLO_VECTOR_BACKEND_AUTO
-        return opts
-
-    if backend_type != "vulkan":
-        raise ValueError("backend type must be one of: 'cpu', 'auto', or 'vulkan'.")
-
-    vk_cfg = cfg.get("vulkan", cfg)
-    required = ("physical_device", "device", "queue", "queue_family_index")
-    missing = [name for name in required if name not in vk_cfg]
-    if missing:
-        raise ValueError(
-            "vulkan backend requires handle fields: "
-            + ", ".join(required)
-            + ". Missing: "
-            + ", ".join(missing)
-        )
-
-    opts.backend_type = 1  # NLO_VECTOR_BACKEND_VULKAN
-    opts.vulkan.physical_device = _to_vk_handle(ffi, vk_cfg.get("physical_device"), "VkPhysicalDevice")
-    opts.vulkan.device = _to_vk_handle(ffi, vk_cfg.get("device"), "VkDevice")
-    opts.vulkan.queue = _to_vk_handle(ffi, vk_cfg.get("queue"), "VkQueue")
-    opts.vulkan.queue_family_index = int(vk_cfg.get("queue_family_index", 0))
-    opts.vulkan.command_pool = _to_vk_handle(ffi, vk_cfg.get("command_pool"), "VkCommandPool")
-    opts.vulkan.descriptor_set_budget_bytes = int(vk_cfg.get("descriptor_set_budget_bytes", 0))
-    opts.vulkan.descriptor_set_count_override = int(vk_cfg.get("descriptor_set_count_override", 0))
-    return opts
-
-
 def rk4ip_solver_recorded(
     A0: np.ndarray,
     z_final: float,
@@ -178,73 +81,45 @@ def rk4ip_solver_recorded(
     num_recorded_samples: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Run one propagation and return z records and envelope records."""
-    try:
-        from nlolib_cffi import ffi, load
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "nlolib_cffi/cffi is not available. Install cffi and ensure "
-            "PYTHONPATH includes the repo's python/ directory."
-        ) from exc
-
-    lib = load()
-
     if num_recorded_samples <= 0:
         raise ValueError("num_recorded_samples must be positive.")
 
     n = int(A0.size)
     dt = float(params["dt"])
     omega = np.asarray(params["omega"], dtype=np.float64)
-    if omega.size != n:
+    if int(omega.size) != n:
         raise ValueError("omega grid size must match A0 size.")
 
-    cfg = ffi.new("sim_config*")
-    cfg.nonlinear.gamma = float(params["gamma"])
-    cfg.dispersion.num_dispersion_terms = 3
-    cfg.dispersion.betas[0] = 0.0
-    cfg.dispersion.betas[1] = 0.0
-    cfg.dispersion.betas[2] = float(params["beta2"])
-    cfg.dispersion.alpha = float(params.get("alpha", 0.0))
+    sim_cfg = TemporalSimulationConfig(
+        gamma=float(params["gamma"]),
+        beta2=float(params["beta2"]),
+        alpha=float(params.get("alpha", 0.0)),
+        dt=dt,
+        z_final=float(z_final),
+        num_time_samples=n,
+        pulse_period=float(params.get("pulse_period", n * dt)),
+        omega=omega,
+        starting_step_size=float(params.get("starting_step_size", 1e-4)),
+        max_step_size=float(params.get("max_step_size", 1e-2)),
+        min_step_size=float(params.get("min_step_size", 1e-4)),
+        error_tolerance=float(params.get("error_tolerance", 1e-8)),
+    )
 
-    cfg.propagation.propagation_distance = float(z_final)
-    cfg.propagation.starting_step_size = float(params.get("starting_step_size", 1e-4))
-    cfg.propagation.max_step_size = float(params.get("max_step_size", 1e-2))
-    cfg.propagation.min_step_size = float(params.get("min_step_size", 1e-4))
-    cfg.propagation.error_tolerance = float(params.get("error_tolerance", 1e-8))
+    exec_opts = SimulationOptions(
+        backend=params.get("backend", "auto"),
+        fft_backend=params.get("fft_backend", "auto"),
+        device_heap_fraction=float(params.get("device_heap_fraction", 0.70)),
+        record_ring_target=int(params.get("record_ring_target", 0)),
+        forced_device_budget_bytes=int(params.get("forced_device_budget_bytes", 0)),
+    )
 
-    cfg.time.pulse_period = float(params.get("pulse_period", n * dt))
-    cfg.time.delta_time = dt
-
-    freq = ffi.new("nlo_complex[]", n)
-    for i, om in enumerate(omega):
-        freq[i].re = float(om)
-        freq[i].im = 0.0
-    cfg.frequency.frequency_grid = freq
-    cfg.spatial.nx = n
-    cfg.spatial.ny = 1
-    cfg.spatial.delta_x = 1.0
-    cfg.spatial.delta_y = 1.0
-    cfg.spatial.grin_gx = 0.0
-    cfg.spatial.grin_gy = 0.0
-    cfg.spatial.spatial_frequency_grid = ffi.NULL
-    cfg.spatial.grin_potential_phase_grid = ffi.NULL
-
-    inp = ffi.new("nlo_complex[]", n)
-    out = ffi.new("nlo_complex[]", n * int(num_recorded_samples))
-    _write_complex_buffer(inp, np.asarray(A0, dtype=np.complex128))
-
-    exec_opts = _build_execution_options(ffi, params)
-    exec_opts_ptr = exec_opts if exec_opts is not None else ffi.NULL
-    status = int(lib.nlolib_propagate(cfg, n, inp, int(num_recorded_samples), out, exec_opts_ptr))
-    if status != 0:
-        raise RuntimeError(f"nlolib_propagate failed with status={status}.")
-
-    flat = _read_complex_buffer(out, n * int(num_recorded_samples))
-    records = flat.reshape(int(num_recorded_samples), n)
-    if int(num_recorded_samples) == 1:
-        z_records = np.asarray([float(z_final)], dtype=np.float64)
-    else:
-        z_records = np.linspace(0.0, float(z_final), int(num_recorded_samples))
-    return z_records, records
+    runner = NloExampleRunner()
+    return runner.propagate_temporal_records(
+        np.asarray(A0, dtype=np.complex128),
+        sim_cfg,
+        int(num_recorded_samples),
+        exec_opts,
+    )
 
 
 def average_relative_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
