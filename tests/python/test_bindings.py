@@ -26,6 +26,14 @@ cfg.dispersion.alpha = 0.0
 
 freq = ffi.new("nlo_complex[]", n)
 cfg.frequency.frequency_grid = freq
+cfg.spatial.nx = n
+cfg.spatial.ny = 1
+cfg.spatial.delta_x = 1.0
+cfg.spatial.delta_y = 1.0
+cfg.spatial.grin_gx = 0.0
+cfg.spatial.grin_gy = 0.0
+cfg.spatial.spatial_frequency_grid = ffi.NULL
+cfg.spatial.grin_potential_phase_grid = ffi.NULL
 print("test_python_bindings: assigned frequency grid buffer.")
 
 assert cfg.dispersion.num_dispersion_terms == 0
@@ -58,3 +66,30 @@ opts.vulkan.descriptor_set_count_override = 0
 status = lib.nlolib_propagate(cfg, n, inp, 4, out_records, opts)
 assert int(status) == 0
 print("test_python_bindings: nlolib_propagate with recorded outputs returned expected status.")
+
+nx = 16
+ny = 8
+nxy = nx * ny
+inp_2d = ffi.new("nlo_complex[]", nxy)
+out_2d = ffi.new("nlo_complex[]", nxy)
+spatial_freq = ffi.new("nlo_complex[]", nxy)
+grin_phase = ffi.new("nlo_complex[]", nxy)
+for i in range(nxy):
+    spatial_freq[i].re = 0.0
+    spatial_freq[i].im = 0.0
+    grin_phase[i].re = 1.0
+    grin_phase[i].im = 0.0
+
+cfg.spatial.nx = nx
+cfg.spatial.ny = ny
+cfg.spatial.spatial_frequency_grid = spatial_freq
+cfg.spatial.grin_potential_phase_grid = grin_phase
+status = lib.nlolib_propagate(cfg, nxy, inp_2d, 1, out_2d, opts)
+assert int(status) == 0
+print("test_python_bindings: nlolib_propagate flattened 2D call returned expected status.")
+
+cfg.spatial.nx = nx + 1
+cfg.spatial.ny = ny
+status = lib.nlolib_propagate(cfg, nxy, inp_2d, 1, out_2d, opts)
+assert int(status) == 1
+print("test_python_bindings: invalid flattened XY shape rejected as expected.")

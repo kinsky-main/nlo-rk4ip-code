@@ -47,6 +47,38 @@ static size_t nlo_compute_record_bytes(size_t num_recorded_samples, size_t num_t
     return per_record_bytes * num_recorded_samples;
 }
 
+static int nlo_resolve_spatial_dimensions(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t* out_nx,
+    size_t* out_ny
+)
+{
+    if (config == NULL || out_nx == NULL || out_ny == NULL || num_time_samples == 0u) {
+        return -1;
+    }
+
+    size_t nx = config->spatial.nx;
+    size_t ny = config->spatial.ny;
+    if (nx == 0u && ny == 0u) {
+        nx = num_time_samples;
+        ny = 1u;
+    } else if (nx == 0u || ny == 0u) {
+        return -1;
+    }
+
+    if (nx > (SIZE_MAX / ny)) {
+        return -1;
+    }
+    if ((nx * ny) != num_time_samples) {
+        return -1;
+    }
+
+    *out_nx = nx;
+    *out_ny = ny;
+    return 0;
+}
+
 static void nlo_log_nlse_propagate_call(
     const sim_config* config,
     size_t num_time_samples,
@@ -69,13 +101,19 @@ static void nlo_log_nlse_propagate_call(
             : 0u;
     const size_t dispersion_bytes = nlo_compute_input_bytes(dispersion_count, sizeof(double));
     const size_t frequency_grid_bytes = nlo_compute_input_bytes(num_time_samples, sizeof(nlo_complex));
+    size_t nx = 0u;
+    size_t ny = 0u;
+    const int has_spatial_shape =
+        (nlo_resolve_spatial_dimensions(config, num_time_samples, &nx, &ny) == 0);
 
     fprintf(stderr,
             "[nlolib] nlse propagate backend=%s | "
             "num_time_samples=%zu num_recorded_samples=%zu field_bytes=%zu record_bytes=%zu | "
             "config=%p(size=%zu) input_field=%p(size=%zu) output_records=%p(size=%zu) "
             "exec_options=%p(size=%zu) | "
-            "dispersion_terms=%zu betas_bytes=%zu frequency_grid=%p(size=%zu)\n",
+            "dispersion_terms=%zu betas_bytes=%zu frequency_grid=%p(size=%zu) | "
+            "spatial(nx=%zu ny=%zu valid=%d dx=%.9e dy=%.9e gx=%.9e gy=%.9e "
+            "spatial_frequency_grid=%p grin_phase_grid=%p)\n",
             nlo_backend_type_to_string(local_exec_options.backend_type),
             num_time_samples,
             num_recorded_samples,
@@ -92,7 +130,16 @@ static void nlo_log_nlse_propagate_call(
             dispersion_count,
             dispersion_bytes,
             (config != NULL) ? (const void*)config->frequency.frequency_grid : NULL,
-            frequency_grid_bytes);
+            frequency_grid_bytes,
+            nx,
+            ny,
+            has_spatial_shape,
+            (config != NULL) ? config->spatial.delta_x : 0.0,
+            (config != NULL) ? config->spatial.delta_y : 0.0,
+            (config != NULL) ? config->spatial.grin_gx : 0.0,
+            (config != NULL) ? config->spatial.grin_gy : 0.0,
+            (config != NULL) ? (const void*)config->spatial.spatial_frequency_grid : NULL,
+            (config != NULL) ? (const void*)config->spatial.grin_potential_phase_grid : NULL);
 }
 
 NLOLIB_API nlolib_status nlolib_propagate(
@@ -123,6 +170,13 @@ NLOLIB_API nlolib_status nlolib_propagate(
     }
     if (nlo_compute_record_bytes(num_recorded_samples, num_time_samples) == 0u) {
         return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    {
+        size_t nx = 0u;
+        size_t ny = 0u;
+        if (nlo_resolve_spatial_dimensions(config, num_time_samples, &nx, &ny) != 0) {
+            return NLOLIB_STATUS_INVALID_ARGUMENT;
+        }
     }
 
     nlo_execution_options local_exec_options =

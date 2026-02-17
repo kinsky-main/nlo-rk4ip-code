@@ -219,6 +219,14 @@ def rk4ip_solver_recorded(
         freq[i].re = float(om)
         freq[i].im = 0.0
     cfg.frequency.frequency_grid = freq
+    cfg.spatial.nx = n
+    cfg.spatial.ny = 1
+    cfg.spatial.delta_x = 1.0
+    cfg.spatial.delta_y = 1.0
+    cfg.spatial.grin_gx = 0.0
+    cfg.spatial.grin_gy = 0.0
+    cfg.spatial.spatial_frequency_grid = ffi.NULL
+    cfg.spatial.grin_potential_phase_grid = ffi.NULL
 
     inp = ffi.new("nlo_complex[]", n)
     out = ffi.new("nlo_complex[]", n * int(num_recorded_samples))

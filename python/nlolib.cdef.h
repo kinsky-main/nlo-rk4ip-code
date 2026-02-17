@@ -63,11 +63,23 @@ typedef struct {
 } frequency_grid;
 
 typedef struct {
+    size_t nx;
+    size_t ny;
+    double delta_x;
+    double delta_y;
+    double grin_gx;
+    double grin_gy;
+    nlo_complex* spatial_frequency_grid;
+    nlo_complex* grin_potential_phase_grid;
+} spatial_grid;
+
+typedef struct {
     nonlinear_params nonlinear;
     dispersion_params dispersion;
     propagation_params propagation;
     time_grid time;
     frequency_grid frequency;
+    spatial_grid spatial;
 } sim_config;
 
 typedef struct {

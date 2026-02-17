@@ -33,6 +33,18 @@
 #endif
 
 static int checked_mul_size_t(size_t a, size_t b, size_t* out);
+static int nlo_resolve_spatial_dimensions(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t* out_nx,
+    size_t* out_ny
+);
+static int nlo_fill_grin_phase_base_grid(
+    const sim_config* config,
+    size_t nx,
+    size_t ny,
+    nlo_complex* out_grid
+);
 static size_t query_available_system_memory_bytes(void);
 static size_t apply_memory_headroom(size_t available_bytes);
 static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records);
@@ -50,6 +62,68 @@ static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer**
 static nlo_vec_status nlo_create_complex_vec(nlo_vector_backend* backend, size_t length, nlo_vec_buffer** out_vec)
 {
     return nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, length, out_vec);
+}
+
+static int nlo_resolve_spatial_dimensions(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t* out_nx,
+    size_t* out_ny
+)
+{
+    if (config == NULL || out_nx == NULL || out_ny == NULL || num_time_samples == 0u) {
+        return -1;
+    }
+
+    size_t nx = config->spatial.nx;
+    size_t ny = config->spatial.ny;
+    if (nx == 0u && ny == 0u) {
+        nx = num_time_samples;
+        ny = 1u;
+    } else if (nx == 0u || ny == 0u) {
+        return -1;
+    }
+
+    size_t total_points = 0u;
+    if (checked_mul_size_t(nx, ny, &total_points) != 0 || total_points != num_time_samples) {
+        return -1;
+    }
+
+    *out_nx = nx;
+    *out_ny = ny;
+    return 0;
+}
+
+static int nlo_fill_grin_phase_base_grid(
+    const sim_config* config,
+    size_t nx,
+    size_t ny,
+    nlo_complex* out_grid
+)
+{
+    if (config == NULL || out_grid == NULL || nx == 0u || ny == 0u) {
+        return -1;
+    }
+
+    const double gx = config->spatial.grin_gx;
+    const double gy = config->spatial.grin_gy;
+    const double dx = (config->spatial.delta_x > 0.0) ? config->spatial.delta_x : 1.0;
+    const double dy = (config->spatial.delta_y > 0.0) ? config->spatial.delta_y : 1.0;
+    const double x_center = 0.5 * (double)(nx - 1u);
+    const double y_center = 0.5 * (double)(ny - 1u);
+
+    for (size_t y = 0u; y < ny; ++y) {
+        const double y_coord = ((double)y - y_center) * dy;
+        const double y_term = gy * y_coord * y_coord;
+        const size_t row_offset = y * nx;
+        for (size_t x = 0u; x < nx; ++x) {
+            const double x_coord = ((double)x - x_center) * dx;
+            const double phase_unit = (gx * x_coord * x_coord) + y_term;
+            out_grid[row_offset + x] = nlo_make(cos(phase_unit), sin(phase_unit));
+        }
+    }
+
+    return 0;
 }
 
 static size_t nlo_compute_device_ring_capacity(const simulation_state* state, size_t requested_records)
@@ -134,6 +208,14 @@ sim_config* create_sim_config(size_t num_dispersion_terms, size_t num_time_sampl
 
     config->propagation.error_tolerance = 1e-6;
     config->dispersion.num_dispersion_terms = num_dispersion_terms;
+    config->spatial.nx = num_time_samples;
+    config->spatial.ny = 1u;
+    config->spatial.delta_x = 1.0;
+    config->spatial.delta_y = 1.0;
+    config->spatial.grin_gx = 0.0;
+    config->spatial.grin_gy = 0.0;
+    config->spatial.spatial_frequency_grid = NULL;
+    config->spatial.grin_potential_phase_grid = NULL;
     config->frequency.frequency_grid = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
     if (config->frequency.frequency_grid == NULL) {
         free(config);
@@ -166,6 +248,15 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
+    size_t spatial_nx = 0u;
+    size_t spatial_ny = 0u;
+    if (nlo_resolve_spatial_dimensions(config,
+                                       num_time_samples,
+                                       &spatial_nx,
+                                       &spatial_ny) != 0) {
+        return NULL;
+    }
+
     simulation_state* state = (simulation_state*)calloc(1, sizeof(simulation_state));
     if (state == NULL) {
         return NULL;
@@ -174,6 +265,7 @@ simulation_state* create_simulation_state(
     state->config = config;
     state->exec_options = *exec_options;
     state->num_time_samples = num_time_samples;
+    state->num_points_xy = num_time_samples;
     state->num_recorded_samples = compute_host_record_capacity(num_time_samples, num_recorded_samples);
     if (state->num_recorded_samples == 0u) {
         free_simulation_state(state);
@@ -228,7 +320,9 @@ simulation_state* create_simulation_state(
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_3_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_4_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.dispersion_factor_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.previous_field_vec) != NLO_VEC_STATUS_OK) {
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.previous_field_vec) != NLO_VEC_STATUS_OK ||
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.grin_phase_factor_vec) != NLO_VEC_STATUS_OK ||
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.grin_work_vec) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
     }
@@ -239,14 +333,64 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
-    if (config->frequency.frequency_grid != NULL) {
+    const nlo_complex* spectral_grid_source = config->spatial.spatial_frequency_grid;
+    if (spectral_grid_source == NULL) {
+        spectral_grid_source = config->frequency.frequency_grid;
+    }
+
+    if (spectral_grid_source != NULL) {
         status = nlo_vec_upload(state->backend,
                                 state->frequency_grid_vec,
-                                config->frequency.frequency_grid,
+                                spectral_grid_source,
                                 num_time_samples * sizeof(nlo_complex));
     } else {
         status = nlo_vec_complex_fill(state->backend, state->frequency_grid_vec, nlo_make(0.0, 0.0));
     }
+    if (status != NLO_VEC_STATUS_OK) {
+        free_simulation_state(state);
+        return NULL;
+    }
+
+    if (config->spatial.grin_potential_phase_grid != NULL) {
+        status = nlo_vec_upload(state->backend,
+                                state->working_vectors.grin_phase_factor_vec,
+                                config->spatial.grin_potential_phase_grid,
+                                num_time_samples * sizeof(nlo_complex));
+    } else if (config->spatial.grin_gx != 0.0 || config->spatial.grin_gy != 0.0) {
+        nlo_complex* grin_phase_base =
+            (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
+        if (grin_phase_base == NULL) {
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        if (nlo_fill_grin_phase_base_grid(config,
+                                          spatial_nx,
+                                          spatial_ny,
+                                          grin_phase_base) != 0) {
+            free(grin_phase_base);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = nlo_vec_upload(state->backend,
+                                state->working_vectors.grin_phase_factor_vec,
+                                grin_phase_base,
+                                num_time_samples * sizeof(nlo_complex));
+        free(grin_phase_base);
+    } else {
+        status = nlo_vec_complex_fill(state->backend,
+                                      state->working_vectors.grin_phase_factor_vec,
+                                      nlo_make(1.0, 0.0));
+    }
+    if (status != NLO_VEC_STATUS_OK) {
+        free_simulation_state(state);
+        return NULL;
+    }
+
+    status = nlo_vec_complex_fill(state->backend,
+                                  state->working_vectors.grin_work_vec,
+                                  nlo_make(0.0, 0.0));
     if (status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
@@ -321,6 +465,8 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_4_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_factor_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.previous_field_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.grin_phase_factor_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.grin_work_vec);
 
         if (state->record_ring_vec != NULL) {
             for (size_t i = 0; i < state->record_ring_capacity; ++i) {

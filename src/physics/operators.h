@@ -33,3 +33,21 @@ nlo_vec_status nlo_apply_nonlinear_operator_vec(
     nlo_vec_buffer* magnitude_squared,
     nlo_vec_buffer* out_field
 );
+
+/**
+ * @brief Apply the graded-index phase operator in real space.
+ *
+ * @param backend Active vector backend.
+ * @param grin_phase_factor_base Precomputed base phase factor per spatial sample.
+ * @param field Field buffer updated in place.
+ * @param grin_working_vec Temporary buffer (same shape as field).
+ * @param half_step_size Propagation half step applied as real exponent.
+ * @return nlo_vec_status operation status.
+ */
+nlo_vec_status nlo_apply_grin_operator_vec(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* grin_phase_factor_base,
+    nlo_vec_buffer* field,
+    nlo_vec_buffer* grin_working_vec,
+    double half_step_size
+);

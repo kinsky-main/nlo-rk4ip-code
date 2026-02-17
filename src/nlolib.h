@@ -50,12 +50,15 @@ typedef enum {
  * @brief Propagate an input field and return recorded envelopes across z.
  *
  * @param config Simulation configuration parameters.
- * @param num_time_samples Number of time-domain samples in the input/output arrays.
- * @param input_field Pointer to input field buffer (length: num_time_samples).
+ * @param num_time_samples Number of samples in the flattened input/output arrays.
+ *        For 1D legacy use this is the temporal sample count.
+ *        For 2D transverse simulations this must equal config->spatial.nx * config->spatial.ny.
+ * @param input_field Pointer to input field buffer (length: num_time_samples),
+ *        flattened in row-major order for 2D transverse mode.
  * @param num_recorded_samples Number of envelope records to return.
  * @param output_records Pointer to output record buffer (length:
  *        num_recorded_samples * num_time_samples). The layout is record-major:
- *        output_records[record_index * num_time_samples + time_index].
+ *        output_records[record_index * num_time_samples + sample_index].
  *        For num_recorded_samples == 1, record 0 is the final field at z_end.
  *        For num_recorded_samples > 1, records are evenly distributed over [0, z_end].
  * @param exec_options Runtime backend selection/options

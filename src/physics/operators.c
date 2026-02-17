@@ -145,3 +145,35 @@ nlo_vec_status nlo_apply_nonlinear_operator_vec(
     return nlo_vec_complex_mul_inplace(backend, out_field, magnitude_squared);
 }
 
+nlo_vec_status nlo_apply_grin_operator_vec(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* grin_phase_factor_base,
+    nlo_vec_buffer* field,
+    nlo_vec_buffer* grin_working_vec,
+    double half_step_size
+)
+{
+    if (backend == NULL ||
+        grin_phase_factor_base == NULL ||
+        field == NULL ||
+        grin_working_vec == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_vec_status status = nlo_vec_complex_copy(backend,
+                                                 grin_working_vec,
+                                                 grin_phase_factor_base);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_real_pow_inplace(backend,
+                                              grin_working_vec,
+                                              half_step_size);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    return nlo_vec_complex_mul_inplace(backend, field, grin_working_vec);
+}
+

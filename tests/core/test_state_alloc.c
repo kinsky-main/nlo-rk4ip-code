@@ -61,15 +61,57 @@ static void test_init_state_invalid_args(void)
     assert(nlo_init_simulation_state(config, 8, 0, &exec_options, &info, &state) != 0);
     assert(state == NULL);
 
+    config->spatial.nx = 3;
+    config->spatial.ny = 3;
+    assert(nlo_init_simulation_state(config, 8, 1, &exec_options, &info, &state) != 0);
+    assert(state == NULL);
+
     free_sim_config(config);
 
     printf("test_init_state_invalid_args: validates argument checks.\n");
+}
+
+static void test_init_state_xy_shape_success(void)
+{
+    const size_t nx = 32;
+    const size_t ny = 16;
+    const size_t num_time_samples = nx * ny;
+    const size_t num_records = 8;
+
+    sim_config* config = create_sim_config(2, num_time_samples);
+    assert(config != NULL);
+
+    config->spatial.nx = nx;
+    config->spatial.ny = ny;
+    config->spatial.delta_x = 0.5;
+    config->spatial.delta_y = 0.5;
+    config->spatial.grin_gx = 0.01;
+    config->spatial.grin_gy = 0.02;
+
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+
+    simulation_state* state = NULL;
+    nlo_allocation_info info = {0};
+    assert(nlo_init_simulation_state(config,
+                                     num_time_samples,
+                                     num_records,
+                                     &exec_options,
+                                     &info,
+                                     &state) == 0);
+    assert(state != NULL);
+    assert(state->num_points_xy == num_time_samples);
+
+    free_simulation_state(state);
+    free_sim_config(config);
+
+    printf("test_init_state_xy_shape_success: validates flattened XY shape handling.\n");
 }
 
 int main(void)
 {
     test_init_state_success();
     test_init_state_invalid_args();
+    test_init_state_xy_shape_success();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;
 }

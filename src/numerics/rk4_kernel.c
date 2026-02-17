@@ -130,6 +130,11 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->omega_power_vec,
                                                    state->current_half_step_exp));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->ip_field_vec));
+    NLO_RK4_CALL(nlo_apply_grin_operator_vec(backend,
+                                             work->grin_phase_factor_vec,
+                                             work->ip_field_vec,
+                                             work->grin_work_vec,
+                                             state->current_half_step_exp));
     nlo_rk4_debug_log_vec_stats(state, work->ip_field_vec, "ip_field", step_index, state->current_z, step);
 
     // Calculate k1
@@ -147,6 +152,11 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->omega_power_vec,
                                                    state->current_half_step_exp));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_1_vec));
+    NLO_RK4_CALL(nlo_apply_grin_operator_vec(backend,
+                                             work->grin_phase_factor_vec,
+                                             work->k_1_vec,
+                                             work->grin_work_vec,
+                                             state->current_half_step_exp));
     nlo_rk4_debug_log_vec_stats(state, work->k_1_vec, "k1", step_index, state->current_z, step);
     
     // Calculate working field term for k2 nonlinearity
@@ -187,6 +197,11 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->omega_power_vec,
                                                    state->current_half_step_exp));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->field_working_vec));
+    NLO_RK4_CALL(nlo_apply_grin_operator_vec(backend,
+                                             work->grin_phase_factor_vec,
+                                             work->field_working_vec,
+                                             work->grin_work_vec,
+                                             state->current_half_step_exp));
 
     // Calculate k4
     NLO_RK4_CALL(nlo_apply_nonlinear_operator_vec(backend,
@@ -214,6 +229,11 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->omega_power_vec,
                                                    state->current_half_step_exp));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_1_vec));
+    NLO_RK4_CALL(nlo_apply_grin_operator_vec(backend,
+                                             work->grin_phase_factor_vec,
+                                             work->k_1_vec,
+                                             work->grin_work_vec,
+                                             state->current_half_step_exp));
 
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_1_vec, work->k_4_vec));
 

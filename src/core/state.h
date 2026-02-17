@@ -14,7 +14,7 @@
 #endif
 
 #ifndef NLO_WORK_VECTOR_COUNT
-#define NLO_WORK_VECTOR_COUNT 11u
+#define NLO_WORK_VECTOR_COUNT 13u
 #endif
 
 #ifndef NLO_DEFAULT_DEVICE_HEAP_FRACTION
@@ -49,11 +49,23 @@ typedef struct {
 } frequency_grid;
 
 typedef struct {
+    size_t nx;
+    size_t ny;
+    double delta_x;
+    double delta_y;
+    double grin_gx;
+    double grin_gy;
+    nlo_complex* spatial_frequency_grid;
+    nlo_complex* grin_potential_phase_grid;
+} spatial_grid;
+
+typedef struct {
     nonlinear_params nonlinear;
     dispersion_params dispersion;
     propagation_params propagation;
     time_grid time;
     frequency_grid frequency;
+    spatial_grid spatial;
 } sim_config;
 
 typedef struct {
@@ -77,6 +89,8 @@ typedef struct {
     nlo_vec_buffer* k_4_vec;
     nlo_vec_buffer* dispersion_factor_vec;
     nlo_vec_buffer* previous_field_vec;
+    nlo_vec_buffer* grin_phase_factor_vec;
+    nlo_vec_buffer* grin_work_vec;
 } simulation_working_vectors;
 
 typedef struct nlo_fft_plan nlo_fft_plan;
@@ -87,6 +101,7 @@ typedef struct {
     nlo_vector_backend* backend;
 
     size_t num_time_samples;
+    size_t num_points_xy;
     size_t num_recorded_samples;
     size_t current_record_index;
 
