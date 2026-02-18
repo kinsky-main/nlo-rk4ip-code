@@ -1,117 +1,129 @@
-function prepared = prepare_sim_config(cfg)
+function [cfgPtr, keepalive] = prepare_sim_config(cfg)
+%PREPARE_SIM_CONFIG Build a sim_config libstruct from a MATLAB struct.
+%   [cfgPtr, keepalive] = nlolib.prepare_sim_config(cfg)
+%
+%   cfg is a flat MATLAB struct with fields matching the nlolib C API.
+%   Returns a libpointer to the populated sim_config and a cell array
+%   of handles that must remain alive for the duration of the calllib
+%   call (they own heap memory referenced by pointer fields).
 if ~isstruct(cfg)
     error("cfg must be a struct");
 end
 
-pyBindings = py.importlib.import_module("nlolib_ctypes");
+% --- validate required fields -------------------------------------------
+required = { ...
+    "num_time_samples", "gamma", "betas", "alpha", ...
+    "propagation_distance", "starting_step_size", "max_step_size", ...
+    "min_step_size", "error_tolerance", "pulse_period", "delta_time", ...
+    "frequency_grid"};
+for idx = 1:numel(required)
+    if ~isfield(cfg, required{idx})
+        error("cfg.%s is required", required{idx});
+    end
+end
 
+% The library must be loaded before libstruct can resolve type names.
+if ~libisloaded('nlolib')
+    error('nlolib:notLoaded', ...
+          'Library not loaded. Create an nlolib.NLolib instance first.');
+end
+
+s = libstruct('sim_config');
+keepalive = {};
+
+% --- nonlinear ----------------------------------------------------------
+s.nonlinear.gamma = double(cfg.gamma);
+
+% --- dispersion ---------------------------------------------------------
+betas = double(cfg.betas(:).');
+numBetas = numel(betas);
+s.dispersion.num_dispersion_terms = uint64(numBetas);
+% betas is a fixed-size C array — write into its first N elements.
+for idx = 1:numBetas
+    s.dispersion.betas(idx) = betas(idx);
+end
+s.dispersion.alpha = double(cfg.alpha);
+
+% --- propagation --------------------------------------------------------
+s.propagation.starting_step_size   = double(cfg.starting_step_size);
+s.propagation.max_step_size        = double(cfg.max_step_size);
+s.propagation.min_step_size        = double(cfg.min_step_size);
+s.propagation.error_tolerance      = double(cfg.error_tolerance);
+s.propagation.propagation_distance = double(cfg.propagation_distance);
+
+% --- time ---------------------------------------------------------------
+s.time.pulse_period = double(cfg.pulse_period);
+s.time.delta_time   = double(cfg.delta_time);
+
+% --- frequency grid (pointer field — needs keepalive) -------------------
+freqPtr = nlolib.pack_complex_array(cfg.frequency_grid);
+keepalive{end + 1} = freqPtr;
+s.frequency.frequency_grid = freqPtr;
+
+% --- spatial grid -------------------------------------------------------
+numTs = double(cfg.num_time_samples);
+s.spatial.nx = uint64(get_optional(cfg, "spatial_nx", numTs));
+s.spatial.ny = uint64(get_optional(cfg, "spatial_ny", 1));
+s.spatial.delta_x = double(get_optional(cfg, "delta_x", 1.0));
+s.spatial.delta_y = double(get_optional(cfg, "delta_y", 1.0));
+s.spatial.grin_gx = double(get_optional(cfg, "grin_gx", 0.0));
+s.spatial.grin_gy = double(get_optional(cfg, "grin_gy", 0.0));
+
+if isfield(cfg, "spatial_frequency_grid") && ~isempty(cfg.spatial_frequency_grid)
+    spFreqPtr = nlolib.pack_complex_array(cfg.spatial_frequency_grid);
+    keepalive{end + 1} = spFreqPtr;
+    s.spatial.spatial_frequency_grid = spFreqPtr;
+else
+    s.spatial.spatial_frequency_grid = libpointer();
+end
+
+if isfield(cfg, "grin_potential_phase_grid") && ~isempty(cfg.grin_potential_phase_grid)
+    grinPtr = nlolib.pack_complex_array(cfg.grin_potential_phase_grid);
+    keepalive{end + 1} = grinPtr;
+    s.spatial.grin_potential_phase_grid = grinPtr;
+else
+    s.spatial.grin_potential_phase_grid = libpointer();
+end
+
+% --- runtime operators --------------------------------------------------
 [dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
 
-if ~isfield(cfg, "num_time_samples")
-    error("cfg.num_time_samples is required");
-end
-if ~isfield(cfg, "gamma")
-    error("cfg.gamma is required");
-end
-if ~isfield(cfg, "betas")
-    error("cfg.betas is required");
-end
-if ~isfield(cfg, "alpha")
-    error("cfg.alpha is required");
-end
-if ~isfield(cfg, "propagation_distance")
-    error("cfg.propagation_distance is required");
-end
-if ~isfield(cfg, "starting_step_size")
-    error("cfg.starting_step_size is required");
-end
-if ~isfield(cfg, "max_step_size")
-    error("cfg.max_step_size is required");
-end
-if ~isfield(cfg, "min_step_size")
-    error("cfg.min_step_size is required");
-end
-if ~isfield(cfg, "error_tolerance")
-    error("cfg.error_tolerance is required");
-end
-if ~isfield(cfg, "pulse_period")
-    error("cfg.pulse_period is required");
-end
-if ~isfield(cfg, "delta_time")
-    error("cfg.delta_time is required");
-end
-if ~isfield(cfg, "frequency_grid")
-    error("cfg.frequency_grid is required");
-end
-
-if strlength(dispersionExpr) == 0 && strlength(nonlinearExpr) == 0 && isempty(constants)
-    runtimeObj = py.None;
+if strlength(dispersionExpr) > 0
+    dispBytes = [uint8(char(dispersionExpr)), 0];   % null-terminated
+    dispPtr   = libpointer('int8Ptr', int8(dispBytes));
+    keepalive{end + 1} = dispPtr;
+    s.runtime.dispersion_expr = dispPtr;
 else
-    runtimeObj = pyBindings.RuntimeOperators(pyargs( ...
-        "dispersion_expr", dispersionExpr, ...
-        "nonlinear_expr", nonlinearExpr, ...
-        "constants", numeric_vector_to_py_list(constants) ...
-    ));
+    s.runtime.dispersion_expr = libpointer();
 end
 
-spatialNx = py.None;
-if isfield(cfg, "spatial_nx")
-    spatialNx = int64(cfg.spatial_nx);
-end
-spatialNy = py.None;
-if isfield(cfg, "spatial_ny")
-    spatialNy = int64(cfg.spatial_ny);
-end
-deltaX = 1.0;
-if isfield(cfg, "delta_x")
-    deltaX = double(cfg.delta_x);
-end
-deltaY = 1.0;
-if isfield(cfg, "delta_y")
-    deltaY = double(cfg.delta_y);
-end
-grinGx = 0.0;
-if isfield(cfg, "grin_gx")
-    grinGx = double(cfg.grin_gx);
-end
-grinGy = 0.0;
-if isfield(cfg, "grin_gy")
-    grinGy = double(cfg.grin_gy);
+if strlength(nonlinearExpr) > 0
+    nlBytes = [uint8(char(nonlinearExpr)), 0];
+    nlPtr   = libpointer('int8Ptr', int8(nlBytes));
+    keepalive{end + 1} = nlPtr;
+    s.runtime.nonlinear_expr = nlPtr;
+else
+    s.runtime.nonlinear_expr = libpointer();
 end
 
-spatialFreq = py.None;
-if isfield(cfg, "spatial_frequency_grid") && ~isempty(cfg.spatial_frequency_grid)
-    spatialFreq = nlolib.matlab_complex_vector_to_py_list(cfg.spatial_frequency_grid);
-end
-grinPhase = py.None;
-if isfield(cfg, "grin_potential_phase_grid") && ~isempty(cfg.grin_potential_phase_grid)
-    grinPhase = nlolib.matlab_complex_vector_to_py_list(cfg.grin_potential_phase_grid);
+s.runtime.num_constants = uint64(numel(constants));
+for idx = 1:numel(constants)
+    s.runtime.constants(idx) = double(constants(idx));
 end
 
-prepared = pyBindings.prepare_sim_config(int64(cfg.num_time_samples), ...
-    pyargs( ...
-        "gamma", double(cfg.gamma), ...
-        "betas", numeric_vector_to_py_list(cfg.betas), ...
-        "alpha", double(cfg.alpha), ...
-        "propagation_distance", double(cfg.propagation_distance), ...
-        "starting_step_size", double(cfg.starting_step_size), ...
-        "max_step_size", double(cfg.max_step_size), ...
-        "min_step_size", double(cfg.min_step_size), ...
-        "error_tolerance", double(cfg.error_tolerance), ...
-        "pulse_period", double(cfg.pulse_period), ...
-        "delta_time", double(cfg.delta_time), ...
-        "frequency_grid", nlolib.matlab_complex_vector_to_py_list(cfg.frequency_grid), ...
-        "spatial_nx", spatialNx, ...
-        "spatial_ny", spatialNy, ...
-        "delta_x", deltaX, ...
-        "delta_y", deltaY, ...
-        "grin_gx", grinGx, ...
-        "grin_gy", grinGy, ...
-        "spatial_frequency_grid", spatialFreq, ...
-        "grin_potential_phase_grid", grinPhase, ...
-        "runtime", runtimeObj ...
-    ) ...
-);
+cfgPtr = s;
+end
+
+% ========================================================================
+% Local helper functions
+% ========================================================================
+
+function val = get_optional(cfg, name, default)
+if isfield(cfg, name)
+    val = cfg.(name);
+else
+    val = default;
+end
 end
 
 function [dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg)
@@ -175,12 +187,4 @@ end
 out(outIdx) = string(shifted(cursor:end));
 shifted = join(out(1:outIdx), "");
 shifted = char(shifted);
-end
-
-function pyList = numeric_vector_to_py_list(values)
-vals = double(values(:).');
-pyList = py.list();
-for idx = 1:numel(vals)
-    pyList.append(vals(idx));
-end
 end

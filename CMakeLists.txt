@@ -52,3 +52,26 @@ if(NLOLIB_BUILD_BENCHMARKS)
 endif()
 
 nlo_configure_docs_target()
+
+# ---------- MATLAB toolbox staging ------------------------------------
+set(NLO_MATLAB_STAGE_DIR "${CMAKE_BINARY_DIR}/matlab_toolbox" CACHE PATH
+    "Directory where MATLAB toolbox files are staged for packaging")
+
+add_custom_target(matlab_stage
+    COMMENT "Staging MATLAB toolbox files"
+    DEPENDS nlolib
+)
+add_custom_command(TARGET matlab_stage POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${NLO_MATLAB_STAGE_DIR}/+nlolib"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${NLO_MATLAB_STAGE_DIR}/lib"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/matlab/+nlolib"
+        "${NLO_MATLAB_STAGE_DIR}/+nlolib"
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_SOURCE_DIR}/src/nlolib_matlab.h"
+        "${NLO_MATLAB_STAGE_DIR}/lib/nlolib_matlab.h"
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "$<TARGET_FILE:nlolib>"
+        "${NLO_MATLAB_STAGE_DIR}/lib/$<TARGET_FILE_NAME:nlolib>"
+    COMMENT "Copying +nlolib, nlolib_matlab.h, and shared library to ${NLO_MATLAB_STAGE_DIR}"
+)

@@ -50,10 +50,39 @@ python benchmarks/python/bench_runtime_callable.py --n 4096 --runs 5
 
 ## MATLAB API
 
-MATLAB wrappers are provided in `matlab/+nlolib` and call into the Python ctypes bindings (`python/nlolib_ctypes.py`) with no MEX dependency.
+MATLAB wrappers are provided in the `matlab/+nlolib` namespace package. They call the nlolib C shared library directly via `loadlibrary`/`calllib` — no Python or MEX dependency.
+
+### Install from .mltbx (recommended)
+
+Download the latest `nlolib.mltbx` from the [GitHub Releases](../../releases) page and double-click it in MATLAB, or run:
 
 ```matlab
-addpath("matlab")
+matlab.addons.install('nlolib.mltbx');
+```
+
+### Build from source
+
+```powershell
+cmake -S . -B build
+cmake --build build --config Release --target matlab_stage
+```
+
+Then add the staged output to the MATLAB path:
+
+```matlab
+addpath('build/matlab_toolbox');
+```
+
+The `matlab_stage` target copies `+nlolib/*.m`, the shared library, and `nlolib_matlab.h` into `build/matlab_toolbox/`. You can also set the `NLOLIB_LIBRARY` environment variable to the full path of `nlolib.dll` / `libnlolib.so` to override automatic library discovery.
+
+### Prerequisites
+
+- MATLAB R2019b or later (loadlibrary with C99 header support).
+- A GPU driver that ships the Vulkan loader (standard on NVIDIA, AMD, and Intel desktop drivers). No Vulkan SDK is needed at runtime.
+
+### Quick start
+
+```matlab
 api = nlolib.NLolib();
 cfg = struct(...); % see examples/matlab/runtime_temporal_demo.m
 records = api.propagate(cfg, field0, 2);
