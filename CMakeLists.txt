@@ -13,6 +13,7 @@ option(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS "Enable debug-only RK4/dispersion diagno
 option(NLO_INSTALL_GIT_HOOKS "Install repository git hooks during CMake configure" ON)
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
+option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
 option(NLO_BUMP_PATCH_ON_BUILD "Bump patch version in CMakeLists.txt after successful builds" ON)
 
 set(NLO_VULKAN_HEADERS_URL
@@ -50,6 +51,9 @@ endif()
 
 if(NLOLIB_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
+endif()
+if(NLOLIB_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
 
 nlo_configure_docs_target()

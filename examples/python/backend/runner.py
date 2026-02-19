@@ -1,4 +1,5 @@
 """Reusable ctypes runner for Python examples."""
+# TODO: Unify the 2D and the 1D example runner methods to avoid code duplication.
 
 from __future__ import annotations
 

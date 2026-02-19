@@ -25,7 +25,7 @@ def main() -> None:
 
     runtime = RuntimeOperators(
         dispersion_fn=lambda w: np.exp((1.0j * scale) * (w * w)),
-        nonlinear_expr=None,
+        nonlinear_expr=lambda field, gamma: np.exp(1.0j * gamma * np.abs(field) ** 2),
     )
 
     sim_cfg = TemporalSimulationConfig(
@@ -47,7 +47,7 @@ def main() -> None:
         field0.astype(np.complex128),
         sim_cfg,
         num_records=2,
-        exec_options=SimulationOptions(backend="cpu", fft_backend="fftw"),
+        exec_options=SimulationOptions(backend="vulkan", fft_backend="vkfft"),
     )
 
     print("runtime callable example completed.")

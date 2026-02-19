@@ -25,8 +25,8 @@ beta2 = 0.05;
 
 cfg = struct();
 cfg.num_time_samples = n;
-cfg.gamma = 0.0;
-cfg.betas = [];
+cfg.gamma = 0.01;
+cfg.betas = beta2;
 cfg.alpha = 0.0;
 cfg.propagation_distance = 0.25;
 cfg.starting_step_size = 1e-3;

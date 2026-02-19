@@ -152,14 +152,14 @@ end
 if isfield(runtime, "dispersion_fn") && ~isempty(runtime.dispersion_fn)
     [translated, captured] = nlolib.translate_runtime_handle(runtime.dispersion_fn, "dispersion", runtime);
     translated = shift_constant_indices(translated, numel(constants));
-    constants = [constants, captured]; %#ok<AGROW>
+    constants = [constants, captured];
     dispersionExpr = translated;
 end
 
 if isfield(runtime, "nonlinear_fn") && ~isempty(runtime.nonlinear_fn)
     [translated, captured] = nlolib.translate_runtime_handle(runtime.nonlinear_fn, "nonlinear", runtime);
     translated = shift_constant_indices(translated, numel(constants));
-    constants = [constants, captured]; %#ok<AGROW>
+    constants = [constants, captured];
     nonlinearExpr = translated;
 end
 end

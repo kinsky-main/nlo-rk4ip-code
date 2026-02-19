@@ -101,12 +101,18 @@ classdef NLolib < handle
                                 numRecordedSamples, ...
                                 outPtr, ...
                                 execOptsPtr);
-            [statusCode, statusName] = nlolib.NLolib.normalize_status(statusRaw);
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
 
             if statusCode ~= 0
-                error('nlolib:propagateFailed', ...
-                      'nlolib_propagate failed with status=%d (%s)', ...
-                      statusCode, statusName);
+                if strlength(statusDetail) > 0
+                    error('nlolib:propagateFailed', ...
+                          'nlolib_propagate failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:propagateFailed', ...
+                          'nlolib_propagate failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
             end
 
             records = nlolib.unpack_records(outPtr, ...
@@ -406,18 +412,43 @@ classdef NLolib < handle
             text = string(value);
         end
 
-        function [code, name] = normalize_status(raw)
+        function [code, name, detail] = normalize_status(raw)
             %NORMALIZE_STATUS Convert calllib enum return into numeric code.
+            detail = "";
             if isnumeric(raw) && isscalar(raw)
                 code = int32(raw);
                 name = nlolib.NLolib.status_name(code);
                 return;
             end
 
-            token = strtrim(char(string(raw)));
+            token = '';
+            if isnumeric(raw) && ~isscalar(raw)
+                vals = double(raw(:).');
+                if ~isempty(vals) && all(isfinite(vals)) && ...
+                        all(vals == floor(vals)) && ...
+                        all(vals >= 0) && all(vals <= 255)
+                    vals = vals(vals ~= 0);
+                    if ~isempty(vals)
+                        isPrintableAscii = (vals >= 32 & vals <= 126) | ...
+                                           vals == 9 | vals == 10 | vals == 13;
+                        if all(isPrintableAscii)
+                            token = strtrim(char(vals));
+                            if ~isempty(token)
+                                detail = "status token decoded from numeric byte vector";
+                            end
+                        end
+                    end
+                end
+            end
+
+            if isempty(token)
+                token = strtrim(char(string(raw)));
+            end
+
             if isempty(token)
                 code = int32(-1);
                 name = "UNKNOWN_EMPTY";
+                detail = nlolib.NLolib.describe_status_raw(raw);
                 return;
             end
 
@@ -432,8 +463,38 @@ classdef NLolib < handle
                     code = int32(3);
                 otherwise
                     code = int32(-1);
+                    if strlength(detail) == 0
+                        detail = nlolib.NLolib.describe_status_raw(raw);
+                    else
+                        detail = detail + " | " + nlolib.NLolib.describe_status_raw(raw);
+                    end
             end
             name = string(token);
+        end
+
+        function detail = describe_status_raw(raw)
+            sz = size(raw);
+            sizeParts = strings(1, numel(sz));
+            for idx = 1:numel(sz)
+                sizeParts(idx) = string(sz(idx));
+            end
+            sizeText = join(sizeParts, "x");
+
+            detail = "raw status return class=" + string(class(raw)) + ...
+                     " size=" + sizeText;
+
+            if isnumeric(raw)
+                flat = double(raw(:).');
+                maxPreview = min(numel(flat), 16);
+                if maxPreview > 0
+                    previewParts = strings(1, maxPreview);
+                    for idx = 1:maxPreview
+                        previewParts(idx) = string(flat(idx));
+                    end
+                    previewText = join(previewParts, ",");
+                    detail = detail + " preview=[" + previewText + "]";
+                end
+            end
         end
 
         function name = status_name(code)

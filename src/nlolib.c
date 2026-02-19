@@ -28,6 +28,15 @@ static const char* nlo_backend_type_to_string(nlo_vector_backend_type backend_ty
     return "UNKNOWN";
 }
 
+static nlolib_status nlo_propagate_fail(const char* stage, nlolib_status status)
+{
+    fprintf(stderr,
+            "[nlolib] nlse propagate failed stage=%s status=%d\n",
+            (stage != NULL) ? stage : "unknown",
+            (int)status);
+    return status;
+}
+
 static size_t nlo_compute_input_bytes(size_t count, size_t stride)
 {
     if (stride == 0u || count > (SIZE_MAX / stride)) {
@@ -159,23 +168,23 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                 exec_options);
 
     if (config == NULL || input_field == NULL || output_records == NULL) {
-        return NLOLIB_STATUS_INVALID_ARGUMENT;
+        return nlo_propagate_fail("validate.null_pointer", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
 
     if (num_time_samples == 0 || num_time_samples > NT_MAX) {
-        return NLOLIB_STATUS_INVALID_ARGUMENT;
+        return nlo_propagate_fail("validate.num_time_samples", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
     if (num_recorded_samples == 0u || num_recorded_samples > NT_MAX) {
-        return NLOLIB_STATUS_INVALID_ARGUMENT;
+        return nlo_propagate_fail("validate.num_recorded_samples", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
     if (nlo_compute_record_bytes(num_recorded_samples, num_time_samples) == 0u) {
-        return NLOLIB_STATUS_INVALID_ARGUMENT;
+        return nlo_propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
     {
         size_t nx = 0u;
         size_t ny = 0u;
         if (nlo_resolve_spatial_dimensions(config, num_time_samples, &nx, &ny) != 0) {
-            return NLOLIB_STATUS_INVALID_ARGUMENT;
+            return nlo_propagate_fail("validate.spatial_dimensions", NLOLIB_STATUS_INVALID_ARGUMENT);
         }
     }
 
@@ -190,7 +199,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                   &local_exec_options,
                                   NULL,
                                   &state) != 0 || state == NULL) {
-        return NLOLIB_STATUS_ALLOCATION_FAILED;
+        return nlo_propagate_fail("init_simulation_state", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
 
     fprintf(stderr,
@@ -200,7 +209,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
     if (simulation_state_upload_initial_field(state, input_field) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
-        return NLOLIB_STATUS_ALLOCATION_FAILED;
+        return nlo_propagate_fail("upload_initial_field", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
 
     solve_rk4(state);
@@ -208,18 +217,18 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (num_recorded_samples == 1u) {
         if (simulation_state_download_current_field(state, output_records) != NLO_VEC_STATUS_OK) {
             free_simulation_state(state);
-            return NLOLIB_STATUS_ALLOCATION_FAILED;
+            return nlo_propagate_fail("download_current_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
     } else {
         if (state->num_recorded_samples != num_recorded_samples || state->field_buffer == NULL) {
             free_simulation_state(state);
-            return NLOLIB_STATUS_ALLOCATION_FAILED;
+            return nlo_propagate_fail("validate.host_record_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
 
         const size_t records_bytes = nlo_compute_record_bytes(num_recorded_samples, num_time_samples);
         if (records_bytes == 0u) {
             free_simulation_state(state);
-            return NLOLIB_STATUS_ALLOCATION_FAILED;
+            return nlo_propagate_fail("validate.output_record_bytes", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
         memcpy(output_records, state->field_buffer, records_bytes);
     }
