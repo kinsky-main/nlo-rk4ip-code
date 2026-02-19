@@ -9,9 +9,10 @@
 - [x] Implement MATLAB interface for solver with string API for defining input operators.
 - [ ] Extension: Add MPA solver for coupled mode problems.
 - [ ] Extension: OpenMP backend for multi-core CPU parallelism.
-- [ ] Implement dispersion operator custom functions, currently staging function is not used.
-- [ ] Combine grin vector operator into dispersion and nonlinear operator expressions.
-- [ ] Remove old API and just have custom functions for dispersion and nonlinearity, this removes the complications of additional vector operators.
+- [x] Implement dispersion operator custom functions, currently staging function is not used.
+- [x] Combine grin vector operator into dispersion and nonlinear operator expressions.
+- [x] Remove old API and just have custom functions for dispersion and nonlinearity, this removes the complications of additional vector operators.
+- [ ] Implement new GRIN operations using preferred kernels for (2+1)D operations.
 
 
 ## FFTW

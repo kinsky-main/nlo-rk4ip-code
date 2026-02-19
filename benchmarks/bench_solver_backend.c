@@ -7,6 +7,7 @@
 #include "core/init.h"
 #include "core/state.h"
 #include "numerics/rk4_kernel.h"
+#include "utility/perf_profile.h"
 #include "vulkan_bench_context.h"
 
 #include <errno.h>
@@ -72,10 +73,21 @@ typedef struct {
     double init_ms;
     double upload_ms;
     double solve_ms;
+    double dispersion_ms;
+    double nonlinear_ms;
     double download_ms;
     double teardown_ms;
     double total_ms;
     double samples_per_sec;
+
+    uint64_t gpu_dispatch_count;
+    uint64_t gpu_copy_count;
+    uint64_t gpu_memory_pass_count;
+    uint64_t gpu_memory_pass_bytes;
+    uint64_t gpu_upload_count;
+    uint64_t gpu_download_count;
+    uint64_t gpu_upload_bytes;
+    uint64_t gpu_download_bytes;
 } nlo_bench_run_metrics;
 
 typedef struct {
@@ -497,8 +509,9 @@ static int nlo_bench_write_csv_header(FILE* csv_file)
 
     const int written = fprintf(csv_file,
                                 "timestamp_utc,backend,size,warmup_runs,measured_runs,run_index,"
-                                "init_ms,upload_ms,solve_ms,download_ms,teardown_ms,total_ms,"
-                                "samples_per_sec,status,notes\n");
+                                "init_ms,upload_ms,solve_ms,dispersion_ms,nonlinear_ms,download_ms,teardown_ms,total_ms,"
+                                "samples_per_sec,gpu_dispatch_count,gpu_copy_count,gpu_memory_pass_count,gpu_memory_pass_bytes,"
+                                "gpu_upload_count,gpu_download_count,gpu_upload_bytes,gpu_download_bytes,status,notes\n");
     if (written < 0) {
         return -1;
     }
@@ -531,7 +544,8 @@ static int nlo_bench_write_csv_row(
 
     const int written = fprintf(csv_file,
                                 "%s,%s,%zu,%zu,%zu,%zu,"
-                                "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%s,%s\n",
+                                "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+                                "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%s,%s\n",
                                 timestamp_utc,
                                 backend_label,
                                 size,
@@ -541,10 +555,20 @@ static int nlo_bench_write_csv_row(
                                 metrics->init_ms,
                                 metrics->upload_ms,
                                 metrics->solve_ms,
+                                metrics->dispersion_ms,
+                                metrics->nonlinear_ms,
                                 metrics->download_ms,
                                 metrics->teardown_ms,
                                 metrics->total_ms,
                                 metrics->samples_per_sec,
+                                (unsigned long long)metrics->gpu_dispatch_count,
+                                (unsigned long long)metrics->gpu_copy_count,
+                                (unsigned long long)metrics->gpu_memory_pass_count,
+                                (unsigned long long)metrics->gpu_memory_pass_bytes,
+                                (unsigned long long)metrics->gpu_upload_count,
+                                (unsigned long long)metrics->gpu_download_count,
+                                (unsigned long long)metrics->gpu_upload_bytes,
+                                (unsigned long long)metrics->gpu_download_bytes,
                                 status,
                                 note_buffer);
     if (written < 0) {
@@ -667,6 +691,9 @@ static int nlo_bench_execute_single_run(
     nlo_bench_timestamp phase_start;
     nlo_bench_timestamp phase_end;
 
+    nlo_perf_profile_set_enabled(1);
+    nlo_perf_profile_reset();
+
     nlo_bench_now(&total_start);
 
     nlo_bench_now(&phase_start);
@@ -677,6 +704,7 @@ static int nlo_bench_execute_single_run(
                                   NULL,
                                   &state) != 0 || state == NULL) {
         nlo_bench_copy_note(note, note_capacity, "State initialization failed.");
+        nlo_perf_profile_set_enabled(0);
         return -1;
     }
     nlo_bench_now(&phase_end);
@@ -697,6 +725,7 @@ static int nlo_bench_execute_single_run(
                  note_capacity,
                  "Initial field upload failed (status=%d).",
                  (int)upload_status);
+        nlo_perf_profile_set_enabled(0);
         return -1;
     }
 
@@ -720,6 +749,7 @@ static int nlo_bench_execute_single_run(
                  note_capacity,
                  "Current field download failed (status=%d).",
                  (int)download_status);
+        nlo_perf_profile_set_enabled(0);
         return -1;
     }
 
@@ -736,6 +766,20 @@ static int nlo_bench_execute_single_run(
     } else {
         out_metrics->samples_per_sec = 0.0;
     }
+
+    nlo_perf_profile_snapshot snapshot;
+    nlo_perf_profile_snapshot_read(&snapshot);
+    out_metrics->dispersion_ms = snapshot.dispersion_ms;
+    out_metrics->nonlinear_ms = snapshot.nonlinear_ms;
+    out_metrics->gpu_dispatch_count = snapshot.gpu_dispatch_count;
+    out_metrics->gpu_copy_count = snapshot.gpu_copy_count;
+    out_metrics->gpu_memory_pass_count = snapshot.gpu_memory_pass_count;
+    out_metrics->gpu_memory_pass_bytes = snapshot.gpu_memory_pass_bytes;
+    out_metrics->gpu_upload_count = snapshot.gpu_upload_count;
+    out_metrics->gpu_download_count = snapshot.gpu_download_count;
+    out_metrics->gpu_upload_bytes = snapshot.gpu_upload_bytes;
+    out_metrics->gpu_download_bytes = snapshot.gpu_download_bytes;
+    nlo_perf_profile_set_enabled(0);
 
     nlo_bench_copy_note(note, note_capacity, "");
     return 0;
@@ -893,7 +937,20 @@ static int nlo_bench_run_backend_case(
 
     const size_t total_runs = options->warmup_runs + options->measured_runs;
     double* measured_totals = (double*)calloc(options->measured_runs, sizeof(double));
+    double* measured_solve = (double*)calloc(options->measured_runs, sizeof(double));
+    double* measured_dispersion = (double*)calloc(options->measured_runs, sizeof(double));
+    double* measured_nonlinear = (double*)calloc(options->measured_runs, sizeof(double));
     if (measured_totals == NULL) {
+        nlo_bench_destroy_case_data(&case_data);
+        nlo_bench_copy_note(note, sizeof(note), "Failed to allocate measurement buffer.");
+        *out_error_count += 1;
+        return -1;
+    }
+    if (measured_solve == NULL || measured_dispersion == NULL || measured_nonlinear == NULL) {
+        free(measured_totals);
+        free(measured_solve);
+        free(measured_dispersion);
+        free(measured_nonlinear);
         nlo_bench_destroy_case_data(&case_data);
         nlo_bench_copy_note(note, sizeof(note), "Failed to allocate measurement buffer.");
         *out_error_count += 1;
@@ -903,6 +960,14 @@ static int nlo_bench_run_backend_case(
     size_t recorded = 0u;
     bool had_error = false;
     bool skipped_backend = false;
+    uint64_t sum_gpu_dispatch_count = 0u;
+    uint64_t sum_gpu_copy_count = 0u;
+    uint64_t sum_gpu_memory_pass_count = 0u;
+    uint64_t sum_gpu_memory_pass_bytes = 0u;
+    uint64_t sum_gpu_upload_count = 0u;
+    uint64_t sum_gpu_download_count = 0u;
+    uint64_t sum_gpu_upload_bytes = 0u;
+    uint64_t sum_gpu_download_bytes = 0u;
     for (size_t run = 0u; run < total_runs; ++run) {
         nlo_bench_run_metrics metrics;
         if (nlo_bench_execute_single_run(&exec_options,
@@ -950,6 +1015,17 @@ static int nlo_bench_run_backend_case(
 
         const size_t measured_index = run - options->warmup_runs;
         measured_totals[measured_index] = metrics.total_ms;
+        measured_solve[measured_index] = metrics.solve_ms;
+        measured_dispersion[measured_index] = metrics.dispersion_ms;
+        measured_nonlinear[measured_index] = metrics.nonlinear_ms;
+        sum_gpu_dispatch_count += metrics.gpu_dispatch_count;
+        sum_gpu_copy_count += metrics.gpu_copy_count;
+        sum_gpu_memory_pass_count += metrics.gpu_memory_pass_count;
+        sum_gpu_memory_pass_bytes += metrics.gpu_memory_pass_bytes;
+        sum_gpu_upload_count += metrics.gpu_upload_count;
+        sum_gpu_download_count += metrics.gpu_download_count;
+        sum_gpu_upload_bytes += metrics.gpu_upload_bytes;
+        sum_gpu_download_bytes += metrics.gpu_download_bytes;
         recorded += 1u;
 
         if (nlo_bench_write_csv_row(csv_file,
@@ -968,15 +1044,74 @@ static int nlo_bench_run_backend_case(
     }
 
     if (!had_error && recorded > 0u) {
-        nlo_bench_summary summary;
-        if (nlo_bench_compute_summary(measured_totals, recorded, &summary) == 0) {
+        nlo_bench_summary total_summary;
+        nlo_bench_summary solve_summary;
+        nlo_bench_summary dispersion_summary;
+        nlo_bench_summary nonlinear_summary;
+        if (nlo_bench_compute_summary(measured_totals, recorded, &total_summary) == 0 &&
+            nlo_bench_compute_summary(measured_solve, recorded, &solve_summary) == 0 &&
+            nlo_bench_compute_summary(measured_dispersion, recorded, &dispersion_summary) == 0 &&
+            nlo_bench_compute_summary(measured_nonlinear, recorded, &nonlinear_summary) == 0) {
+            const double solve_ms = solve_summary.mean_ms;
+            const double total_ms = total_summary.mean_ms;
+            const double dispersion_share_solve = (solve_ms > 0.0)
+                                                      ? (100.0 * dispersion_summary.mean_ms / solve_ms)
+                                                      : 0.0;
+            const double nonlinear_share_solve = (solve_ms > 0.0)
+                                                     ? (100.0 * nonlinear_summary.mean_ms / solve_ms)
+                                                     : 0.0;
+            const double phase_share_total = (total_ms > 0.0)
+                                                 ? (100.0 * (dispersion_summary.mean_ms + nonlinear_summary.mean_ms) / total_ms)
+                                                 : 0.0;
+
             printf("  %-3s total(ms): mean=%.3f median=%.3f min=%.3f max=%.3f std=%.3f\n",
                    backend_label,
-                   summary.mean_ms,
-                   summary.median_ms,
-                   summary.min_ms,
-                   summary.max_ms,
-                   summary.stddev_ms);
+                   total_summary.mean_ms,
+                   total_summary.median_ms,
+                   total_summary.min_ms,
+                   total_summary.max_ms,
+                   total_summary.stddev_ms);
+            printf("      solve(ms): mean=%.3f | dispersion=%.3f (%.1f%% of solve) | nonlinear=%.3f (%.1f%% of solve)\n",
+                   solve_summary.mean_ms,
+                   dispersion_summary.mean_ms,
+                   dispersion_share_solve,
+                   nonlinear_summary.mean_ms,
+                   nonlinear_share_solve);
+            printf("      phase impact: dispersion+nonlinear = %.1f%% of total runtime\n",
+                   phase_share_total);
+
+            if (backend == NLO_BENCH_RUNTIME_GPU) {
+                const double run_count = (double)recorded;
+                const double mean_dispatch_count = (double)sum_gpu_dispatch_count / run_count;
+                const double mean_copy_count = (double)sum_gpu_copy_count / run_count;
+                const double mean_memory_pass_count = (double)sum_gpu_memory_pass_count / run_count;
+                const double mean_memory_pass_bytes = (double)sum_gpu_memory_pass_bytes / run_count;
+                const double mean_upload_count = (double)sum_gpu_upload_count / run_count;
+                const double mean_download_count = (double)sum_gpu_download_count / run_count;
+                const double mean_upload_bytes = (double)sum_gpu_upload_bytes / run_count;
+                const double mean_download_bytes = (double)sum_gpu_download_bytes / run_count;
+                const double mean_transfer_bytes = mean_upload_bytes + mean_download_bytes;
+                const double transfer_bw_gbps = (total_ms > 0.0)
+                                                    ? ((mean_transfer_bytes / 1.0e9) / (total_ms / 1000.0))
+                                                    : 0.0;
+                const double memory_pass_bw_gbps = (solve_ms > 0.0)
+                                                       ? ((mean_memory_pass_bytes / 1.0e9) / (solve_ms / 1000.0))
+                                                       : 0.0;
+
+                printf("      gpu ops/run: dispatches=%.1f copies=%.1f memory_passes=%.1f (%.2f MiB)\n",
+                       mean_dispatch_count,
+                       mean_copy_count,
+                       mean_memory_pass_count,
+                       mean_memory_pass_bytes / (1024.0 * 1024.0));
+                printf("      gpu transfers/run: uploads=%.1f (%.2f MiB) downloads=%.1f (%.2f MiB)\n",
+                       mean_upload_count,
+                       mean_upload_bytes / (1024.0 * 1024.0),
+                       mean_download_count,
+                       mean_download_bytes / (1024.0 * 1024.0));
+                printf("      estimated bandwidth impact: transfer=%.2f GB/s, memory-pass=%.2f GB/s\n",
+                       transfer_bw_gbps,
+                       memory_pass_bw_gbps);
+            }
         } else {
             printf("  %-3s warning: failed to compute summary statistics.\n", backend_label);
         }
@@ -985,6 +1120,9 @@ static int nlo_bench_run_backend_case(
     }
 
     free(measured_totals);
+    free(measured_solve);
+    free(measured_dispersion);
+    free(measured_nonlinear);
     nlo_bench_destroy_case_data(&case_data);
     return had_error ? -1 : 0;
 }

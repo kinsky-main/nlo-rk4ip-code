@@ -6,6 +6,7 @@
 #include "core/state.h"
 #include "fft/fft.h"
 #include "physics/operators.h"
+#include "utility/state_debug.h"
 #include <float.h>
 #include <math.h>
 #include <stdint.h>
@@ -60,7 +61,7 @@ static int nlo_frequency_grid_matches_expected_unshifted(
 );
 
 #ifndef NLO_DEFAULT_DISPERSION_FACTOR_EXPR
-#define NLO_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*(w^2)-c1"
+#define NLO_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
 #endif
 
 #ifndef NLO_DEFAULT_DISPERSION_EXPR
@@ -391,6 +392,7 @@ simulation_state* create_simulation_state(
     state->num_points_xy = num_time_samples;
     state->num_recorded_samples = compute_host_record_capacity(num_time_samples, num_recorded_samples);
     if (state->num_recorded_samples == 0u) {
+        nlo_state_debug_log_failure("host_record_capacity", NLO_VEC_STATUS_ALLOCATION_FAILED);
         free_simulation_state(state);
         return NULL;
     }
@@ -403,12 +405,14 @@ simulation_state* create_simulation_state(
 
     size_t host_elements = 0u;
     if (checked_mul_size_t(state->num_time_samples, state->num_recorded_samples, &host_elements) != 0) {
+        nlo_state_debug_log_failure("host_elements_overflow", NLO_VEC_STATUS_INVALID_ARGUMENT);
         free_simulation_state(state);
         return NULL;
     }
 
     state->field_buffer = (nlo_complex*)calloc(host_elements, sizeof(nlo_complex));
     if (state->field_buffer == NULL) {
+        nlo_state_debug_log_failure("allocate_host_field_buffer", NLO_VEC_STATUS_ALLOCATION_FAILED);
         free_simulation_state(state);
         return NULL;
     }
@@ -427,6 +431,7 @@ simulation_state* create_simulation_state(
     }
 
     if (state->backend == NULL) {
+        nlo_state_debug_log_failure("create_backend", NLO_VEC_STATUS_BACKEND_UNAVAILABLE);
         free_simulation_state(state);
         return NULL;
     }
@@ -447,12 +452,14 @@ simulation_state* create_simulation_state(
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.nonlinear_multiplier_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.potential_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.previous_field_vec) != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("allocate_device_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
         free_simulation_state(state);
         return NULL;
     }
 
     nlo_vec_status status = nlo_vec_complex_fill(state->backend, state->current_field_vec, nlo_make(0.0, 0.0));
     if (status != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("clear_current_field", status);
         free_simulation_state(state);
         return NULL;
     }
@@ -470,6 +477,7 @@ simulation_state* create_simulation_state(
         } else {
             generated_frequency_grid = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
             if (generated_frequency_grid == NULL) {
+                nlo_state_debug_log_failure("allocate_generated_frequency_grid", NLO_VEC_STATUS_ALLOCATION_FAILED);
                 free_simulation_state(state);
                 return NULL;
             }
@@ -492,6 +500,7 @@ simulation_state* create_simulation_state(
         generated_frequency_grid = NULL;
     }
     if (status != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("upload_frequency_grid", status);
         free_simulation_state(state);
         return NULL;
     }
@@ -507,6 +516,7 @@ simulation_state* create_simulation_state(
                                       nlo_make(0.0, 0.0));
     }
     if (status != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("upload_potential_grid", status);
         free_simulation_state(state);
         return NULL;
     }
@@ -517,6 +527,7 @@ simulation_state* create_simulation_state(
                                                                   resolved_runtime_constants);
     if (runtime_constant_count == 0u ||
         runtime_constant_count > NLO_RUNTIME_OPERATOR_CONSTANTS_MAX) {
+        nlo_state_debug_log_failure("resolve_runtime_constants", NLO_VEC_STATUS_INVALID_ARGUMENT);
         free_simulation_state(state);
         return NULL;
     }
@@ -534,6 +545,7 @@ simulation_state* create_simulation_state(
                                           runtime_constants,
                                           &state->dispersion_factor_operator_program);
     if (status != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("compile_dispersion_factor_program", status);
         free_simulation_state(state);
         return NULL;
     }
@@ -544,6 +556,7 @@ simulation_state* create_simulation_state(
                                           runtime_constants,
                                           &state->dispersion_operator_program);
     if (status != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("compile_dispersion_program", status);
         free_simulation_state(state);
         return NULL;
     }
@@ -554,6 +567,7 @@ simulation_state* create_simulation_state(
                                           runtime_constants,
                                           &state->nonlinear_operator_program);
     if (status != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("compile_nonlinear_program", status);
         free_simulation_state(state);
         return NULL;
     }
@@ -568,6 +582,7 @@ simulation_state* create_simulation_state(
 
     if (required_stack_slots == 0u ||
         required_stack_slots > NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS) {
+        nlo_state_debug_log_failure("resolve_runtime_stack_slots", NLO_VEC_STATUS_INVALID_ARGUMENT);
         free_simulation_state(state);
         return NULL;
     }
@@ -577,6 +592,7 @@ simulation_state* create_simulation_state(
         if (nlo_create_complex_vec(state->backend,
                                    num_time_samples,
                                    &state->runtime_operator_stack_vec[i]) != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("allocate_runtime_stack_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
             free_simulation_state(state);
             return NULL;
         }
@@ -596,6 +612,7 @@ simulation_state* create_simulation_state(
                                           state->runtime_operator_stack_slots,
                                           state->working_vectors.dispersion_factor_vec);
     if (status != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("execute_dispersion_factor_program", status);
         free_simulation_state(state);
         return NULL;
     }
@@ -606,6 +623,7 @@ simulation_state* create_simulation_state(
                                          num_time_samples,
                                          state->exec_options.fft_backend,
                                          &state->fft_plan) != NLO_VEC_STATUS_OK) {
+        nlo_state_debug_log_failure("create_fft_plan", NLO_VEC_STATUS_BACKEND_UNAVAILABLE);
         free_simulation_state(state);
         return NULL;
     }
@@ -614,12 +632,14 @@ simulation_state* create_simulation_state(
     if (state->record_ring_capacity > 0u) {
         state->record_ring_vec = (nlo_vec_buffer**)calloc(state->record_ring_capacity, sizeof(nlo_vec_buffer*));
         if (state->record_ring_vec == NULL) {
+            nlo_state_debug_log_failure("allocate_record_ring_array", NLO_VEC_STATUS_ALLOCATION_FAILED);
             free_simulation_state(state);
             return NULL;
         }
 
         for (size_t i = 0; i < state->record_ring_capacity; ++i) {
             if (nlo_create_complex_vec(state->backend, num_time_samples, &state->record_ring_vec[i]) != NLO_VEC_STATUS_OK) {
+                nlo_state_debug_log_failure("allocate_record_ring_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
                 free_simulation_state(state);
                 return NULL;
             }

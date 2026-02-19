@@ -19,7 +19,7 @@ if str(PYTHON_API_DIR) not in sys.path:
 
 from nlolib_ctypes import (  # noqa: E402
     NLO_FFT_BACKEND_VKFFT,
-    NLO_VECTOR_BACKEND_VULKAN,
+    NLO_VECTOR_BACKEND_AUTO,
     NLolib,
     RuntimeOperators,
     default_execution_options,
@@ -54,7 +54,7 @@ def main() -> None:
     )
 
     opts = default_execution_options(
-        backend_type=NLO_VECTOR_BACKEND_VULKAN,
+        backend_type=NLO_VECTOR_BACKEND_AUTO,
         fft_backend=NLO_FFT_BACKEND_VKFFT,
     )
     api = NLolib()

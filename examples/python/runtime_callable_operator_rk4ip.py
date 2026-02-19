@@ -48,7 +48,7 @@ def main() -> None:
         field0.astype(np.complex128),
         sim_cfg,
         num_records=2,
-        exec_options=SimulationOptions(backend="vulkan", fft_backend="vkfft"),
+        exec_options=SimulationOptions(backend="auto", fft_backend="vkfft"),
     )
 
     print("runtime callable example completed.")

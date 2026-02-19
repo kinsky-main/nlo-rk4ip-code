@@ -49,6 +49,13 @@ class SimulationOptions:
     record_ring_target: int = 0
     forced_device_budget_bytes: int = 0
 
+    def backend_type(self) -> str:
+        if isinstance(self.backend, str):
+            return self.backend.strip().lower()
+        if isinstance(self.backend, dict):
+            return str(self.backend.get("type", "cpu")).strip().lower()
+        return ""
+
     def to_ctypes(self, nlo):
         opts = nlo.default_execution_options(
             backend_type=nlo.NLO_VECTOR_BACKEND_AUTO,
@@ -159,6 +166,27 @@ class NloExampleRunner:
         self.nlo = nlo
         self.api = nlo.NLolib(path=library_path)
 
+    @staticmethod
+    def _effective_options(
+        options: SimulationOptions,
+        num_records: int,
+    ) -> SimulationOptions:
+        backend_type = options.backend_type()
+        if options.record_ring_target > 0:
+            return options
+        if backend_type not in {"auto", "vulkan"}:
+            return options
+
+        # Keep GPU prioritized while avoiding oversized descriptor/ring allocations.
+        capped_ring = max(1, min(int(num_records), 32))
+        return SimulationOptions(
+            backend=options.backend,
+            fft_backend=options.fft_backend,
+            device_heap_fraction=options.device_heap_fraction,
+            record_ring_target=capped_ring,
+            forced_device_budget_bytes=options.forced_device_budget_bytes,
+        )
+
     def propagate_temporal_records(
         self,
         field0: np.ndarray,
@@ -202,7 +230,8 @@ class NloExampleRunner:
         )
 
         options = exec_options if exec_options is not None else SimulationOptions()
-        opts = options.to_ctypes(self.nlo)
+        effective_options = self._effective_options(options, int(num_records))
+        opts = effective_options.to_ctypes(self.nlo)
         records = np.asarray(
             self.api.propagate(prepared, field.tolist(), int(num_records), opts),
             dtype=np.complex128,
@@ -290,7 +319,8 @@ class NloExampleRunner:
         )
 
         options = exec_options if exec_options is not None else SimulationOptions()
-        opts = options.to_ctypes(self.nlo)
+        effective_options = self._effective_options(options, int(num_records))
+        opts = effective_options.to_ctypes(self.nlo)
         records = np.asarray(
             self.api.propagate(prepared, field.tolist(), int(num_records), opts),
             dtype=np.complex128,

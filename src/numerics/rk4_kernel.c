@@ -6,6 +6,7 @@
 #include "numerics/rk4_kernel.h"
 #include "fft/fft.h"
 #include "physics/operators.h"
+#include "utility/perf_profile.h"
 #include "utility/rk4_debug.h"
 #include <assert.h>
 #include <float.h>
@@ -129,14 +130,20 @@ static nlo_vec_status nlo_apply_nonlinear_operator_stage(
         .half_step_size = state->current_half_step_exp
     };
 
-    return nlo_apply_nonlinear_operator_program_vec(state->backend,
-                                                    &state->nonlinear_operator_program,
-                                                    &eval_ctx,
-                                                    field,
-                                                    state->working_vectors.nonlinear_multiplier_vec,
-                                                    out_field,
-                                                    state->runtime_operator_stack_vec,
-                                                    state->runtime_operator_stack_slots);
+    const double start_ms = nlo_perf_profile_now_ms();
+    const nlo_vec_status status = nlo_apply_nonlinear_operator_program_vec(state->backend,
+                                                                           &state->nonlinear_operator_program,
+                                                                           &eval_ctx,
+                                                                           field,
+                                                                           state->working_vectors.nonlinear_multiplier_vec,
+                                                                           out_field,
+                                                                           state->runtime_operator_stack_vec,
+                                                                           state->runtime_operator_stack_slots);
+    const double end_ms = nlo_perf_profile_now_ms();
+    if (status == NLO_VEC_STATUS_OK) {
+        nlo_perf_profile_add_nonlinear_time(end_ms - start_ms);
+    }
+    return status;
 }
 
 static nlo_vec_status nlo_apply_dispersion_operator_stage(
@@ -156,13 +163,19 @@ static nlo_vec_status nlo_apply_dispersion_operator_stage(
         .half_step_size = state->current_half_step_exp
     };
 
-    return nlo_apply_dispersion_operator_program_vec(state->backend,
-                                                     &state->dispersion_operator_program,
-                                                     &eval_ctx,
-                                                     freq_domain_envelope,
-                                                     state->working_vectors.dispersion_operator_vec,
-                                                     state->runtime_operator_stack_vec,
-                                                     state->runtime_operator_stack_slots);
+    const double start_ms = nlo_perf_profile_now_ms();
+    const nlo_vec_status status = nlo_apply_dispersion_operator_program_vec(state->backend,
+                                                                             &state->dispersion_operator_program,
+                                                                             &eval_ctx,
+                                                                             freq_domain_envelope,
+                                                                             state->working_vectors.dispersion_operator_vec,
+                                                                             state->runtime_operator_stack_vec,
+                                                                             state->runtime_operator_stack_slots);
+    const double end_ms = nlo_perf_profile_now_ms();
+    if (status == NLO_VEC_STATUS_OK) {
+        nlo_perf_profile_add_dispersion_time(end_ms - start_ms);
+    }
+    return status;
 }
 
 static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_index)

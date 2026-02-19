@@ -7,6 +7,7 @@
 #include "numerics/vk_vector_ops.h"
 
 #include "nlo_vk_shader_paths.h"
+#include "utility/perf_profile.h"
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -1082,6 +1083,9 @@ static nlo_vec_status nlo_vk_dispatch_kernel(
         if (status != NLO_VEC_STATUS_OK) {
             return status;
         }
+        nlo_perf_profile_add_gpu_dispatch(1u,
+                                          2u,
+                                          2u * (uint64_t)chunk_bytes);
 
         offset_elems += chunk_elems;
     }
@@ -1157,6 +1161,9 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     VkCommandBuffer cmd = backend->vk.command_buffer;
     VkDeviceSize complex_bytes = (VkDeviceSize)current->bytes;
     VkDeviceSize partial_bytes = (VkDeviceSize)groups * (VkDeviceSize)sizeof(double);
+    uint64_t dispatch_count = 0u;
+    uint64_t dispatch_pass_count = 0u;
+    uint64_t dispatch_pass_bytes = 0u;
 
     nlo_vk_cmd_compute_to_compute(cmd, current->vk_buffer, 0u, complex_bytes);
     nlo_vk_cmd_compute_to_compute(cmd, previous->vk_buffer, 0u, complex_bytes);
@@ -1200,6 +1207,9 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
                        (uint32_t)sizeof(push),
                        &push);
     vkCmdDispatch(cmd, groups, 1u, 1u);
+    dispatch_count += 1u;
+    dispatch_pass_count += 2u;
+    dispatch_pass_bytes += (uint64_t)partial_bytes * 2u;
     nlo_vk_cmd_compute_to_compute(cmd, backend->vk.reduction_buffer_a, 0u, partial_bytes);
 
     VkBuffer src_buffer = backend->vk.reduction_buffer_a;
@@ -1249,6 +1259,9 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
                            (uint32_t)sizeof(push),
                            &push);
         vkCmdDispatch(cmd, next_groups, 1u, 1u);
+        dispatch_count += 1u;
+        dispatch_pass_count += 2u;
+        dispatch_pass_bytes += (uint64_t)src_bytes + (uint64_t)dst_bytes;
         nlo_vk_cmd_compute_to_compute(cmd, dst_buffer, 0u, dst_bytes);
 
         VkBuffer tmp = src_buffer;
@@ -1271,6 +1284,11 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     if (status != NLO_VEC_STATUS_OK) {
         return status;
     }
+    nlo_perf_profile_add_gpu_dispatch(dispatch_count,
+                                      dispatch_pass_count,
+                                      dispatch_pass_bytes);
+    nlo_perf_profile_add_gpu_copy(1u, (uint64_t)sizeof(double));
+    nlo_perf_profile_add_gpu_download(1u, (uint64_t)sizeof(double));
     if (backend->in_simulation) {
         status = nlo_vk_simulation_phase_flush(backend);
         if (status != NLO_VEC_STATUS_OK) {
@@ -1320,6 +1338,7 @@ static nlo_vec_status nlo_vk_copy_buffer_chunked(
         if (status != NLO_VEC_STATUS_OK) {
             return status;
         }
+        nlo_perf_profile_add_gpu_copy(1u, (uint64_t)chunk);
 
         offset += chunk;
         remaining -= chunk;
@@ -1485,6 +1504,8 @@ nlo_vec_status nlo_vk_upload(
         if (status != NLO_VEC_STATUS_OK) {
             return status;
         }
+        nlo_perf_profile_add_gpu_copy(1u, (uint64_t)chunk);
+        nlo_perf_profile_add_gpu_upload(1u, (uint64_t)chunk);
 
         remaining -= chunk;
         offset += chunk;
@@ -1529,6 +1550,8 @@ nlo_vec_status nlo_vk_download(
         if (status != NLO_VEC_STATUS_OK) {
             return status;
         }
+        nlo_perf_profile_add_gpu_copy(1u, (uint64_t)chunk);
+        nlo_perf_profile_add_gpu_download(1u, (uint64_t)chunk);
 
         memcpy(dst + (size_t)offset, backend->vk.staging_mapped_ptr, (size_t)chunk);
         remaining -= chunk;

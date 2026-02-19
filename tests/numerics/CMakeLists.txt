@@ -20,6 +20,7 @@ add_executable(test_nlo_vector_backend
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
+  ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_vector_ops.c
 )
 
@@ -54,6 +55,7 @@ add_executable(test_nlo_vector_backend_vulkan
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
+  ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_vector_ops.c
 )
 
