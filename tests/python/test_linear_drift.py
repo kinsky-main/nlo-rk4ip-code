@@ -3,6 +3,7 @@ import math
 from nlolib_ctypes import (
     NLO_VECTOR_BACKEND_CPU,
     NLolib,
+    RuntimeOperators,
     default_execution_options,
     prepare_sim_config,
 )
@@ -51,29 +52,27 @@ def _intensity_centroid(t, field):
 def _build_config(n, dt, omega, beta2, z_final):
     return prepare_sim_config(
         n,
-        gamma=0.0,
-        betas=[0.0, 0.0, beta2],
-        alpha=0.0,
         propagation_distance=z_final,
-        starting_step_size=1e-3,
-        max_step_size=5e-3,
-        min_step_size=1e-5,
-        error_tolerance=1e-7,
+        starting_step_size=5e-3,
+        max_step_size=2e-2,
+        min_step_size=1e-4,
+        error_tolerance=1e-6,
         pulse_period=float(n) * dt,
         delta_time=dt,
         frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(constants=[0.5 * beta2, 0.0, 0.0]),
     )
 
 
 def main():
     api = NLolib()
 
-    n = 1024
+    n = 512
     dt = 0.01
     sigma = 0.20
     beta2 = 0.05
     d = 12.0
-    z_final = 1.0
+    z_final = 0.5
 
     t = _centered_time_grid(n, dt)
     omega = _omega_grid_unshifted(n, dt)

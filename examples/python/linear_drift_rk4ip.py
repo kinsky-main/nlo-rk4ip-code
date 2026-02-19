@@ -17,11 +17,12 @@ from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
     plot_total_error_over_propagation,
 )
-from backend.runner import NloExampleRunner, SimulationOptions, TemporalSimulationConfig
-
-
-def centered_time_grid(num_samples: int, delta_time: float) -> np.ndarray:
-    return (np.arange(num_samples, dtype=np.float64) - 0.5 * float(num_samples - 1)) * delta_time
+from backend.runner import (
+    NloExampleRunner,
+    SimulationOptions,
+    TemporalSimulationConfig,
+    centered_time_grid,
+)
 
 
 def gaussian_with_phase_ramp(t: np.ndarray, sigma: float, d: float) -> np.ndarray:

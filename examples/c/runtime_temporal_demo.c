@@ -65,7 +65,7 @@ int main(void)
 {
     const double delta_time = 0.02;
     const double beta2 = 0.05;
-    static const char* k_runtime_dispersion_expr = "exp(i*c0*w*w)";
+    static const char* k_runtime_dispersion_factor_expr = "i*c0*w*w";
 
     static sim_config cfg;
     static nlo_execution_options exec_options;
@@ -79,11 +79,6 @@ int main(void)
 
     fill_input_field(delta_time, input_field);
     fill_frequency_grid(delta_time, frequency_grid);
-
-    cfg.nonlinear.gamma = 0.01;
-    cfg.dispersion.num_dispersion_terms = 1u;
-    cfg.dispersion.betas[0] = beta2;
-    cfg.dispersion.alpha = 0.0;
 
     cfg.propagation.propagation_distance = 0.25;
     cfg.propagation.starting_step_size = 1e-3;
@@ -100,15 +95,16 @@ int main(void)
     cfg.spatial.ny = 1u;
     cfg.spatial.delta_x = 1.0;
     cfg.spatial.delta_y = 1.0;
-    cfg.spatial.grin_gx = 0.0;
-    cfg.spatial.grin_gy = 0.0;
     cfg.spatial.spatial_frequency_grid = NULL;
-    cfg.spatial.grin_potential_phase_grid = NULL;
+    cfg.spatial.potential_grid = NULL;
 
-    cfg.runtime.dispersion_expr = k_runtime_dispersion_expr;
+    cfg.runtime.dispersion_factor_expr = k_runtime_dispersion_factor_expr;
+    cfg.runtime.dispersion_expr = NULL;
     cfg.runtime.nonlinear_expr = NULL;
-    cfg.runtime.num_constants = 1u;
+    cfg.runtime.num_constants = 3u;
     cfg.runtime.constants[0] = 0.5 * beta2;
+    cfg.runtime.constants[1] = 0.0;
+    cfg.runtime.constants[2] = 0.01;
 
     exec_options.backend_type = NLO_VECTOR_BACKEND_CPU;
     exec_options.fft_backend = NLO_FFT_BACKEND_FFTW;

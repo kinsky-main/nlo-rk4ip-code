@@ -1,5 +1,4 @@
-"""Reusable ctypes runner for Python examples."""
-# TODO: Unify the 2D and the 1D example runner methods to avoid code duplication.
+"""Reusable ctypes runner utilities for Python examples."""
 
 from __future__ import annotations
 
@@ -17,6 +16,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PYTHON_API_DIR = REPO_ROOT / "python"
 if str(PYTHON_API_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_API_DIR))
+
+
+def centered_time_grid(num_samples: int, delta_time: float) -> np.ndarray:
+    """Return a centered time axis with sample spacing ``delta_time``."""
+    return (np.arange(num_samples, dtype=np.float64) - 0.5 * float(num_samples - 1)) * delta_time
 
 
 def _parse_pointer_value(value: int | str) -> int:
@@ -107,6 +111,13 @@ class SimulationOptions:
 
 @dataclass
 class TemporalSimulationConfig:
+    """
+    Example convenience config mapped to operator-default runtime constants.
+
+    When ``runtime`` is omitted, ``gamma``, ``beta2``, and ``alpha`` map to
+    default constants ``c2``, ``c0``, and ``c1`` respectively.
+    """
+
     gamma: float
     beta2: float
     dt: float
@@ -165,19 +176,16 @@ class NloExampleRunner:
 
         omega = sim_cfg.resolved_omega()
         runtime_cfg = sim_cfg.runtime
-        use_runtime_dispersion = (
-            runtime_cfg is not None
-            and (
-                getattr(runtime_cfg, "dispersion_expr", None)
-                or getattr(runtime_cfg, "dispersion_fn", None)
+        if runtime_cfg is None:
+            runtime_cfg = self.nlo.RuntimeOperators(
+                constants=[
+                    0.5 * float(sim_cfg.beta2),
+                    0.5 * float(sim_cfg.alpha),
+                    float(sim_cfg.gamma),
+                ]
             )
-        )
-        betas = [] if use_runtime_dispersion else [0.0, 0.0, float(sim_cfg.beta2)]
         prepared = self.nlo.prepare_sim_config(
             n,
-            gamma=float(sim_cfg.gamma),
-            betas=betas,
-            alpha=float(sim_cfg.alpha),
             propagation_distance=float(sim_cfg.z_final),
             starting_step_size=float(sim_cfg.starting_step_size),
             max_step_size=float(sim_cfg.max_step_size),
@@ -190,8 +198,6 @@ class NloExampleRunner:
             spatial_ny=1,
             delta_x=1.0,
             delta_y=1.0,
-            grin_gx=0.0,
-            grin_gy=0.0,
             runtime=runtime_cfg,
         )
 
@@ -220,13 +226,11 @@ class NloExampleRunner:
         error_tolerance: float,
         delta_x: float,
         delta_y: float,
-        grin_gx: float,
-        grin_gy: float,
         gamma: float = 0.0,
         alpha: float = 0.0,
         frequency_grid: np.ndarray | None = None,
         spatial_frequency_grid: np.ndarray | None = None,
-        grin_potential_phase_grid: np.ndarray | None = None,
+        potential_grid: np.ndarray | None = None,
         runtime: Any | None = None,
         exec_options: SimulationOptions | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -250,17 +254,24 @@ class NloExampleRunner:
             if int(spatial_values.size) != nxy:
                 raise ValueError("spatial_frequency_grid length must equal nx * ny.")
 
-        grin_phase_values = None
-        if grin_potential_phase_grid is not None:
-            grin_phase_values = np.asarray(grin_potential_phase_grid, dtype=np.complex128).reshape(-1)
-            if int(grin_phase_values.size) != nxy:
-                raise ValueError("grin_potential_phase_grid length must equal nx * ny.")
+        potential_values = None
+        if potential_grid is not None:
+            potential_values = np.asarray(potential_grid, dtype=np.complex128).reshape(-1)
+            if int(potential_values.size) != nxy:
+                raise ValueError("potential_grid length must equal nx * ny.")
+
+        runtime_cfg = runtime
+        if runtime_cfg is None:
+            runtime_cfg = self.nlo.RuntimeOperators(
+                constants=[
+                    0.0,
+                    0.5 * float(alpha),
+                    float(gamma),
+                ]
+            )
 
         prepared = self.nlo.prepare_sim_config(
             nxy,
-            gamma=float(gamma),
-            betas=[],
-            alpha=float(alpha),
             propagation_distance=float(propagation_distance),
             starting_step_size=float(starting_step_size),
             max_step_size=float(max_step_size),
@@ -273,11 +284,9 @@ class NloExampleRunner:
             spatial_ny=int(ny),
             delta_x=float(delta_x),
             delta_y=float(delta_y),
-            grin_gx=float(grin_gx),
-            grin_gy=float(grin_gy),
             spatial_frequency_grid=(None if spatial_values is None else spatial_values.tolist()),
-            grin_potential_phase_grid=(None if grin_phase_values is None else grin_phase_values.tolist()),
-            runtime=runtime,
+            potential_grid=(None if potential_values is None else potential_values.tolist()),
+            runtime=runtime_cfg,
         )
 
         options = exec_options if exec_options is not None else SimulationOptions()

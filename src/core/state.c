@@ -48,12 +48,6 @@ static int nlo_resolve_spatial_dimensions(
     size_t* out_nx,
     size_t* out_ny
 );
-static int nlo_fill_grin_phase_base_grid(
-    const sim_config* config,
-    size_t nx,
-    size_t ny,
-    nlo_complex* out_grid
-);
 static size_t query_available_system_memory_bytes(void);
 static size_t apply_memory_headroom(size_t available_bytes);
 static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records);
@@ -64,11 +58,30 @@ static int nlo_frequency_grid_matches_expected_unshifted(
     size_t num_time_samples,
     double delta_time
 );
-static nlo_vec_status nlo_convert_dispersion_factor_exp_to_generator(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dispersion_factor,
-    size_t num_time_samples
-);
+
+#ifndef NLO_DEFAULT_DISPERSION_FACTOR_EXPR
+#define NLO_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*(w^2)-c1"
+#endif
+
+#ifndef NLO_DEFAULT_DISPERSION_EXPR
+#define NLO_DEFAULT_DISPERSION_EXPR "exp(h*D)"
+#endif
+
+#ifndef NLO_DEFAULT_NONLINEAR_EXPR
+#define NLO_DEFAULT_NONLINEAR_EXPR "i*c2*I + i*V"
+#endif
+
+#ifndef NLO_DEFAULT_C0
+#define NLO_DEFAULT_C0 -0.5
+#endif
+
+#ifndef NLO_DEFAULT_C1
+#define NLO_DEFAULT_C1 0.0
+#endif
+
+#ifndef NLO_DEFAULT_C2
+#define NLO_DEFAULT_C2 1.0
+#endif
 
 static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer** vec)
 {
@@ -112,38 +125,6 @@ static int nlo_resolve_spatial_dimensions(
 
     *out_nx = nx;
     *out_ny = ny;
-    return 0;
-}
-
-static int nlo_fill_grin_phase_base_grid(
-    const sim_config* config,
-    size_t nx,
-    size_t ny,
-    nlo_complex* out_grid
-)
-{
-    if (config == NULL || out_grid == NULL || nx == 0u || ny == 0u) {
-        return -1;
-    }
-
-    const double gx = config->spatial.grin_gx;
-    const double gy = config->spatial.grin_gy;
-    const double dx = (config->spatial.delta_x > 0.0) ? config->spatial.delta_x : 1.0;
-    const double dy = (config->spatial.delta_y > 0.0) ? config->spatial.delta_y : 1.0;
-    const double x_center = 0.5 * (double)(nx - 1u);
-    const double y_center = 0.5 * (double)(ny - 1u);
-
-    for (size_t y = 0u; y < ny; ++y) {
-        const double y_coord = ((double)y - y_center) * dy;
-        const double y_term = gy * y_coord * y_coord;
-        const size_t row_offset = y * nx;
-        for (size_t x = 0u; x < nx; ++x) {
-            const double x_coord = ((double)x - x_center) * dx;
-            const double phase_unit = (gx * x_coord * x_coord) + y_term;
-            out_grid[row_offset + x] = nlo_make(cos(phase_unit), sin(phase_unit));
-        }
-    }
-
     return 0;
 }
 
@@ -219,68 +200,47 @@ static int nlo_frequency_grid_matches_expected_unshifted(
     return 1;
 }
 
-static nlo_vec_status nlo_convert_dispersion_factor_exp_to_generator(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dispersion_factor,
-    size_t num_time_samples
-)
+static const char* nlo_resolve_operator_expr(const char* expr, const char* fallback)
 {
-    if (backend == NULL || dispersion_factor == NULL || num_time_samples == 0u) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    if (expr != NULL && expr[0] != '\0') {
+        return expr;
     }
 
-    nlo_complex* host_values = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
-    if (host_values == NULL) {
-        return NLO_VEC_STATUS_ALLOCATION_FAILED;
+    return fallback;
+}
+
+static size_t nlo_resolve_runtime_constants(const runtime_operator_params* runtime, double out_constants[16])
+{
+    if (out_constants == NULL) {
+        return 0u;
     }
 
-    nlo_vec_status status = nlo_vec_download(backend,
-                                             dispersion_factor,
-                                             host_values,
-                                             num_time_samples * sizeof(nlo_complex));
-    if (status != NLO_VEC_STATUS_OK) {
-        free(host_values);
-        return status;
+    for (size_t i = 0u; i < NLO_RUNTIME_OPERATOR_CONSTANTS_MAX; ++i) {
+        out_constants[i] = 0.0;
+    }
+    out_constants[0] = NLO_DEFAULT_C0;
+    out_constants[1] = NLO_DEFAULT_C1;
+    out_constants[2] = NLO_DEFAULT_C2;
+
+    size_t count = 3u;
+    if (runtime == NULL) {
+        return count;
     }
 
-    double prev_phase = 0.0;
-    const double phase_wrap_limit = 0.5 * NLO_TWO_PI;
-    int has_prev_phase = 0;
-    const size_t negative_branch_start = (num_time_samples + 1u) / 2u;
-    for (size_t i = 0u; i < num_time_samples; ++i) {
-        if (i == 0u || i == negative_branch_start) {
-            has_prev_phase = 0;
-        }
-
-        const double re = host_values[i].re;
-        const double im = host_values[i].im;
-        const double magnitude = hypot(re, im);
-        const double safe_magnitude = (magnitude > DBL_MIN) ? magnitude : DBL_MIN;
-        const double log_magnitude = log(safe_magnitude);
-
-        double phase = atan2(im, re);
-        if (has_prev_phase) {
-            while ((phase - prev_phase) > phase_wrap_limit) {
-                phase -= NLO_TWO_PI;
-            }
-            while ((phase - prev_phase) < -phase_wrap_limit) {
-                phase += NLO_TWO_PI;
-            }
-        } else {
-            has_prev_phase = 1;
-        }
-
-        prev_phase = phase;
-        host_values[i].re = log_magnitude;
-        host_values[i].im = phase;
+    const size_t runtime_count = runtime->num_constants;
+    if (runtime_count > NLO_RUNTIME_OPERATOR_CONSTANTS_MAX) {
+        return 0u;
     }
 
-    status = nlo_vec_upload(backend,
-                            dispersion_factor,
-                            host_values,
-                            num_time_samples * sizeof(nlo_complex));
-    free(host_values);
-    return status;
+    for (size_t i = 0u; i < runtime_count; ++i) {
+        out_constants[i] = runtime->constants[i];
+    }
+
+    if (runtime_count > count) {
+        count = runtime_count;
+    }
+
+    return count;
 }
 
 static size_t nlo_compute_device_ring_capacity(const simulation_state* state, size_t requested_records)
@@ -352,9 +312,9 @@ nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type back
     return options;
 }
 
-sim_config* create_sim_config(size_t num_dispersion_terms, size_t num_time_samples)
+sim_config* create_sim_config(size_t num_time_samples)
 {
-    if (num_dispersion_terms > NT_MAX || num_time_samples == 0 || num_time_samples > NT_MAX) {
+    if (num_time_samples == 0 || num_time_samples > NT_MAX) {
         return NULL;
     }
 
@@ -364,15 +324,16 @@ sim_config* create_sim_config(size_t num_dispersion_terms, size_t num_time_sampl
     }
 
     config->propagation.error_tolerance = 1e-6;
-    config->dispersion.num_dispersion_terms = num_dispersion_terms;
     config->spatial.nx = num_time_samples;
     config->spatial.ny = 1u;
     config->spatial.delta_x = 1.0;
     config->spatial.delta_y = 1.0;
-    config->spatial.grin_gx = 0.0;
-    config->spatial.grin_gy = 0.0;
     config->spatial.spatial_frequency_grid = NULL;
-    config->spatial.grin_potential_phase_grid = NULL;
+    config->spatial.potential_grid = NULL;
+    config->runtime.dispersion_factor_expr = NULL;
+    config->runtime.dispersion_expr = NULL;
+    config->runtime.nonlinear_expr = NULL;
+    config->runtime.num_constants = 0u;
     config->frequency.frequency_grid = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
     if (config->frequency.frequency_grid == NULL) {
         free(config);
@@ -416,6 +377,8 @@ simulation_state* create_simulation_state(
                                        &spatial_ny) != 0) {
         return NULL;
     }
+    (void)spatial_nx;
+    (void)spatial_ny;
 
     simulation_state* state = (simulation_state*)calloc(1, sizeof(simulation_state));
     if (state == NULL) {
@@ -435,11 +398,7 @@ simulation_state* create_simulation_state(
     state->current_z = 0.0;
     state->current_step_size = config->propagation.starting_step_size;
     state->current_half_step_exp = 0.5 * state->current_step_size;
-    state->last_dispersion_step_size = 0.0;
     state->dispersion_valid = 0;
-    state->dispersion_factor_is_exponential = 0;
-    state->runtime_dispersion_enabled = 0;
-    state->runtime_nonlinear_enabled = 0;
     state->runtime_operator_stack_slots = 0u;
 
     size_t host_elements = 0u;
@@ -484,9 +443,10 @@ simulation_state* create_simulation_state(
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_3_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_4_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.dispersion_factor_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.previous_field_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.grin_phase_factor_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.grin_work_vec) != NLO_VEC_STATUS_OK) {
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.dispersion_operator_vec) != NLO_VEC_STATUS_OK ||
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.nonlinear_multiplier_vec) != NLO_VEC_STATUS_OK ||
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.potential_vec) != NLO_VEC_STATUS_OK ||
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.previous_field_vec) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
     }
@@ -536,139 +496,110 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
-    if (config->spatial.grin_potential_phase_grid != NULL) {
+    if (config->spatial.potential_grid != NULL) {
         status = nlo_vec_upload(state->backend,
-                                state->working_vectors.grin_phase_factor_vec,
-                                config->spatial.grin_potential_phase_grid,
+                                state->working_vectors.potential_vec,
+                                config->spatial.potential_grid,
                                 num_time_samples * sizeof(nlo_complex));
-    } else if (config->spatial.grin_gx != 0.0 || config->spatial.grin_gy != 0.0) {
-        nlo_complex* grin_phase_base =
-            (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
-        if (grin_phase_base == NULL) {
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        if (nlo_fill_grin_phase_base_grid(config,
-                                          spatial_nx,
-                                          spatial_ny,
-                                          grin_phase_base) != 0) {
-            free(grin_phase_base);
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        status = nlo_vec_upload(state->backend,
-                                state->working_vectors.grin_phase_factor_vec,
-                                grin_phase_base,
-                                num_time_samples * sizeof(nlo_complex));
-        free(grin_phase_base);
     } else {
         status = nlo_vec_complex_fill(state->backend,
-                                      state->working_vectors.grin_phase_factor_vec,
-                                      nlo_make(1.0, 0.0));
+                                      state->working_vectors.potential_vec,
+                                      nlo_make(0.0, 0.0));
     }
     if (status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
     }
 
-    status = nlo_vec_complex_fill(state->backend,
-                                  state->working_vectors.grin_work_vec,
-                                  nlo_make(0.0, 0.0));
+    double resolved_runtime_constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
+    const double* runtime_constants = resolved_runtime_constants;
+    size_t runtime_constant_count = nlo_resolve_runtime_constants(&config->runtime,
+                                                                  resolved_runtime_constants);
+    if (runtime_constant_count == 0u ||
+        runtime_constant_count > NLO_RUNTIME_OPERATOR_CONSTANTS_MAX) {
+        free_simulation_state(state);
+        return NULL;
+    }
+
+    const char* dispersion_factor_expr = nlo_resolve_operator_expr(config->runtime.dispersion_factor_expr,
+                                                                   NLO_DEFAULT_DISPERSION_FACTOR_EXPR);
+    const char* dispersion_expr = nlo_resolve_operator_expr(config->runtime.dispersion_expr,
+                                                            NLO_DEFAULT_DISPERSION_EXPR);
+    const char* nonlinear_expr = nlo_resolve_operator_expr(config->runtime.nonlinear_expr,
+                                                           NLO_DEFAULT_NONLINEAR_EXPR);
+
+    status = nlo_operator_program_compile(dispersion_factor_expr,
+                                          NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR,
+                                          runtime_constant_count,
+                                          runtime_constants,
+                                          &state->dispersion_factor_operator_program);
     if (status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
     }
 
-    const char* dispersion_expr = config->runtime.dispersion_expr;
-    if (dispersion_expr != NULL && dispersion_expr[0] != '\0') {
-        status = nlo_operator_program_compile(dispersion_expr,
-                                              NLO_OPERATOR_CONTEXT_DISPERSION,
-                                              config->runtime.num_constants,
-                                              config->runtime.constants,
-                                              &state->dispersion_operator_program);
-        if (status != NLO_VEC_STATUS_OK) {
-            free_simulation_state(state);
-            return NULL;
-        }
-        state->runtime_dispersion_enabled = 1;
-    }
-
-    const char* nonlinear_expr = config->runtime.nonlinear_expr;
-    if (nonlinear_expr != NULL && nonlinear_expr[0] != '\0') {
-        status = nlo_operator_program_compile(nonlinear_expr,
-                                              NLO_OPERATOR_CONTEXT_NONLINEAR,
-                                              config->runtime.num_constants,
-                                              config->runtime.constants,
-                                              &state->nonlinear_operator_program);
-        if (status != NLO_VEC_STATUS_OK) {
-            free_simulation_state(state);
-            return NULL;
-        }
-        state->runtime_nonlinear_enabled = 1;
-    }
-
-    if (state->runtime_dispersion_enabled || state->runtime_nonlinear_enabled) {
-        const size_t dispersion_stack = state->runtime_dispersion_enabled
-                                            ? state->dispersion_operator_program.required_stack_slots
-                                            : 0u;
-        const size_t nonlinear_stack = state->runtime_nonlinear_enabled
-                                           ? state->nonlinear_operator_program.required_stack_slots
-                                           : 0u;
-        state->runtime_operator_stack_slots =
-            (dispersion_stack > nonlinear_stack) ? dispersion_stack : nonlinear_stack;
-
-        if (state->runtime_operator_stack_slots == 0u ||
-            state->runtime_operator_stack_slots > NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS) {
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        for (size_t i = 0u; i < state->runtime_operator_stack_slots; ++i) {
-            if (nlo_create_complex_vec(state->backend,
-                                       num_time_samples,
-                                       &state->runtime_operator_stack_vec[i]) != NLO_VEC_STATUS_OK) {
-                free_simulation_state(state);
-                return NULL;
-            }
-        }
-    }
-
-    if (state->runtime_dispersion_enabled) {
-        const nlo_operator_eval_context eval_ctx = {
-            .frequency_grid = state->frequency_grid_vec,
-            .field = NULL
-        };
-        status = nlo_operator_program_execute(state->backend,
-                                              &state->dispersion_operator_program,
-                                              &eval_ctx,
-                                              state->runtime_operator_stack_vec,
-                                              state->runtime_operator_stack_slots,
-                                              state->working_vectors.dispersion_factor_vec);
-        if (status == NLO_VEC_STATUS_OK) {
-            status = nlo_convert_dispersion_factor_exp_to_generator(state->backend,
-                                                                     state->working_vectors.dispersion_factor_vec,
-                                                                     num_time_samples);
-        }
-        state->dispersion_factor_is_exponential = 0;
-    } else {
-        status = nlo_calculate_dispersion_factor_vec(state->backend,
-                                                     config->dispersion.num_dispersion_terms,
-                                                     config->dispersion.betas,
-                                                     state->current_step_size,
-                                                     state->working_vectors.dispersion_factor_vec,
-                                                     state->frequency_grid_vec,
-                                                     state->working_vectors.omega_power_vec,
-                                                     state->working_vectors.field_working_vec);
-        state->dispersion_factor_is_exponential = 0;
-    }
+    status = nlo_operator_program_compile(dispersion_expr,
+                                          NLO_OPERATOR_CONTEXT_DISPERSION,
+                                          runtime_constant_count,
+                                          runtime_constants,
+                                          &state->dispersion_operator_program);
     if (status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return NULL;
     }
 
-    state->last_dispersion_step_size = state->current_step_size;
+    status = nlo_operator_program_compile(nonlinear_expr,
+                                          NLO_OPERATOR_CONTEXT_NONLINEAR,
+                                          runtime_constant_count,
+                                          runtime_constants,
+                                          &state->nonlinear_operator_program);
+    if (status != NLO_VEC_STATUS_OK) {
+        free_simulation_state(state);
+        return NULL;
+    }
+
+    size_t required_stack_slots = state->dispersion_factor_operator_program.required_stack_slots;
+    if (state->dispersion_operator_program.required_stack_slots > required_stack_slots) {
+        required_stack_slots = state->dispersion_operator_program.required_stack_slots;
+    }
+    if (state->nonlinear_operator_program.required_stack_slots > required_stack_slots) {
+        required_stack_slots = state->nonlinear_operator_program.required_stack_slots;
+    }
+
+    if (required_stack_slots == 0u ||
+        required_stack_slots > NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS) {
+        free_simulation_state(state);
+        return NULL;
+    }
+
+    state->runtime_operator_stack_slots = required_stack_slots;
+    for (size_t i = 0u; i < state->runtime_operator_stack_slots; ++i) {
+        if (nlo_create_complex_vec(state->backend,
+                                   num_time_samples,
+                                   &state->runtime_operator_stack_vec[i]) != NLO_VEC_STATUS_OK) {
+            free_simulation_state(state);
+            return NULL;
+        }
+    }
+
+    const nlo_operator_eval_context dispersion_factor_eval_ctx = {
+        .frequency_grid = state->frequency_grid_vec,
+        .field = state->current_field_vec,
+        .dispersion_factor = NULL,
+        .potential = state->working_vectors.potential_vec,
+        .half_step_size = state->current_half_step_exp
+    };
+    status = nlo_operator_program_execute(state->backend,
+                                          &state->dispersion_factor_operator_program,
+                                          &dispersion_factor_eval_ctx,
+                                          state->runtime_operator_stack_vec,
+                                          state->runtime_operator_stack_slots,
+                                          state->working_vectors.dispersion_factor_vec);
+    if (status != NLO_VEC_STATUS_OK) {
+        free_simulation_state(state);
+        return NULL;
+    }
+
     state->dispersion_valid = 1;
 
     if (nlo_fft_plan_create_with_backend(state->backend,
@@ -723,9 +654,10 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_3_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_4_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_factor_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_operator_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.nonlinear_multiplier_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.potential_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.previous_field_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.grin_phase_factor_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.grin_work_vec);
         for (size_t i = 0u; i < NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS; ++i) {
             nlo_destroy_vec_if_set(state->backend, &state->runtime_operator_stack_vec[i]);
         }

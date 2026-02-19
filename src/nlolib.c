@@ -104,11 +104,6 @@ static void nlo_log_nlse_propagate_call(
 
     const size_t field_bytes = nlo_compute_input_bytes(num_time_samples, sizeof(nlo_complex));
     const size_t records_bytes = nlo_compute_record_bytes(num_recorded_samples, num_time_samples);
-    const size_t dispersion_count =
-        (config != NULL)
-            ? config->dispersion.num_dispersion_terms
-            : 0u;
-    const size_t dispersion_bytes = nlo_compute_input_bytes(dispersion_count, sizeof(double));
     const size_t frequency_grid_bytes = nlo_compute_input_bytes(num_time_samples, sizeof(nlo_complex));
     size_t nx = 0u;
     size_t ny = 0u;
@@ -120,9 +115,8 @@ static void nlo_log_nlse_propagate_call(
             "num_time_samples=%zu num_recorded_samples=%zu field_bytes=%zu record_bytes=%zu | "
             "config=%p(size=%zu) input_field=%p(size=%zu) output_records=%p(size=%zu) "
             "exec_options=%p(size=%zu) | "
-            "dispersion_terms=%zu betas_bytes=%zu frequency_grid=%p(size=%zu) | "
-            "spatial(nx=%zu ny=%zu valid=%d dx=%.9e dy=%.9e gx=%.9e gy=%.9e "
-            "spatial_frequency_grid=%p grin_phase_grid=%p)\n",
+            "frequency_grid=%p(size=%zu) runtime(constants=%zu df=%p d=%p n=%p) | "
+            "spatial(nx=%zu ny=%zu valid=%d dx=%.9e dy=%.9e spatial_frequency_grid=%p potential_grid=%p)\n",
             nlo_backend_type_to_string(local_exec_options.backend_type),
             num_time_samples,
             num_recorded_samples,
@@ -136,19 +130,19 @@ static void nlo_log_nlse_propagate_call(
             records_bytes,
             (const void*)exec_options,
             sizeof(nlo_execution_options),
-            dispersion_count,
-            dispersion_bytes,
             (config != NULL) ? (const void*)config->frequency.frequency_grid : NULL,
             frequency_grid_bytes,
+            (config != NULL) ? config->runtime.num_constants : 0u,
+            (config != NULL) ? (const void*)config->runtime.dispersion_factor_expr : NULL,
+            (config != NULL) ? (const void*)config->runtime.dispersion_expr : NULL,
+            (config != NULL) ? (const void*)config->runtime.nonlinear_expr : NULL,
             nx,
             ny,
             has_spatial_shape,
             (config != NULL) ? config->spatial.delta_x : 0.0,
             (config != NULL) ? config->spatial.delta_y : 0.0,
-            (config != NULL) ? config->spatial.grin_gx : 0.0,
-            (config != NULL) ? config->spatial.grin_gy : 0.0,
             (config != NULL) ? (const void*)config->spatial.spatial_frequency_grid : NULL,
-            (config != NULL) ? (const void*)config->spatial.grin_potential_phase_grid : NULL);
+            (config != NULL) ? (const void*)config->spatial.potential_grid : NULL);
 }
 
 NLOLIB_API nlolib_status nlolib_propagate(

@@ -72,54 +72,6 @@ def second_order_soliton_normalized_envelope(
     return numerator / denominator
 
 
-def rk4ip_solver_recorded(
-    A0: np.ndarray,
-    z_final: float,
-    params: dict,
-    num_recorded_samples: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Run one propagation and return z records and envelope records."""
-    if num_recorded_samples <= 0:
-        raise ValueError("num_recorded_samples must be positive.")
-
-    n = int(A0.size)
-    dt = float(params["dt"])
-    omega = np.asarray(params["omega"], dtype=np.float64)
-    if int(omega.size) != n:
-        raise ValueError("omega grid size must match A0 size.")
-
-    sim_cfg = TemporalSimulationConfig(
-        gamma=float(params["gamma"]),
-        beta2=float(params["beta2"]),
-        alpha=float(params.get("alpha", 0.0)),
-        dt=dt,
-        z_final=float(z_final),
-        num_time_samples=n,
-        pulse_period=float(params.get("pulse_period", n * dt)),
-        omega=omega,
-        starting_step_size=float(params.get("starting_step_size", 1e-4)),
-        max_step_size=float(params.get("max_step_size", 1e-2)),
-        min_step_size=float(params.get("min_step_size", 1e-4)),
-        error_tolerance=float(params.get("error_tolerance", 1e-8)),
-    )
-
-    exec_opts = SimulationOptions(
-        backend=params.get("backend", "auto"),
-        fft_backend=params.get("fft_backend", "auto"),
-        device_heap_fraction=float(params.get("device_heap_fraction", 0.70)),
-        record_ring_target=int(params.get("record_ring_target", 0)),
-        forced_device_budget_bytes=int(params.get("forced_device_budget_bytes", 0)),
-    )
-
-    runner = NloExampleRunner()
-    return runner.propagate_temporal_records(
-        np.asarray(A0, dtype=np.complex128),
-        sim_cfg,
-        int(num_recorded_samples),
-        exec_opts,
-    )
-
-
 def average_relative_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
     intensity_num = np.abs(A_num) ** 2
     intensity_true = np.abs(A_true) ** 2
@@ -301,23 +253,30 @@ def main() -> float:
     U0 = 2.0 * sech(t)
     A0 = to_physical_envelope(U0, 0.0, p0, alpha)
 
-    params = {
-        "beta2": beta2,
-        "gamma": gamma,
-        "alpha": alpha,
-        "backend": "auto",
-        "fft_backend": "auto",
-        "dt": dt,
-        "omega": omega,
-        "pulse_period": n * dt,
-        "starting_step_size": 1e-4,
-        "max_step_size": 1e-2,
-        "min_step_size": 1e-6,
-        "error_tolerance": 1e-8,
-    }
-
     num_recorded_samples = 200
-    z_records, A_records = rk4ip_solver_recorded(A0, z_final, params, num_recorded_samples)
+    sim_cfg = TemporalSimulationConfig(
+        gamma=gamma,
+        beta2=beta2,
+        alpha=alpha,
+        dt=dt,
+        z_final=z_final,
+        num_time_samples=n,
+        pulse_period=n * dt,
+        omega=omega,
+        starting_step_size=1e-4,
+        max_step_size=1e-2,
+        min_step_size=1e-6,
+        error_tolerance=1e-8,
+    )
+    exec_opts = SimulationOptions(backend="auto", fft_backend="auto")
+
+    runner = NloExampleRunner()
+    z_records, A_records = runner.propagate_temporal_records(
+        np.asarray(A0, dtype=np.complex128),
+        sim_cfg,
+        num_recorded_samples,
+        exec_opts,
+    )
     U_num_records = np.empty_like(A_records, dtype=np.complex128)
     U_true_records = np.empty_like(A_records, dtype=np.complex128)
     for i, z in enumerate(z_records):

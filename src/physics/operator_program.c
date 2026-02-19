@@ -47,6 +47,39 @@ static int nlo_is_identifier_char(char c)
     return (c == '_') || isalnum((unsigned char)c);
 }
 
+static int nlo_context_allows_symbol_w(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_DISPERSION);
+}
+
+static int nlo_context_allows_symbol_a(nlo_operator_program_context context)
+{
+    (void)context;
+    return 1;
+}
+
+static int nlo_context_allows_symbol_i(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_NONLINEAR);
+}
+
+static int nlo_context_allows_symbol_d(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION);
+}
+
+static int nlo_context_allows_symbol_v(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION ||
+            context == NLO_OPERATOR_CONTEXT_NONLINEAR);
+}
+
+static int nlo_context_allows_symbol_h(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION);
+}
+
 static int nlo_emit_instruction(
     nlo_operator_program* program,
     nlo_operator_opcode opcode,
@@ -220,7 +253,7 @@ static int nlo_parse_primary(nlo_parser* parser)
         }
 
         if (strcmp(parser->current.ident, "w") == 0) {
-            if (parser->context != NLO_OPERATOR_CONTEXT_DISPERSION) {
+            if (!nlo_context_allows_symbol_w(parser->context)) {
                 return -1;
             }
             if (nlo_emit_instruction(parser->program,
@@ -232,7 +265,7 @@ static int nlo_parse_primary(nlo_parser* parser)
         }
 
         if (strcmp(parser->current.ident, "A") == 0) {
-            if (parser->context != NLO_OPERATOR_CONTEXT_NONLINEAR) {
+            if (!nlo_context_allows_symbol_a(parser->context)) {
                 return -1;
             }
             if (nlo_emit_instruction(parser->program,
@@ -244,11 +277,47 @@ static int nlo_parse_primary(nlo_parser* parser)
         }
 
         if (strcmp(parser->current.ident, "I") == 0) {
-            if (parser->context != NLO_OPERATOR_CONTEXT_NONLINEAR) {
+            if (!nlo_context_allows_symbol_i(parser->context)) {
                 return -1;
             }
             if (nlo_emit_instruction(parser->program,
                                      NLO_OPERATOR_OP_PUSH_SYMBOL_I,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "D") == 0) {
+            if (!nlo_context_allows_symbol_d(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_D,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "V") == 0) {
+            if (!nlo_context_allows_symbol_v(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_V,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "h") == 0) {
+            if (!nlo_context_allows_symbol_h(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_H,
                                      nlo_make(0.0, 0.0)) != 0) {
                 return -1;
             }
@@ -406,6 +475,9 @@ static int nlo_program_compute_stack_requirements(nlo_operator_program* program)
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_W ||
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_A ||
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_I ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_D ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_V ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_H ||
             op == NLO_OPERATOR_OP_PUSH_IMAG_UNIT) {
             ++depth;
             if (depth > max_depth) {
@@ -556,6 +628,42 @@ nlo_vec_status nlo_operator_program_execute(
             }
             nlo_vec_buffer* dst = stack_vectors[stack_depth];
             status = nlo_vec_complex_magnitude_squared(backend, eval_ctx->field, dst);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_D) {
+            if (eval_ctx->dispersion_factor == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->dispersion_factor);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_V) {
+            if (eval_ctx->potential == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->potential);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_H) {
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_fill(backend, dst, nlo_make(eval_ctx->half_step_size, 0.0));
             if (status != NLO_VEC_STATUS_OK) {
                 return status;
             }

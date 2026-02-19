@@ -11,7 +11,7 @@ end
 
 % --- validate required fields -------------------------------------------
 required = { ...
-    "num_time_samples", "gamma", "betas", "alpha", ...
+    "num_time_samples", ...
     "propagation_distance", "starting_step_size", "max_step_size", ...
     "min_step_size", "error_tolerance", "pulse_period", "delta_time", ...
     "frequency_grid"};
@@ -28,24 +28,11 @@ if ~libisloaded('nlolib')
 end
 
 nlolib.NLolib.ensure_types_loaded();
-maxBetas = bitshift(1, 20);   % NT_MAX from nlolib_matlab.h
 maxConstants = 16;            % NLO_RUNTIME_OPERATOR_CONSTANTS_MAX from nlolib_matlab.h
-
-betas = double(cfg.betas(:).');
-numBetas = numel(betas);
-if numBetas > maxBetas
-    error('nlolib:tooManyBetas', ...
-          'cfg.betas has %d values but max supported is %d.', ...
-          numBetas, maxBetas);
-end
-betasFixed = zeros(1, maxBetas);
-if numBetas > 0
-    betasFixed(1:numBetas) = betas;
-end
 
 numTs = double(cfg.num_time_samples);
 
-[dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
+[dispersionFactorExpr, dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
 constants = double(constants(:).');
 numConstants = numel(constants);
 if numConstants > maxConstants
@@ -65,18 +52,19 @@ spatialMl.nx = uint64(get_optional(cfg, "spatial_nx", numTs));
 spatialMl.ny = uint64(get_optional(cfg, "spatial_ny", 1));
 spatialMl.delta_x = double(get_optional(cfg, "delta_x", 1.0));
 spatialMl.delta_y = double(get_optional(cfg, "delta_y", 1.0));
-spatialMl.grin_gx = double(get_optional(cfg, "grin_gx", 0.0));
-spatialMl.grin_gy = double(get_optional(cfg, "grin_gy", 0.0));
 
 if isfield(cfg, "spatial_frequency_grid") && ~isempty(cfg.spatial_frequency_grid)
     spatialMl.spatial_frequency_grid = complex_to_nlo_complex_struct(cfg.spatial_frequency_grid);
 end
 
-if isfield(cfg, "grin_potential_phase_grid") && ~isempty(cfg.grin_potential_phase_grid)
-    spatialMl.grin_potential_phase_grid = complex_to_nlo_complex_struct(cfg.grin_potential_phase_grid);
+if isfield(cfg, "potential_grid") && ~isempty(cfg.potential_grid)
+    spatialMl.potential_grid = complex_to_nlo_complex_struct(cfg.potential_grid);
 end
 
 runtimeMl = struct();
+if strlength(dispersionFactorExpr) > 0
+    runtimeMl.dispersion_factor_expr = char(dispersionFactorExpr);
+end
 if strlength(dispersionExpr) > 0
     runtimeMl.dispersion_expr = char(dispersionExpr);
 end
@@ -87,11 +75,6 @@ runtimeMl.num_constants = uint64(numConstants);
 runtimeMl.constants = constantsFixed;
 
 cfgMl = struct();
-cfgMl.nonlinear = struct('gamma', double(cfg.gamma));
-cfgMl.dispersion = struct( ...
-    'num_dispersion_terms', uint64(numBetas), ...
-    'betas', betasFixed, ...
-    'alpha', double(cfg.alpha));
 cfgMl.propagation = struct( ...
     'starting_step_size', double(cfg.starting_step_size), ...
     'max_step_size', double(cfg.max_step_size), ...
@@ -128,7 +111,8 @@ im = num2cell(imag(vals));
 out = struct('re', re, 'im', im);
 end
 
-function [dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg)
+function [dispersionFactorExpr, dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg)
+dispersionFactorExpr = "";
 dispersionExpr = "";
 nonlinearExpr = "";
 constants = [];
@@ -142,11 +126,21 @@ if isfield(runtime, "constants") && ~isempty(runtime.constants)
     constants = double(runtime.constants(:).');
 end
 
+if isfield(runtime, "dispersion_factor_expr") && ~isempty(runtime.dispersion_factor_expr)
+    dispersionFactorExpr = string(runtime.dispersion_factor_expr);
+end
 if isfield(runtime, "dispersion_expr") && ~isempty(runtime.dispersion_expr)
     dispersionExpr = string(runtime.dispersion_expr);
 end
 if isfield(runtime, "nonlinear_expr") && ~isempty(runtime.nonlinear_expr)
     nonlinearExpr = string(runtime.nonlinear_expr);
+end
+
+if isfield(runtime, "dispersion_factor_fn") && ~isempty(runtime.dispersion_factor_fn)
+    [translated, captured] = nlolib.translate_runtime_handle(runtime.dispersion_factor_fn, "dispersion_factor", runtime);
+    translated = shift_constant_indices(translated, numel(constants));
+    constants = [constants, captured];
+    dispersionFactorExpr = translated;
 end
 
 if isfield(runtime, "dispersion_fn") && ~isempty(runtime.dispersion_fn)

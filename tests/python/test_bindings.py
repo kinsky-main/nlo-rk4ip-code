@@ -1,6 +1,7 @@
 from nlolib_ctypes import (
     NLO_VECTOR_BACKEND_CPU,
     NLolib,
+    RuntimeOperators,
     default_execution_options,
     prepare_sim_config,
 )
@@ -9,9 +10,6 @@ from nlolib_ctypes import (
 def _base_config(n: int):
     return prepare_sim_config(
         n,
-        gamma=1.0,
-        betas=[],
-        alpha=0.0,
         propagation_distance=0.0,
         starting_step_size=0.01,
         max_step_size=0.1,
@@ -20,6 +18,7 @@ def _base_config(n: int):
         pulse_period=1.0,
         delta_time=0.001,
         frequency_grid=[0j] * n,
+        runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
     )
 
 
@@ -52,9 +51,6 @@ def main():
     nxy = nx * ny
     cfg_2d = prepare_sim_config(
         nxy,
-        gamma=1.0,
-        betas=[],
-        alpha=0.0,
         propagation_distance=0.0,
         starting_step_size=0.01,
         max_step_size=0.1,
@@ -66,7 +62,8 @@ def main():
         spatial_nx=nx,
         spatial_ny=ny,
         spatial_frequency_grid=[0j] * nxy,
-        grin_potential_phase_grid=[1 + 0j] * nxy,
+        potential_grid=[1 + 0j] * nxy,
+        runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
     )
     out_2d = api.propagate(cfg_2d, [0j] * nxy, 1, cpu_opts)
     assert len(out_2d) == 1
@@ -75,9 +72,6 @@ def main():
 
     bad_cfg_2d = prepare_sim_config(
         nxy,
-        gamma=1.0,
-        betas=[],
-        alpha=0.0,
         propagation_distance=0.0,
         starting_step_size=0.01,
         max_step_size=0.1,
@@ -88,6 +82,7 @@ def main():
         frequency_grid=[0j] * nxy,
         spatial_nx=nx + 1,
         spatial_ny=ny,
+        runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
     )
     try:
         api.propagate(bad_cfg_2d, [0j] * nxy, 1, cpu_opts)

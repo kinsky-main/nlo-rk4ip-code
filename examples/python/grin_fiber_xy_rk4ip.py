@@ -46,6 +46,7 @@ def main() -> None:
     w0 = 8.0
     grin_gx = 2.0e-4
     grin_gy = 2.0e-4
+    phase_unit = (grin_gx * (xx * xx)) + (grin_gy * (yy * yy))
     field0 = np.exp(-((xx * xx + yy * yy) / (w0 * w0))).astype(np.complex128)
     field0_flat = field0.reshape(-1)
 
@@ -67,8 +68,7 @@ def main() -> None:
         error_tolerance=1e-7,
         delta_x=dx,
         delta_y=dy,
-        grin_gx=grin_gx,
-        grin_gy=grin_gy,
+        potential_grid=phase_unit.astype(np.complex128).reshape(-1),
         gamma=0.0,
         alpha=0.0,
         exec_options=exec_opts,
@@ -79,7 +79,6 @@ def main() -> None:
     print(f"GRIN XY propagation completed: records={num_records}, shape=({ny}, {nx})")
     print(f"Power trend: z0={in_power:.6e}, z_end={out_power:.6e}")
 
-    phase_unit = (grin_gx * (xx * xx)) + (grin_gy * (yy * yy))
     analytical_records = np.empty_like(records, dtype=np.complex128)
     for i, z in enumerate(z_records):
         analytical_records[i] = field0 * np.exp((1.0j) * phase_unit * float(z))

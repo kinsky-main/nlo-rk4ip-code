@@ -5,11 +5,12 @@ Runtime operator callable example using the unified example runner backend.
 from __future__ import annotations
 
 import numpy as np
-from backend.runner import NloExampleRunner, SimulationOptions, TemporalSimulationConfig
-
-
-def centered_time_grid(num_samples: int, delta_time: float) -> np.ndarray:
-    return (np.arange(num_samples, dtype=np.float64) - 0.5 * float(num_samples - 1)) * delta_time
+from backend.runner import (
+    NloExampleRunner,
+    SimulationOptions,
+    TemporalSimulationConfig,
+    centered_time_grid,
+)
 
 
 def main() -> None:
@@ -24,8 +25,8 @@ def main() -> None:
     field0 = np.exp(-((t / 0.20) ** 2)) * np.exp((-1.0j) * 12.0 * t)
 
     runtime = RuntimeOperators(
-        dispersion_fn=lambda w: np.exp((1.0j * scale) * (w * w)),
-        nonlinear_expr=lambda field, gamma: np.exp(1.0j * gamma * np.abs(field) ** 2),
+        dispersion_factor_fn=lambda A, w: (1.0j * scale) * (w * w),
+        nonlinear_fn=lambda A, I: (1.0j * 0.0) * I,
     )
 
     sim_cfg = TemporalSimulationConfig(

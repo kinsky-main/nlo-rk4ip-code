@@ -74,18 +74,6 @@ typedef struct
 
 typedef struct
 {
-    double gamma;
-} nonlinear_params;
-
-typedef struct
-{
-    size_t num_dispersion_terms;
-    double betas[NT_MAX];
-    double alpha;
-} dispersion_params;
-
-typedef struct
-{
     double starting_step_size;
     double max_step_size;
     double min_step_size;
@@ -110,14 +98,13 @@ typedef struct
     size_t ny;
     double delta_x;
     double delta_y;
-    double grin_gx;
-    double grin_gy;
     nlo_complex *spatial_frequency_grid;
-    nlo_complex *grin_potential_phase_grid;
+    nlo_complex *potential_grid;
 } spatial_grid;
 
 typedef struct
 {
+    const char *dispersion_factor_expr;
     const char *dispersion_expr;
     const char *nonlinear_expr;
     size_t num_constants;
@@ -126,8 +113,6 @@ typedef struct
 
 typedef struct
 {
-    nonlinear_params nonlinear;
-    dispersion_params dispersion;
     propagation_params propagation;
     time_grid time;
     nlo_frequency_grid frequency;

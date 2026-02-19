@@ -13,6 +13,7 @@ from numbers import Real
 from typing import Any, Callable, Mapping
 
 RUNTIME_CONTEXT_DISPERSION = "dispersion"
+RUNTIME_CONTEXT_DISPERSION_FACTOR = "dispersion_factor"
 RUNTIME_CONTEXT_NONLINEAR = "nonlinear"
 
 _ALLOWED_FUNCS = {"exp", "log", "sqrt", "sin", "cos"}
@@ -105,10 +106,19 @@ class _ExpressionTranslator:
         self._constants_by_name: dict[str, int] = {}
 
     def _require_symbol_allowed(self, symbol: str) -> None:
-        if symbol == "w" and self._context != RUNTIME_CONTEXT_DISPERSION:
-            raise ValueError("'w' is only valid in dispersion runtime expressions")
-        if symbol in {"A", "I"} and self._context != RUNTIME_CONTEXT_NONLINEAR:
-            raise ValueError(f"'{symbol}' is only valid in nonlinear runtime expressions")
+        if symbol == "A":
+            return
+        if symbol == "w" and self._context in {RUNTIME_CONTEXT_DISPERSION_FACTOR, RUNTIME_CONTEXT_DISPERSION}:
+            return
+        if symbol == "D" and self._context == RUNTIME_CONTEXT_DISPERSION:
+            return
+        if symbol == "h" and self._context == RUNTIME_CONTEXT_DISPERSION:
+            return
+        if symbol == "I" and self._context == RUNTIME_CONTEXT_NONLINEAR:
+            return
+        if symbol == "V" and self._context in {RUNTIME_CONTEXT_DISPERSION, RUNTIME_CONTEXT_NONLINEAR}:
+            return
+        raise ValueError(f"'{symbol}' is not valid in {self._context} runtime expressions")
 
     def _add_named_constant(self, name: str, value: float) -> str:
         if name in self._constants_by_name:
@@ -200,7 +210,7 @@ class _ExpressionTranslator:
                 self._require_symbol_allowed(symbol)
                 return symbol
 
-            if node.id in {"w", "A", "I", "i"}:
+            if node.id in {"w", "A", "I", "D", "V", "h", "i"}:
                 self._require_symbol_allowed(node.id)
                 return node.id
 
@@ -229,25 +239,46 @@ def translate_callable(
     constant_bindings: Mapping[str, float] | None = None,
     auto_capture: bool = True,
 ) -> TranslatedExpression:
-    if context not in {RUNTIME_CONTEXT_DISPERSION, RUNTIME_CONTEXT_NONLINEAR}:
-        raise ValueError("context must be 'dispersion' or 'nonlinear'")
+    if context not in {
+        RUNTIME_CONTEXT_DISPERSION_FACTOR,
+        RUNTIME_CONTEXT_DISPERSION,
+        RUNTIME_CONTEXT_NONLINEAR,
+    }:
+        raise ValueError("context must be 'dispersion_factor', 'dispersion', or 'nonlinear'")
 
     sig = inspect.signature(func)
-    params = [
-        p for p in sig.parameters.values()
-        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    ]
+    params = list(sig.parameters.values())
+    for param in params:
+        if param.kind not in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            raise ValueError("runtime callables must only use positional parameters")
 
-    if context == RUNTIME_CONTEXT_DISPERSION:
-        if len(params) != 1:
-            raise ValueError("dispersion callable must take exactly one positional argument")
-        symbol_map = {params[0].name: "w"}
+    if context == RUNTIME_CONTEXT_DISPERSION_FACTOR:
+        if len(params) < 1 or len(params) > 2:
+            raise ValueError("dispersion_factor callable must take one or two positional arguments")
+        symbol_map = {params[0].name: "A"}
+        if len(params) > 1:
+            symbol_map[params[1].name] = "w"
+    elif context == RUNTIME_CONTEXT_DISPERSION:
+        if len(params) < 1 or len(params) > 4:
+            raise ValueError("dispersion callable must take one to four positional arguments")
+        symbol_map = {params[0].name: "A"}
+        if len(params) > 1:
+            symbol_map[params[1].name] = "D"
+        if len(params) > 2:
+            symbol_map[params[2].name] = "h"
+        if len(params) > 3:
+            symbol_map[params[3].name] = "w"
     else:
-        if len(params) not in (1, 2):
-            raise ValueError("nonlinear callable must take one or two positional arguments")
+        if len(params) < 1 or len(params) > 3:
+            raise ValueError("nonlinear callable must take one to three positional arguments")
         symbol_map = {params[0].name: "A"}
         if len(params) > 1:
             symbol_map[params[1].name] = "I"
+        if len(params) > 2:
+            symbol_map[params[2].name] = "V"
 
     closure_vars = inspect.getclosurevars(func)
     captured_scope: dict[str, Any] = {}

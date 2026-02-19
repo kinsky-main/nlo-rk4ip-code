@@ -3,8 +3,8 @@ if ~isa(fn, "function_handle")
     error("runtime handle must be a function_handle");
 end
 context = string(context);
-if context ~= "dispersion" && context ~= "nonlinear"
-    error("context must be 'dispersion' or 'nonlinear'");
+if context ~= "dispersion_factor" && context ~= "dispersion" && context ~= "nonlinear"
+    error("context must be 'dispersion_factor', 'dispersion', or 'nonlinear'");
 end
 if nargin < 3
     runtime = struct();
@@ -13,18 +13,38 @@ end
 handleText = char(func2str(fn));
 [argNames, body] = parse_handle_text(handleText);
 
-if context == "dispersion"
-    if numel(argNames) ~= 1
-        error("dispersion handle must take exactly one argument");
-    end
-    symbolMap = struct(argNames{1}, 'w');
-else
+if context == "dispersion_factor"
     if numel(argNames) < 1 || numel(argNames) > 2
-        error("nonlinear handle must take one or two arguments");
+        error("dispersion_factor handle must take one or two arguments");
     end
     symbolMap = struct(argNames{1}, 'A');
-    if numel(argNames) == 2
+    if numel(argNames) >= 2
+        symbolMap.(argNames{2}) = 'w';
+    end
+elseif context == "dispersion"
+    if numel(argNames) < 1 || numel(argNames) > 4
+        error("dispersion handle must take one to four arguments");
+    end
+    symbolMap = struct(argNames{1}, 'A');
+    if numel(argNames) >= 2
+        symbolMap.(argNames{2}) = 'D';
+    end
+    if numel(argNames) >= 3
+        symbolMap.(argNames{3}) = 'h';
+    end
+    if numel(argNames) >= 4
+        symbolMap.(argNames{4}) = 'w';
+    end
+else
+    if numel(argNames) < 1 || numel(argNames) > 3
+        error("nonlinear handle must take one to three arguments");
+    end
+    symbolMap = struct(argNames{1}, 'A');
+    if numel(argNames) >= 2
         symbolMap.(argNames{2}) = 'I';
+    end
+    if numel(argNames) >= 3
+        symbolMap.(argNames{3}) = 'V';
     end
 end
 
@@ -70,7 +90,7 @@ end
 identifiers = regexp(body, "[A-Za-z_]\w*", "match");
 for idx = 1:numel(identifiers)
     name = identifiers{idx};
-    if ismember(name, {'w', 'A', 'I', 'i', 'exp', 'log', 'sqrt', 'sin', 'cos'})
+    if ismember(name, {'w', 'A', 'I', 'D', 'V', 'h', 'i', 'exp', 'log', 'sqrt', 'sin', 'cos'})
         continue;
     end
     if ~isempty(regexp(name, "^c\d+$", "once"))

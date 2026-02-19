@@ -568,7 +568,7 @@ static int nlo_bench_prepare_case_data(
 
     memset(out_case_data, 0, sizeof(*out_case_data));
     out_case_data->sample_count = sample_count;
-    out_case_data->config = create_sim_config(3u, sample_count);
+    out_case_data->config = create_sim_config(sample_count);
     if (out_case_data->config == NULL) {
         nlo_bench_copy_note(note, note_capacity, "Failed to allocate sim_config.");
         return -1;
@@ -588,12 +588,10 @@ static int nlo_bench_prepare_case_data(
     }
 
     sim_config* config = out_case_data->config;
-    config->nonlinear.gamma = 1.0;
-    config->dispersion.alpha = 0.0;
-    config->dispersion.num_dispersion_terms = 3u;
-    config->dispersion.betas[0] = 0.0;
-    config->dispersion.betas[1] = 0.0;
-    config->dispersion.betas[2] = -1.0;
+    config->runtime.dispersion_factor_expr = NULL;
+    config->runtime.dispersion_expr = NULL;
+    config->runtime.nonlinear_expr = NULL;
+    config->runtime.num_constants = 0u;
 
     config->propagation.starting_step_size = 0.002;
     config->propagation.max_step_size = 0.020;

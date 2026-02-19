@@ -1,4 +1,5 @@
 function runtime_temporal_demo()
+% Just code to get the path and functions into the path, only useful for testing the runtime interface
 repoRoot = fileparts(fileparts(fileparts(mfilename("fullpath"))));
 matlabCandidates = { ...
     fullfile(repoRoot, "matlab"), ...
@@ -15,6 +16,7 @@ else
     addpath(fullfile(repoRoot, "examples", "matlab"));
 end
 
+% Actually how you would use the runtime interface, this is just a simple demo of a temporal simulation with dispersion only
 n = 512;
 dt = 0.02;
 t = ((0:(n - 1)) - 0.5 * (n - 1)) * dt;
@@ -25,9 +27,6 @@ beta2 = 0.05;
 
 cfg = struct();
 cfg.num_time_samples = n;
-cfg.gamma = 0.01;
-cfg.betas = beta2;
-cfg.alpha = 0.0;
 cfg.propagation_distance = 0.25;
 cfg.starting_step_size = 1e-3;
 cfg.max_step_size = 5e-3;
@@ -38,8 +37,8 @@ cfg.delta_time = dt;
 cfg.frequency_grid = complex(omega, zeros(size(omega)));
 
 runtime = struct();
-runtime.dispersion_fn = @(w) exp(1i * (beta2 / 2.0) * (w .* w));
-runtime.constants = [];
+runtime.dispersion_factor_fn = @(A, w) 1i * (beta2 / 2.0) * (w .* w);
+runtime.constants = [beta2 / 2.0, 0.0, 0.01];
 cfg.runtime = runtime;
 
 api = nlolib.NLolib();

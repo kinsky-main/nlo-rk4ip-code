@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from backend.runner import centered_time_grid
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -25,11 +26,6 @@ from nlolib_ctypes import (  # noqa: E402
     prepare_sim_config,
 )
 
-
-def centered_time_grid(num_samples: int, delta_time: float) -> np.ndarray:
-    return (np.arange(num_samples, dtype=np.float64) - 0.5 * float(num_samples - 1)) * delta_time
-
-
 def main() -> None:
     n = 512
     dt = 0.02
@@ -40,15 +36,12 @@ def main() -> None:
     omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
 
     runtime = RuntimeOperators(
-        dispersion_fn=lambda w: np.exp((1.0j * (beta2 / 2.0)) * (w * w)),
-        nonlinear_expr=None,
+        dispersion_factor_fn=lambda A, w: (1.0j * (beta2 / 2.0)) * (w * w),
+        constants=[beta2 / 2.0, 0.0, 0.01],
     )
 
     cfg = prepare_sim_config(
         n,
-        gamma=0.01,
-        betas=[beta2],
-        alpha=0.0,
         propagation_distance=0.25,
         starting_step_size=1e-3,
         max_step_size=5e-3,

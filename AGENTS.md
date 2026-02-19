@@ -29,6 +29,9 @@
 
 ## Tests
 - Run relevant tests if available
+- Create new tests if necessary to cover new functionality or edge cases
+- Ensure tests are deterministic and do not rely on external state
+- Ensure tests run within a reasonable time frame
 - Note when tests were not run
 
 ## PR / review notes
