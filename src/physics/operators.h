@@ -9,13 +9,13 @@
 #include <stddef.h>
 
 /**
- * @brief Build the base dispersion factor vector from beta-series coefficients.
+ * @brief Build the linear dispersion generator L(omega) from beta-series coefficients.
  *
  * @param backend Active vector backend.
  * @param num_dispersion_terms Number of beta-series terms.
  * @param betas Dispersion beta-series coefficients.
- * @param step_size Current propagation step size.
- * @param dispersion_factor Output base dispersion factor vector.
+ * @param step_size Current propagation step size (debug reporting only).
+ * @param dispersion_factor Output dispersion generator vector L(omega).
  * @param frequency_grid Frequency grid vector.
  * @param omega_power Scratch vector used for frequency powers.
  * @param term_buffer Scratch vector used for accumulation.
@@ -36,10 +36,11 @@ nlo_vec_status nlo_calculate_dispersion_factor_vec(
  * @brief Apply the dispersion operator in frequency space.
  *
  * @param backend Active vector backend.
- * @param dispersion_factor Base dispersion factor vector.
+ * @param dispersion_factor Dispersion vector representation.
  * @param freq_domain_envelope Frequency-domain field updated in place.
  * @param dispersion_working_vec Scratch vector.
- * @param half_step_size Half propagation step used as real exponent.
+ * @param half_step_size Half propagation step.
+ * @param factor_is_exponential Nonzero when dispersion_factor stores exp(L(omega)).
  * @return nlo_vec_status operation status.
  */
 nlo_vec_status nlo_apply_dispersion_operator_vec(
@@ -47,7 +48,8 @@ nlo_vec_status nlo_apply_dispersion_operator_vec(
     const nlo_vec_buffer* dispersion_factor,
     nlo_vec_buffer* freq_domain_envelope,
     nlo_vec_buffer* dispersion_working_vec,
-    double half_step_size
+    double half_step_size,
+    int factor_is_exponential
 );
 
 /**

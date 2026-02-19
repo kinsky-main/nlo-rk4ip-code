@@ -163,7 +163,8 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->dispersion_factor_vec,
                                                    work->field_freq_vec,
                                                    work->omega_power_vec,
-                                                   state->current_half_step_exp));
+                                                   state->current_half_step_exp,
+                                                   state->dispersion_factor_is_exponential));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->ip_field_vec));
     NLO_RK4_CALL(nlo_apply_grin_operator_vec(backend,
                                              work->grin_phase_factor_vec,
@@ -183,7 +184,8 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->dispersion_factor_vec,
                                                    work->field_freq_vec,
                                                    work->omega_power_vec,
-                                                   state->current_half_step_exp));
+                                                   state->current_half_step_exp,
+                                                   state->dispersion_factor_is_exponential));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_1_vec));
     NLO_RK4_CALL(nlo_apply_grin_operator_vec(backend,
                                              work->grin_phase_factor_vec,
@@ -226,7 +228,8 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->dispersion_factor_vec,
                                                    work->field_freq_vec,
                                                    work->omega_power_vec,
-                                                   state->current_half_step_exp));
+                                                   state->current_half_step_exp,
+                                                   state->dispersion_factor_is_exponential));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->field_working_vec));
     NLO_RK4_CALL(nlo_apply_grin_operator_vec(backend,
                                              work->grin_phase_factor_vec,
@@ -257,7 +260,8 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
                                                    work->dispersion_factor_vec,
                                                    work->field_freq_vec,
                                                    work->omega_power_vec,
-                                                   state->current_half_step_exp));
+                                                   state->current_half_step_exp,
+                                                   state->dispersion_factor_is_exponential));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_1_vec));
     NLO_RK4_CALL(nlo_apply_grin_operator_vec(backend,
                                              work->grin_phase_factor_vec,

@@ -4,12 +4,11 @@ function ptr = pack_complex_array(values)
 %
 %   ptr = nlolib.pack_complex_array(values)
 %
-%   Returns a libpointer('doublePtr', ...) whose memory layout matches
-%   an array of nlo_complex structs: [re1 im1 re2 im2 ...].
-values = values(:).';
-n      = numel(values);
-buf    = zeros(1, 2 * n);
-buf(1:2:end) = real(values);
-buf(2:2:end) = imag(values);
-ptr = libpointer('doublePtr', buf);
+%   Returns a typed libpointer('nlo_complexPtr', ...) whose payload is a
+%   struct array with fields .re and .im.
+vals = values(:).';
+re = num2cell(real(vals));
+im = num2cell(imag(vals));
+arr = struct('re', re, 'im', im);
+ptr = libpointer('nlo_complexPtr', arr);
 end

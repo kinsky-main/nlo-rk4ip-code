@@ -3,9 +3,8 @@ function [cfgPtr, keepalive] = prepare_sim_config(cfg)
 %   [cfgPtr, keepalive] = nlolib.prepare_sim_config(cfg)
 %
 %   cfg is a flat MATLAB struct with fields matching the nlolib C API.
-%   Returns a libpointer to the populated sim_config and a cell array
-%   of handles that must remain alive for the duration of the calllib
-%   call (they own heap memory referenced by pointer fields).
+%   Returns a libstruct('sim_config', ...) and a compatibility keepalive
+%   cell array (currently empty).
 if ~isstruct(cfg)
     error("cfg must be a struct");
 end
@@ -28,90 +27,86 @@ if ~libisloaded('nlolib')
           'Library not loaded. Create an nlolib.NLolib instance first.');
 end
 
-s = libstruct('sim_config');
-keepalive = {};
+nlolib.NLolib.ensure_types_loaded();
+maxBetas = bitshift(1, 20);   % NT_MAX from nlolib_matlab.h
+maxConstants = 16;            % NLO_RUNTIME_OPERATOR_CONSTANTS_MAX from nlolib_matlab.h
 
-% --- nonlinear ----------------------------------------------------------
-s.nonlinear.gamma = double(cfg.gamma);
-
-% --- dispersion ---------------------------------------------------------
 betas = double(cfg.betas(:).');
 numBetas = numel(betas);
-s.dispersion.num_dispersion_terms = uint64(numBetas);
-% betas is a fixed-size C array — write into its first N elements.
-for idx = 1:numBetas
-    s.dispersion.betas(idx) = betas(idx);
+if numBetas > maxBetas
+    error('nlolib:tooManyBetas', ...
+          'cfg.betas has %d values but max supported is %d.', ...
+          numBetas, maxBetas);
 end
-s.dispersion.alpha = double(cfg.alpha);
+betasFixed = zeros(1, maxBetas);
+if numBetas > 0
+    betasFixed(1:numBetas) = betas;
+end
 
-% --- propagation --------------------------------------------------------
-s.propagation.starting_step_size   = double(cfg.starting_step_size);
-s.propagation.max_step_size        = double(cfg.max_step_size);
-s.propagation.min_step_size        = double(cfg.min_step_size);
-s.propagation.error_tolerance      = double(cfg.error_tolerance);
-s.propagation.propagation_distance = double(cfg.propagation_distance);
-
-% --- time ---------------------------------------------------------------
-s.time.pulse_period = double(cfg.pulse_period);
-s.time.delta_time   = double(cfg.delta_time);
-
-% --- frequency grid (pointer field — needs keepalive) -------------------
-freqPtr = nlolib.pack_complex_array(cfg.frequency_grid);
-keepalive{end + 1} = freqPtr;
-s.frequency.frequency_grid = freqPtr;
-
-% --- spatial grid -------------------------------------------------------
 numTs = double(cfg.num_time_samples);
-s.spatial.nx = uint64(get_optional(cfg, "spatial_nx", numTs));
-s.spatial.ny = uint64(get_optional(cfg, "spatial_ny", 1));
-s.spatial.delta_x = double(get_optional(cfg, "delta_x", 1.0));
-s.spatial.delta_y = double(get_optional(cfg, "delta_y", 1.0));
-s.spatial.grin_gx = double(get_optional(cfg, "grin_gx", 0.0));
-s.spatial.grin_gy = double(get_optional(cfg, "grin_gy", 0.0));
+
+[dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
+constants = double(constants(:).');
+numConstants = numel(constants);
+if numConstants > maxConstants
+    error('nlolib:tooManyRuntimeConstants', ...
+          'cfg.runtime.constants has %d values but max supported is %d.', ...
+          numConstants, maxConstants);
+end
+constantsFixed = zeros(1, maxConstants);
+if numConstants > 0
+    constantsFixed(1:numConstants) = constants;
+end
+
+freqStruct = complex_to_nlo_complex_struct(cfg.frequency_grid);
+
+spatialMl = struct();
+spatialMl.nx = uint64(get_optional(cfg, "spatial_nx", numTs));
+spatialMl.ny = uint64(get_optional(cfg, "spatial_ny", 1));
+spatialMl.delta_x = double(get_optional(cfg, "delta_x", 1.0));
+spatialMl.delta_y = double(get_optional(cfg, "delta_y", 1.0));
+spatialMl.grin_gx = double(get_optional(cfg, "grin_gx", 0.0));
+spatialMl.grin_gy = double(get_optional(cfg, "grin_gy", 0.0));
 
 if isfield(cfg, "spatial_frequency_grid") && ~isempty(cfg.spatial_frequency_grid)
-    spFreqPtr = nlolib.pack_complex_array(cfg.spatial_frequency_grid);
-    keepalive{end + 1} = spFreqPtr;
-    s.spatial.spatial_frequency_grid = spFreqPtr;
-else
-    s.spatial.spatial_frequency_grid = libpointer();
+    spatialMl.spatial_frequency_grid = complex_to_nlo_complex_struct(cfg.spatial_frequency_grid);
 end
 
 if isfield(cfg, "grin_potential_phase_grid") && ~isempty(cfg.grin_potential_phase_grid)
-    grinPtr = nlolib.pack_complex_array(cfg.grin_potential_phase_grid);
-    keepalive{end + 1} = grinPtr;
-    s.spatial.grin_potential_phase_grid = grinPtr;
-else
-    s.spatial.grin_potential_phase_grid = libpointer();
+    spatialMl.grin_potential_phase_grid = complex_to_nlo_complex_struct(cfg.grin_potential_phase_grid);
 end
 
-% --- runtime operators --------------------------------------------------
-[dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
-
+runtimeMl = struct();
 if strlength(dispersionExpr) > 0
-    dispBytes = [uint8(char(dispersionExpr)), 0];   % null-terminated
-    dispPtr   = libpointer('int8Ptr', int8(dispBytes));
-    keepalive{end + 1} = dispPtr;
-    s.runtime.dispersion_expr = dispPtr;
-else
-    s.runtime.dispersion_expr = libpointer();
+    runtimeMl.dispersion_expr = char(dispersionExpr);
 end
-
 if strlength(nonlinearExpr) > 0
-    nlBytes = [uint8(char(nonlinearExpr)), 0];
-    nlPtr   = libpointer('int8Ptr', int8(nlBytes));
-    keepalive{end + 1} = nlPtr;
-    s.runtime.nonlinear_expr = nlPtr;
-else
-    s.runtime.nonlinear_expr = libpointer();
+    runtimeMl.nonlinear_expr = char(nonlinearExpr);
 end
+runtimeMl.num_constants = uint64(numConstants);
+runtimeMl.constants = constantsFixed;
 
-s.runtime.num_constants = uint64(numel(constants));
-for idx = 1:numel(constants)
-    s.runtime.constants(idx) = double(constants(idx));
-end
+cfgMl = struct();
+cfgMl.nonlinear = struct('gamma', double(cfg.gamma));
+cfgMl.dispersion = struct( ...
+    'num_dispersion_terms', uint64(numBetas), ...
+    'betas', betasFixed, ...
+    'alpha', double(cfg.alpha));
+cfgMl.propagation = struct( ...
+    'starting_step_size', double(cfg.starting_step_size), ...
+    'max_step_size', double(cfg.max_step_size), ...
+    'min_step_size', double(cfg.min_step_size), ...
+    'error_tolerance', double(cfg.error_tolerance), ...
+    'propagation_distance', double(cfg.propagation_distance));
+cfgMl.time = struct( ...
+    'pulse_period', double(cfg.pulse_period), ...
+    'delta_time', double(cfg.delta_time));
+cfgMl.frequency = struct('frequency_grid', freqStruct);
+cfgMl.spatial = spatialMl;
+cfgMl.runtime = runtimeMl;
 
-cfgPtr = s;
+cfgPtr = libstruct('sim_config', cfgMl);
+keepalive = {};
 end
 
 % ========================================================================
@@ -124,6 +119,13 @@ if isfield(cfg, name)
 else
     val = default;
 end
+end
+
+function out = complex_to_nlo_complex_struct(values)
+vals = values(:).';
+re = num2cell(real(vals));
+im = num2cell(imag(vals));
+out = struct('re', re, 'im', im);
 end
 
 function [dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg)

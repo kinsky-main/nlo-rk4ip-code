@@ -31,6 +31,7 @@
  * Then add the staging directory to the MATLAB path:
  * @code{.m}
  *   addpath('<repo>/build/matlab_toolbox');
+ *   nlolib_setup();
  * @endcode
  *
  * The nlolib shared library (nlolib.dll / libnlolib.so) and this header
@@ -54,30 +55,37 @@
  * Constants
  * ------------------------------------------------------------------- */
 
-#define NT_MAX                              (1 << 20)
-#define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX  16
+#define NT_MAX (1 << 20)
+#define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16
 
 /* -------------------------------------------------------------------
  * nlo_complex
  * ------------------------------------------------------------------- */
 
-typedef struct { double re; double im; } nlo_complex;
+typedef struct
+{
+    double re;
+    double im;
+} nlo_complex;
 
 /* -------------------------------------------------------------------
  * Simulation configuration sub-structs
  * ------------------------------------------------------------------- */
 
-typedef struct {
+typedef struct
+{
     double gamma;
 } nonlinear_params;
 
-typedef struct {
+typedef struct
+{
     size_t num_dispersion_terms;
     double betas[NT_MAX];
     double alpha;
 } dispersion_params;
 
-typedef struct {
+typedef struct
+{
     double starting_step_size;
     double max_step_size;
     double min_step_size;
@@ -85,40 +93,45 @@ typedef struct {
     double propagation_distance;
 } propagation_params;
 
-typedef struct {
+typedef struct
+{
     double pulse_period;
     double delta_time;
 } time_grid;
 
-typedef struct {
-    nlo_complex* frequency_grid;
-} frequency_grid;
+typedef struct
+{
+    nlo_complex *frequency_grid;
+} nlo_frequency_grid;
 
-typedef struct {
+typedef struct
+{
     size_t nx;
     size_t ny;
     double delta_x;
     double delta_y;
     double grin_gx;
     double grin_gy;
-    nlo_complex* spatial_frequency_grid;
-    nlo_complex* grin_potential_phase_grid;
+    nlo_complex *spatial_frequency_grid;
+    nlo_complex *grin_potential_phase_grid;
 } spatial_grid;
 
-typedef struct {
-    const char* dispersion_expr;
-    const char* nonlinear_expr;
-    size_t      num_constants;
-    double      constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
+typedef struct
+{
+    const char *dispersion_expr;
+    const char *nonlinear_expr;
+    size_t num_constants;
+    double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
 } runtime_operator_params;
 
-typedef struct {
-    nonlinear_params        nonlinear;
-    dispersion_params       dispersion;
-    propagation_params      propagation;
-    time_grid               time;
-    frequency_grid          frequency;
-    spatial_grid            spatial;
+typedef struct
+{
+    nonlinear_params nonlinear;
+    dispersion_params dispersion;
+    propagation_params propagation;
+    time_grid time;
+    nlo_frequency_grid frequency;
+    spatial_grid spatial;
     runtime_operator_params runtime;
 } sim_config;
 
@@ -126,13 +139,15 @@ typedef struct {
  * Backend / execution option enums
  * ------------------------------------------------------------------- */
 
-typedef enum {
-    NLO_VECTOR_BACKEND_CPU    = 0,
+typedef enum
+{
+    NLO_VECTOR_BACKEND_CPU = 0,
     NLO_VECTOR_BACKEND_VULKAN = 1,
-    NLO_VECTOR_BACKEND_AUTO   = 2
+    NLO_VECTOR_BACKEND_AUTO = 2
 } nlo_vector_backend_type;
 
-typedef enum {
+typedef enum
+{
     NLO_FFT_BACKEND_AUTO = 0,
     NLO_FFT_BACKEND_FFTW = 1,
     NLO_FFT_BACKEND_VKFFT = 2
@@ -142,43 +157,46 @@ typedef enum {
  * Vulkan backend config (Vulkan handles replaced with opaque stubs)
  * ------------------------------------------------------------------- */
 
-typedef void*    VkPhysicalDevice;
-typedef void*    VkDevice;
-typedef void*    VkQueue;
-typedef void*    VkCommandPool;
+typedef void *VkPhysicalDevice;
+typedef void *VkDevice;
+typedef void *VkQueue;
+typedef void *VkCommandPool;
 
-typedef struct {
+typedef struct
+{
     VkPhysicalDevice physical_device;
-    VkDevice         device;
-    VkQueue          queue;
-    uint32_t         queue_family_index;
-    VkCommandPool    command_pool;
-    size_t           descriptor_set_budget_bytes;
-    uint32_t         descriptor_set_count_override;
+    VkDevice device;
+    VkQueue queue;
+    uint32_t queue_family_index;
+    VkCommandPool command_pool;
+    size_t descriptor_set_budget_bytes;
+    uint32_t descriptor_set_count_override;
 } nlo_vk_backend_config;
 
 /* -------------------------------------------------------------------
  * Execution options
  * ------------------------------------------------------------------- */
 
-typedef struct {
+typedef struct
+{
     nlo_vector_backend_type backend_type;
-    nlo_fft_backend_type    fft_backend;
-    double                  device_heap_fraction;
-    size_t                  record_ring_target;
-    size_t                  forced_device_budget_bytes;
-    nlo_vk_backend_config   vulkan;
+    nlo_fft_backend_type fft_backend;
+    double device_heap_fraction;
+    size_t record_ring_target;
+    size_t forced_device_budget_bytes;
+    nlo_vk_backend_config vulkan;
 } nlo_execution_options;
 
 /* -------------------------------------------------------------------
  * Status codes
  * ------------------------------------------------------------------- */
 
-typedef enum {
-    NLOLIB_STATUS_OK               = 0,
+typedef enum
+{
+    NLOLIB_STATUS_OK = 0,
     NLOLIB_STATUS_INVALID_ARGUMENT = 1,
     NLOLIB_STATUS_ALLOCATION_FAILED = 2,
-    NLOLIB_STATUS_NOT_IMPLEMENTED  = 3
+    NLOLIB_STATUS_NOT_IMPLEMENTED = 3
 } nlolib_status;
 
 /* -------------------------------------------------------------------
@@ -186,12 +204,11 @@ typedef enum {
  * ------------------------------------------------------------------- */
 
 nlolib_status nlolib_propagate(
-    const sim_config*            config,
-    size_t                       num_time_samples,
-    const nlo_complex*           input_field,
-    size_t                       num_recorded_samples,
-    nlo_complex*                 output_records,
-    const nlo_execution_options* exec_options
-);
+    const sim_config *config,
+    size_t num_time_samples,
+    const nlo_complex *input_field,
+    size_t num_recorded_samples,
+    nlo_complex *output_records,
+    const nlo_execution_options *exec_options);
 
 #endif /* NLOLIB_MATLAB_H */

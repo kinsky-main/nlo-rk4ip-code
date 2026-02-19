@@ -137,6 +137,7 @@ typedef struct {
     double current_half_step_exp;
     double last_dispersion_step_size;
     int dispersion_valid;
+    int dispersion_factor_is_exponential;
 
     int runtime_dispersion_enabled;
     int runtime_nonlinear_enabled;

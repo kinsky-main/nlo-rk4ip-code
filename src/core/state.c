@@ -6,6 +6,7 @@
 #include "core/state.h"
 #include "fft/fft.h"
 #include "physics/operators.h"
+#include <float.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -62,6 +63,11 @@ static int nlo_frequency_grid_matches_expected_unshifted(
     const nlo_complex* grid,
     size_t num_time_samples,
     double delta_time
+);
+static nlo_vec_status nlo_convert_dispersion_factor_exp_to_generator(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dispersion_factor,
+    size_t num_time_samples
 );
 
 static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer** vec)
@@ -211,6 +217,70 @@ static int nlo_frequency_grid_matches_expected_unshifted(
     }
 
     return 1;
+}
+
+static nlo_vec_status nlo_convert_dispersion_factor_exp_to_generator(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dispersion_factor,
+    size_t num_time_samples
+)
+{
+    if (backend == NULL || dispersion_factor == NULL || num_time_samples == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_complex* host_values = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
+    if (host_values == NULL) {
+        return NLO_VEC_STATUS_ALLOCATION_FAILED;
+    }
+
+    nlo_vec_status status = nlo_vec_download(backend,
+                                             dispersion_factor,
+                                             host_values,
+                                             num_time_samples * sizeof(nlo_complex));
+    if (status != NLO_VEC_STATUS_OK) {
+        free(host_values);
+        return status;
+    }
+
+    double prev_phase = 0.0;
+    const double phase_wrap_limit = 0.5 * NLO_TWO_PI;
+    int has_prev_phase = 0;
+    const size_t negative_branch_start = (num_time_samples + 1u) / 2u;
+    for (size_t i = 0u; i < num_time_samples; ++i) {
+        if (i == 0u || i == negative_branch_start) {
+            has_prev_phase = 0;
+        }
+
+        const double re = host_values[i].re;
+        const double im = host_values[i].im;
+        const double magnitude = hypot(re, im);
+        const double safe_magnitude = (magnitude > DBL_MIN) ? magnitude : DBL_MIN;
+        const double log_magnitude = log(safe_magnitude);
+
+        double phase = atan2(im, re);
+        if (has_prev_phase) {
+            while ((phase - prev_phase) > phase_wrap_limit) {
+                phase -= NLO_TWO_PI;
+            }
+            while ((phase - prev_phase) < -phase_wrap_limit) {
+                phase += NLO_TWO_PI;
+            }
+        } else {
+            has_prev_phase = 1;
+        }
+
+        prev_phase = phase;
+        host_values[i].re = log_magnitude;
+        host_values[i].im = phase;
+    }
+
+    status = nlo_vec_upload(backend,
+                            dispersion_factor,
+                            host_values,
+                            num_time_samples * sizeof(nlo_complex));
+    free(host_values);
+    return status;
 }
 
 static size_t nlo_compute_device_ring_capacity(const simulation_state* state, size_t requested_records)
@@ -367,6 +437,7 @@ simulation_state* create_simulation_state(
     state->current_half_step_exp = 0.5 * state->current_step_size;
     state->last_dispersion_step_size = 0.0;
     state->dispersion_valid = 0;
+    state->dispersion_factor_is_exponential = 0;
     state->runtime_dispersion_enabled = 0;
     state->runtime_nonlinear_enabled = 0;
     state->runtime_operator_stack_slots = 0u;
@@ -575,6 +646,12 @@ simulation_state* create_simulation_state(
                                               state->runtime_operator_stack_vec,
                                               state->runtime_operator_stack_slots,
                                               state->working_vectors.dispersion_factor_vec);
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_convert_dispersion_factor_exp_to_generator(state->backend,
+                                                                     state->working_vectors.dispersion_factor_vec,
+                                                                     num_time_samples);
+        }
+        state->dispersion_factor_is_exponential = 0;
     } else {
         status = nlo_calculate_dispersion_factor_vec(state->backend,
                                                      config->dispersion.num_dispersion_terms,
@@ -584,6 +661,7 @@ simulation_state* create_simulation_state(
                                                      state->frequency_grid_vec,
                                                      state->working_vectors.omega_power_vec,
                                                      state->working_vectors.field_working_vec);
+        state->dispersion_factor_is_exponential = 0;
     }
     if (status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);

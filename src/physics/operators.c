@@ -77,11 +77,6 @@ nlo_vec_status nlo_calculate_dispersion_factor_vec(
         }
     }
 
-    status = nlo_vec_complex_exp_inplace(backend, dispersion_factor);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
-
     nlo_rk4_debug_log_dispersion_factor(backend, dispersion_factor, num_dispersion_terms, step_size);
 
     return NLO_VEC_STATUS_OK;
@@ -92,7 +87,8 @@ nlo_vec_status nlo_apply_dispersion_operator_vec(
     const nlo_vec_buffer* dispersion_factor,
     nlo_vec_buffer* freq_domain_envelope,
     nlo_vec_buffer* dispersion_working_vec,
-    double half_step_size
+    double half_step_size,
+    int factor_is_exponential
 )
 {
     if (backend == NULL || dispersion_factor == NULL || freq_domain_envelope == NULL || dispersion_working_vec == NULL) {
@@ -104,7 +100,16 @@ nlo_vec_status nlo_apply_dispersion_operator_vec(
         return status;
     }
 
-    status = nlo_vec_complex_real_pow_inplace(backend, dispersion_working_vec, half_step_size);
+    if (factor_is_exponential != 0) {
+        status = nlo_vec_complex_real_pow_inplace(backend, dispersion_working_vec, half_step_size);
+    } else {
+        status = nlo_vec_complex_scalar_mul_inplace(backend,
+                                                    dispersion_working_vec,
+                                                    nlo_make(half_step_size, 0.0));
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_complex_exp_inplace(backend, dispersion_working_vec);
+        }
+    }
     if (status != NLO_VEC_STATUS_OK) {
         return status;
     }

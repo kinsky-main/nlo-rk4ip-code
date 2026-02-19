@@ -1,6 +1,19 @@
 function runtime_temporal_demo()
 repoRoot = fileparts(fileparts(fileparts(mfilename("fullpath"))));
-addpath(fullfile(repoRoot, "matlab"));
+matlabCandidates = { ...
+    fullfile(repoRoot, "matlab"), ...
+    repoRoot ...
+};
+for idx = 1:numel(matlabCandidates)
+    if isfolder(matlabCandidates{idx})
+        addpath(matlabCandidates{idx});
+    end
+end
+if exist("nlolib_setup", "file") == 2
+    nlolib_setup();
+else
+    addpath(fullfile(repoRoot, "examples", "matlab"));
+end
 
 n = 512;
 dt = 0.02;

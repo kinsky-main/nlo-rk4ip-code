@@ -16,6 +16,7 @@ classdef NLolib < handle
     %          cmake --build build --config Release --target matlab_stage
     %     2. Add the staging directory to the MATLAB path:
     %          addpath('<repo>/build/matlab_toolbox');
+    %          nlolib_setup();
     %
     %   The shared library (nlolib.dll / libnlolib.so) and the header
     %   nlolib_matlab.h must be reachable at runtime.  The wrapper
@@ -50,8 +51,12 @@ classdef NLolib < handle
             if ~libisloaded(obj.LIBNAME)
                 headerPath = nlolib.NLolib.resolve_header();
                 dllPath    = nlolib.NLolib.resolve_library(libraryPath);
-                loadlibrary(dllPath, headerPath, 'alias', obj.LIBNAME);
+                [notfound, loadWarnings] = loadlibrary(dllPath, headerPath, ...
+                                                       'alias', obj.LIBNAME);
+                nlolib.NLolib.validate_load_result(notfound, loadWarnings, ...
+                                                   dllPath, headerPath);
             end
+            nlolib.NLolib.ensure_types_loaded();
         end
 
         function delete(~)
@@ -80,27 +85,28 @@ classdef NLolib < handle
 
             % Allocate output buffer.
             outLen = uint64(numTimeSamples) * numRecordedSamples;
-            outBuf = zeros(1, double(outLen) * 2);
-            outPtr = libpointer('doublePtr', outBuf);
+            outPtr = nlolib.pack_complex_array(zeros(1, double(outLen)));
 
-            % Build execution options (or pass NULL).
+            % Build execution options with explicit typed defaults.
             if isempty(fieldnames(execOptions))
-                execOptsPtr = libpointer();          % NULL
+                execOptsPtr = nlolib.NLolib.make_exec_options(struct());
             else
                 execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
             end
 
-            status = calllib(obj.LIBNAME, 'nlolib_propagate', ...
-                             cfgPtr, ...
-                             uint64(numTimeSamples), ...
-                             inPtr, ...
-                             numRecordedSamples, ...
-                             outPtr, ...
-                             execOptsPtr);
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate', ...
+                                cfgPtr, ...
+                                uint64(numTimeSamples), ...
+                                inPtr, ...
+                                numRecordedSamples, ...
+                                outPtr, ...
+                                execOptsPtr);
+            [statusCode, statusName] = nlolib.NLolib.normalize_status(statusRaw);
 
-            if status ~= 0
+            if statusCode ~= 0
                 error('nlolib:propagateFailed', ...
-                      'nlolib_propagate failed with status=%d', status);
+                      'nlolib_propagate failed with status=%d (%s)', ...
+                      statusCode, statusName);
             end
 
             records = nlolib.unpack_records(outPtr, ...
@@ -116,16 +122,110 @@ classdef NLolib < handle
                 unloadlibrary('nlolib');
             end
         end
+
+        function ensure_types_loaded()
+            %ENSURE_TYPES_LOADED Validate MATLAB can resolve required types.
+            if ~libisloaded('nlolib')
+                error('nlolib:notLoaded', ...
+                      'Library not loaded. Create an nlolib.NLolib instance first.');
+            end
+
+            try
+                s = libstruct('sim_config');
+            catch ME
+                error('nlolib:simConfigTypeUnavailable', ...
+                      ['Failed to resolve C type ''sim_config'' via libstruct().\n' ...
+                       'This usually means MATLAB loaded an incompatible header/library pair,\n' ...
+                       'or multiple nlolib package copies are on the MATLAB path.\n' ...
+                       'Remediation:\n' ...
+                       '  1) nlolib.NLolib.unload();\n' ...
+                       '  2) clear classes;\n' ...
+                       '  3) verify only one nlolib package is on path;\n' ...
+                       '  4) recreate api = nlolib.NLolib();\n\n' ...
+                       'Original error: %s'], ME.message);
+            end
+
+            try
+                names = fieldnames(s);
+            catch
+                names = {};
+            end
+            if isempty(names)
+                error('nlolib:simConfigTypeUnavailable', ...
+                      ['MATLAB resolved an invalid/empty ''sim_config'' definition.\n' ...
+                       'This can happen after loadlibrary parser warnings or stale prototypes.\n' ...
+                       'Run:\n' ...
+                       '  nlolib.NLolib.unload();\n' ...
+                       '  clear classes;\n' ...
+                       'Then recreate nlolib.NLolib().']);
+            end
+
+            % Probe nested sub-struct assignment; some parser modes leave
+            % nested fields as empty placeholders.
+            try
+                probe = libstruct('sim_config');
+                nl = libstruct('nonlinear_params');
+                set(nl, 'gamma', 0.0);
+                set(probe, 'nonlinear', nl); %#ok<NASGU>
+            catch ME
+                error('nlolib:simConfigTypeUnavailable', ...
+                      ['MATLAB loaded sim_config but nested type assignment failed.\n' ...
+                       'This indicates an incompatible parsed type table.\n' ...
+                       'Run:\n' ...
+                       '  nlolib.NLolib.unload();\n' ...
+                       '  clear classes;\n' ...
+                       'Then recreate nlolib.NLolib().\n\n' ...
+                       'Original error: %s'], ME.message);
+            end
+
+            try
+                fg = libstruct('nlo_frequency_grid', ...
+                               struct('frequency_grid', struct('re', 0.0, 'im', 0.0))); %#ok<NASGU>
+            catch ME
+                error('nlolib:simConfigTypeUnavailable', ...
+                      ['MATLAB failed to construct nlo_frequency_grid.\n' ...
+                       'This points to a header parse mismatch for frequency pointer fields.\n' ...
+                       'Run:\n' ...
+                       '  nlolib.NLolib.unload();\n' ...
+                       '  clear classes;\n' ...
+                       'Then recreate nlolib.NLolib().\n\n' ...
+                       'Original error: %s'], ME.message);
+            end
+
+            try
+                maxConstants = 16;   % NLO_RUNTIME_OPERATOR_CONSTANTS_MAX
+                rt = libstruct('runtime_operator_params', ...
+                               struct('dispersion_expr', 'w', ...
+                                      'nonlinear_expr', 'a', ...
+                                      'num_constants', uint64(0), ...
+                                      'constants', zeros(1, maxConstants))); %#ok<NASGU>
+            catch ME
+                error('nlolib:simConfigTypeUnavailable', ...
+                      ['MATLAB failed to construct runtime_operator_params with char fields.\n' ...
+                       'This points to a header parse mismatch for const char* fields.\n' ...
+                       'Run:\n' ...
+                       '  nlolib.NLolib.unload();\n' ...
+                       '  clear classes;\n' ...
+                       'Then recreate nlolib.NLolib().\n\n' ...
+                       'Original error: %s'], ME.message);
+            end
+        end
     end
 
     methods (Static, Access = private)
         function headerPath = resolve_header()
             %RESOLVE_HEADER Locate nlolib_matlab.h relative to this file.
-            repoRoot   = fileparts(fileparts(fileparts(mfilename("fullpath"))));
-            candidates = {
-                fullfile(repoRoot, 'src', 'nlolib_matlab.h')
-                fullfile(repoRoot, 'lib', 'nlolib_matlab.h')
-            };
+            roots = nlolib.NLolib.resolve_roots();
+            candidates = {};
+            for idx = 1:numel(roots)
+                root = roots{idx};
+                candidates{end + 1} = fullfile(root, 'lib', 'nlolib_matlab.h'); %#ok<AGROW>
+                candidates{end + 1} = fullfile(root, 'src', 'nlolib_matlab.h'); %#ok<AGROW>
+                candidates{end + 1} = fullfile(root, 'build', 'matlab_toolbox', ...
+                                               'lib', 'nlolib_matlab.h'); %#ok<AGROW>
+            end
+            candidates = unique(candidates, 'stable');
+
             for idx = 1:numel(candidates)
                 if isfile(candidates{idx})
                     headerPath = candidates{idx};
@@ -150,27 +250,45 @@ classdef NLolib < handle
                 return;
             end
 
-            repoRoot = fileparts(fileparts(fileparts(mfilename("fullpath"))));
+            roots = nlolib.NLolib.resolve_roots();
             if ispc
-                searchDirs = {
-                    fullfile(repoRoot, 'build', 'src', 'Release')
-                    fullfile(repoRoot, 'build', 'src', 'Debug')
-                    fullfile(repoRoot, 'build', 'src', 'RelWithDebInfo')
-                    fullfile(repoRoot, 'build', 'src')
-                    fullfile(repoRoot, 'lib', 'win64')
-                    fullfile(repoRoot, 'python', 'Release')
-                    fullfile(repoRoot, 'python', 'Debug')
-                    fullfile(repoRoot, 'python')
-                };
                 libFile = 'nlolib.dll';
-            else
-                searchDirs = {
-                    fullfile(repoRoot, 'build', 'src')
-                    fullfile(repoRoot, 'lib', 'glnxa64')
-                    fullfile(repoRoot, 'python')
+                searchTail = { ...
+                    fullfile('lib'), ...
+                    fullfile('lib', 'win64'), ...
+                    fullfile('build', 'matlab_toolbox', 'lib'), ...
+                    fullfile('build', 'src', 'Release'), ...
+                    fullfile('build', 'src', 'Debug'), ...
+                    fullfile('build', 'src', 'RelWithDebInfo'), ...
+                    fullfile('build', 'src'), ...
+                    fullfile('src', 'Release'), ...
+                    fullfile('src', 'Debug'), ...
+                    fullfile('src', 'RelWithDebInfo'), ...
+                    fullfile('src'), ...
+                    fullfile('python', 'Release'), ...
+                    fullfile('python', 'Debug'), ...
+                    fullfile('python') ...
                 };
+            else
                 libFile = 'libnlolib.so';
+                searchTail = { ...
+                    fullfile('lib'), ...
+                    fullfile('lib', 'glnxa64'), ...
+                    fullfile('build', 'matlab_toolbox', 'lib'), ...
+                    fullfile('build', 'src'), ...
+                    fullfile('src'), ...
+                    fullfile('python') ...
+                };
             end
+
+            searchDirs = {};
+            for idx = 1:numel(roots)
+                root = roots{idx};
+                for jdx = 1:numel(searchTail)
+                    searchDirs{end + 1} = fullfile(root, searchTail{jdx}); %#ok<AGROW>
+                end
+            end
+            searchDirs = unique(searchDirs, 'stable');
 
             for idx = 1:numel(searchDirs)
                 candidate = fullfile(searchDirs{idx}, libFile);
@@ -191,7 +309,7 @@ classdef NLolib < handle
             if isfield(opts, 'backend_type')
                 s.backend_type = int32(opts.backend_type);
             else
-                s.backend_type = int32(2);   % AUTO
+                s.backend_type = int32(0);   % CPU (portable default for MATLAB)
             end
             if isfield(opts, 'fft_backend')
                 s.fft_backend = int32(opts.fft_backend);
@@ -225,6 +343,112 @@ classdef NLolib < handle
             s.vulkan.descriptor_set_count_override = uint32(0);
 
             ptr = s;
+        end
+
+        function roots = resolve_roots()
+            %RESOLVE_ROOTS Candidate roots for source and staged toolbox layouts.
+            packageDir = fileparts(mfilename("fullpath"));     % .../+nlolib
+            containerDir = fileparts(packageDir);              % .../matlab OR .../matlab_toolbox
+            parentDir = fileparts(containerDir);               % repo root OR .../build
+            [~, leaf] = fileparts(containerDir);
+
+            if strcmpi(leaf, 'matlab')
+                roots = unique({parentDir, containerDir}, 'stable');
+                return;
+            end
+
+            if strcmpi(leaf, 'matlab_toolbox')
+                grandParentDir = fileparts(parentDir);
+                roots = unique({containerDir, parentDir, grandParentDir}, 'stable');
+                return;
+            end
+
+            roots = unique({containerDir, parentDir}, 'stable');
+        end
+
+        function validate_load_result(notfound, loadWarnings, dllPath, headerPath)
+            %VALIDATE_LOAD_RESULT Surface loadlibrary diagnostics clearly.
+            if ~isempty(notfound)
+                missingText = char(nlolib.NLolib.as_text(notfound));
+                error('nlolib:loadlibraryNotFound', ...
+                      ['loadlibrary could not resolve one or more symbols.\n' ...
+                       'Library: %s\n' ...
+                       'Header : %s\n' ...
+                       'Missing symbols:\n%s'], ...
+                      dllPath, headerPath, missingText);
+            end
+
+            warningText = strtrim(char(nlolib.NLolib.as_text(loadWarnings)));
+            if ~isempty(warningText)
+                warning('nlolib:loadlibraryWarnings', ...
+                        ['loadlibrary produced parser warnings.\n' ...
+                         'These are often non-fatal, but unresolved types will fail fast later.\n' ...
+                         'Library: %s\n' ...
+                         'Header : %s\n\n%s'], ...
+                        dllPath, headerPath, warningText);
+            end
+        end
+
+        function text = as_text(value)
+            %AS_TEXT Convert MATLAB values returned by loadlibrary to text.
+            if isempty(value)
+                text = "";
+                return;
+            end
+            if isstring(value)
+                text = join(value, newline);
+                return;
+            end
+            if iscell(value)
+                text = join(string(value), newline);
+                return;
+            end
+            text = string(value);
+        end
+
+        function [code, name] = normalize_status(raw)
+            %NORMALIZE_STATUS Convert calllib enum return into numeric code.
+            if isnumeric(raw) && isscalar(raw)
+                code = int32(raw);
+                name = nlolib.NLolib.status_name(code);
+                return;
+            end
+
+            token = strtrim(char(string(raw)));
+            if isempty(token)
+                code = int32(-1);
+                name = "UNKNOWN_EMPTY";
+                return;
+            end
+
+            switch token
+                case 'NLOLIB_STATUS_OK'
+                    code = int32(0);
+                case 'NLOLIB_STATUS_INVALID_ARGUMENT'
+                    code = int32(1);
+                case 'NLOLIB_STATUS_ALLOCATION_FAILED'
+                    code = int32(2);
+                case 'NLOLIB_STATUS_NOT_IMPLEMENTED'
+                    code = int32(3);
+                otherwise
+                    code = int32(-1);
+            end
+            name = string(token);
+        end
+
+        function name = status_name(code)
+            switch int32(code)
+                case 0
+                    name = "NLOLIB_STATUS_OK";
+                case 1
+                    name = "NLOLIB_STATUS_INVALID_ARGUMENT";
+                case 2
+                    name = "NLOLIB_STATUS_ALLOCATION_FAILED";
+                case 3
+                    name = "NLOLIB_STATUS_NOT_IMPLEMENTED";
+                otherwise
+                    name = "NLOLIB_STATUS_UNKNOWN";
+            end
         end
     end
 end

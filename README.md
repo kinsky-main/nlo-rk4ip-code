@@ -9,6 +9,9 @@
 - [x] Implement MATLAB interface for solver with string API for defining input operators.
 - [ ] Extension: Add MPA solver for coupled mode problems.
 - [ ] Extension: OpenMP backend for multi-core CPU parallelism.
+- [ ] Implement dispersion operator custom functions, currently staging function is not used.
+- [ ] Combine grin vector operator into dispersion and nonlinear operator expressions.
+- [ ] Remove old API and just have custom functions for dispersion and nonlinearity, this removes the complications of additional vector operators.
 
 
 ## FFTW
@@ -60,22 +63,46 @@ Download the latest `nlolib.mltbx` from the [GitHub Releases](../../releases) pa
 matlab.addons.install('nlolib.mltbx');
 ```
 
-### Build from source
+### MATLAB Development workflow
+
+#### Build from source
 
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release --target matlab_stage
 ```
 
-Then add the staged output to the MATLAB path:
+Then add the staged output to the MATLAB path and run setup:
 
 ```matlab
 addpath('build/matlab_toolbox');
+nlolib_setup();
 ```
 
-The `matlab_stage` target copies `+nlolib/*.m`, the shared library, and `nlolib_matlab.h` into `build/matlab_toolbox/`. You can also set the `NLOLIB_LIBRARY` environment variable to the full path of `nlolib.dll` / `libnlolib.so` to override automatic library discovery.
+From a source checkout (without staging), use:
 
-### Prerequisites
+```matlab
+addpath('matlab');
+nlolib_setup();
+```
+
+`nlolib_setup()` adds the MATLAB package plus `examples/matlab` to the path.  
+The `matlab_stage` target copies `+nlolib/*.m`, `nlolib_setup.m`, `examples/matlab`, the shared library, and `nlolib_matlab.h` into `build/matlab_toolbox/`. You can also set the `NLOLIB_LIBRARY` environment variable to the full path of `nlolib.dll` / `libnlolib.so` to override automatic library discovery.
+
+#### Create MATLAB package from source
+
+- Home -> Add-Ons -> Package Toolbox
+- Toolbox folder: C:\Users\Wenzel\Final Year Project\nlolib\build\matlab_toolbox
+- Include these:
+    - +nlolib/
+    - nlolib_setup.m
+    - examples/matlab/
+    - lib/nlolib.dll
+    - lib/nlolib_matlab.h
+- Save project as: C:\Users\Wenzel\Final Year Project\nlolib\matlab\nlolib.prj
+- Click Package -> output nlolib.mltbx
+
+#### Prerequisites
 
 - MATLAB R2019b or later (loadlibrary with C99 header support).
 - A GPU driver that ships the Vulkan loader (standard on NVIDIA, AMD, and Intel desktop drivers). No Vulkan SDK is needed at runtime.
