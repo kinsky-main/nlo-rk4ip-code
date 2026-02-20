@@ -80,12 +80,21 @@ classdef NLolib < handle
             % Pack sim_config and collect keepalive handles.
             [cfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>
 
-            % Pack input field into interleaved [re im re im ...] buffer.
-            inPtr = nlolib.pack_complex_array(inputField);
+            useInterleaved = nlolib.NLolib.has_library_function(obj.LIBNAME, ...
+                                                                 'nlolib_propagate_interleaved');
+            if useInterleaved
+                inPtr = nlolib.pack_complex_interleaved_array(inputField);
+            else
+                inPtr = nlolib.pack_complex_array(inputField);
+            end
 
             % Allocate output buffer.
             outLen = uint64(numTimeSamples) * numRecordedSamples;
-            outPtr = nlolib.pack_complex_array(zeros(1, double(outLen)));
+            if useInterleaved
+                outPtr = nlolib.pack_complex_interleaved_array(zeros(1, double(outLen)));
+            else
+                outPtr = nlolib.pack_complex_array(zeros(1, double(outLen)));
+            end
             totalComplex = double(outLen);
 
             matlabDebug = false;
@@ -107,13 +116,23 @@ classdef NLolib < handle
                 execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
             end
 
-            statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate', ...
-                                cfgPtr, ...
-                                uint64(numTimeSamples), ...
-                                inPtr, ...
-                                numRecordedSamples, ...
-                                outPtr, ...
-                                execOptsPtr);
+            if useInterleaved
+                statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate_interleaved', ...
+                                    cfgPtr, ...
+                                    uint64(numTimeSamples), ...
+                                    inPtr, ...
+                                    numRecordedSamples, ...
+                                    outPtr, ...
+                                    execOptsPtr);
+            else
+                statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate', ...
+                                    cfgPtr, ...
+                                    uint64(numTimeSamples), ...
+                                    inPtr, ...
+                                    numRecordedSamples, ...
+                                    outPtr, ...
+                                    execOptsPtr);
+            end
             if matlabDebug
                 postProbe = nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
                                                            "post-call", true);
@@ -121,6 +140,28 @@ classdef NLolib < handle
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
 
             if statusCode ~= 0
+                if matlabDebug
+                    if isstruct(postProbe) && isfield(postProbe, 'value_size')
+                        sizeText = join(string(double(postProbe.value_size(:).')), "x");
+                    else
+                        sizeText = "";
+                    end
+                    probeDetail = sprintf(['MATLAB probe post-call: ptr.class=%s ptr.datatype=%s ' ...
+                                           'value.class=%s value.size=%s raw=%d re=%d im=%d expected=%g'], ...
+                                          char(string(getfield_safe(postProbe, 'pointer_class', ""))), ...
+                                          char(string(getfield_safe(postProbe, 'pointer_datatype', ""))), ...
+                                          char(string(getfield_safe(postProbe, 'value_class', ""))), ...
+                                          char(string(sizeText)), ...
+                                          int64(getfield_safe(postProbe, 'raw_count', 0)), ...
+                                          int64(getfield_safe(postProbe, 're_count', 0)), ...
+                                          int64(getfield_safe(postProbe, 'im_count', 0)), ...
+                                          double(getfield_safe(postProbe, 'expected_count', 0)));
+                    if strlength(statusDetail) > 0
+                        statusDetail = statusDetail + " | " + string(probeDetail);
+                    else
+                        statusDetail = string(probeDetail);
+                    end
+                end
                 if strlength(statusDetail) > 0
                     error('nlolib:propagateFailed', ...
                           'nlolib_propagate failed with status=%d (%s). %s', ...
@@ -140,6 +181,15 @@ classdef NLolib < handle
                                             double(numRecordedSamples), ...
                                             numTimeSamples, ...
                                             debugContext);
+        end
+
+        function tf = storage_is_available(obj)
+            %STORAGE_IS_AVAILABLE Return true when SQLite storage is compiled in.
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_storage_is_available')
+                tf = false;
+                return;
+            end
+            tf = logical(calllib(obj.LIBNAME, 'nlolib_storage_is_available'));
         end
     end
 
@@ -321,16 +371,34 @@ classdef NLolib < handle
             end
             searchDirs = unique(searchDirs, 'stable');
 
+            foundPaths = {};
+            foundDatenum = [];
             for idx = 1:numel(searchDirs)
                 candidate = fullfile(searchDirs{idx}, libFile);
                 if isfile(candidate)
-                    dllPath = candidate;
-                    return;
+                    info = dir(candidate);
+                    foundPaths{end + 1} = candidate; %#ok<AGROW>
+                    foundDatenum(end + 1) = info.datenum; %#ok<AGROW>
                 end
+            end
+            if ~isempty(foundPaths)
+                [~, newestIdx] = max(foundDatenum);
+                dllPath = foundPaths{newestIdx};
+                return;
             end
             error('nlolib:libraryNotFound', ...
                   'Cannot locate %s. Set NLOLIB_LIBRARY or pass path.', ...
                   libFile);
+        end
+
+        function tf = has_library_function(libName, functionName)
+            tf = false;
+            try
+                names = libfunctions(libName);
+                tf = any(strcmp(names, functionName));
+            catch
+                tf = false;
+            end
         end
 
         function ptr = make_exec_options(opts)
@@ -537,4 +605,15 @@ classdef NLolib < handle
             end
         end
     end
+end
+
+function value = getfield_safe(s, name, defaultValue)
+if nargin < 3
+    defaultValue = [];
+end
+if isstruct(s) && isfield(s, name)
+    value = s.(name);
+else
+    value = defaultValue;
+end
 end

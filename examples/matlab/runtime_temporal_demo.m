@@ -1,28 +1,12 @@
 function runtime_temporal_demo()
-% Just code to get the path and functions into the path, only useful for testing the runtime interface
-repoRoot = fileparts(fileparts(fileparts(mfilename("fullpath"))));
-matlabCandidates = { ...
-    fullfile(repoRoot, "matlab"), ...
-    repoRoot ...
-};
-for idx = 1:numel(matlabCandidates)
-    if isfolder(matlabCandidates{idx})
-        addpath(matlabCandidates{idx});
-    end
-end
-if exist("nlolib_setup", "file") == 2
-    nlolib_setup();
-else
-    addpath(fullfile(repoRoot, "examples", "matlab"));
-end
+repoRoot = setup_matlab_example_environment();
 
-% Actually how you would use the runtime interface, this is just a simple demo of a temporal simulation with dispersion only
 n = 512;
 dt = 0.02;
-t = ((0:(n - 1)) - 0.5 * (n - 1)) * dt;
+t = backend.centered_time_grid(n, dt);
 field0 = exp(-((t / 0.25) .^ 2)) .* exp(-1i * 8.0 * t);
 
-omega = 2.0 * pi * fftfreq_unshifted(n, dt);
+omega = backend.angular_frequency_grid(n, dt);
 beta2 = 0.05;
 
 cfg = struct();
@@ -42,23 +26,28 @@ runtime.constants = [beta2 / 2.0, 0.0, 0.01];
 cfg.runtime = runtime;
 
 api = nlolib.NLolib();
-records = api.propagate(cfg, field0, 2);
+simOptions = backend.default_simulation_options( ...
+    "backend", "auto", ...
+    "fft_backend", "vkfft");
+[records, info] = backend.propagate_with_fallback(api, cfg, field0, 2, simOptions);
 finalField = records(end, :).';
 
 fprintf("runtime_temporal_demo: propagated %d samples.\n", n);
 fprintf("initial power=%.6e final power=%.6e\n", ...
         sum(abs(field0) .^ 2), sum(abs(finalField) .^ 2));
-end
+fprintf("backend requested=%s used=%s fallback=%d\n", ...
+        info.requested_backend, info.used_backend, info.used_fallback);
 
-function omega = fftfreq_unshifted(n, dt)
-omega = zeros(1, n);
-factor = 1.0 / (n * dt);
-half = floor((n - 1) / 2);
-for i = 0:(n - 1)
-    if i <= half
-        omega(i + 1) = i * factor;
-    else
-        omega(i + 1) = -(n - i) * factor;
-    end
+outputDir = fullfile(repoRoot, "examples", "matlab", "output", "runtime_temporal_demo");
+if ~isfolder(outputDir)
+    mkdir(outputDir);
 end
+plotPath = backend.plot_final_intensity_comparison( ...
+    t, records(1, :), records(end, :), ...
+    fullfile(outputDir, "final_intensity_comparison.png"), ...
+    "x_label", "Time t", ...
+    "title", "Runtime Temporal Demo: Initial vs Final Intensity", ...
+    "reference_label", "Initial", ...
+    "final_label", "Final");
+fprintf("saved plot: %s\n", plotPath);
 end

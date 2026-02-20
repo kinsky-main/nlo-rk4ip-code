@@ -51,6 +51,7 @@ end
 body = strrep(body, ".^", "^");
 body = strrep(body, ".*", "*");
 body = strrep(body, "./", "/");
+body = regexprep(body, "(?<![A-Za-z0-9_\\.])1(?:\\.0+)?[iIjJ]\\>", "i");
 body = regexprep(body, "\<1[iIjJ]\>", "i");
 body = regexprep(body, "\<1[jJ]\>", "i");
 

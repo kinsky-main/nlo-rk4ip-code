@@ -20,10 +20,12 @@ report.pointer_datatype = "";
 report.value_class = "";
 report.value_size = [0, 0];
 report.is_struct = false;
+report.is_numeric = false;
 report.has_re = false;
 report.has_im = false;
 report.re_count = 0;
 report.im_count = 0;
+report.raw_count = 0;
 report.expected_count = double(expectedCount);
 report.error = "";
 
@@ -39,6 +41,7 @@ try
     report.value_class = class(raw);
     report.value_size = size(raw);
     report.is_struct = isstruct(raw);
+    report.is_numeric = isnumeric(raw);
 
     if report.is_struct
         report.has_re = isfield(raw, 're');
@@ -51,6 +54,16 @@ try
             im = [raw.im];
             report.im_count = numel(im);
         end
+    elseif report.is_numeric
+        flat = double(raw(:).');
+        report.raw_count = numel(flat);
+        if mod(report.raw_count, 2) == 0
+            report.re_count = report.raw_count / 2;
+            report.im_count = report.raw_count / 2;
+        else
+            report.re_count = floor(report.raw_count / 2);
+            report.im_count = floor(report.raw_count / 2);
+        end
     end
 catch ME
     report.error = string(ME.message);
@@ -58,12 +71,13 @@ end
 
 if logical(verbose)
     fprintf(['[nlolib.matlab_debug] %s ptr.class=%s ptr.datatype=%s ' ...
-             'value.class=%s value.size=%s re=%d im=%d expected=%g\n'], ...
+             'value.class=%s value.size=%s raw=%d re=%d im=%d expected=%g\n'], ...
             char(report.context), ...
             char(string(report.pointer_class)), ...
             char(string(report.pointer_datatype)), ...
             char(string(report.value_class)), ...
             char(size_to_text(report.value_size)), ...
+            int64(report.raw_count), ...
             int64(report.re_count), ...
             int64(report.im_count), ...
             double(report.expected_count));

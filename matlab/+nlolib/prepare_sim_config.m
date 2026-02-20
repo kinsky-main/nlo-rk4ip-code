@@ -3,8 +3,8 @@ function [cfgPtr, keepalive] = prepare_sim_config(cfg)
 %   [cfgPtr, keepalive] = nlolib.prepare_sim_config(cfg)
 %
 %   cfg is a flat MATLAB struct with fields matching the nlolib C API.
-%   Returns a libstruct('sim_config', ...) and a compatibility keepalive
-%   cell array (currently empty).
+%   Returns a libstruct('sim_config', ...) and a keepalive cell array for
+%   pointer-backed fields (complex arrays and c-strings).
 if ~isstruct(cfg)
     error("cfg must be a struct");
 end
@@ -28,11 +28,12 @@ if ~libisloaded('nlolib')
 end
 
 nlolib.NLolib.ensure_types_loaded();
+keepalive = {};
 maxConstants = 16;            % NLO_RUNTIME_OPERATOR_CONSTANTS_MAX from nlolib_matlab.h
 
 numTs = double(cfg.num_time_samples);
 
-[dispersionFactorExpr, dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
+[dispersionFactorExpr, dispersionExpr, transverseFactorExpr, transverseExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
 constants = double(constants(:).');
 numConstants = numel(constants);
 if numConstants > maxConstants
@@ -45,31 +46,56 @@ if numConstants > 0
     constantsFixed(1:numConstants) = constants;
 end
 
-freqStruct = complex_to_nlo_complex_struct(cfg.frequency_grid);
+freqPtr = nlolib.pack_complex_array(cfg.frequency_grid);
+keepalive{end + 1} = freqPtr; %#ok<AGROW>
 
 spatialMl = struct();
-spatialMl.nx = uint64(get_optional(cfg, "spatial_nx", numTs));
+defaultNx = numTs;
+if isfield(cfg, "time_nt") && ~isempty(cfg.time_nt) && double(cfg.time_nt) > 0
+    defaultNx = 1;
+end
+spatialMl.nx = uint64(get_optional(cfg, "spatial_nx", defaultNx));
 spatialMl.ny = uint64(get_optional(cfg, "spatial_ny", 1));
 spatialMl.delta_x = double(get_optional(cfg, "delta_x", 1.0));
 spatialMl.delta_y = double(get_optional(cfg, "delta_y", 1.0));
 
 if isfield(cfg, "spatial_frequency_grid") && ~isempty(cfg.spatial_frequency_grid)
-    spatialMl.spatial_frequency_grid = complex_to_nlo_complex_struct(cfg.spatial_frequency_grid);
+    spatialFreqPtr = nlolib.pack_complex_array(cfg.spatial_frequency_grid);
+    spatialMl.spatial_frequency_grid = spatialFreqPtr;
+    keepalive{end + 1} = spatialFreqPtr; %#ok<AGROW>
 end
 
 if isfield(cfg, "potential_grid") && ~isempty(cfg.potential_grid)
-    spatialMl.potential_grid = complex_to_nlo_complex_struct(cfg.potential_grid);
+    potentialPtr = nlolib.pack_complex_array(cfg.potential_grid);
+    spatialMl.potential_grid = potentialPtr;
+    keepalive{end + 1} = potentialPtr; %#ok<AGROW>
 end
 
 runtimeMl = struct();
 if strlength(dispersionFactorExpr) > 0
-    runtimeMl.dispersion_factor_expr = char(dispersionFactorExpr);
+    dispersionFactorPtr = cstring_ptr(dispersionFactorExpr);
+    runtimeMl.dispersion_factor_expr = dispersionFactorPtr;
+    keepalive{end + 1} = dispersionFactorPtr; %#ok<AGROW>
 end
 if strlength(dispersionExpr) > 0
-    runtimeMl.dispersion_expr = char(dispersionExpr);
+    dispersionPtr = cstring_ptr(dispersionExpr);
+    runtimeMl.dispersion_expr = dispersionPtr;
+    keepalive{end + 1} = dispersionPtr; %#ok<AGROW>
+end
+if strlength(transverseFactorExpr) > 0
+    transverseFactorPtr = cstring_ptr(transverseFactorExpr);
+    runtimeMl.transverse_factor_expr = transverseFactorPtr;
+    keepalive{end + 1} = transverseFactorPtr; %#ok<AGROW>
+end
+if strlength(transverseExpr) > 0
+    transversePtr = cstring_ptr(transverseExpr);
+    runtimeMl.transverse_expr = transversePtr;
+    keepalive{end + 1} = transversePtr; %#ok<AGROW>
 end
 if strlength(nonlinearExpr) > 0
-    runtimeMl.nonlinear_expr = char(nonlinearExpr);
+    nonlinearPtr = cstring_ptr(nonlinearExpr);
+    runtimeMl.nonlinear_expr = nonlinearPtr;
+    keepalive{end + 1} = nonlinearPtr; %#ok<AGROW>
 end
 runtimeMl.num_constants = uint64(numConstants);
 runtimeMl.constants = constantsFixed;
@@ -82,14 +108,14 @@ cfgMl.propagation = struct( ...
     'error_tolerance', double(cfg.error_tolerance), ...
     'propagation_distance', double(cfg.propagation_distance));
 cfgMl.time = struct( ...
+    'nt', uint64(get_optional(cfg, "time_nt", 0)), ...
     'pulse_period', double(cfg.pulse_period), ...
     'delta_time', double(cfg.delta_time));
-cfgMl.frequency = struct('frequency_grid', freqStruct);
+cfgMl.frequency = struct('frequency_grid', freqPtr);
 cfgMl.spatial = spatialMl;
 cfgMl.runtime = runtimeMl;
 
 cfgPtr = libstruct('sim_config', cfgMl);
-keepalive = {};
 end
 
 % ========================================================================
@@ -111,9 +137,15 @@ im = num2cell(imag(vals));
 out = struct('re', re, 'im', im);
 end
 
-function [dispersionFactorExpr, dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg)
+function ptr = cstring_ptr(text)
+ptr = libpointer('cstring', char(string(text)));
+end
+
+function [dispersionFactorExpr, dispersionExpr, transverseFactorExpr, transverseExpr, nonlinearExpr, constants] = resolve_runtime(cfg)
 dispersionFactorExpr = "";
 dispersionExpr = "";
+transverseFactorExpr = "";
+transverseExpr = "";
 nonlinearExpr = "";
 constants = [];
 
@@ -132,6 +164,12 @@ end
 if isfield(runtime, "dispersion_expr") && ~isempty(runtime.dispersion_expr)
     dispersionExpr = string(runtime.dispersion_expr);
 end
+if isfield(runtime, "transverse_factor_expr") && ~isempty(runtime.transverse_factor_expr)
+    transverseFactorExpr = string(runtime.transverse_factor_expr);
+end
+if isfield(runtime, "transverse_expr") && ~isempty(runtime.transverse_expr)
+    transverseExpr = string(runtime.transverse_expr);
+end
 if isfield(runtime, "nonlinear_expr") && ~isempty(runtime.nonlinear_expr)
     nonlinearExpr = string(runtime.nonlinear_expr);
 end
@@ -148,6 +186,20 @@ if isfield(runtime, "dispersion_fn") && ~isempty(runtime.dispersion_fn)
     translated = shift_constant_indices(translated, numel(constants));
     constants = [constants, captured];
     dispersionExpr = translated;
+end
+
+if isfield(runtime, "transverse_factor_fn") && ~isempty(runtime.transverse_factor_fn)
+    [translated, captured] = nlolib.translate_runtime_handle(runtime.transverse_factor_fn, "dispersion_factor", runtime);
+    translated = shift_constant_indices(translated, numel(constants));
+    constants = [constants, captured];
+    transverseFactorExpr = translated;
+end
+
+if isfield(runtime, "transverse_fn") && ~isempty(runtime.transverse_fn)
+    [translated, captured] = nlolib.translate_runtime_handle(runtime.transverse_fn, "dispersion", runtime);
+    translated = shift_constant_indices(translated, numel(constants));
+    constants = [constants, captured];
+    transverseExpr = translated;
 end
 
 if isfield(runtime, "nonlinear_fn") && ~isempty(runtime.nonlinear_fn)

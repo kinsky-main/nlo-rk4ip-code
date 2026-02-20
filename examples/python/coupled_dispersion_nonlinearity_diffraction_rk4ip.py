@@ -160,9 +160,11 @@ def main() -> None:
     runner = NloExampleRunner()
     exec_opts = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
 
-    nt = 24
-    nx = 48
-    ny = 48
+    # Keep defaults within the core library hard cap:
+    # NT_MAX = 1,048,576 flattened samples (nt * nx * ny).
+    nt = 16
+    nx = 64
+    ny = 64
     dt = 0.02
     dx = 0.8
     dy = 0.8
@@ -176,6 +178,13 @@ def main() -> None:
     temporal_width = 0.22
     spatial_width = 8.0
     chirp = 8.0
+
+    total_samples = nt * nx * ny
+    if total_samples > int(runner.nlo.NT_MAX):
+        raise ValueError(
+            f"Requested nt*nx*ny={total_samples} exceeds NT_MAX={runner.nlo.NT_MAX}. "
+            "Reduce nt/nx/ny or increase NT_MAX in the core library and rebuild."
+        )
 
     t, x, y, z_records, _, full_records = _run_case(
         runner,
