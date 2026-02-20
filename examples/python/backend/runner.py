@@ -45,7 +45,7 @@ def _to_vk_handle(value: int | str | None):
 class SimulationOptions:
     backend: str | dict[str, Any] = "auto"
     fft_backend: str = "auto"
-    device_heap_fraction: float = 0.70
+    device_heap_fraction: float = 0.0
     record_ring_target: int = 0
     forced_device_budget_bytes: int = 0
 

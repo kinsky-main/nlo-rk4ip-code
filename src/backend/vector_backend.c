@@ -305,6 +305,7 @@ nlo_vec_status nlo_vec_query_memory_info(
         out_info->max_storage_buffer_range = (size_t)backend->vk.limits.maxStorageBufferRange;
         out_info->max_compute_workgroups_x = (size_t)backend->vk.limits.maxComputeWorkGroupCount[0];
         out_info->max_kernel_chunk_bytes = (size_t)backend->vk.max_kernel_chunk_bytes;
+        out_info->device_type = backend->vk.device_type;
         return NLO_VEC_STATUS_OK;
     }
 

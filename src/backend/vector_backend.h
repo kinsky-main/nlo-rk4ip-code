@@ -50,6 +50,7 @@ typedef struct {
     size_t max_storage_buffer_range;
     size_t max_compute_workgroups_x;
     size_t max_kernel_chunk_bytes;
+    VkPhysicalDeviceType device_type;
 } nlo_vec_backend_memory_info;
 
 // MARK: Backend Lifecycle

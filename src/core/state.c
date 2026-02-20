@@ -243,6 +243,18 @@ static size_t nlo_resolve_runtime_constants(const runtime_operator_params* runti
     return count;
 }
 
+static double nlo_default_heap_fraction_for_device(VkPhysicalDeviceType device_type)
+{
+    switch (device_type) {
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            return NLO_DEFAULT_DEVICE_HEAP_FRACTION_DISCRETE;
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            return NLO_DEFAULT_DEVICE_HEAP_FRACTION_INTEGRATED;
+        default:
+            return NLO_DEFAULT_DEVICE_HEAP_FRACTION;
+    }
+}
+
 static size_t nlo_compute_device_ring_capacity(const simulation_state* state, size_t requested_records)
 {
     if (state == NULL || state->backend == NULL || requested_records == 0u) {
@@ -253,15 +265,15 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
         return 0u;
     }
 
-    const double frac = (state->exec_options.device_heap_fraction > 0.0 &&
-                         state->exec_options.device_heap_fraction <= 1.0)
-                            ? state->exec_options.device_heap_fraction
-                            : NLO_DEFAULT_DEVICE_HEAP_FRACTION;
-
     nlo_vec_backend_memory_info mem_info = {0};
     if (nlo_vec_query_memory_info(state->backend, &mem_info) != NLO_VEC_STATUS_OK) {
         return NLO_MIN_DEVICE_RING_CAPACITY;
     }
+
+    const double frac = (state->exec_options.device_heap_fraction > 0.0 &&
+                         state->exec_options.device_heap_fraction <= 1.0)
+                            ? state->exec_options.device_heap_fraction
+                            : nlo_default_heap_fraction_for_device(mem_info.device_type);
 
     const size_t per_record_bytes = state->num_time_samples * sizeof(nlo_complex);
     if (per_record_bytes == 0u) {
@@ -306,7 +318,7 @@ nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type back
     memset(&options, 0, sizeof(options));
     options.backend_type = backend_type;
     options.fft_backend = NLO_FFT_BACKEND_AUTO;
-    options.device_heap_fraction = NLO_DEFAULT_DEVICE_HEAP_FRACTION;
+    options.device_heap_fraction = 0.0;
     options.record_ring_target = 0u;
     options.forced_device_budget_bytes = 0u;
     return options;

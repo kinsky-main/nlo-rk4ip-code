@@ -326,7 +326,7 @@ classdef NLolib < handle
             if isfield(opts, 'device_heap_fraction')
                 s.device_heap_fraction = double(opts.device_heap_fraction);
             else
-                s.device_heap_fraction = 0.70;
+                s.device_heap_fraction = 0.0;
             end
             if isfield(opts, 'record_ring_target')
                 s.record_ring_target = uint64(opts.record_ring_target);
