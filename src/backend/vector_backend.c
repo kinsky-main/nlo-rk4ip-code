@@ -243,11 +243,6 @@ nlo_vec_status nlo_vec_begin_simulation(nlo_vector_backend* backend)
     }
 
     backend->in_simulation = true;
-    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
-        if (vkQueueWaitIdle(backend->vk.queue) != VK_SUCCESS) {
-            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
-        }
-    }
     return NLO_VEC_STATUS_OK;
 }
 

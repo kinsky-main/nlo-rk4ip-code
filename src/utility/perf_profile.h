@@ -23,6 +23,10 @@ typedef struct {
 
     uint64_t gpu_dispatch_count;
     uint64_t gpu_copy_count;
+    uint64_t gpu_device_copy_count;
+    uint64_t gpu_device_copy_bytes;
+    uint64_t gpu_host_transfer_copy_count;
+    uint64_t gpu_host_transfer_copy_bytes;
     uint64_t gpu_memory_pass_count;
     uint64_t gpu_memory_pass_bytes;
 
@@ -86,7 +90,25 @@ void nlo_perf_profile_add_gpu_dispatch(
 );
 
 /**
- * @brief Record one or more GPU buffer-copy operations and associated memory passes.
+ * @brief Record one or more GPU device-to-device buffer-copy operations.
+ *
+ * This counter excludes host transfer staging copies.
+ *
+ * @param copy_count Number of GPU copy operations.
+ * @param bytes Bytes copied per operation aggregate.
+ */
+void nlo_perf_profile_add_gpu_device_copy(uint64_t copy_count, uint64_t bytes);
+
+/**
+ * @brief Record one or more GPU copies used for host-transfer staging.
+ *
+ * @param copy_count Number of GPU copy operations.
+ * @param bytes Bytes copied per operation aggregate.
+ */
+void nlo_perf_profile_add_gpu_host_transfer_copy(uint64_t copy_count, uint64_t bytes);
+
+/**
+ * @brief Backward-compatible alias for GPU device-to-device copy accounting.
  *
  * @param copy_count Number of GPU copy operations.
  * @param bytes Bytes copied per operation aggregate.
@@ -119,4 +141,3 @@ double nlo_perf_profile_now_ms(void);
 #ifdef __cplusplus
 }
 #endif
-

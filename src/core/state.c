@@ -34,6 +34,14 @@
 #define NLO_MIN_DEVICE_RING_CAPACITY 1u
 #endif
 
+#ifndef NLO_DEVICE_RING_BUDGET_HEADROOM_NUM
+#define NLO_DEVICE_RING_BUDGET_HEADROOM_NUM 9u
+#endif
+
+#ifndef NLO_DEVICE_RING_BUDGET_HEADROOM_DEN
+#define NLO_DEVICE_RING_BUDGET_HEADROOM_DEN 10u
+#endif
+
 #ifndef NLO_TWO_PI
 #define NLO_TWO_PI 6.283185307179586476925286766559
 #endif
@@ -273,10 +281,25 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     if (budget_bytes == 0u) {
         budget_bytes = (size_t)((double)mem_info.device_local_available_bytes * frac);
     }
+    budget_bytes =
+        (budget_bytes / NLO_DEVICE_RING_BUDGET_HEADROOM_DEN) *
+        NLO_DEVICE_RING_BUDGET_HEADROOM_NUM;
+    if (budget_bytes == 0u) {
+        return NLO_MIN_DEVICE_RING_CAPACITY;
+    }
 
-    const size_t active_vec_count = 2u + NLO_WORK_VECTOR_COUNT;
+    size_t active_vec_count = 2u + NLO_WORK_VECTOR_COUNT;
+    if (state->runtime_operator_stack_slots > SIZE_MAX - active_vec_count) {
+        return NLO_MIN_DEVICE_RING_CAPACITY;
+    }
+    active_vec_count += state->runtime_operator_stack_slots;
+
     size_t active_bytes = 0u;
     if (checked_mul_size_t(active_vec_count, per_record_bytes, &active_bytes) != 0) {
+        return NLO_MIN_DEVICE_RING_CAPACITY;
+    }
+
+    if (active_bytes > SIZE_MAX - per_record_bytes) {
         return NLO_MIN_DEVICE_RING_CAPACITY;
     }
 
@@ -297,6 +320,13 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     if (ring_capacity > requested_records) {
         ring_capacity = requested_records;
     }
+
+    nlo_state_debug_log_ring_capacity(requested_records,
+                                      per_record_bytes,
+                                      active_bytes,
+                                      state->runtime_operator_stack_slots,
+                                      budget_bytes,
+                                      ring_capacity);
 
     return ring_capacity;
 }

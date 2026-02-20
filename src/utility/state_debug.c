@@ -61,3 +61,28 @@ void nlo_state_debug_log_failure(const char* stage, int status)
             (stage != NULL) ? stage : "unknown",
             status);
 }
+
+void nlo_state_debug_log_ring_capacity(
+    size_t requested_records,
+    size_t per_record_bytes,
+    size_t active_bytes,
+    size_t runtime_stack_slots,
+    size_t budget_bytes,
+    size_t ring_capacity
+)
+{
+    if (!nlo_state_debug_enabled()) {
+        return;
+    }
+
+    fprintf(stderr,
+            "[NLO_STATE_DEBUG] ring_capacity requested=%zu per_record_bytes=%zu "
+            "active_bytes=%zu runtime_stack_slots=%zu budget_bytes=%zu "
+            "computed_capacity=%zu\n",
+            requested_records,
+            per_record_bytes,
+            active_bytes,
+            runtime_stack_slots,
+            budget_bytes,
+            ring_capacity);
+}

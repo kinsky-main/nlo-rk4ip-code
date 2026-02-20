@@ -89,6 +89,26 @@ void nlo_perf_profile_add_gpu_copy(uint64_t copy_count, uint64_t bytes)
     }
 
     g_nlo_perf_profile_state.snapshot.gpu_copy_count += copy_count;
+    g_nlo_perf_profile_state.snapshot.gpu_device_copy_count += copy_count;
+    g_nlo_perf_profile_state.snapshot.gpu_device_copy_bytes += bytes;
+    g_nlo_perf_profile_state.snapshot.gpu_memory_pass_count += 2u * copy_count;
+    g_nlo_perf_profile_state.snapshot.gpu_memory_pass_bytes += 2u * bytes;
+}
+
+void nlo_perf_profile_add_gpu_device_copy(uint64_t copy_count, uint64_t bytes)
+{
+    nlo_perf_profile_add_gpu_copy(copy_count, bytes);
+}
+
+void nlo_perf_profile_add_gpu_host_transfer_copy(uint64_t copy_count, uint64_t bytes)
+{
+    if (!g_nlo_perf_profile_state.enabled || copy_count == 0u) {
+        return;
+    }
+
+    g_nlo_perf_profile_state.snapshot.gpu_copy_count += copy_count;
+    g_nlo_perf_profile_state.snapshot.gpu_host_transfer_copy_count += copy_count;
+    g_nlo_perf_profile_state.snapshot.gpu_host_transfer_copy_bytes += bytes;
     g_nlo_perf_profile_state.snapshot.gpu_memory_pass_count += 2u * copy_count;
     g_nlo_perf_profile_state.snapshot.gpu_memory_pass_bytes += 2u * bytes;
 }
@@ -134,4 +154,3 @@ double nlo_perf_profile_now_ms(void)
     return ((double)now.tv_sec * 1000.0) + ((double)now.tv_nsec / 1000000.0);
 #endif
 }
-

@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <float.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -80,6 +81,35 @@ static int nlo_rk4_debug_enabled_runtime(void)
 {
     const char* env = getenv("NLO_RK4_DEBUG");
     return (env != NULL && *env != '\0' && *env != '0') ? 1 : 0;
+}
+
+static size_t nlo_rk4_error_check_interval(void)
+{
+    static size_t cached_interval = 0u;
+    if (cached_interval != 0u) {
+        return cached_interval;
+    }
+
+    const char* env = getenv("NLO_RK4_ERROR_CHECK_INTERVAL");
+    if (env == NULL || env[0] == '\0') {
+        cached_interval = 1u;
+        return cached_interval;
+    }
+
+    char* end_ptr = NULL;
+    unsigned long long parsed = strtoull(env, &end_ptr, 10);
+    if (end_ptr == env || (end_ptr != NULL && *end_ptr != '\0') || parsed == 0u) {
+        cached_interval = 1u;
+        return cached_interval;
+    }
+
+    if (parsed > (unsigned long long)SIZE_MAX) {
+        cached_interval = SIZE_MAX;
+        return cached_interval;
+    }
+
+    cached_interval = (size_t)parsed;
+    return cached_interval;
 }
 
 static double nlo_record_capture_tolerance(double z_end)
@@ -325,6 +355,7 @@ void solve_rk4(simulation_state *state)
     double record_spacing = 0.0;
     double next_record_z = z_end;
     const double record_capture_eps = nlo_record_capture_tolerance(z_end);
+    const size_t error_check_interval = nlo_rk4_error_check_interval();
     if (state->num_recorded_samples > 1u)
     {
         record_spacing = z_end / (double)(state->num_recorded_samples - 1u);
@@ -377,20 +408,32 @@ void solve_rk4(simulation_state *state)
             break;
         }
 
-        double error = 0.0;
-        if (nlo_vec_complex_relative_error(state->backend,
-                                           state->current_field_vec,
-                                           state->working_vectors.previous_field_vec,
-                                           NLO_RK4_ERROR_EPS,
-                                           &error) != NLO_VEC_STATUS_OK)
+        const int should_check_error =
+            (error_check_interval <= 1u) ||
+            (((rk4_step_index + 1u) % error_check_interval) == 0u) ||
+            (state->current_z + step + record_capture_eps >= z_end);
+        double error = -1.0;
+        if (should_check_error)
         {
             error = 0.0;
+            if (nlo_vec_complex_relative_error(state->backend,
+                                               state->current_field_vec,
+                                               state->working_vectors.previous_field_vec,
+                                               NLO_RK4_ERROR_EPS,
+                                               &error) != NLO_VEC_STATUS_OK)
+            {
+                error = 0.0;
+            }
         }
 
         state->current_z += step;
 
         double scale = NLO_RK4_STEP_GROW_MAX;
-        if (error > 0.0)
+        if (!should_check_error)
+        {
+            scale = 1.0;
+        }
+        else if (error > 0.0)
         {
             scale = NLO_RK4_ERROR_SAFETY * pow(tol / error, 0.2);
             if (scale < NLO_RK4_STEP_SHRINK_MIN)
@@ -436,8 +479,8 @@ void solve_rk4(simulation_state *state)
         next_record_z = record_spacing * (double)state->current_record_index;
     }
 
-    (void)simulation_state_flush_snapshots(state);
     (void)nlo_vec_end_simulation(state->backend);
+    (void)simulation_state_flush_snapshots(state);
 }
 
 void step_rk4(simulation_state *state)
