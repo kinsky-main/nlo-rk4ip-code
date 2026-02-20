@@ -212,6 +212,60 @@ def test_extended_runtime_operators_execute(api, opts):
     assert len(records[0]) == n
 
 
+def test_transverse_runtime_callable_matches_string(api, opts):
+    nt = 4
+    nx = 6
+    ny = 4
+    n = nt * nx * ny
+    coef = -0.015
+    input_field = _random_input_field(n, seed=91)
+    k2 = [complex(float(i % (nx * ny)), 0.0) for i in range(nx * ny)]
+
+    common = dict(
+        propagation_distance=0.01,
+        starting_step_size=1e-3,
+        max_step_size=2e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(nt) * 0.02,
+        delta_time=0.02,
+        time_nt=nt,
+        frequency_grid=[0j] * nt,
+        spatial_nx=nx,
+        spatial_ny=ny,
+        spatial_frequency_grid=k2,
+        potential_grid=[0j] * (nx * ny),
+    )
+
+    string_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            transverse_factor_expr="i*c3*w",
+            transverse_expr="exp(h*D)",
+            nonlinear_expr="0",
+            constants=[0.0, 0.0, 0.0, coef],
+        ),
+        **common,
+    )
+    callable_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            transverse_factor_fn=lambda A, w: (1j * coef) * w,  # noqa: E731
+            transverse_fn=lambda A, D, h: cmath.exp(h * D),  # noqa: E731
+            nonlinear_expr="0",
+            constants=[0.0, 0.0, 0.0, 0.0],
+        ),
+        **common,
+    )
+
+    string_final = api.propagate(string_cfg, input_field, 2, opts)[1]
+    callable_final = api.propagate(callable_cfg, input_field, 2, opts)[1]
+    err = _max_abs_diff(string_final, callable_final)
+    assert err <= 2e-8, f"transverse callable mismatch: err={err}"
+
+
 def test_linear_drift_signed_prediction(api, opts):
     n = 384
     dt = 0.01
@@ -312,6 +366,7 @@ def main():
     test_nonlinear_callable_matches_string(api, opts)
     test_field_first_callable_signature_enforced()
     test_extended_runtime_operators_execute(api, opts)
+    test_transverse_runtime_callable_matches_string(api, opts)
     test_linear_drift_signed_prediction(api, opts)
     test_second_order_soliton_intensity_error(api, opts)
     print("test_python_operator_regression: runtime-operator propagation regressions validated.")

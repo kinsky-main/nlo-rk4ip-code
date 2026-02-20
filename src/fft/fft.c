@@ -23,7 +23,8 @@ struct nlo_fft_plan {
     nlo_vector_backend* backend;
     nlo_vector_backend_type backend_type;
     nlo_fft_backend_type fft_backend;
-    size_t signal_size;
+    nlo_fft_shape shape;
+    size_t total_size;
 
     fftw_plan forward_plan;
     fftw_plan inverse_plan;
@@ -193,16 +194,51 @@ static nlo_fft_backend_type nlo_fft_resolve_backend(
     return NLO_FFT_BACKEND_AUTO;
 }
 
+static int nlo_fft_compute_total_size(const nlo_fft_shape* shape, size_t* out_total)
+{
+    if (shape == NULL || out_total == NULL || shape->rank == 0u || shape->rank > 3u) {
+        return -1;
+    }
+
+    size_t total = 1u;
+    for (size_t i = 0u; i < shape->rank; ++i) {
+        const size_t dim = shape->dims[i];
+        if (dim == 0u || total > (SIZE_MAX / dim)) {
+            return -1;
+        }
+        total *= dim;
+    }
+
+    *out_total = total;
+    return 0;
+}
+
+static int nlo_fft_shape_to_fftw_dims(const nlo_fft_shape* shape, int out_dims[3])
+{
+    if (shape == NULL || out_dims == NULL || shape->rank == 0u || shape->rank > 3u) {
+        return -1;
+    }
+
+    for (size_t i = 0u; i < shape->rank; ++i) {
+        if (shape->dims[i] > (size_t)INT_MAX) {
+            return -1;
+        }
+        out_dims[i] = (int)shape->dims[i];
+    }
+    return 0;
+}
+
 nlo_vec_status nlo_fft_plan_create(
     nlo_vector_backend* backend,
     size_t signal_size,
     nlo_fft_plan** out_plan
 )
 {
-    return nlo_fft_plan_create_with_backend(backend,
-                                            signal_size,
-                                            NLO_FFT_BACKEND_AUTO,
-                                            out_plan);
+    return nlo_fft_plan_create_with_backend(
+        backend,
+        signal_size,
+        NLO_FFT_BACKEND_AUTO,
+        out_plan);
 }
 
 nlo_vec_status nlo_fft_plan_create_with_backend(
@@ -212,7 +248,26 @@ nlo_vec_status nlo_fft_plan_create_with_backend(
     nlo_fft_plan** out_plan
 )
 {
-    if (backend == NULL || out_plan == NULL || signal_size == 0u) {
+    nlo_fft_shape shape = {
+        .rank = 1u,
+        .dims = {signal_size, 1u, 1u}
+    };
+    return nlo_fft_plan_create_shaped_with_backend(backend, &shape, fft_backend, out_plan);
+}
+
+nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
+    nlo_vector_backend* backend,
+    const nlo_fft_shape* shape,
+    nlo_fft_backend_type fft_backend,
+    nlo_fft_plan** out_plan
+)
+{
+    if (backend == NULL || out_plan == NULL || shape == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    size_t total_size = 0u;
+    if (nlo_fft_compute_total_size(shape, &total_size) != 0) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
@@ -226,42 +281,46 @@ nlo_vec_status nlo_fft_plan_create_with_backend(
     plan->backend = backend;
     plan->backend_type = nlo_vector_backend_get_type(backend);
     plan->fft_backend = nlo_fft_resolve_backend(plan->backend_type, fft_backend);
-    plan->signal_size = signal_size;
+    plan->shape = *shape;
+    plan->total_size = total_size;
 
     if (plan->fft_backend == NLO_FFT_BACKEND_FFTW) {
         if (plan->backend_type != NLO_VECTOR_BACKEND_CPU) {
             nlo_fft_plan_destroy(plan);
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
         }
-        if (signal_size > (size_t)INT_MAX) {
+        int fftw_dims[3] = {0};
+        if (nlo_fft_shape_to_fftw_dims(&plan->shape, fftw_dims) != 0) {
             nlo_fft_plan_destroy(plan);
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
         }
 
-        plan->plan_in = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * signal_size);
-        plan->plan_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * signal_size);
+        plan->plan_in = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * plan->total_size);
+        plan->plan_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * plan->total_size);
         if (plan->plan_in == NULL || plan->plan_out == NULL) {
             nlo_fft_plan_destroy(plan);
             return NLO_VEC_STATUS_ALLOCATION_FAILED;
         }
 
         const unsigned flags = FFTW_ESTIMATE | FFTW_UNALIGNED;
-        plan->forward_plan = fftw_plan_dft_1d((int)signal_size,
-                                              plan->plan_in,
-                                              plan->plan_out,
-                                              FFTW_FORWARD,
-                                              flags);
-        plan->inverse_plan = fftw_plan_dft_1d((int)signal_size,
-                                              plan->plan_in,
-                                              plan->plan_out,
-                                              FFTW_BACKWARD,
-                                              flags);
+        plan->forward_plan = fftw_plan_dft((int)plan->shape.rank,
+                                           fftw_dims,
+                                           plan->plan_in,
+                                           plan->plan_out,
+                                           FFTW_FORWARD,
+                                           flags);
+        plan->inverse_plan = fftw_plan_dft((int)plan->shape.rank,
+                                           fftw_dims,
+                                           plan->plan_in,
+                                           plan->plan_out,
+                                           FFTW_BACKWARD,
+                                           flags);
         if (plan->forward_plan == NULL || plan->inverse_plan == NULL) {
             nlo_fft_plan_destroy(plan);
             return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
         }
 
-        plan->inverse_scale = 1.0 / (double)signal_size;
+        plan->inverse_scale = 1.0 / (double)plan->total_size;
         *out_plan = plan;
         return NLO_VEC_STATUS_OK;
     }
@@ -274,7 +333,7 @@ nlo_vec_status nlo_fft_plan_create_with_backend(
 
         nlo_vec_status status = nlo_vec_create(backend,
                                                NLO_VEC_KIND_COMPLEX64,
-                                               signal_size,
+                                               plan->total_size,
                                                &plan->vk_placeholder_vec);
         if (status != NLO_VEC_STATUS_OK) {
             nlo_fft_plan_destroy(plan);
@@ -325,8 +384,11 @@ nlo_vec_status nlo_fft_plan_create_with_backend(
         }
 
         VkFFTConfiguration configuration = {0};
-        configuration.FFTdim = 1u;
-        configuration.size[0] = (uint64_t)signal_size;
+        configuration.FFTdim = (uint32_t)plan->shape.rank;
+        for (size_t i = 0u; i < plan->shape.rank; ++i) {
+            const size_t src_idx = (plan->shape.rank - 1u) - i;
+            configuration.size[i] = (uint64_t)plan->shape.dims[src_idx];
+        }
         configuration.numberBatches = 1u;
         configuration.doublePrecision = 1u;
         configuration.normalize = 1u;
@@ -432,7 +494,7 @@ nlo_vec_status nlo_fft_forward_vec(
     }
     if (input->owner != plan->backend || output->owner != plan->backend ||
         input->kind != NLO_VEC_KIND_COMPLEX64 || output->kind != NLO_VEC_KIND_COMPLEX64 ||
-        input->length != plan->signal_size || output->length != plan->signal_size) {
+        input->length != plan->total_size || output->length != plan->total_size) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
@@ -477,7 +539,7 @@ nlo_vec_status nlo_fft_inverse_vec(
     }
     if (input->owner != plan->backend || output->owner != plan->backend ||
         input->kind != NLO_VEC_KIND_COMPLEX64 || output->kind != NLO_VEC_KIND_COMPLEX64 ||
-        input->length != plan->signal_size || output->length != plan->signal_size) {
+        input->length != plan->total_size || output->length != plan->total_size) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
@@ -496,7 +558,7 @@ nlo_vec_status nlo_fft_inverse_vec(
         fftw_execute_dft(plan->inverse_plan, (fftw_complex*)in_ptr, (fftw_complex*)out_ptr);
 
         nlo_complex* data = (nlo_complex*)out_ptr;
-        for (size_t i = 0; i < plan->signal_size; ++i) {
+        for (size_t i = 0u; i < plan->total_size; ++i) {
             NLO_RE(data[i]) *= plan->inverse_scale;
             NLO_IM(data[i]) *= plan->inverse_scale;
         }

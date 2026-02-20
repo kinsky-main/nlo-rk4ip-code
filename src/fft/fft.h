@@ -14,6 +14,11 @@ extern "C" {
 
 typedef struct nlo_fft_plan nlo_fft_plan;
 
+typedef struct {
+    size_t rank;
+    size_t dims[3];
+} nlo_fft_shape;
+
 /**
  * @brief Create an FFT plan using backend-default implementation selection.
  */
@@ -29,6 +34,16 @@ nlo_vec_status nlo_fft_plan_create(
 nlo_vec_status nlo_fft_plan_create_with_backend(
     nlo_vector_backend* backend,
     size_t signal_size,
+    nlo_fft_backend_type fft_backend,
+    nlo_fft_plan** out_plan
+);
+
+/**
+ * @brief Create an FFT plan for an explicit shape (rank 1-3).
+ */
+nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
+    nlo_vector_backend* backend,
+    const nlo_fft_shape* shape,
     nlo_fft_backend_type fft_backend,
     nlo_fft_plan** out_plan
 );

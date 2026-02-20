@@ -51,10 +51,13 @@ typedef enum {
  *
  * @param config Simulation configuration parameters.
  * @param num_time_samples Number of samples in the flattened input/output arrays.
- *        For 1D legacy use this is the temporal sample count.
- *        For 2D transverse simulations this must equal config->spatial.nx * config->spatial.ny.
+ *        For legacy 1D use this is the temporal sample count.
+ *        If config->time.nt == 0 and spatial nx/ny are provided, this must
+ *        equal config->spatial.nx * config->spatial.ny (legacy flattened mode).
+ *        If config->time.nt > 0, this must equal
+ *        config->time.nt * config->spatial.nx * config->spatial.ny.
  * @param input_field Pointer to input field buffer (length: num_time_samples),
- *        flattened in row-major order for 2D transverse mode.
+ *        flattened in row-major order with x as the fastest index.
  * @param num_recorded_samples Number of envelope records to return.
  * @param output_records Pointer to output record buffer (length:
  *        num_recorded_samples * num_time_samples). The layout is record-major:

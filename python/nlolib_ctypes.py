@@ -78,6 +78,7 @@ class PropagationParams(ctypes.Structure):
 
 class TimeGrid(ctypes.Structure):
     _fields_ = [
+        ("nt", ctypes.c_size_t),
         ("pulse_period", ctypes.c_double),
         ("delta_time", ctypes.c_double),
     ]
@@ -102,6 +103,8 @@ class RuntimeOperatorParams(ctypes.Structure):
     _fields_ = [
         ("dispersion_factor_expr", ctypes.c_char_p),
         ("dispersion_expr", ctypes.c_char_p),
+        ("transverse_factor_expr", ctypes.c_char_p),
+        ("transverse_expr", ctypes.c_char_p),
         ("nonlinear_expr", ctypes.c_char_p),
         ("num_constants", ctypes.c_size_t),
         ("constants", ctypes.c_double * NLO_RUNTIME_OPERATOR_CONSTANTS_MAX),
@@ -254,9 +257,13 @@ def default_execution_options(
 class RuntimeOperators:
     dispersion_factor_expr: str | None = None
     dispersion_expr: str | None = None
+    transverse_factor_expr: str | None = None
+    transverse_expr: str | None = None
     nonlinear_expr: str | None = None
     dispersion_factor_fn: Callable[..., object] | None = None
     dispersion_fn: Callable[..., object] | None = None
+    transverse_factor_fn: Callable[..., object] | None = None
+    transverse_fn: Callable[..., object] | None = None
     nonlinear_fn: Callable[..., object] | None = None
     constants: Sequence[float] = ()
     constant_bindings: Mapping[str, float] | None = None
@@ -293,6 +300,7 @@ def prepare_sim_config(
     error_tolerance: float,
     pulse_period: float,
     delta_time: float,
+    time_nt: int | None = None,
     frequency_grid: Sequence[complex],
     spatial_nx: int | None = None,
     spatial_ny: int | None = None,
@@ -307,7 +315,13 @@ def prepare_sim_config(
     """
     if num_time_samples <= 0:
         raise ValueError("num_time_samples must be > 0")
-    if len(frequency_grid) != num_time_samples:
+    if time_nt is not None and int(time_nt) > 0:
+        time_nt_int = int(time_nt)
+        if len(frequency_grid) not in {time_nt_int, num_time_samples}:
+            raise ValueError(
+                "frequency_grid length must match time_nt (or num_time_samples for full-volume grids)"
+            )
+    elif len(frequency_grid) != num_time_samples:
         raise ValueError("frequency_grid length must match num_time_samples")
 
     cfg = SimConfig()
@@ -319,6 +333,7 @@ def prepare_sim_config(
     cfg.propagation.min_step_size = float(min_step_size)
     cfg.propagation.error_tolerance = float(error_tolerance)
 
+    cfg.time.nt = int(time_nt) if time_nt is not None else 0
     cfg.time.pulse_period = float(pulse_period)
     cfg.time.delta_time = float(delta_time)
 
@@ -326,12 +341,36 @@ def prepare_sim_config(
     keepalive.append(freq_arr)
     cfg.frequency.frequency_grid = ctypes.cast(freq_arr, ctypes.POINTER(NloComplex))
 
-    nx = int(spatial_nx) if spatial_nx is not None else int(num_time_samples)
+    nx = int(spatial_nx) if spatial_nx is not None else (1 if cfg.time.nt > 0 else int(num_time_samples))
     ny = int(spatial_ny) if spatial_ny is not None else 1
+    if cfg.time.nt > 0:
+        if nx <= 0 or ny <= 0:
+            raise ValueError("spatial_nx and spatial_ny must be positive when time_nt is set")
+        if (cfg.time.nt * nx * ny) != int(num_time_samples):
+            raise ValueError("time_nt * spatial_nx * spatial_ny must match num_time_samples")
     cfg.spatial.nx = nx
     cfg.spatial.ny = ny
     cfg.spatial.delta_x = float(delta_x)
     cfg.spatial.delta_y = float(delta_y)
+
+    if cfg.time.nt > 0:
+        xy_points = nx * ny
+        if spatial_frequency_grid is not None and len(spatial_frequency_grid) not in {
+            xy_points,
+            num_time_samples,
+        }:
+            raise ValueError(
+                "spatial_frequency_grid length must match spatial_nx*spatial_ny "
+                "(or num_time_samples for full-volume grids)"
+            )
+        if potential_grid is not None and len(potential_grid) not in {
+            xy_points,
+            num_time_samples,
+        }:
+            raise ValueError(
+                "potential_grid length must match spatial_nx*spatial_ny "
+                "(or num_time_samples for full-volume grids)"
+            )
 
     if spatial_frequency_grid is not None:
         spatial_arr = make_complex_array(spatial_frequency_grid)
@@ -362,6 +401,12 @@ def prepare_sim_config(
             )
         if runtime.dispersion_expr and runtime.dispersion_fn is not None:
             raise ValueError("runtime.dispersion_expr and runtime.dispersion_fn are mutually exclusive")
+        if runtime.transverse_factor_expr and runtime.transverse_factor_fn is not None:
+            raise ValueError(
+                "runtime.transverse_factor_expr and runtime.transverse_factor_fn are mutually exclusive"
+            )
+        if runtime.transverse_expr and runtime.transverse_fn is not None:
+            raise ValueError("runtime.transverse_expr and runtime.transverse_fn are mutually exclusive")
         if runtime.nonlinear_expr and runtime.nonlinear_fn is not None:
             raise ValueError("runtime.nonlinear_expr and runtime.nonlinear_fn are mutually exclusive")
 
@@ -388,6 +433,30 @@ def prepare_sim_config(
             shifted = _shift_constant_indices(translated.expression, len(constants))
             constants.extend(translated.constants)
             dispersion_expr = shifted
+
+        transverse_factor_expr = runtime.transverse_factor_expr
+        if runtime.transverse_factor_fn is not None:
+            translated = translate_callable(
+                runtime.transverse_factor_fn,
+                RUNTIME_CONTEXT_DISPERSION_FACTOR,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            transverse_factor_expr = shifted
+
+        transverse_expr = runtime.transverse_expr
+        if runtime.transverse_fn is not None:
+            translated = translate_callable(
+                runtime.transverse_fn,
+                RUNTIME_CONTEXT_DISPERSION,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            transverse_expr = shifted
 
         nonlinear_expr = runtime.nonlinear_expr
         if runtime.nonlinear_fn is not None:
@@ -421,6 +490,20 @@ def prepare_sim_config(
         else:
             cfg.runtime.dispersion_expr = None
 
+        if transverse_factor_expr:
+            trans_factor_bytes = transverse_factor_expr.encode("utf-8")
+            keepalive.append(trans_factor_bytes)
+            cfg.runtime.transverse_factor_expr = ctypes.c_char_p(trans_factor_bytes)
+        else:
+            cfg.runtime.transverse_factor_expr = None
+
+        if transverse_expr:
+            trans_bytes = transverse_expr.encode("utf-8")
+            keepalive.append(trans_bytes)
+            cfg.runtime.transverse_expr = ctypes.c_char_p(trans_bytes)
+        else:
+            cfg.runtime.transverse_expr = None
+
         if nonlinear_expr:
             nonlin_bytes = nonlinear_expr.encode("utf-8")
             keepalive.append(nonlin_bytes)
@@ -434,6 +517,8 @@ def prepare_sim_config(
     else:
         cfg.runtime.dispersion_factor_expr = None
         cfg.runtime.dispersion_expr = None
+        cfg.runtime.transverse_factor_expr = None
+        cfg.runtime.transverse_expr = None
         cfg.runtime.nonlinear_expr = None
         cfg.runtime.num_constants = 0
 

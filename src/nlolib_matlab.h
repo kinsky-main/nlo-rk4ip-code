@@ -83,6 +83,7 @@ typedef struct
 
 typedef struct
 {
+    size_t nt;
     double pulse_period;
     double delta_time;
 } time_grid;
@@ -106,6 +107,8 @@ typedef struct
 {
     const char *dispersion_factor_expr;
     const char *dispersion_expr;
+    const char *transverse_factor_expr;
+    const char *transverse_expr;
     const char *nonlinear_expr;
     size_t num_constants;
     double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];

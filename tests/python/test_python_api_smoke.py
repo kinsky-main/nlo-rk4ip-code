@@ -59,6 +59,32 @@ def main():
     assert len(out_2d[0]) == nxy
     print("test_python_api_smoke: flattened 2D propagation returned expected shape.")
 
+    nt = 4
+    nx3 = 4
+    ny3 = 2
+    n3 = nt * nx3 * ny3
+    cfg_3d = prepare_sim_config(
+        n3,
+        propagation_distance=0.0,
+        starting_step_size=0.01,
+        max_step_size=0.1,
+        min_step_size=0.001,
+        error_tolerance=1e-6,
+        pulse_period=1.0,
+        delta_time=0.001,
+        time_nt=nt,
+        frequency_grid=[0j] * nt,
+        spatial_nx=nx3,
+        spatial_ny=ny3,
+        spatial_frequency_grid=[0j] * (nx3 * ny3),
+        potential_grid=[0j] * (nx3 * ny3),
+        runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0, 0.0]),
+    )
+    out_3d = api.propagate(cfg_3d, [0j] * n3, 1, cpu_opts)
+    assert len(out_3d) == 1
+    assert len(out_3d[0]) == n3
+    print("test_python_api_smoke: explicit 3+1D layout propagation returned expected shape.")
+
     bad_cfg_2d = prepare_sim_config(
         nxy,
         propagation_distance=0.0,

@@ -173,13 +173,29 @@ static nlo_vec_status nlo_apply_dispersion_operator_stage(
     };
 
     const double start_ms = nlo_perf_profile_now_ms();
-    const nlo_vec_status status = nlo_apply_dispersion_operator_program_vec(state->backend,
-                                                                             &state->dispersion_operator_program,
-                                                                             &eval_ctx,
-                                                                             freq_domain_envelope,
-                                                                             state->working_vectors.dispersion_operator_vec,
-                                                                             state->runtime_operator_stack_vec,
-                                                                             state->runtime_operator_stack_slots);
+    nlo_vec_status status = nlo_apply_dispersion_operator_program_vec(state->backend,
+                                                                      &state->dispersion_operator_program,
+                                                                      &eval_ctx,
+                                                                      freq_domain_envelope,
+                                                                      state->working_vectors.dispersion_operator_vec,
+                                                                      state->runtime_operator_stack_vec,
+                                                                      state->runtime_operator_stack_slots);
+    if (status == NLO_VEC_STATUS_OK && state->transverse_active) {
+        const nlo_operator_eval_context transverse_eval_ctx = {
+            .frequency_grid = state->spatial_frequency_grid_vec,
+            .field = freq_domain_envelope,
+            .dispersion_factor = state->transverse_factor_vec,
+            .potential = state->working_vectors.potential_vec,
+            .half_step_size = state->current_half_step_exp
+        };
+        status = nlo_apply_dispersion_operator_program_vec(state->backend,
+                                                           &state->transverse_operator_program,
+                                                           &transverse_eval_ctx,
+                                                           freq_domain_envelope,
+                                                           state->transverse_operator_vec,
+                                                           state->runtime_operator_stack_vec,
+                                                           state->runtime_operator_stack_slots);
+    }
     const double end_ms = nlo_perf_profile_now_ms();
     if (status == NLO_VEC_STATUS_OK) {
         nlo_perf_profile_add_dispersion_time(end_ms - start_ms);

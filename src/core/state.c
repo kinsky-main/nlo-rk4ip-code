@@ -51,17 +51,40 @@
 #endif
 
 static int checked_mul_size_t(size_t a, size_t b, size_t* out);
-static int nlo_resolve_spatial_dimensions(
+static int nlo_resolve_sim_dimensions(
     const sim_config* config,
-    size_t num_time_samples,
+    size_t total_samples,
+    size_t* out_nt,
     size_t* out_nx,
-    size_t* out_ny
+    size_t* out_ny,
+    int* out_explicit_nd
 );
 static size_t query_available_system_memory_bytes(void);
 static size_t apply_memory_headroom(size_t available_bytes);
 static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records);
 static double nlo_resolve_delta_time(const sim_config* config, size_t num_time_samples);
 static void nlo_fill_default_omega_grid(nlo_complex* out_grid, size_t num_time_samples, double delta_time);
+static void nlo_fill_default_k2_grid_xy(
+    nlo_complex* out_grid_xy,
+    size_t nx,
+    size_t ny,
+    double delta_x,
+    double delta_y
+);
+static int nlo_expand_temporal_grid_to_volume(
+    nlo_complex* out_volume,
+    const nlo_complex* temporal_grid,
+    size_t nt,
+    size_t nx,
+    size_t ny
+);
+static int nlo_expand_xy_grid_to_volume(
+    nlo_complex* out_volume,
+    const nlo_complex* xy_grid,
+    size_t nt,
+    size_t nx,
+    size_t ny
+);
 static int nlo_frequency_grid_matches_expected_unshifted(
     const nlo_complex* grid,
     size_t num_time_samples,
@@ -80,6 +103,14 @@ static int nlo_frequency_grid_matches_expected_unshifted(
 #define NLO_DEFAULT_NONLINEAR_EXPR "i*c2*I + i*V"
 #endif
 
+#ifndef NLO_DEFAULT_TRANSVERSE_FACTOR_EXPR
+#define NLO_DEFAULT_TRANSVERSE_FACTOR_EXPR "0"
+#endif
+
+#ifndef NLO_DEFAULT_TRANSVERSE_EXPR
+#define NLO_DEFAULT_TRANSVERSE_EXPR "exp(h*D)"
+#endif
+
 #ifndef NLO_DEFAULT_C0
 #define NLO_DEFAULT_C0 -0.5
 #endif
@@ -90,6 +121,10 @@ static int nlo_frequency_grid_matches_expected_unshifted(
 
 #ifndef NLO_DEFAULT_C2
 #define NLO_DEFAULT_C2 1.0
+#endif
+
+#ifndef NLO_DEFAULT_C3
+#define NLO_DEFAULT_C3 0.0
 #endif
 
 static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer** vec)
@@ -107,33 +142,80 @@ static nlo_vec_status nlo_create_complex_vec(nlo_vector_backend* backend, size_t
     return nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, length, out_vec);
 }
 
-static int nlo_resolve_spatial_dimensions(
+static int nlo_resolve_sim_dimensions(
     const sim_config* config,
-    size_t num_time_samples,
+    size_t total_samples,
+    size_t* out_nt,
     size_t* out_nx,
-    size_t* out_ny
+    size_t* out_ny,
+    int* out_explicit_nd
 )
 {
-    if (config == NULL || out_nx == NULL || out_ny == NULL || num_time_samples == 0u) {
+    if (config == NULL ||
+        out_nt == NULL ||
+        out_nx == NULL ||
+        out_ny == NULL ||
+        out_explicit_nd == NULL ||
+        total_samples == 0u) {
         return -1;
     }
 
+    const size_t configured_nt = config->time.nt;
     size_t nx = config->spatial.nx;
     size_t ny = config->spatial.ny;
-    if (nx == 0u && ny == 0u) {
-        nx = num_time_samples;
+
+    if (configured_nt == 0u) {
+        if (nx == 0u && ny == 0u) {
+            *out_nt = total_samples;
+            *out_nx = 1u;
+            *out_ny = 1u;
+            *out_explicit_nd = 0;
+            return 0;
+        }
+        if (nx == 0u || ny == 0u) {
+            return -1;
+        }
+
+        size_t total_points = 0u;
+        if (checked_mul_size_t(nx, ny, &total_points) != 0 || total_points != total_samples) {
+            return -1;
+        }
+
+        if (ny == 1u && nx == total_samples) {
+            *out_nt = total_samples;
+            *out_nx = 1u;
+            *out_ny = 1u;
+            *out_explicit_nd = 0;
+            return 0;
+        }
+
+        *out_nt = 1u;
+        *out_nx = nx;
+        *out_ny = ny;
+        *out_explicit_nd = 0;
+        return 0;
+    }
+
+    if (nx == 0u) {
+        nx = 1u;
+    }
+    if (ny == 0u) {
         ny = 1u;
-    } else if (nx == 0u || ny == 0u) {
+    }
+
+    size_t ntxy = 0u;
+    if (checked_mul_size_t(configured_nt, nx, &ntxy) != 0) {
+        return -1;
+    }
+    size_t resolved_total = 0u;
+    if (checked_mul_size_t(ntxy, ny, &resolved_total) != 0 || resolved_total != total_samples) {
         return -1;
     }
 
-    size_t total_points = 0u;
-    if (checked_mul_size_t(nx, ny, &total_points) != 0 || total_points != num_time_samples) {
-        return -1;
-    }
-
+    *out_nt = configured_nt;
     *out_nx = nx;
     *out_ny = ny;
+    *out_explicit_nd = 1;
     return 0;
 }
 
@@ -180,6 +262,75 @@ static void nlo_fill_default_omega_grid(nlo_complex* out_grid, size_t num_time_s
     for (size_t i = 0u; i < num_time_samples; ++i) {
         out_grid[i] = nlo_make(nlo_expected_omega_unshifted(i, num_time_samples, omega_step), 0.0);
     }
+}
+
+static void nlo_fill_default_k2_grid_xy(
+    nlo_complex* out_grid_xy,
+    size_t nx,
+    size_t ny,
+    double delta_x,
+    double delta_y
+)
+{
+    if (out_grid_xy == NULL || nx == 0u || ny == 0u) {
+        return;
+    }
+
+    const double safe_dx = (delta_x > 0.0) ? delta_x : 1.0;
+    const double safe_dy = (delta_y > 0.0) ? delta_y : 1.0;
+    const double kx_step = NLO_TWO_PI / ((double)nx * safe_dx);
+    const double ky_step = NLO_TWO_PI / ((double)ny * safe_dy);
+
+    for (size_t y = 0u; y < ny; ++y) {
+        const double ky = nlo_expected_omega_unshifted(y, ny, ky_step);
+        for (size_t x = 0u; x < nx; ++x) {
+            const double kx = nlo_expected_omega_unshifted(x, nx, kx_step);
+            const double k2 = (kx * kx) + (ky * ky);
+            out_grid_xy[(y * nx) + x] = nlo_make(k2, 0.0);
+        }
+    }
+}
+
+static int nlo_expand_temporal_grid_to_volume(
+    nlo_complex* out_volume,
+    const nlo_complex* temporal_grid,
+    size_t nt,
+    size_t nx,
+    size_t ny
+)
+{
+    if (out_volume == NULL || temporal_grid == NULL || nt == 0u || nx == 0u || ny == 0u) {
+        return -1;
+    }
+
+    const size_t plane = nx * ny;
+    for (size_t t = 0u; t < nt; ++t) {
+        const nlo_complex omega = temporal_grid[t];
+        const size_t base = t * plane;
+        for (size_t i = 0u; i < plane; ++i) {
+            out_volume[base + i] = omega;
+        }
+    }
+    return 0;
+}
+
+static int nlo_expand_xy_grid_to_volume(
+    nlo_complex* out_volume,
+    const nlo_complex* xy_grid,
+    size_t nt,
+    size_t nx,
+    size_t ny
+)
+{
+    if (out_volume == NULL || xy_grid == NULL || nt == 0u || nx == 0u || ny == 0u) {
+        return -1;
+    }
+
+    const size_t plane = nx * ny;
+    for (size_t t = 0u; t < nt; ++t) {
+        memcpy(out_volume + (t * plane), xy_grid, plane * sizeof(nlo_complex));
+    }
+    return 0;
 }
 
 static int nlo_frequency_grid_matches_expected_unshifted(
@@ -230,8 +381,9 @@ static size_t nlo_resolve_runtime_constants(const runtime_operator_params* runti
     out_constants[0] = NLO_DEFAULT_C0;
     out_constants[1] = NLO_DEFAULT_C1;
     out_constants[2] = NLO_DEFAULT_C2;
+    out_constants[3] = NLO_DEFAULT_C3;
 
-    size_t count = 3u;
+    size_t count = 4u;
     if (runtime == NULL) {
         return count;
     }
@@ -289,6 +441,15 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     }
 
     size_t active_vec_count = 2u + NLO_WORK_VECTOR_COUNT;
+    if (state->spatial_frequency_grid_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->transverse_factor_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->transverse_operator_vec != NULL) {
+        active_vec_count += 1u;
+    }
     if (state->runtime_operator_stack_slots > SIZE_MAX - active_vec_count) {
         return NLO_MIN_DEVICE_RING_CAPACITY;
     }
@@ -355,6 +516,7 @@ sim_config* create_sim_config(size_t num_time_samples)
     }
 
     config->propagation.error_tolerance = 1e-6;
+    config->time.nt = 0u;
     config->spatial.nx = num_time_samples;
     config->spatial.ny = 1u;
     config->spatial.delta_x = 1.0;
@@ -363,6 +525,8 @@ sim_config* create_sim_config(size_t num_time_samples)
     config->spatial.potential_grid = NULL;
     config->runtime.dispersion_factor_expr = NULL;
     config->runtime.dispersion_expr = NULL;
+    config->runtime.transverse_factor_expr = NULL;
+    config->runtime.transverse_expr = NULL;
     config->runtime.nonlinear_expr = NULL;
     config->runtime.num_constants = 0u;
     config->frequency.frequency_grid = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
@@ -400,16 +564,18 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
+    size_t resolved_nt = 0u;
     size_t spatial_nx = 0u;
     size_t spatial_ny = 0u;
-    if (nlo_resolve_spatial_dimensions(config,
-                                       num_time_samples,
-                                       &spatial_nx,
-                                       &spatial_ny) != 0) {
+    int explicit_nd = 0;
+    if (nlo_resolve_sim_dimensions(config,
+                                   num_time_samples,
+                                   &resolved_nt,
+                                   &spatial_nx,
+                                   &spatial_ny,
+                                   &explicit_nd) != 0) {
         return NULL;
     }
-    (void)spatial_nx;
-    (void)spatial_ny;
 
     simulation_state* state = (simulation_state*)calloc(1, sizeof(simulation_state));
     if (state == NULL) {
@@ -418,8 +584,11 @@ simulation_state* create_simulation_state(
 
     state->config = config;
     state->exec_options = *exec_options;
+    state->nt = resolved_nt;
+    state->nx = spatial_nx;
+    state->ny = spatial_ny;
     state->num_time_samples = num_time_samples;
-    state->num_points_xy = num_time_samples;
+    state->num_points_xy = spatial_nx * spatial_ny;
     state->num_recorded_samples = compute_host_record_capacity(num_time_samples, num_recorded_samples);
     if (state->num_recorded_samples == 0u) {
         nlo_state_debug_log_failure("host_record_capacity", NLO_VEC_STATUS_ALLOCATION_FAILED);
@@ -487,6 +656,18 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
+    const int enable_transverse = (explicit_nd != 0) && (spatial_nx > 1u || spatial_ny > 1u);
+    state->transverse_active = 0;
+    if (enable_transverse) {
+        if (nlo_create_complex_vec(state->backend, num_time_samples, &state->spatial_frequency_grid_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->transverse_factor_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->transverse_operator_vec) != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("allocate_transverse_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
+            free_simulation_state(state);
+            return NULL;
+        }
+    }
+
     nlo_vec_status status = nlo_vec_complex_fill(state->backend, state->current_field_vec, nlo_make(0.0, 0.0));
     if (status != NLO_VEC_STATUS_OK) {
         nlo_state_debug_log_failure("clear_current_field", status);
@@ -494,61 +675,191 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
-    const nlo_complex* spectral_grid_source = config->spatial.spatial_frequency_grid;
-    nlo_complex* generated_frequency_grid = NULL;
-    if (spectral_grid_source == NULL) {
-        const nlo_complex* temporal_frequency_grid = config->frequency.frequency_grid;
-        const double delta_time = nlo_resolve_delta_time(config, num_time_samples);
-        if (temporal_frequency_grid != NULL &&
-            nlo_frequency_grid_matches_expected_unshifted(temporal_frequency_grid,
-                                                          num_time_samples,
-                                                          delta_time)) {
-            spectral_grid_source = temporal_frequency_grid;
-        } else {
-            generated_frequency_grid = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
-            if (generated_frequency_grid == NULL) {
-                nlo_state_debug_log_failure("allocate_generated_frequency_grid", NLO_VEC_STATUS_ALLOCATION_FAILED);
-                free_simulation_state(state);
-                return NULL;
-            }
+    const double delta_time = nlo_resolve_delta_time(config, state->nt);
+    if (explicit_nd != 0) {
+        nlo_complex* temporal_line = (nlo_complex*)malloc(state->nt * sizeof(nlo_complex));
+        nlo_complex* temporal_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
+        if (temporal_line == NULL || temporal_volume == NULL) {
+            free(temporal_line);
+            free(temporal_volume);
+            nlo_state_debug_log_failure("allocate_temporal_frequency_grid", NLO_VEC_STATUS_ALLOCATION_FAILED);
+            free_simulation_state(state);
+            return NULL;
+        }
 
-            nlo_fill_default_omega_grid(generated_frequency_grid, num_time_samples, delta_time);
-            spectral_grid_source = generated_frequency_grid;
+        if (config->frequency.frequency_grid != NULL) {
+            memcpy(temporal_line, config->frequency.frequency_grid, state->nt * sizeof(nlo_complex));
+        } else {
+            nlo_fill_default_omega_grid(temporal_line, state->nt, delta_time);
+        }
+
+        if (nlo_expand_temporal_grid_to_volume(temporal_volume,
+                                               temporal_line,
+                                               state->nt,
+                                               state->nx,
+                                               state->ny) != 0) {
+            free(temporal_line);
+            free(temporal_volume);
+            nlo_state_debug_log_failure("expand_temporal_frequency_grid", NLO_VEC_STATUS_INVALID_ARGUMENT);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = nlo_vec_upload(state->backend,
+                                state->frequency_grid_vec,
+                                temporal_volume,
+                                num_time_samples * sizeof(nlo_complex));
+        free(temporal_line);
+        free(temporal_volume);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("upload_frequency_grid", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+    } else {
+        const nlo_complex* spectral_grid_source = config->spatial.spatial_frequency_grid;
+        nlo_complex* generated_frequency_grid = NULL;
+        if (spectral_grid_source == NULL) {
+            const nlo_complex* temporal_frequency_grid = config->frequency.frequency_grid;
+            if (temporal_frequency_grid != NULL &&
+                nlo_frequency_grid_matches_expected_unshifted(temporal_frequency_grid,
+                                                              num_time_samples,
+                                                              delta_time)) {
+                spectral_grid_source = temporal_frequency_grid;
+            } else {
+                generated_frequency_grid = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
+                if (generated_frequency_grid == NULL) {
+                    nlo_state_debug_log_failure("allocate_generated_frequency_grid", NLO_VEC_STATUS_ALLOCATION_FAILED);
+                    free_simulation_state(state);
+                    return NULL;
+                }
+
+                nlo_fill_default_omega_grid(generated_frequency_grid, num_time_samples, delta_time);
+                spectral_grid_source = generated_frequency_grid;
+            }
+        }
+
+        if (spectral_grid_source != NULL) {
+            status = nlo_vec_upload(state->backend,
+                                    state->frequency_grid_vec,
+                                    spectral_grid_source,
+                                    num_time_samples * sizeof(nlo_complex));
+        } else {
+            status = nlo_vec_complex_fill(state->backend, state->frequency_grid_vec, nlo_make(0.0, 0.0));
+        }
+        if (generated_frequency_grid != NULL) {
+            free(generated_frequency_grid);
+            generated_frequency_grid = NULL;
+        }
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("upload_frequency_grid", status);
+            free_simulation_state(state);
+            return NULL;
         }
     }
 
-    if (spectral_grid_source != NULL) {
-        status = nlo_vec_upload(state->backend,
-                                state->frequency_grid_vec,
-                                spectral_grid_source,
-                                num_time_samples * sizeof(nlo_complex));
-    } else {
-        status = nlo_vec_complex_fill(state->backend, state->frequency_grid_vec, nlo_make(0.0, 0.0));
-    }
-    if (generated_frequency_grid != NULL) {
-        free(generated_frequency_grid);
-        generated_frequency_grid = NULL;
-    }
-    if (status != NLO_VEC_STATUS_OK) {
-        nlo_state_debug_log_failure("upload_frequency_grid", status);
-        free_simulation_state(state);
-        return NULL;
-    }
+    if (enable_transverse) {
+        const size_t xy_points = state->num_points_xy;
+        nlo_complex* k2_xy = (nlo_complex*)malloc(xy_points * sizeof(nlo_complex));
+        nlo_complex* k2_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
+        nlo_complex* potential_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
+        if (k2_xy == NULL || k2_volume == NULL || potential_volume == NULL) {
+            free(k2_xy);
+            free(k2_volume);
+            free(potential_volume);
+            nlo_state_debug_log_failure("allocate_transverse_grids", NLO_VEC_STATUS_ALLOCATION_FAILED);
+            free_simulation_state(state);
+            return NULL;
+        }
 
-    if (config->spatial.potential_grid != NULL) {
+        if (config->spatial.spatial_frequency_grid != NULL) {
+            memcpy(k2_xy, config->spatial.spatial_frequency_grid, xy_points * sizeof(nlo_complex));
+        } else {
+            nlo_fill_default_k2_grid_xy(k2_xy,
+                                        state->nx,
+                                        state->ny,
+                                        config->spatial.delta_x,
+                                        config->spatial.delta_y);
+        }
+        if (nlo_expand_xy_grid_to_volume(k2_volume, k2_xy, state->nt, state->nx, state->ny) != 0) {
+            free(k2_xy);
+            free(k2_volume);
+            free(potential_volume);
+            nlo_state_debug_log_failure("expand_spatial_frequency_grid", NLO_VEC_STATUS_INVALID_ARGUMENT);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        if (config->spatial.potential_grid != NULL) {
+            if (nlo_expand_xy_grid_to_volume(potential_volume,
+                                             config->spatial.potential_grid,
+                                             state->nt,
+                                             state->nx,
+                                             state->ny) != 0) {
+                free(k2_xy);
+                free(k2_volume);
+                free(potential_volume);
+                nlo_state_debug_log_failure("expand_potential_grid", NLO_VEC_STATUS_INVALID_ARGUMENT);
+                free_simulation_state(state);
+                return NULL;
+            }
+        } else {
+            for (size_t i = 0u; i < num_time_samples; ++i) {
+                potential_volume[i] = nlo_make(0.0, 0.0);
+            }
+        }
+
         status = nlo_vec_upload(state->backend,
-                                state->working_vectors.potential_vec,
-                                config->spatial.potential_grid,
+                                state->spatial_frequency_grid_vec,
+                                k2_volume,
                                 num_time_samples * sizeof(nlo_complex));
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_upload(state->backend,
+                                    state->working_vectors.potential_vec,
+                                    potential_volume,
+                                    num_time_samples * sizeof(nlo_complex));
+        }
+        free(k2_xy);
+        free(k2_volume);
+        free(potential_volume);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("upload_transverse_grids", status);
+            free_simulation_state(state);
+            return NULL;
+        }
     } else {
-        status = nlo_vec_complex_fill(state->backend,
-                                      state->working_vectors.potential_vec,
-                                      nlo_make(0.0, 0.0));
-    }
-    if (status != NLO_VEC_STATUS_OK) {
-        nlo_state_debug_log_failure("upload_potential_grid", status);
-        free_simulation_state(state);
-        return NULL;
+        if (config->spatial.potential_grid != NULL) {
+            if (explicit_nd != 0) {
+                nlo_complex* potential_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
+                if (potential_volume == NULL) {
+                    nlo_state_debug_log_failure("allocate_potential_grid", NLO_VEC_STATUS_ALLOCATION_FAILED);
+                    free_simulation_state(state);
+                    return NULL;
+                }
+                for (size_t i = 0u; i < num_time_samples; ++i) {
+                    potential_volume[i] = config->spatial.potential_grid[0];
+                }
+                status = nlo_vec_upload(state->backend,
+                                        state->working_vectors.potential_vec,
+                                        potential_volume,
+                                        num_time_samples * sizeof(nlo_complex));
+                free(potential_volume);
+            } else {
+                status = nlo_vec_upload(state->backend,
+                                        state->working_vectors.potential_vec,
+                                        config->spatial.potential_grid,
+                                        num_time_samples * sizeof(nlo_complex));
+            }
+        } else {
+            status = nlo_vec_complex_fill(state->backend,
+                                          state->working_vectors.potential_vec,
+                                          nlo_make(0.0, 0.0));
+        }
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("upload_potential_grid", status);
+            free_simulation_state(state);
+            return NULL;
+        }
     }
 
     double resolved_runtime_constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
@@ -566,6 +877,10 @@ simulation_state* create_simulation_state(
                                                                    NLO_DEFAULT_DISPERSION_FACTOR_EXPR);
     const char* dispersion_expr = nlo_resolve_operator_expr(config->runtime.dispersion_expr,
                                                             NLO_DEFAULT_DISPERSION_EXPR);
+    const char* transverse_factor_expr = nlo_resolve_operator_expr(config->runtime.transverse_factor_expr,
+                                                                   NLO_DEFAULT_TRANSVERSE_FACTOR_EXPR);
+    const char* transverse_expr = nlo_resolve_operator_expr(config->runtime.transverse_expr,
+                                                            NLO_DEFAULT_TRANSVERSE_EXPR);
     const char* nonlinear_expr = nlo_resolve_operator_expr(config->runtime.nonlinear_expr,
                                                            NLO_DEFAULT_NONLINEAR_EXPR);
 
@@ -591,6 +906,30 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
+    if (enable_transverse) {
+        status = nlo_operator_program_compile(transverse_factor_expr,
+                                              NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->transverse_factor_operator_program);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("compile_transverse_factor_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = nlo_operator_program_compile(transverse_expr,
+                                              NLO_OPERATOR_CONTEXT_DISPERSION,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->transverse_operator_program);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("compile_transverse_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+    }
+
     status = nlo_operator_program_compile(nonlinear_expr,
                                           NLO_OPERATOR_CONTEXT_NONLINEAR,
                                           runtime_constant_count,
@@ -605,6 +944,12 @@ simulation_state* create_simulation_state(
     size_t required_stack_slots = state->dispersion_factor_operator_program.required_stack_slots;
     if (state->dispersion_operator_program.required_stack_slots > required_stack_slots) {
         required_stack_slots = state->dispersion_operator_program.required_stack_slots;
+    }
+    if (state->transverse_factor_operator_program.required_stack_slots > required_stack_slots) {
+        required_stack_slots = state->transverse_factor_operator_program.required_stack_slots;
+    }
+    if (state->transverse_operator_program.required_stack_slots > required_stack_slots) {
+        required_stack_slots = state->transverse_operator_program.required_stack_slots;
     }
     if (state->nonlinear_operator_program.required_stack_slots > required_stack_slots) {
         required_stack_slots = state->nonlinear_operator_program.required_stack_slots;
@@ -647,12 +992,76 @@ simulation_state* create_simulation_state(
         return NULL;
     }
 
+    if (enable_transverse) {
+        const nlo_operator_eval_context transverse_factor_eval_ctx = {
+            .frequency_grid = state->spatial_frequency_grid_vec,
+            .field = state->current_field_vec,
+            .dispersion_factor = NULL,
+            .potential = state->working_vectors.potential_vec,
+            .half_step_size = state->current_half_step_exp
+        };
+        status = nlo_operator_program_execute(state->backend,
+                                              &state->transverse_factor_operator_program,
+                                              &transverse_factor_eval_ctx,
+                                              state->runtime_operator_stack_vec,
+                                              state->runtime_operator_stack_slots,
+                                              state->transverse_factor_vec);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("execute_transverse_factor_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+        state->transverse_active = 1;
+    }
+
     state->dispersion_valid = 1;
 
-    if (nlo_fft_plan_create_with_backend(state->backend,
-                                         num_time_samples,
-                                         state->exec_options.fft_backend,
-                                         &state->fft_plan) != NLO_VEC_STATUS_OK) {
+    nlo_vec_status fft_status = NLO_VEC_STATUS_UNSUPPORTED;
+    if (explicit_nd != 0 && state->nt > 1u && state->nx > 1u && state->ny > 1u) {
+        const nlo_fft_shape shape = {
+            .rank = 3u,
+            .dims = {state->nt, state->ny, state->nx}
+        };
+        fft_status = nlo_fft_plan_create_shaped_with_backend(state->backend,
+                                                             &shape,
+                                                             state->exec_options.fft_backend,
+                                                             &state->fft_plan);
+        if (fft_status != NLO_VEC_STATUS_OK) {
+            const nlo_fft_shape fallback_shape = {
+                .rank = 1u,
+                .dims = {num_time_samples, 1u, 1u}
+            };
+            fft_status = nlo_fft_plan_create_shaped_with_backend(state->backend,
+                                                                 &fallback_shape,
+                                                                 state->exec_options.fft_backend,
+                                                                 &state->fft_plan);
+        }
+    } else if (explicit_nd != 0 && state->nx > 1u && state->ny > 1u) {
+        const nlo_fft_shape shape = {
+            .rank = 2u,
+            .dims = {state->ny, state->nx, 1u}
+        };
+        fft_status = nlo_fft_plan_create_shaped_with_backend(state->backend,
+                                                             &shape,
+                                                             state->exec_options.fft_backend,
+                                                             &state->fft_plan);
+        if (fft_status != NLO_VEC_STATUS_OK) {
+            const nlo_fft_shape fallback_shape = {
+                .rank = 1u,
+                .dims = {num_time_samples, 1u, 1u}
+            };
+            fft_status = nlo_fft_plan_create_shaped_with_backend(state->backend,
+                                                                 &fallback_shape,
+                                                                 state->exec_options.fft_backend,
+                                                                 &state->fft_plan);
+        }
+    } else {
+        fft_status = nlo_fft_plan_create_with_backend(state->backend,
+                                                      num_time_samples,
+                                                      state->exec_options.fft_backend,
+                                                      &state->fft_plan);
+    }
+    if (fft_status != NLO_VEC_STATUS_OK) {
         nlo_state_debug_log_failure("create_fft_plan", NLO_VEC_STATUS_BACKEND_UNAVAILABLE);
         free_simulation_state(state);
         return NULL;
@@ -708,6 +1117,9 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.nonlinear_multiplier_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.potential_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.previous_field_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->spatial_frequency_grid_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->transverse_factor_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->transverse_operator_vec);
         for (size_t i = 0u; i < NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS; ++i) {
             nlo_destroy_vec_if_set(state->backend, &state->runtime_operator_stack_vec[i]);
         }

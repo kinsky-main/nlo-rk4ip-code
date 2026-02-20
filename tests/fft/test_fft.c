@@ -90,10 +90,62 @@ static void test_fft_backend_selection_validation(void)
     printf("test_fft_backend_selection_validation: validates runtime FFT selection guards.\n");
 }
 
+static void test_fft_round_trip_3d_shape(void)
+{
+    const size_t nt = 4u;
+    const size_t ny = 2u;
+    const size_t nx = 2u;
+    const size_t n = nt * ny * nx;
+    nlo_complex time_domain[16];
+    nlo_complex round_trip[16];
+
+    for (size_t i = 0u; i < n; ++i) {
+        time_domain[i] = nlo_make((double)i * 0.125, (double)(n - i) * 0.03125);
+    }
+
+    nlo_vector_backend* backend = nlo_vector_backend_create_cpu();
+    assert(backend != NULL);
+
+    nlo_vec_buffer* in = NULL;
+    nlo_vec_buffer* freq = NULL;
+    nlo_vec_buffer* out = NULL;
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n, &in) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n, &freq) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n, &out) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_upload(backend, in, time_domain, sizeof(time_domain)) == NLO_VEC_STATUS_OK);
+
+    const nlo_fft_shape shape = {
+        .rank = 3u,
+        .dims = {nt, ny, nx}
+    };
+    nlo_fft_plan* plan = NULL;
+    assert(nlo_fft_plan_create_shaped_with_backend(backend,
+                                                   &shape,
+                                                   NLO_FFT_BACKEND_FFTW,
+                                                   &plan) == NLO_VEC_STATUS_OK);
+    assert(plan != NULL);
+    assert(nlo_fft_forward_vec(plan, in, freq) == NLO_VEC_STATUS_OK);
+    assert(nlo_fft_inverse_vec(plan, freq, out) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_download(backend, out, round_trip, sizeof(round_trip)) == NLO_VEC_STATUS_OK);
+
+    for (size_t i = 0u; i < n; ++i) {
+        assert(fabs(NLO_RE(round_trip[i]) - NLO_RE(time_domain[i])) < NLO_TEST_EPS);
+        assert(fabs(NLO_IM(round_trip[i]) - NLO_IM(time_domain[i])) < NLO_TEST_EPS);
+    }
+
+    nlo_fft_plan_destroy(plan);
+    nlo_vec_destroy(backend, in);
+    nlo_vec_destroy(backend, freq);
+    nlo_vec_destroy(backend, out);
+    nlo_vector_backend_destroy(backend);
+    printf("test_fft_round_trip_3d_shape: validates shaped 3D FFT round-trip consistency.\n");
+}
+
 int main(void)
 {
     test_fft_round_trip();
     test_fft_backend_selection_validation();
+    test_fft_round_trip_3d_shape();
     printf("test_fft: all subtests completed.\n");
     return 0;
 }

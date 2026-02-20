@@ -1,5 +1,9 @@
 """
-Minimal flattened-XY GRIN propagation example using the ctypes API.
+GRIN transverse phase validations with analytical references.
+
+This script now runs two analytical GRIN checks:
+1) Symmetric parabolic GRIN phase accumulation.
+2) Astigmatic (gx != gy) phase accumulation with offset input beam.
 """
 
 from __future__ import annotations
@@ -30,38 +34,39 @@ def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) 
     return out
 
 
-def main() -> None:
-    runner = NloExampleRunner()
-
-    nx = 1024
-    ny = 1024
+def run_phase_validation(
+    runner: NloExampleRunner,
+    *,
+    scenario_name: str,
+    nx: int,
+    ny: int,
+    dx: float,
+    dy: float,
+    w0: float,
+    grin_gx: float,
+    grin_gy: float,
+    x_offset: float,
+    y_offset: float,
+    propagation_distance: float,
+    num_records: int,
+    exec_opts: SimulationOptions,
+    output_root: Path,
+) -> tuple[list[Path], float, float]:
     nxy = nx * ny
-    dx = 0.5
-    dy = 0.5
-
     x = (np.arange(nx, dtype=np.float64) - 0.5 * (nx - 1)) * dx
     y = (np.arange(ny, dtype=np.float64) - 0.5 * (ny - 1)) * dy
     xx, yy = np.meshgrid(x, y, indexing="xy")
 
-    w0 = 8.0
-    grin_gx = 2.0e-4
-    grin_gy = 2.0e-4
     phase_unit = (grin_gx * (xx * xx)) + (grin_gy * (yy * yy))
-    field0 = np.exp(-((xx * xx + yy * yy) / (w0 * w0))).astype(np.complex128)
+    field0 = np.exp(-(((xx - x_offset) ** 2 + (yy - y_offset) ** 2) / (w0 * w0))).astype(np.complex128)
     field0_flat = field0.reshape(-1)
 
-    num_records = 8
-    exec_opts = SimulationOptions(
-        backend="auto",
-        fft_backend="auto",
-        device_heap_fraction=0.70,
-    )
     z_records, records = runner.propagate_flattened_xy_records(
         field0_flat=field0_flat,
         nx=nx,
         ny=ny,
         num_records=num_records,
-        propagation_distance=0.25,
+        propagation_distance=propagation_distance,
         starting_step_size=1e-3,
         max_step_size=2e-3,
         min_step_size=5e-5,
@@ -73,11 +78,6 @@ def main() -> None:
         alpha=0.0,
         exec_options=exec_opts,
     )
-
-    in_power = float(np.sum(np.abs(records[0]) ** 2))
-    out_power = float(np.sum(np.abs(records[-1]) ** 2))
-    print(f"GRIN XY propagation completed: records={num_records}, shape=({ny}, {nx})")
-    print(f"Power trend: z0={in_power:.6e}, z_end={out_power:.6e}")
 
     analytical_records = np.empty_like(records, dtype=np.complex128)
     for i, z in enumerate(z_records):
@@ -91,22 +91,20 @@ def main() -> None:
     center_row = ny // 2
     profile_records = np.asarray(records[:, center_row, :], dtype=np.complex128)
     analytical_profile_records = np.asarray(analytical_records[:, center_row, :], dtype=np.complex128)
-    analytical_final_profile = analytical_profile_records[-1]
-    final_profile = profile_records[-1]
     profile_error = relative_l2_error_curve(profile_records, analytical_profile_records)
 
-    output_dir = Path(__file__).resolve().parent / "output" / "grin_fiber_xy"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = output_root / scenario_name
+    out_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
     p1 = plot_intensity_colormap_vs_propagation(
         x,
         z_records,
         np.abs(profile_records) ** 2,
-        output_dir / "profile_intensity_colormap.png",
+        out_dir / "centerline_intensity_colormap.png",
         x_label="Transverse coordinate x",
         y_label="Propagation distance z",
-        title="GRIN Fiber: Center-Line Intensity Profile vs Propagation",
+        title=f"{scenario_name}: center-line intensity vs propagation",
         colorbar_label="Normalized center-line intensity",
         cmap="viridis",
     )
@@ -115,11 +113,11 @@ def main() -> None:
 
     p2 = plot_final_re_im_comparison(
         x,
-        analytical_final_profile,
-        final_profile,
-        output_dir / "final_re_im_profile_comparison.png",
+        analytical_profile_records[-1],
+        profile_records[-1],
+        out_dir / "final_re_im_profile_comparison.png",
         x_label="Transverse coordinate x",
-        title="GRIN Fiber: Final Re/Im Profile (Analytical vs Numerical)",
+        title=f"{scenario_name}: final Re/Im profile (analytical vs numerical)",
         reference_label="Analytical final",
         final_label="Numerical final",
     )
@@ -128,11 +126,11 @@ def main() -> None:
 
     p3 = plot_final_intensity_comparison(
         x,
-        analytical_final_profile,
-        final_profile,
-        output_dir / "final_intensity_profile_comparison.png",
+        analytical_profile_records[-1],
+        profile_records[-1],
+        out_dir / "final_intensity_profile_comparison.png",
         x_label="Transverse coordinate x",
-        title="GRIN Fiber: Final Intensity Profile (Analytical vs Numerical)",
+        title=f"{scenario_name}: final intensity profile (analytical vs numerical)",
         reference_label="Analytical final",
         final_label="Numerical final",
     )
@@ -142,9 +140,9 @@ def main() -> None:
     p4 = plot_total_error_over_propagation(
         z_records,
         full_error,
-        output_dir / "total_profile_error_over_propagation.png",
-        title="GRIN Fiber: Total Error Over Propagation (Analytical vs Numerical)",
-        y_label="Relative L2 error (full transverse field)",
+        out_dir / "full_field_relative_error_over_propagation.png",
+        title=f"{scenario_name}: full-field error over propagation",
+        y_label="Relative L2 error (full field)",
     )
     if p4 is not None:
         saved_paths.append(p4)
@@ -154,21 +152,93 @@ def main() -> None:
         y,
         z_records,
         np.asarray(records, dtype=np.complex128),
-        output_dir / "propagation_3d_intensity_scatter.png",
+        out_dir / "propagation_3d_numerical_scatter.png",
         intensity_cutoff=0.08,
-        xy_stride=24,
+        xy_stride=16,
         min_marker_size=2.0,
-        max_marker_size=40.0,
-        title="GRIN Fiber: 3D Propagation Scatter (Intensity-Weighted)",
+        max_marker_size=34.0,
+        title=f"{scenario_name}: numerical propagation (3D scatter)",
     )
     if p5 is not None:
         saved_paths.append(p5)
 
-    print(f"analytical comparison: final full-field relative L2 error={full_error[-1]:.6e}")
-    print(f"analytical comparison: final center-line relative L2 error={profile_error[-1]:.6e}")
-    if saved_paths:
-        print("saved profile plots:")
-        for path in saved_paths:
+    p6 = plot_3d_intensity_scatter_propagation(
+        x,
+        y,
+        z_records,
+        np.asarray(analytical_records, dtype=np.complex128),
+        out_dir / "propagation_3d_analytical_scatter.png",
+        intensity_cutoff=0.08,
+        xy_stride=16,
+        min_marker_size=2.0,
+        max_marker_size=34.0,
+        title=f"{scenario_name}: analytical propagation (3D scatter)",
+    )
+    if p6 is not None:
+        saved_paths.append(p6)
+
+    in_power = float(np.sum(np.abs(records[0]) ** 2))
+    out_power = float(np.sum(np.abs(records[-1]) ** 2))
+    power_drift = abs(out_power - in_power) / max(in_power, 1e-12)
+    final_error = float(full_error[-1])
+    final_profile_error = float(profile_error[-1])
+    print(
+        f"{scenario_name}: records={num_records}, grid=({ny},{nx}), "
+        f"final_full_error={final_error:.6e}, final_profile_error={final_profile_error:.6e}, "
+        f"power_drift={power_drift:.6e}"
+    )
+    return saved_paths, final_error, power_drift
+
+
+def main() -> None:
+    runner = NloExampleRunner()
+    exec_opts = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
+    output_root = Path(__file__).resolve().parent / "output" / "grin_fiber_xy"
+
+    scenarios = [
+        {
+            "scenario_name": "grin_phase_validation_symmetric",
+            "nx": 384,
+            "ny": 384,
+            "dx": 0.6,
+            "dy": 0.6,
+            "w0": 7.5,
+            "grin_gx": 2.0e-4,
+            "grin_gy": 2.0e-4,
+            "x_offset": 0.0,
+            "y_offset": 0.0,
+            "propagation_distance": 0.25,
+            "num_records": 8,
+        },
+        {
+            "scenario_name": "grin_phase_validation_astigmatic_offset",
+            "nx": 384,
+            "ny": 320,
+            "dx": 0.6,
+            "dy": 0.7,
+            "w0": 8.0,
+            "grin_gx": 3.0e-4,
+            "grin_gy": 1.2e-4,
+            "x_offset": 2.5,
+            "y_offset": -1.8,
+            "propagation_distance": 0.25,
+            "num_records": 8,
+        },
+    ]
+
+    all_saved: list[Path] = []
+    for scenario in scenarios:
+        saved_paths, _, _ = run_phase_validation(
+            runner,
+            exec_opts=exec_opts,
+            output_root=output_root,
+            **scenario,
+        )
+        all_saved.extend(saved_paths)
+
+    if all_saved:
+        print("saved plots:")
+        for path in all_saved:
             print(f"  {path}")
 
 

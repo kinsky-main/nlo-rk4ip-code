@@ -35,6 +35,7 @@ typedef struct {
 } propagation_params;
 
 typedef struct {
+    size_t nt;
     double pulse_period;
     double delta_time;
 } time_grid;
@@ -55,6 +56,8 @@ typedef struct {
 typedef struct {
     const char* dispersion_factor_expr;
     const char* dispersion_expr;
+    const char* transverse_factor_expr;
+    const char* transverse_expr;
     const char* nonlinear_expr;
     size_t num_constants;
     double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
@@ -101,6 +104,9 @@ typedef struct {
     nlo_execution_options exec_options;
     nlo_vector_backend* backend;
 
+    size_t nt;
+    size_t nx;
+    size_t ny;
     size_t num_time_samples;
     size_t num_points_xy;
     size_t num_recorded_samples;
@@ -127,7 +133,13 @@ typedef struct {
 
     nlo_operator_program dispersion_factor_operator_program;
     nlo_operator_program dispersion_operator_program;
+    nlo_operator_program transverse_factor_operator_program;
+    nlo_operator_program transverse_operator_program;
     nlo_operator_program nonlinear_operator_program;
+    int transverse_active;
+    nlo_vec_buffer* spatial_frequency_grid_vec;
+    nlo_vec_buffer* transverse_factor_vec;
+    nlo_vec_buffer* transverse_operator_vec;
     size_t runtime_operator_stack_slots;
     nlo_vec_buffer* runtime_operator_stack_vec[NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS];
 } simulation_state;
