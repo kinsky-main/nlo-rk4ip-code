@@ -10,6 +10,7 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/physics/operators.c
   ${CMAKE_SOURCE_DIR}/src/physics/operator_program.c
   ${CMAKE_SOURCE_DIR}/src/numerics/rk4_kernel.c
+  ${CMAKE_SOURCE_DIR}/src/io/snapshot_store.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
   ${CMAKE_SOURCE_DIR}/src/utility/rk4_debug.c
   ${CMAKE_SOURCE_DIR}/src/utility/state_debug.c
@@ -24,6 +25,8 @@ target_include_directories(test_core_state_alloc PRIVATE
   ${CMAKE_BINARY_DIR}/src/generated
 )
 target_link_libraries(test_core_state_alloc PRIVATE nlo_fft_backend simd::simd Vulkan::Vulkan)
+include(NLOSQLite)
+nlo_configure_sqlite(test_core_state_alloc)
 if(TARGET nlo_vk_shaders)
   add_dependencies(test_core_state_alloc nlo_vk_shaders)
 endif()

@@ -57,6 +57,7 @@
 
 #define NT_MAX (1 << 20)
 #define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16
+#define NLO_STORAGE_RUN_ID_MAX 64
 
 /* -------------------------------------------------------------------
  * nlo_complex
@@ -187,6 +188,31 @@ typedef enum
     NLOLIB_STATUS_NOT_IMPLEMENTED = 3
 } nlolib_status;
 
+typedef enum
+{
+    NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
+    NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
+} nlo_storage_db_cap_policy;
+
+typedef struct
+{
+    const char *sqlite_path;
+    const char *run_id;
+    size_t sqlite_max_bytes;
+    size_t chunk_records;
+    nlo_storage_db_cap_policy cap_policy;
+} nlo_storage_options;
+
+typedef struct
+{
+    char run_id[NLO_STORAGE_RUN_ID_MAX];
+    size_t records_captured;
+    size_t records_spilled;
+    size_t chunks_written;
+    size_t db_size_bytes;
+    int truncated;
+} nlo_storage_result;
+
 /* -------------------------------------------------------------------
  * Public API
  * ------------------------------------------------------------------- */
@@ -198,5 +224,25 @@ nlolib_status nlolib_propagate(
     size_t num_recorded_samples,
     nlo_complex *output_records,
     const nlo_execution_options *exec_options);
+
+nlolib_status nlolib_propagate_interleaved(
+    const sim_config *config,
+    size_t num_time_samples,
+    const double *input_field_interleaved,
+    size_t num_recorded_samples,
+    double *output_records_interleaved,
+    const nlo_execution_options *exec_options);
+
+nlolib_status nlolib_propagate_with_storage(
+    const sim_config *config,
+    size_t num_time_samples,
+    const nlo_complex *input_field,
+    size_t num_recorded_samples,
+    nlo_complex *output_records,
+    const nlo_execution_options *exec_options,
+    const nlo_storage_options *storage_options,
+    nlo_storage_result *storage_result);
+
+int nlolib_storage_is_available(void);
 
 #endif /* NLOLIB_MATLAB_H */

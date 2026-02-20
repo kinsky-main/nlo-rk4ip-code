@@ -26,6 +26,10 @@
 #define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16u
 #endif
 
+#ifndef NLO_STORAGE_RUN_ID_MAX
+#define NLO_STORAGE_RUN_ID_MAX 64u
+#endif
+
 typedef struct {
     double starting_step_size;
     double max_step_size;
@@ -80,6 +84,30 @@ typedef struct {
     nlo_vk_backend_config vulkan;
 } nlo_execution_options;
 
+typedef enum {
+    NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
+    NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
+} nlo_storage_db_cap_policy;
+
+typedef struct {
+    const char* sqlite_path;
+    const char* run_id;
+    size_t sqlite_max_bytes;
+    size_t chunk_records;
+    nlo_storage_db_cap_policy cap_policy;
+} nlo_storage_options;
+
+typedef struct {
+    char run_id[NLO_STORAGE_RUN_ID_MAX];
+    size_t records_captured;
+    size_t records_spilled;
+    size_t chunks_written;
+    size_t db_size_bytes;
+    int truncated;
+} nlo_storage_result;
+
+typedef struct nlo_snapshot_store nlo_snapshot_store;
+
 typedef struct {
     nlo_vec_buffer* ip_field_vec;
     nlo_vec_buffer* field_magnitude_vec;
@@ -110,9 +138,14 @@ typedef struct {
     size_t num_time_samples;
     size_t num_points_xy;
     size_t num_recorded_samples;
+    size_t num_host_records;
     size_t current_record_index;
 
     nlo_complex* field_buffer;
+    nlo_complex* snapshot_scratch_record;
+    nlo_snapshot_store* snapshot_store;
+    nlo_storage_result snapshot_result;
+    nlo_vec_status snapshot_status;
 
     nlo_vec_buffer* current_field_vec;
     nlo_vec_buffer* frequency_grid_vec;
@@ -145,12 +178,21 @@ typedef struct {
 } simulation_state;
 
 nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type);
+nlo_storage_options nlo_storage_options_default(void);
 
 simulation_state* create_simulation_state(
     const sim_config* config,
     size_t num_time_samples,
     size_t num_recorded_samples,
     const nlo_execution_options* exec_options
+);
+
+simulation_state* create_simulation_state_with_storage(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t num_recorded_samples,
+    const nlo_execution_options* exec_options,
+    const nlo_storage_options* storage_options
 );
 
 void free_simulation_state(simulation_state* state);
@@ -166,7 +208,7 @@ nlo_vec_status simulation_state_flush_snapshots(simulation_state* state);
 
 static inline nlo_complex* simulation_state_get_field_record(simulation_state* state, size_t record_index)
 {
-    if (state == NULL || state->field_buffer == NULL || record_index >= state->num_recorded_samples) {
+    if (state == NULL || state->field_buffer == NULL || record_index >= state->num_host_records) {
         return NULL;
     }
 

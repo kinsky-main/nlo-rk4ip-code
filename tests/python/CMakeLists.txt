@@ -17,6 +17,10 @@ add_test(NAME test_python_operator_regression
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_operator_regression.py"
 )
 
+add_test(NAME test_python_storage_chunking
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_storage_chunking.py"
+)
+
 set(_NLOLIB_TEST_PATH "$ENV{PATH}")
 string(REPLACE ";" "\\;" _NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}")
 
@@ -25,5 +29,9 @@ set_tests_properties(test_python_api_smoke PROPERTIES
 )
 
 set_tests_properties(test_python_operator_regression PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
+)
+
+set_tests_properties(test_python_storage_chunking PROPERTIES
   ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
 )

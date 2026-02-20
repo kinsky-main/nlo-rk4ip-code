@@ -402,7 +402,7 @@ void solve_rk4(simulation_state *state)
         return;
     }
 
-    if (state->current_record_index == 0u && state->num_recorded_samples > 0u)
+    if (state->current_record_index == 0u && state->num_recorded_samples > 1u)
     {
         if (simulation_state_capture_snapshot(state) != NLO_VEC_STATUS_OK)
         {

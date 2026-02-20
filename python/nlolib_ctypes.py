@@ -29,6 +29,7 @@ except ImportError:
 
 NT_MAX = 1 << 20
 NLO_RUNTIME_OPERATOR_CONSTANTS_MAX = 16
+NLO_STORAGE_RUN_ID_MAX = 64
 
 NLO_VECTOR_BACKEND_CPU = 0
 NLO_VECTOR_BACKEND_VULKAN = 1
@@ -42,6 +43,9 @@ NLOLIB_STATUS_OK = 0
 NLOLIB_STATUS_INVALID_ARGUMENT = 1
 NLOLIB_STATUS_ALLOCATION_FAILED = 2
 NLOLIB_STATUS_NOT_IMPLEMENTED = 3
+
+NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0
+NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
 
 
 class NloComplex(ctypes.Structure):
@@ -132,6 +136,27 @@ class NloExecutionOptions(ctypes.Structure):
     ]
 
 
+class NloStorageOptions(ctypes.Structure):
+    _fields_ = [
+        ("sqlite_path", ctypes.c_char_p),
+        ("run_id", ctypes.c_char_p),
+        ("sqlite_max_bytes", ctypes.c_size_t),
+        ("chunk_records", ctypes.c_size_t),
+        ("cap_policy", ctypes.c_int),
+    ]
+
+
+class NloStorageResult(ctypes.Structure):
+    _fields_ = [
+        ("run_id", ctypes.c_char * NLO_STORAGE_RUN_ID_MAX),
+        ("records_captured", ctypes.c_size_t),
+        ("records_spilled", ctypes.c_size_t),
+        ("chunks_written", ctypes.c_size_t),
+        ("db_size_bytes", ctypes.c_size_t),
+        ("truncated", ctypes.c_int),
+    ]
+
+
 def _candidate_library_paths() -> list[str]:
     candidates: list[str] = []
     env_path = os.environ.get("NLOLIB_LIBRARY")
@@ -203,6 +228,19 @@ def load(path: str | None = None) -> ctypes.CDLL:
         ctypes.POINTER(NloExecutionOptions),
     ]
     lib.nlolib_propagate.restype = ctypes.c_int
+    lib.nlolib_propagate_with_storage.argtypes = [
+        ctypes.POINTER(SimConfig),
+        ctypes.c_size_t,
+        ctypes.POINTER(NloComplex),
+        ctypes.c_size_t,
+        ctypes.POINTER(NloComplex),
+        ctypes.POINTER(NloExecutionOptions),
+        ctypes.POINTER(NloStorageOptions),
+        ctypes.POINTER(NloStorageResult),
+    ]
+    lib.nlolib_propagate_with_storage.restype = ctypes.c_int
+    lib.nlolib_storage_is_available.argtypes = []
+    lib.nlolib_storage_is_available.restype = ctypes.c_int
     return lib
 
 
@@ -251,6 +289,39 @@ def default_execution_options(
     options.vulkan.descriptor_set_budget_bytes = 0
     options.vulkan.descriptor_set_count_override = 0
     return options
+
+
+def default_storage_options(
+    *,
+    sqlite_path: str,
+    run_id: str | None = None,
+    sqlite_max_bytes: int = 0,
+    chunk_records: int = 0,
+    cap_policy: int = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
+) -> tuple[NloStorageOptions, list[bytes]]:
+    """
+    Build storage options and return keepalive byte buffers for ctypes strings.
+    """
+    opts = NloStorageOptions()
+    keepalive: list[bytes] = []
+
+    if not sqlite_path:
+        raise ValueError("sqlite_path must be a non-empty string")
+    path_b = sqlite_path.encode("utf-8")
+    keepalive.append(path_b)
+    opts.sqlite_path = ctypes.c_char_p(path_b)
+
+    if run_id is not None and run_id != "":
+        run_b = run_id.encode("utf-8")
+        keepalive.append(run_b)
+        opts.run_id = ctypes.c_char_p(run_b)
+    else:
+        opts.run_id = None
+
+    opts.sqlite_max_bytes = int(sqlite_max_bytes)
+    opts.chunk_records = int(chunk_records)
+    opts.cap_policy = int(cap_policy)
+    return opts, keepalive
 
 
 @dataclass
@@ -533,6 +604,12 @@ class NLolib:
     def __init__(self, path: str | None = None):
         self.lib = load(path)
 
+    def storage_is_available(self) -> bool:
+        """
+        Return whether SQLite-backed storage is available in the loaded library.
+        """
+        return bool(int(self.lib.nlolib_storage_is_available()))
+
     def propagate(
         self,
         config: PreparedSimConfig | SimConfig,
@@ -577,10 +654,80 @@ class NLolib:
             records.append(flat[start : start + n])
         return records
 
+    def propagate_with_storage(
+        self,
+        config: PreparedSimConfig | SimConfig,
+        input_field: Sequence[complex],
+        num_recorded_samples: int,
+        *,
+        sqlite_path: str,
+        run_id: str | None = None,
+        sqlite_max_bytes: int = 0,
+        chunk_records: int = 0,
+        cap_policy: int = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
+        exec_options: NloExecutionOptions | None = None,
+        return_records: bool = False,
+    ) -> tuple[list[list[complex]] | None, NloStorageResult]:
+        """
+        Propagate and persist snapshot chunks into SQLite.
+        """
+        if num_recorded_samples <= 0:
+            raise ValueError("num_recorded_samples must be > 0")
+
+        n = len(input_field)
+        if n == 0:
+            raise ValueError("input_field must be non-empty")
+
+        if not self.storage_is_available():
+            raise RuntimeError("SQLite storage is not available in this nlolib build")
+
+        in_arr = make_complex_array(input_field)
+        out_arr = make_complex_array(n * int(num_recorded_samples)) if return_records else None
+
+        cfg = config.config if isinstance(config, PreparedSimConfig) else config
+        cfg_ptr = ctypes.pointer(cfg)
+        opts_ptr = ctypes.pointer(exec_options) if exec_options is not None else None
+
+        storage_opts, storage_keepalive = default_storage_options(
+            sqlite_path=sqlite_path,
+            run_id=run_id,
+            sqlite_max_bytes=sqlite_max_bytes,
+            chunk_records=chunk_records,
+            cap_policy=cap_policy,
+        )
+        storage_result = NloStorageResult()
+        _ = storage_keepalive  # Keep ctypes-backed strings alive for call duration.
+
+        status = int(
+            self.lib.nlolib_propagate_with_storage(
+                cfg_ptr,
+                n,
+                ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
+                int(num_recorded_samples),
+                ctypes.cast(out_arr, ctypes.POINTER(NloComplex)) if out_arr is not None else None,
+                opts_ptr,
+                ctypes.pointer(storage_opts),
+                ctypes.pointer(storage_result),
+            )
+        )
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_propagate_with_storage failed with status={status}")
+
+        if out_arr is None:
+            return None, storage_result
+
+        flat = complex_array_to_list(out_arr, n * int(num_recorded_samples))
+        records: list[list[complex]] = []
+        for i in range(int(num_recorded_samples)):
+            start = i * n
+            records.append(flat[start : start + n])
+        return records, storage_result
+
 
 __all__ = [
     "NT_MAX",
     "NLO_RUNTIME_OPERATOR_CONSTANTS_MAX",
+    "NLO_STORAGE_RUN_ID_MAX",
     "NLO_VECTOR_BACKEND_CPU",
     "NLO_VECTOR_BACKEND_VULKAN",
     "NLO_VECTOR_BACKEND_AUTO",
@@ -591,14 +738,19 @@ __all__ = [
     "NLOLIB_STATUS_INVALID_ARGUMENT",
     "NLOLIB_STATUS_ALLOCATION_FAILED",
     "NLOLIB_STATUS_NOT_IMPLEMENTED",
+    "NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES",
+    "NLO_STORAGE_DB_CAP_POLICY_FAIL",
     "NloComplex",
     "NloExecutionOptions",
+    "NloStorageOptions",
+    "NloStorageResult",
     "NloVkBackendConfig",
     "PreparedSimConfig",
     "RuntimeOperators",
     "NLolib",
     "complex_array_to_list",
     "default_execution_options",
+    "default_storage_options",
     "load",
     "make_complex_array",
     "prepare_sim_config",

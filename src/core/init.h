@@ -39,6 +39,16 @@ NLOLIB_API int nlo_init_simulation_state(
     simulation_state** out_state
 );
 
+NLOLIB_API int nlo_init_simulation_state_with_storage(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t num_recorded_samples,
+    const nlo_execution_options* exec_options,
+    const nlo_storage_options* storage_options,
+    nlo_allocation_info* allocation_info,
+    simulation_state** out_state
+);
+
 #ifdef __cplusplus
 }
 #endif

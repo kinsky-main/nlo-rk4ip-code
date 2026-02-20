@@ -9,6 +9,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/numerics/math_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/rk4_kernel.c
+  ${CMAKE_CURRENT_LIST_DIR}/io/snapshot_store.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/perf_profile.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/rk4_debug.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/state_debug.c
@@ -35,6 +36,8 @@ endif()
 
 add_subdirectory(fft)
 target_link_libraries(nlolib PUBLIC nlo_fft_backend simd::simd)
+include(NLOSQLite)
+nlo_configure_sqlite(nlolib)
 
 if(UNIX)
   target_link_libraries(nlolib PUBLIC m)

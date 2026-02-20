@@ -5,6 +5,7 @@
 
 #include "core/state.h"
 #include "fft/fft.h"
+#include "io/snapshot_store.h"
 #include "physics/operators.h"
 #include "utility/state_debug.h"
 #include <float.h>
@@ -62,6 +63,7 @@ static int nlo_resolve_sim_dimensions(
 static size_t query_available_system_memory_bytes(void);
 static size_t apply_memory_headroom(size_t available_bytes);
 static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records);
+static int nlo_storage_options_enabled(const nlo_storage_options* options);
 static double nlo_resolve_delta_time(const sim_config* config, size_t num_time_samples);
 static void nlo_fill_default_omega_grid(nlo_complex* out_grid, size_t num_time_samples, double delta_time);
 static void nlo_fill_default_k2_grid_xy(
@@ -90,6 +92,7 @@ static int nlo_frequency_grid_matches_expected_unshifted(
     size_t num_time_samples,
     double delta_time
 );
+static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t record_index, const nlo_complex* record);
 
 #ifndef NLO_DEFAULT_DISPERSION_FACTOR_EXPR
 #define NLO_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
@@ -492,6 +495,13 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     return ring_capacity;
 }
 
+static int nlo_storage_options_enabled(const nlo_storage_options* options)
+{
+    return (options != NULL &&
+            options->sqlite_path != NULL &&
+            options->sqlite_path[0] != '\0');
+}
+
 nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type)
 {
     nlo_execution_options options;
@@ -501,6 +511,18 @@ nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type back
     options.device_heap_fraction = NLO_DEFAULT_DEVICE_HEAP_FRACTION;
     options.record_ring_target = 0u;
     options.forced_device_budget_bytes = 0u;
+    return options;
+}
+
+nlo_storage_options nlo_storage_options_default(void)
+{
+    nlo_storage_options options;
+    memset(&options, 0, sizeof(options));
+    options.sqlite_path = NULL;
+    options.run_id = NULL;
+    options.sqlite_max_bytes = 0u;
+    options.chunk_records = 0u;
+    options.cap_policy = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES;
     return options;
 }
 
@@ -555,6 +577,21 @@ simulation_state* create_simulation_state(
     const nlo_execution_options* exec_options
 )
 {
+    return create_simulation_state_with_storage(config,
+                                                num_time_samples,
+                                                num_recorded_samples,
+                                                exec_options,
+                                                NULL);
+}
+
+simulation_state* create_simulation_state_with_storage(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t num_recorded_samples,
+    const nlo_execution_options* exec_options,
+    const nlo_storage_options* storage_options
+)
+{
     if (config == NULL || exec_options == NULL ||
         num_time_samples == 0 || num_time_samples > NT_MAX ||
         num_recorded_samples == 0 || num_recorded_samples > NT_MAX) {
@@ -589,9 +626,16 @@ simulation_state* create_simulation_state(
     state->ny = spatial_ny;
     state->num_time_samples = num_time_samples;
     state->num_points_xy = spatial_nx * spatial_ny;
-    state->num_recorded_samples = compute_host_record_capacity(num_time_samples, num_recorded_samples);
-    if (state->num_recorded_samples == 0u) {
+    state->num_recorded_samples = num_recorded_samples;
+    state->num_host_records = compute_host_record_capacity(num_time_samples, num_recorded_samples);
+    const int storage_enabled = nlo_storage_options_enabled(storage_options);
+    if (state->num_host_records == 0u && !storage_enabled) {
         nlo_state_debug_log_failure("host_record_capacity", NLO_VEC_STATUS_ALLOCATION_FAILED);
+        free_simulation_state(state);
+        return NULL;
+    }
+    if (!storage_enabled && state->num_host_records < num_recorded_samples) {
+        nlo_state_debug_log_failure("host_record_capacity_insufficient", NLO_VEC_STATUS_ALLOCATION_FAILED);
         free_simulation_state(state);
         return NULL;
     }
@@ -601,19 +645,54 @@ simulation_state* create_simulation_state(
     state->current_half_step_exp = 0.5 * state->current_step_size;
     state->dispersion_valid = 0;
     state->runtime_operator_stack_slots = 0u;
+    state->snapshot_status = NLO_VEC_STATUS_OK;
 
-    size_t host_elements = 0u;
-    if (checked_mul_size_t(state->num_time_samples, state->num_recorded_samples, &host_elements) != 0) {
-        nlo_state_debug_log_failure("host_elements_overflow", NLO_VEC_STATUS_INVALID_ARGUMENT);
-        free_simulation_state(state);
-        return NULL;
+    if (storage_enabled) {
+        if (!nlo_snapshot_store_is_available()) {
+            nlo_state_debug_log_failure("snapshot_store_unavailable", NLO_VEC_STATUS_UNSUPPORTED);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        nlo_snapshot_store_open_params store_params;
+        memset(&store_params, 0, sizeof(store_params));
+        store_params.config = config;
+        store_params.exec_options = exec_options;
+        store_params.storage_options = storage_options;
+        store_params.num_time_samples = num_time_samples;
+        store_params.num_recorded_samples = num_recorded_samples;
+        state->snapshot_store = nlo_snapshot_store_open(&store_params);
+        if (state->snapshot_store == NULL) {
+            nlo_state_debug_log_failure("snapshot_store_open", NLO_VEC_STATUS_ALLOCATION_FAILED);
+            free_simulation_state(state);
+            return NULL;
+        }
+        nlo_snapshot_store_get_result(state->snapshot_store, &state->snapshot_result);
     }
 
-    state->field_buffer = (nlo_complex*)calloc(host_elements, sizeof(nlo_complex));
-    if (state->field_buffer == NULL) {
-        nlo_state_debug_log_failure("allocate_host_field_buffer", NLO_VEC_STATUS_ALLOCATION_FAILED);
-        free_simulation_state(state);
-        return NULL;
+    if (state->num_host_records > 0u) {
+        size_t host_elements = 0u;
+        if (checked_mul_size_t(state->num_time_samples, state->num_host_records, &host_elements) != 0) {
+            nlo_state_debug_log_failure("host_elements_overflow", NLO_VEC_STATUS_INVALID_ARGUMENT);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        state->field_buffer = (nlo_complex*)calloc(host_elements, sizeof(nlo_complex));
+        if (state->field_buffer == NULL) {
+            nlo_state_debug_log_failure("allocate_host_field_buffer", NLO_VEC_STATUS_ALLOCATION_FAILED);
+            free_simulation_state(state);
+            return NULL;
+        }
+    }
+
+    if (storage_enabled && state->num_host_records < state->num_recorded_samples) {
+        state->snapshot_scratch_record = (nlo_complex*)calloc(state->num_time_samples, sizeof(nlo_complex));
+        if (state->snapshot_scratch_record == NULL) {
+            nlo_state_debug_log_failure("allocate_snapshot_scratch_record", NLO_VEC_STATUS_ALLOCATION_FAILED);
+            free_simulation_state(state);
+            return NULL;
+        }
     }
 
     if (exec_options->backend_type == NLO_VECTOR_BACKEND_CPU) {
@@ -1135,6 +1214,9 @@ void free_simulation_state(simulation_state* state)
     }
 
     free(state->record_ring_vec);
+    nlo_snapshot_store_close(state->snapshot_store);
+    state->snapshot_store = NULL;
+    free(state->snapshot_scratch_record);
     free(state->field_buffer);
     free(state);
 }
@@ -1151,16 +1233,15 @@ nlo_vec_status simulation_state_upload_initial_field(simulation_state* state, co
         return status;
     }
 
-    nlo_complex* record0 = simulation_state_get_field_record(state, 0u);
-    if (record0 != NULL) {
-        memcpy(record0, field, bytes);
+    if (state->num_recorded_samples > 1u) {
+        status = nlo_snapshot_emit_record(state, 0u, field);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
     }
 
-    state->current_record_index = 1u;
-    if (state->current_record_index > state->num_recorded_samples) {
-        state->current_record_index = state->num_recorded_samples;
-    }
-    state->record_ring_flushed_count = (state->num_recorded_samples > 0u) ? 1u : 0u;
+    state->current_record_index = (state->num_recorded_samples > 1u) ? 1u : 0u;
+    state->record_ring_flushed_count = state->current_record_index;
 
     return NLO_VEC_STATUS_OK;
 }
@@ -1177,6 +1258,45 @@ nlo_vec_status simulation_state_download_current_field(const simulation_state* s
                             state->num_time_samples * sizeof(nlo_complex));
 }
 
+static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t record_index, const nlo_complex* record)
+{
+    if (state == NULL || record == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    int recorded_anywhere = 0;
+    if (record_index < state->num_host_records) {
+        nlo_complex* host_record = simulation_state_get_field_record(state, record_index);
+        if (host_record == NULL) {
+            return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        }
+        if (host_record != record) {
+            memcpy(host_record, record, state->num_time_samples * sizeof(nlo_complex));
+        }
+        recorded_anywhere = 1;
+    }
+
+    if (state->snapshot_store != NULL) {
+        const nlo_snapshot_store_status store_status =
+            nlo_snapshot_store_write_record(state->snapshot_store,
+                                           record_index,
+                                           record,
+                                           state->num_time_samples);
+        nlo_snapshot_store_get_result(state->snapshot_store, &state->snapshot_result);
+        if (store_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
+            state->snapshot_status = NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+            return state->snapshot_status;
+        }
+        recorded_anywhere = 1;
+    }
+
+    if (!recorded_anywhere) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    return NLO_VEC_STATUS_OK;
+}
+
 static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state* state)
 {
     if (state == NULL || state->record_ring_size == 0u || state->record_ring_capacity == 0u) {
@@ -1188,7 +1308,11 @@ static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state*
     }
 
     nlo_complex* host_record = simulation_state_get_field_record(state, state->record_ring_flushed_count);
-    if (host_record == NULL) {
+    nlo_complex* download_target = host_record;
+    if (download_target == NULL) {
+        download_target = state->snapshot_scratch_record;
+    }
+    if (download_target == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
@@ -1208,7 +1332,7 @@ static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state*
 
     nlo_vec_status status = nlo_vec_download(state->backend,
                                              src,
-                                             host_record,
+                                             download_target,
                                              state->num_time_samples * sizeof(nlo_complex));
 
     if (resume_simulation) {
@@ -1218,6 +1342,11 @@ static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state*
         }
     }
 
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_snapshot_emit_record(state, state->record_ring_flushed_count, download_target);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
     }
@@ -1247,19 +1376,24 @@ nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
             return (status == NLO_VEC_STATUS_OK) ? NLO_VEC_STATUS_BACKEND_UNAVAILABLE : status;
         }
 
-        nlo_complex* host_record = simulation_state_get_field_record(state, state->current_record_index);
-        if (host_record == NULL) {
-            return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        status = nlo_snapshot_emit_record(state,
+                                          state->current_record_index,
+                                          (const nlo_complex*)host_src);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
         }
 
-        memcpy(host_record, host_src, state->num_time_samples * sizeof(nlo_complex));
         state->current_record_index += 1u;
         return NLO_VEC_STATUS_OK;
     }
 
     if (state->record_ring_capacity == 0u) {
         nlo_complex* host_record = simulation_state_get_field_record(state, state->current_record_index);
-        if (host_record == NULL) {
+        nlo_complex* download_target = host_record;
+        if (download_target == NULL) {
+            download_target = state->snapshot_scratch_record;
+        }
+        if (download_target == NULL) {
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
         }
 
@@ -1273,7 +1407,7 @@ nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
 
         nlo_vec_status status = nlo_vec_download(state->backend,
                                                  state->current_field_vec,
-                                                 host_record,
+                                                 download_target,
                                                  state->num_time_samples * sizeof(nlo_complex));
 
         if (resume_simulation) {
@@ -1283,6 +1417,11 @@ nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
             }
         }
 
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        status = nlo_snapshot_emit_record(state, state->current_record_index, download_target);
         if (status != NLO_VEC_STATUS_OK) {
             return status;
         }
@@ -1325,6 +1464,15 @@ nlo_vec_status simulation_state_flush_snapshots(simulation_state* state)
         nlo_vec_status status = simulation_state_flush_oldest_ring_entry(state);
         if (status != NLO_VEC_STATUS_OK) {
             return status;
+        }
+    }
+
+    if (state->snapshot_store != NULL) {
+        const nlo_snapshot_store_status store_status = nlo_snapshot_store_flush(state->snapshot_store);
+        nlo_snapshot_store_get_result(state->snapshot_store, &state->snapshot_result);
+        if (store_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
+            state->snapshot_status = NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+            return state->snapshot_status;
         }
     }
 

@@ -77,6 +77,60 @@ NLOLIB_API nlolib_status nlolib_propagate(
     const nlo_execution_options* exec_options
 );
 
+/**
+ * @brief MATLAB/FFI convenience API using interleaved complex doubles.
+ *
+ * @param config Simulation configuration parameters.
+ * @param num_time_samples Number of complex samples in input/output records.
+ * @param input_field_interleaved Pointer to interleaved complex input of
+ *        length 2 * num_time_samples:
+ *        [re0, im0, re1, im1, ...].
+ * @param num_recorded_samples Number of envelope records to return.
+ * @param output_records_interleaved Pointer to interleaved complex output of
+ *        length 2 * num_recorded_samples * num_time_samples.
+ * @param exec_options Runtime backend selection/options
+ *        (NULL uses AUTO hardware-detected defaults).
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_propagate_interleaved(
+    const sim_config* config,
+    size_t num_time_samples,
+    const double* input_field_interleaved,
+    size_t num_recorded_samples,
+    double* output_records_interleaved,
+    const nlo_execution_options* exec_options
+);
+
+/**
+ * @brief Propagate while optionally spilling snapshot chunks into SQLite.
+ *
+ * @param config Simulation configuration parameters.
+ * @param num_time_samples Number of complex samples in the flattened field.
+ * @param input_field Pointer to input field buffer (length: num_time_samples).
+ * @param num_recorded_samples Number of envelope records to capture.
+ * @param output_records Optional host output buffer (same layout as
+ *        nlolib_propagate). Pass NULL for storage-only capture.
+ * @param exec_options Runtime backend selection/options.
+ * @param storage_options Optional storage configuration (NULL disables storage).
+ * @param storage_result Optional output summary for persisted chunks/run state.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_propagate_with_storage(
+    const sim_config* config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    size_t num_recorded_samples,
+    nlo_complex* output_records,
+    const nlo_execution_options* exec_options,
+    const nlo_storage_options* storage_options,
+    nlo_storage_result* storage_result
+);
+
+/**
+ * @brief Returns nonzero when SQLite storage support is available.
+ */
+NLOLIB_API int nlolib_storage_is_available(void);
+
 #ifdef __cplusplus
 }
 #endif
