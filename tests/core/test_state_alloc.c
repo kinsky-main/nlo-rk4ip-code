@@ -267,6 +267,7 @@ static void test_explicit_heap_fraction_preserved(void)
     assert(state != NULL);
     assert(info.backend_type == NLO_VECTOR_BACKEND_CPU);
     assert(info.allocated_records == num_records);
+    assert(info.device_ring_capacity == 0u);
 
     free_simulation_state(state);
     free_sim_config(config);
