@@ -108,7 +108,7 @@ int main(void)
 
     exec_options.backend_type = NLO_VECTOR_BACKEND_CPU;
     exec_options.fft_backend = NLO_FFT_BACKEND_FFTW;
-    exec_options.device_heap_fraction = 0.70;
+    exec_options.device_heap_fraction = 0.0;
     exec_options.record_ring_target = 0u;
     exec_options.forced_device_budget_bytes = 0u;
 

@@ -54,7 +54,7 @@ def main() -> None:
     exec_opts = SimulationOptions(
         backend="auto",
         fft_backend="auto",
-        device_heap_fraction=0.70,
+        device_heap_fraction=0.0,
     )
     z_records, records = runner.propagate_flattened_xy_records(
         field0_flat=field0_flat,

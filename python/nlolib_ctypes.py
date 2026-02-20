@@ -237,7 +237,7 @@ def default_execution_options(
     options = NloExecutionOptions()
     options.backend_type = int(backend_type)
     options.fft_backend = int(fft_backend)
-    options.device_heap_fraction = 0.70
+    options.device_heap_fraction = 0.0
     options.record_ring_target = 0
     options.forced_device_budget_bytes = 0
     options.vulkan.physical_device = None

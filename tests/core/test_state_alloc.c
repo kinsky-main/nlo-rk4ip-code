@@ -230,6 +230,51 @@ static void test_frequency_grid_preserved_when_valid(void)
     printf("test_frequency_grid_preserved_when_valid: validates valid temporal omega preservation.\n");
 }
 
+static void test_execution_options_default_heap_fraction_auto(void)
+{
+    nlo_execution_options options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    assert(options.device_heap_fraction == 0.0);
+    assert(options.backend_type == NLO_VECTOR_BACKEND_CPU);
+    assert(options.record_ring_target == 0u);
+    assert(options.forced_device_budget_bytes == 0u);
+
+    nlo_execution_options vk_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_VULKAN);
+    assert(vk_options.device_heap_fraction == 0.0);
+    assert(vk_options.backend_type == NLO_VECTOR_BACKEND_VULKAN);
+
+    printf("test_execution_options_default_heap_fraction_auto: validates auto device_heap_fraction.\n");
+}
+
+static void test_explicit_heap_fraction_preserved(void)
+{
+    const size_t num_time_samples = 16;
+    const size_t num_records = 4;
+
+    sim_config* config = create_sim_config(num_time_samples);
+    assert(config != NULL);
+
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    exec_options.device_heap_fraction = 0.50;
+
+    simulation_state* state = NULL;
+    nlo_allocation_info info = {0};
+    assert(nlo_init_simulation_state(config,
+                                     num_time_samples,
+                                     num_records,
+                                     &exec_options,
+                                     &info,
+                                     &state) == 0);
+    assert(state != NULL);
+    assert(info.backend_type == NLO_VECTOR_BACKEND_CPU);
+    assert(info.allocated_records == num_records);
+    assert(info.device_ring_capacity == 0u);
+
+    free_simulation_state(state);
+    free_sim_config(config);
+
+    printf("test_explicit_heap_fraction_preserved: validates explicit fraction override.\n");
+}
+
 int main(void)
 {
     test_init_state_success();
@@ -237,6 +282,8 @@ int main(void)
     test_init_state_xy_shape_success();
     test_default_frequency_grid_generated_when_invalid();
     test_frequency_grid_preserved_when_valid();
+    test_execution_options_default_heap_fraction_auto();
+    test_explicit_heap_fraction_preserved();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;
 }
