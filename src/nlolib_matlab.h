@@ -55,7 +55,7 @@
  * Constants
  * ------------------------------------------------------------------- */
 
-#define NT_MAX (1 << 20)
+#define NT_MAX ((size_t)-1) /* Unbounded sentinel; use nlolib_query_runtime_limits(). */
 #define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16
 #define NLO_STORAGE_RUN_ID_MAX 64
 
@@ -176,6 +176,16 @@ typedef struct
     nlo_vk_backend_config vulkan;
 } nlo_execution_options;
 
+typedef struct
+{
+    size_t max_num_time_samples_runtime;
+    size_t max_num_recorded_samples_in_memory;
+    size_t max_num_recorded_samples_with_storage;
+    size_t estimated_required_working_set_bytes;
+    size_t estimated_device_budget_bytes;
+    int storage_available;
+} nlo_runtime_limits;
+
 /* -------------------------------------------------------------------
  * Status codes
  * ------------------------------------------------------------------- */
@@ -224,6 +234,11 @@ nlolib_status nlolib_propagate(
     size_t num_recorded_samples,
     nlo_complex *output_records,
     const nlo_execution_options *exec_options);
+
+nlolib_status nlolib_query_runtime_limits(
+    const sim_config *config,
+    const nlo_execution_options *exec_options,
+    nlo_runtime_limits *out_limits);
 
 nlolib_status nlolib_propagate_interleaved(
     const sim_config *config,

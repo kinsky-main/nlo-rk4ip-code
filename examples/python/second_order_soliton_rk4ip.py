@@ -20,7 +20,12 @@ from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
     plot_total_error_over_propagation,
 )
-from backend.runner import NloExampleRunner, SimulationOptions, TemporalSimulationConfig
+from backend.runner import (
+    NloExampleRunner,
+    SimulationOptions,
+    TemporalSimulationConfig,
+    centered_time_grid,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -127,6 +132,18 @@ def compute_wavelength_spectral_map_from_records(
     max_value = float(np.max(spec_map))
     if max_value > 0.0:
         spec_map /= max_value
+
+    # Keep only the visibly occupied spectral band; this avoids an effectively
+    # blank map when tiny near-zero-frequency bins stretch lambda to huge values.
+    spectral_profile = np.max(spec_map, axis=0)
+    if spectral_profile.size > 0:
+        support_threshold = max(float(np.max(spectral_profile)) * 1e-3, 1e-12)
+        support_idx = np.flatnonzero(spectral_profile >= support_threshold)
+        if support_idx.size >= 8:
+            left = max(int(support_idx[0]) - 2, 0)
+            right = min(int(support_idx[-1]) + 3, lambda_nm.size)
+            lambda_nm = lambda_nm[left:right]
+            spec_map = spec_map[:, left:right]
 
     return z_samples, lambda_nm, spec_map
 
@@ -249,14 +266,13 @@ def main() -> float:
     tfwhm = 100e-3
     t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
     p0 = (2**2) * abs(beta2) / (gamma * t0 * t0)
-    z_final = 0.506
     sgn_beta2, ld, lnl = normalized_nlse_coefficients(beta2, gamma, t0, p0)
+    z_final = 0.5 * math.pi * ld
 
     n = 2**10
-    tmax = 8.0 * t0
-    T = np.linspace(-tmax, tmax, n)
+    dt = (16.0 * t0) / n
+    T = centered_time_grid(n, dt)
     t = to_dimensionless_time(T, t0)
-    dt = float(T[1] - T[0])
     omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
 
     U0 = 2.0 * sech(t)

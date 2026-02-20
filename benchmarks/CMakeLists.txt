@@ -4,6 +4,7 @@ add_executable(bench_solver_backend
   ${CMAKE_CURRENT_LIST_DIR}/bench_solver_backend.c
   ${CMAKE_SOURCE_DIR}/src/core/state.c
   ${CMAKE_SOURCE_DIR}/src/core/init.c
+  ${CMAKE_SOURCE_DIR}/src/io/snapshot_store.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
@@ -28,6 +29,8 @@ target_include_directories(bench_solver_backend PRIVATE
 )
 
 target_link_libraries(bench_solver_backend PRIVATE simd::simd)
+include(NLOSQLite)
+nlo_configure_sqlite(bench_solver_backend)
 
 include(NLOFftw)
 nlo_configure_fftw(_nlo_fftw_target _nlo_fftw_include_dirs)

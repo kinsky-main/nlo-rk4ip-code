@@ -27,7 +27,7 @@ except ImportError:
         translate_callable,
     )
 
-NT_MAX = 1 << 20
+NT_MAX = ctypes.c_size_t(-1).value  # Unbounded sentinel; prefer query_runtime_limits().
 NLO_RUNTIME_OPERATOR_CONSTANTS_MAX = 16
 NLO_STORAGE_RUN_ID_MAX = 64
 
@@ -136,6 +136,17 @@ class NloExecutionOptions(ctypes.Structure):
     ]
 
 
+class NloRuntimeLimits(ctypes.Structure):
+    _fields_ = [
+        ("max_num_time_samples_runtime", ctypes.c_size_t),
+        ("max_num_recorded_samples_in_memory", ctypes.c_size_t),
+        ("max_num_recorded_samples_with_storage", ctypes.c_size_t),
+        ("estimated_required_working_set_bytes", ctypes.c_size_t),
+        ("estimated_device_budget_bytes", ctypes.c_size_t),
+        ("storage_available", ctypes.c_int),
+    ]
+
+
 class NloStorageOptions(ctypes.Structure):
     _fields_ = [
         ("sqlite_path", ctypes.c_char_p),
@@ -228,19 +239,40 @@ def load(path: str | None = None) -> ctypes.CDLL:
         ctypes.POINTER(NloExecutionOptions),
     ]
     lib.nlolib_propagate.restype = ctypes.c_int
-    lib.nlolib_propagate_with_storage.argtypes = [
-        ctypes.POINTER(SimConfig),
-        ctypes.c_size_t,
-        ctypes.POINTER(NloComplex),
-        ctypes.c_size_t,
-        ctypes.POINTER(NloComplex),
-        ctypes.POINTER(NloExecutionOptions),
-        ctypes.POINTER(NloStorageOptions),
-        ctypes.POINTER(NloStorageResult),
-    ]
-    lib.nlolib_propagate_with_storage.restype = ctypes.c_int
-    lib.nlolib_storage_is_available.argtypes = []
-    lib.nlolib_storage_is_available.restype = ctypes.c_int
+    try:
+        lib.nlolib_query_runtime_limits.argtypes = [
+            ctypes.POINTER(SimConfig),
+            ctypes.POINTER(NloExecutionOptions),
+            ctypes.POINTER(NloRuntimeLimits),
+        ]
+        lib.nlolib_query_runtime_limits.restype = ctypes.c_int
+        lib._has_query_runtime_limits = True
+    except AttributeError:
+        lib._has_query_runtime_limits = False
+
+    try:
+        lib.nlolib_propagate_with_storage.argtypes = [
+            ctypes.POINTER(SimConfig),
+            ctypes.c_size_t,
+            ctypes.POINTER(NloComplex),
+            ctypes.c_size_t,
+            ctypes.POINTER(NloComplex),
+            ctypes.POINTER(NloExecutionOptions),
+            ctypes.POINTER(NloStorageOptions),
+            ctypes.POINTER(NloStorageResult),
+        ]
+        lib.nlolib_propagate_with_storage.restype = ctypes.c_int
+        lib._has_propagate_with_storage = True
+    except AttributeError:
+        lib._has_propagate_with_storage = False
+
+    try:
+        lib.nlolib_storage_is_available.argtypes = []
+        lib.nlolib_storage_is_available.restype = ctypes.c_int
+        lib._has_storage_is_available = True
+    except AttributeError:
+        lib._has_storage_is_available = False
+
     return lib
 
 
@@ -608,7 +640,38 @@ class NLolib:
         """
         Return whether SQLite-backed storage is available in the loaded library.
         """
+        if not bool(getattr(self.lib, "_has_storage_is_available", False)):
+            return False
         return bool(int(self.lib.nlolib_storage_is_available()))
+
+    def query_runtime_limits(
+        self,
+        config: PreparedSimConfig | SimConfig | None = None,
+        exec_options: NloExecutionOptions | None = None,
+    ) -> NloRuntimeLimits:
+        """
+        Query runtime-derived solver limits for current backend/options.
+        """
+        if not bool(getattr(self.lib, "_has_query_runtime_limits", False)):
+            out = NloRuntimeLimits()
+            out.max_num_time_samples_runtime = int(NT_MAX)
+            out.max_num_recorded_samples_in_memory = int(NT_MAX)
+            out.max_num_recorded_samples_with_storage = int(NT_MAX)
+            out.estimated_required_working_set_bytes = 0
+            out.estimated_device_budget_bytes = 0
+            out.storage_available = 1 if self.storage_is_available() else 0
+            return out
+
+        cfg = None
+        if config is not None:
+            cfg = config.config if isinstance(config, PreparedSimConfig) else config
+        cfg_ptr = ctypes.pointer(cfg) if cfg is not None else None
+        opts_ptr = ctypes.pointer(exec_options) if exec_options is not None else None
+        out = NloRuntimeLimits()
+        status = int(self.lib.nlolib_query_runtime_limits(cfg_ptr, opts_ptr, ctypes.pointer(out)))
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_query_runtime_limits failed with status={status}")
+        return out
 
     def propagate(
         self,
@@ -671,6 +734,11 @@ class NLolib:
         """
         Propagate and persist snapshot chunks into SQLite.
         """
+        if not bool(getattr(self.lib, "_has_propagate_with_storage", False)):
+            raise RuntimeError(
+                "nlolib_propagate_with_storage is unavailable in the loaded nlolib build"
+            )
+
         if num_recorded_samples <= 0:
             raise ValueError("num_recorded_samples must be > 0")
 
@@ -742,6 +810,7 @@ __all__ = [
     "NLO_STORAGE_DB_CAP_POLICY_FAIL",
     "NloComplex",
     "NloExecutionOptions",
+    "NloRuntimeLimits",
     "NloStorageOptions",
     "NloStorageResult",
     "NloVkBackendConfig",

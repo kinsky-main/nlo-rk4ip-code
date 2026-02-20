@@ -9,6 +9,7 @@
 #include "physics/operators.h"
 #include "utility/state_debug.h"
 #include <float.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -63,6 +64,8 @@ static int nlo_resolve_sim_dimensions(
 static size_t query_available_system_memory_bytes(void);
 static size_t apply_memory_headroom(size_t available_bytes);
 static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records);
+static size_t nlo_estimate_active_vector_count(const sim_config* config);
+static size_t nlo_resolve_runtime_num_time_samples_from_config(const sim_config* config);
 static int nlo_storage_options_enabled(const nlo_storage_options* options);
 static double nlo_resolve_delta_time(const sim_config* config, size_t num_time_samples);
 static void nlo_fill_default_omega_grid(nlo_complex* out_grid, size_t num_time_samples, double delta_time);
@@ -526,9 +529,181 @@ nlo_storage_options nlo_storage_options_default(void)
     return options;
 }
 
+nlo_runtime_limits nlo_runtime_limits_default(void)
+{
+    nlo_runtime_limits limits;
+    memset(&limits, 0, sizeof(limits));
+    limits.max_num_time_samples_runtime = 0u;
+    limits.max_num_recorded_samples_in_memory = 0u;
+    limits.max_num_recorded_samples_with_storage =
+        (SIZE_MAX < (size_t)9007199254740991ull)
+            ? SIZE_MAX
+            : (size_t)9007199254740991ull;
+    limits.estimated_required_working_set_bytes = 0u;
+    limits.estimated_device_budget_bytes = 0u;
+    limits.storage_available = nlo_snapshot_store_is_available();
+    return limits;
+}
+
+static size_t nlo_estimate_active_vector_count(const sim_config* config)
+{
+    size_t active_vec_count = 2u + NLO_WORK_VECTOR_COUNT + NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS;
+    if (config != NULL) {
+        const size_t nt = config->time.nt;
+        const size_t nx = config->spatial.nx;
+        const size_t ny = config->spatial.ny;
+        const int explicit_nd = (nt > 0u) ? 1 : 0;
+        const int enable_transverse = (explicit_nd != 0) && (nx > 1u || ny > 1u);
+        if (enable_transverse) {
+            if (active_vec_count <= SIZE_MAX - 3u) {
+                active_vec_count += 3u;
+            } else {
+                return SIZE_MAX;
+            }
+        }
+    }
+    return active_vec_count;
+}
+
+static size_t nlo_resolve_runtime_num_time_samples_from_config(const sim_config* config)
+{
+    if (config == NULL) {
+        return 0u;
+    }
+
+    const size_t nt = config->time.nt;
+    const size_t nx = config->spatial.nx;
+    const size_t ny = config->spatial.ny;
+
+    if (nt > 0u) {
+        const size_t resolved_nx = (nx > 0u) ? nx : 1u;
+        const size_t resolved_ny = (ny > 0u) ? ny : 1u;
+        size_t ntx = 0u;
+        size_t total = 0u;
+        if (checked_mul_size_t(nt, resolved_nx, &ntx) != 0 ||
+            checked_mul_size_t(ntx, resolved_ny, &total) != 0) {
+            return 0u;
+        }
+        return total;
+    }
+
+    if (nx == 0u && ny == 0u) {
+        return 0u;
+    }
+    if (nx == 0u || ny == 0u) {
+        return 0u;
+    }
+
+    size_t total = 0u;
+    if (checked_mul_size_t(nx, ny, &total) != 0) {
+        return 0u;
+    }
+    return total;
+}
+
+int nlo_query_runtime_limits_internal(
+    const sim_config* config,
+    const nlo_execution_options* exec_options,
+    nlo_runtime_limits* out_limits
+)
+{
+    if (out_limits == NULL) {
+        return -1;
+    }
+
+    *out_limits = nlo_runtime_limits_default();
+    const nlo_execution_options options =
+        (exec_options != NULL)
+            ? *exec_options
+            : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
+
+    const size_t active_vec_count = nlo_estimate_active_vector_count(config);
+    const size_t requested_num_time_samples = nlo_resolve_runtime_num_time_samples_from_config(config);
+    const size_t max_samples_by_element_size = SIZE_MAX / sizeof(nlo_complex);
+    size_t bytes_per_sample = 0u;
+    if (active_vec_count == SIZE_MAX ||
+        checked_mul_size_t(active_vec_count, sizeof(nlo_complex), &bytes_per_sample) != 0 ||
+        bytes_per_sample == 0u) {
+        return -1;
+    }
+
+    if (requested_num_time_samples > 0u) {
+        (void)checked_mul_size_t(requested_num_time_samples,
+                                 bytes_per_sample,
+                                 &out_limits->estimated_required_working_set_bytes);
+        out_limits->max_num_recorded_samples_in_memory =
+            compute_host_record_capacity(requested_num_time_samples, SIZE_MAX);
+    }
+
+    size_t runtime_limit = max_samples_by_element_size;
+    const size_t host_available = apply_memory_headroom(query_available_system_memory_bytes());
+    if (host_available > 0u) {
+        const size_t host_limit = host_available / bytes_per_sample;
+        if (host_limit > 0u && host_limit < runtime_limit) {
+            runtime_limit = host_limit;
+        }
+    }
+
+    nlo_vector_backend* backend = NULL;
+    if (options.backend_type == NLO_VECTOR_BACKEND_CPU) {
+        backend = nlo_vector_backend_create_cpu();
+    } else if (options.backend_type == NLO_VECTOR_BACKEND_VULKAN) {
+        backend = nlo_vector_backend_create_vulkan(&options.vulkan);
+    } else {
+        backend = nlo_vector_backend_create_vulkan(NULL);
+        if (backend == NULL) {
+            backend = nlo_vector_backend_create_cpu();
+        }
+    }
+
+    if (backend != NULL) {
+        nlo_vec_backend_memory_info mem_info = {0};
+        if (nlo_vec_query_memory_info(backend, &mem_info) == NLO_VEC_STATUS_OK &&
+            nlo_vector_backend_get_type(backend) == NLO_VECTOR_BACKEND_VULKAN) {
+            const double frac = (options.device_heap_fraction > 0.0 &&
+                                 options.device_heap_fraction <= 1.0)
+                                    ? options.device_heap_fraction
+                                    : NLO_DEFAULT_DEVICE_HEAP_FRACTION;
+            size_t budget_bytes = options.forced_device_budget_bytes;
+            if (budget_bytes == 0u) {
+                budget_bytes = (size_t)((double)mem_info.device_local_available_bytes * frac);
+            }
+            budget_bytes =
+                (budget_bytes / NLO_DEVICE_RING_BUDGET_HEADROOM_DEN) *
+                NLO_DEVICE_RING_BUDGET_HEADROOM_NUM;
+            out_limits->estimated_device_budget_bytes = budget_bytes;
+
+            if (budget_bytes > 0u) {
+                const size_t device_budget_limit = budget_bytes / bytes_per_sample;
+                if (device_budget_limit > 0u && device_budget_limit < runtime_limit) {
+                    runtime_limit = device_budget_limit;
+                }
+            }
+            if (mem_info.max_storage_buffer_range > 0u) {
+                const size_t max_buffer_samples = mem_info.max_storage_buffer_range / sizeof(nlo_complex);
+                if (max_buffer_samples > 0u && max_buffer_samples < runtime_limit) {
+                    runtime_limit = max_buffer_samples;
+                }
+            }
+        } else if (nlo_vector_backend_get_type(backend) == NLO_VECTOR_BACKEND_CPU &&
+                   options.fft_backend == NLO_FFT_BACKEND_FFTW &&
+                   runtime_limit > (size_t)INT_MAX) {
+            runtime_limit = (size_t)INT_MAX;
+        }
+        nlo_vector_backend_destroy(backend);
+    }
+
+    if (runtime_limit > max_samples_by_element_size) {
+        runtime_limit = max_samples_by_element_size;
+    }
+
+    out_limits->max_num_time_samples_runtime = runtime_limit;
+    return 0;
+}
+
 sim_config* create_sim_config(size_t num_time_samples)
 {
-    if (num_time_samples == 0 || num_time_samples > NT_MAX) {
+    if (num_time_samples == 0) {
         return NULL;
     }
 
@@ -593,8 +768,7 @@ simulation_state* create_simulation_state_with_storage(
 )
 {
     if (config == NULL || exec_options == NULL ||
-        num_time_samples == 0 || num_time_samples > NT_MAX ||
-        num_recorded_samples == 0 || num_recorded_samples > NT_MAX) {
+        num_time_samples == 0 || num_recorded_samples == 0) {
         return NULL;
     }
     if (config->runtime.num_constants > NLO_RUNTIME_OPERATOR_CONSTANTS_MAX) {
@@ -1580,10 +1754,6 @@ static size_t compute_host_record_capacity(size_t num_time_samples, size_t reque
     size_t max_records = (available_bytes - working_bytes) / per_record_bytes;
     if (max_records == 0u) {
         return 0u;
-    }
-
-    if (max_records > NT_MAX) {
-        max_records = NT_MAX;
     }
 
     return (max_records < requested_records) ? max_records : requested_records;

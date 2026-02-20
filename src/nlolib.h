@@ -44,6 +44,21 @@ typedef enum {
     NLOLIB_STATUS_NOT_IMPLEMENTED = 3
 } nlolib_status;
 
+/**
+ * @brief Query runtime-derived limits for current backend/config selection.
+ *
+ * @param config Optional simulation configuration used to estimate
+ *        required working-set bytes and in-memory record capacity.
+ * @param exec_options Optional runtime backend selection/options.
+ * @param out_limits Destination limits descriptor.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_query_runtime_limits(
+    const sim_config* config,
+    const nlo_execution_options* exec_options,
+    nlo_runtime_limits* out_limits
+);
+
 // MARK: Function Declarations
 
 /**

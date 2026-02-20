@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 nlo_configure_build_configurations()
 
-project(nlolib VERSION 0.1.2 LANGUAGES C)
+project(nlolib VERSION 0.1.6 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -15,10 +15,14 @@ option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
 option(NLO_BUMP_PATCH_ON_BUILD "Bump patch version in CMakeLists.txt after successful builds" ON)
+option(NLO_SQLITE_USE_FETCHCONTENT "Fetch SQLite amalgamation via CMake instead of system SQLite discovery" OFF)
 
 set(NLO_VULKAN_HEADERS_URL
   "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/heads/main.zip"
   CACHE STRING "URL used to fetch Vulkan headers when local headers are unavailable")
+set(NLO_SQLITE_AMALGAMATION_URL
+  "https://www.sqlite.org/2025/sqlite-amalgamation-3490200.zip"
+  CACHE STRING "URL used to fetch SQLite amalgamation when SQLite3 is unavailable")
 set(NLO_FFTW_GIT_TAG
   "fftw-3.3.10"
   CACHE STRING "FFTW git tag used for in-tree static FFTW builds")

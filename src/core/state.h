@@ -11,7 +11,7 @@
 #include <stddef.h>
 
 #ifndef NT_MAX
-#define NT_MAX (1u << 20)
+#define NT_MAX ((size_t)-1) /* Unbounded sentinel; runtime limits are query-driven. */
 #endif
 
 #ifndef NLO_WORK_VECTOR_COUNT
@@ -83,6 +83,15 @@ typedef struct {
     size_t forced_device_budget_bytes;
     nlo_vk_backend_config vulkan;
 } nlo_execution_options;
+
+typedef struct {
+    size_t max_num_time_samples_runtime;
+    size_t max_num_recorded_samples_in_memory;
+    size_t max_num_recorded_samples_with_storage;
+    size_t estimated_required_working_set_bytes;
+    size_t estimated_device_budget_bytes;
+    int storage_available;
+} nlo_runtime_limits;
 
 typedef enum {
     NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
@@ -179,6 +188,13 @@ typedef struct {
 
 nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type);
 nlo_storage_options nlo_storage_options_default(void);
+nlo_runtime_limits nlo_runtime_limits_default(void);
+
+int nlo_query_runtime_limits_internal(
+    const sim_config* config,
+    const nlo_execution_options* exec_options,
+    nlo_runtime_limits* out_limits
+);
 
 simulation_state* create_simulation_state(
     const sim_config* config,

@@ -64,6 +64,23 @@ static int nlo_storage_enabled(const nlo_storage_options* storage_options)
             storage_options->sqlite_path[0] != '\0');
 }
 
+NLOLIB_API nlolib_status nlolib_query_runtime_limits(
+    const sim_config* config,
+    const nlo_execution_options* exec_options,
+    nlo_runtime_limits* out_limits
+)
+{
+    if (out_limits == NULL) {
+        return nlo_propagate_fail("validate.runtime_limits.null_out", NLOLIB_STATUS_INVALID_ARGUMENT);
+    }
+
+    if (nlo_query_runtime_limits_internal(config, exec_options, out_limits) != 0) {
+        return nlo_propagate_fail("query_runtime_limits_internal", NLOLIB_STATUS_ALLOCATION_FAILED);
+    }
+
+    return NLOLIB_STATUS_OK;
+}
+
 static int nlo_resolve_sim_dimensions(
     const sim_config* config,
     size_t total_samples,
@@ -254,11 +271,15 @@ static nlolib_status nlo_propagate_impl(
         return nlo_propagate_fail("validate.output_or_storage", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
 
-    if (num_time_samples == 0 || num_time_samples > NT_MAX) {
+    if (num_time_samples == 0u) {
         return nlo_propagate_fail("validate.num_time_samples", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
-    if (num_recorded_samples == 0u || num_recorded_samples > NT_MAX) {
+    if (num_recorded_samples == 0u) {
         return nlo_propagate_fail("validate.num_recorded_samples", NLOLIB_STATUS_INVALID_ARGUMENT);
+    }
+    if (num_recorded_samples >
+        nlo_runtime_limits_default().max_num_recorded_samples_with_storage) {
+        return nlo_propagate_fail("validate.num_recorded_samples_precision", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
     if (output_records != NULL &&
         nlo_compute_record_bytes(num_recorded_samples, num_time_samples) == 0u) {

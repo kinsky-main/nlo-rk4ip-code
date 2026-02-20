@@ -25,6 +25,9 @@ def _base_config(n: int):
 def main():
     api = NLolib()
     cpu_opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
+    limits = api.query_runtime_limits(exec_options=cpu_opts)
+    assert int(limits.max_num_time_samples_runtime) > 0
+    assert int(limits.max_num_recorded_samples_with_storage) > 0
 
     n = 128
     cfg = _base_config(n)
