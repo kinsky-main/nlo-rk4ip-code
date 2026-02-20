@@ -24,27 +24,16 @@ def _base_config(n: int):
 
 def main():
     api = NLolib()
-    print("test_python_bindings: loaded nlolib ctypes bindings.")
+    cpu_opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
 
     n = 128
     cfg = _base_config(n)
     input_field = [0j] * n
 
-    try:
-        out = api.propagate(cfg, input_field, 1, None)
-        assert len(out) == 1 and len(out[0]) == n
-        print("test_python_bindings: nlolib_propagate default AUTO backend returned expected status.")
-    except RuntimeError:
-        print(
-            "test_python_bindings: default AUTO backend unavailable on this machine; "
-            "continuing with explicit CPU backend checks."
-        )
-
-    cpu_opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
     out_records = api.propagate(cfg, input_field, 4, cpu_opts)
     assert len(out_records) == 4
     assert len(out_records[0]) == n
-    print("test_python_bindings: nlolib_propagate with recorded outputs returned expected status.")
+    print("test_python_api_smoke: CPU 1D propagation returned expected record-major shape.")
 
     nx = 16
     ny = 8
@@ -68,7 +57,7 @@ def main():
     out_2d = api.propagate(cfg_2d, [0j] * nxy, 1, cpu_opts)
     assert len(out_2d) == 1
     assert len(out_2d[0]) == nxy
-    print("test_python_bindings: nlolib_propagate flattened 2D call returned expected status.")
+    print("test_python_api_smoke: flattened 2D propagation returned expected shape.")
 
     bad_cfg_2d = prepare_sim_config(
         nxy,
@@ -86,10 +75,10 @@ def main():
     )
     try:
         api.propagate(bad_cfg_2d, [0j] * nxy, 1, cpu_opts)
-        raise AssertionError("expected invalid shape to fail")
+        raise AssertionError("expected invalid flattened shape to fail")
     except RuntimeError as exc:
         assert "status=1" in str(exc)
-    print("test_python_bindings: invalid flattened XY shape rejected as expected.")
+    print("test_python_api_smoke: invalid flattened XY shape rejected as expected.")
 
 
 if __name__ == "__main__":

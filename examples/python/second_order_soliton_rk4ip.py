@@ -85,11 +85,6 @@ def average_relative_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> f
     return float(numerator / denominator)
 
 
-def _spectral_intensity(field_t: np.ndarray) -> np.ndarray:
-    spectrum = np.fft.fftshift(np.fft.fft(field_t))
-    return np.abs(spectrum) ** 2
-
-
 def analytical_initial_condition_error(
     t: np.ndarray,
     beta2: float,
@@ -119,11 +114,9 @@ def compute_wavelength_spectral_map_from_records(
     valid = nu > 0.0
     lambda_nm = C_NM_PER_PS / nu[valid]
 
-    spec_map = np.empty((z_samples.size, valid.sum()), dtype=np.float64)
-    for i in range(z_samples.size):
-        field_z = np.asarray(A_records[i], dtype=np.complex128)
-        spec = np.nan_to_num(_spectral_intensity(field_z), nan=0.0, posinf=0.0, neginf=0.0)
-        spec_map[i, :] = spec[valid]
+    field_records = np.asarray(A_records, dtype=np.complex128)
+    spectra = np.fft.fftshift(np.fft.fft(field_records, axis=1), axes=1)
+    spec_map = np.abs(spectra[:, valid]) ** 2
 
     order = np.argsort(lambda_nm)
     lambda_nm = lambda_nm[order]
@@ -142,12 +135,14 @@ def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) 
     if records.shape != reference_records.shape:
         raise ValueError("records and reference_records must have the same shape.")
 
+    ref_norms = np.linalg.norm(np.asarray(reference_records, dtype=np.complex128), axis=1)
+    norm_floor = max(float(np.max(ref_norms)) * 1e-12, 1e-15)
     out = np.empty(records.shape[0], dtype=np.float64)
     for i in range(records.shape[0]):
         ref = np.asarray(reference_records[i], dtype=np.complex128)
         num = np.asarray(records[i], dtype=np.complex128)
         ref_norm = float(np.linalg.norm(ref))
-        safe_ref_norm = ref_norm if ref_norm > 0.0 else 1.0
+        safe_ref_norm = max(ref_norm, norm_floor)
         out[i] = float(np.linalg.norm(num - ref) / safe_ref_norm)
     return out
 
@@ -233,6 +228,20 @@ def diagnose_first_nonfinite_record(
     return None, max_finite_amplitude
 
 
+def ensure_finite_records_or_raise(
+    A_records: np.ndarray,
+    z_samples: np.ndarray,
+) -> None:
+    first_bad_z, max_finite_amplitude = diagnose_first_nonfinite_record(A_records, z_samples)
+    if first_bad_z is None:
+        return
+    raise RuntimeError(
+        "numerical propagation diverged with non-finite field values near "
+        f"z = {first_bad_z:.6e} m; max finite |A| before divergence = {max_finite_amplitude:.6e}. "
+        "Plotting was aborted to avoid blank/invalid figures."
+    )
+
+
 def main() -> float:
     beta2 = -0.01
     gamma = 0.01
@@ -243,7 +252,7 @@ def main() -> float:
     z_final = 0.506
     sgn_beta2, ld, lnl = normalized_nlse_coefficients(beta2, gamma, t0, p0)
 
-    n = 2**12
+    n = 2**10
     tmax = 8.0 * t0
     T = np.linspace(-tmax, tmax, n)
     t = to_dimensionless_time(T, t0)
@@ -253,7 +262,7 @@ def main() -> float:
     U0 = 2.0 * sech(t)
     A0 = to_physical_envelope(U0, 0.0, p0, alpha)
 
-    num_recorded_samples = 200
+    num_recorded_samples = 160
     sim_cfg = TemporalSimulationConfig(
         gamma=gamma,
         beta2=beta2,
@@ -263,10 +272,10 @@ def main() -> float:
         num_time_samples=n,
         pulse_period=n * dt,
         omega=omega,
-        starting_step_size=1e-4,
+        starting_step_size=2e-4,
         max_step_size=1e-2,
-        min_step_size=1e-6,
-        error_tolerance=1e-8,
+        min_step_size=1e-7,
+        error_tolerance=5e-6,
     )
     exec_opts = SimulationOptions(backend="auto", fft_backend="auto")
 
@@ -277,6 +286,7 @@ def main() -> float:
         num_recorded_samples,
         exec_opts,
     )
+    ensure_finite_records_or_raise(A_records, z_records)
     U_num_records = np.empty_like(A_records, dtype=np.complex128)
     U_true_records = np.empty_like(A_records, dtype=np.complex128)
     for i, z in enumerate(z_records):
@@ -289,14 +299,7 @@ def main() -> float:
     error_curve = relative_l2_error_curve(U_num_records, U_true_records)
     z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):
-        first_bad_z, max_finite_amplitude = diagnose_first_nonfinite_record(A_records, z_records)
-        print("warning: epsilon is non-finite because numerical field contains non-finite values.")
-        if first_bad_z is not None:
-            print(
-                "diagnostic: first non-finite numerical value detected near "
-                f"z = {first_bad_z:.6e} m; max finite |A| before divergence = "
-                f"{max_finite_amplitude:.6e}."
-            )
+        raise RuntimeError("final epsilon is non-finite; numerical output is invalid.")
 
     lambda0_nm = 1550.0
     z_map, lambda_nm, spectral_map = compute_wavelength_spectral_map_from_records(
@@ -305,6 +308,8 @@ def main() -> float:
         dt,
         lambda0_nm,
     )
+    if not np.all(np.isfinite(spectral_map)):
+        raise RuntimeError("spectral map contains non-finite values; refusing to render blank output.")
 
     output_dir = Path(__file__).resolve().parent / "output" / "second_order_soliton"
     saved_paths = save_plots(

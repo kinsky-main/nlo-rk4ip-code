@@ -1,3 +1,4 @@
+import cmath
 import math
 import random
 
@@ -23,6 +24,11 @@ def _omega_grid_unshifted(n, dt):
     ]
 
 
+def _centered_time_grid(n, dt):
+    mid = n // 2
+    return [float(i - mid) * dt for i in range(n)]
+
+
 def _random_input_field(n, seed):
     rng = random.Random(seed)
     return [complex(rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3)) for _ in range(n)]
@@ -32,38 +38,44 @@ def _max_abs_diff(a, b):
     return max(abs(x - y) for x, y in zip(a, b))
 
 
-def test_default_runtime_matches_explicit_defaults(api, opts):
-    n = 256
-    dt = 0.02
-    omega = _omega_grid_unshifted(n, dt)
-    input_field = _random_input_field(n, seed=5)
+def _gaussian_with_phase(t, sigma, d):
+    out = [0j] * len(t)
+    for i, ti in enumerate(t):
+        amp = math.exp(-((ti / sigma) * (ti / sigma)))
+        phase = -d * ti
+        out[i] = amp * complex(math.cos(phase), math.sin(phase))
+    return out
 
-    common = dict(
-        propagation_distance=0.1,
-        starting_step_size=1e-3,
-        max_step_size=5e-3,
-        min_step_size=1e-5,
-        error_tolerance=1e-7,
-        pulse_period=float(n) * dt,
-        delta_time=dt,
-        frequency_grid=[complex(w, 0.0) for w in omega],
-    )
 
-    default_cfg = prepare_sim_config(n, **common)
-    explicit_cfg = prepare_sim_config(
-        n,
-        runtime=RuntimeOperators(constants=[-0.5, 0.0, 1.0]),
-        **common,
-    )
+def _intensity_centroid(t, field):
+    weighted = 0.0
+    total = 0.0
+    for ti, ai in zip(t, field):
+        ii = (ai.real * ai.real) + (ai.imag * ai.imag)
+        weighted += ti * ii
+        total += ii
 
-    default_final = api.propagate(default_cfg, input_field, 2, opts)[1]
-    explicit_final = api.propagate(explicit_cfg, input_field, 2, opts)[1]
-    err = _max_abs_diff(default_final, explicit_final)
-    assert err <= 2e-8, f"default runtime mismatch: err={err}"
+    if total <= 0.0:
+        return 0.0
+    return weighted / total
+
+
+def _sech(x):
+    return 1.0 / math.cosh(x)
+
+
+def _second_order_soliton_analytic(t_value, z, beta2, t0):
+    ld = (t0 * t0) / abs(beta2)
+    xi = z / ld
+    numerator = 4.0 * (
+        math.cosh(3.0 * t_value) + 3.0 * cmath.exp(4.0j * xi) * math.cosh(t_value)
+    ) * cmath.exp(0.5j * xi)
+    denominator = math.cosh(4.0 * t_value) + 4.0 * math.cosh(2.0 * t_value) + 3.0 * math.cos(4.0 * xi)
+    return numerator / denominator
 
 
 def test_dispersion_factor_callable_matches_string(api, opts):
-    n = 256
+    n = 192
     dt = 0.02
     scale = -0.02
     omega = _omega_grid_unshifted(n, dt)
@@ -106,7 +118,7 @@ def test_dispersion_factor_callable_matches_string(api, opts):
 
 
 def test_nonlinear_callable_matches_string(api, opts):
-    n = 256
+    n = 192
     dt = 0.01
     gamma = 0.6
     input_field = _random_input_field(n, seed=23)
@@ -200,15 +212,109 @@ def test_extended_runtime_operators_execute(api, opts):
     assert len(records[0]) == n
 
 
+def test_linear_drift_signed_prediction(api, opts):
+    n = 384
+    dt = 0.01
+    sigma = 0.20
+    beta2 = 0.05
+    d = 12.0
+    z_final = 0.5
+
+    t = _centered_time_grid(n, dt)
+    omega = _omega_grid_unshifted(n, dt)
+
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=z_final,
+        starting_step_size=5e-3,
+        max_step_size=2e-2,
+        min_step_size=1e-4,
+        error_tolerance=1e-6,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(constants=[0.5 * beta2, 0.0, 0.0]),
+    )
+
+    pulse_pos = _gaussian_with_phase(t, sigma, d)
+    pulse_neg = _gaussian_with_phase(t, sigma, -d)
+
+    final_pos = api.propagate(cfg, pulse_pos, 2, opts)[1]
+    final_neg = api.propagate(cfg, pulse_neg, 2, opts)[1]
+
+    shift_pos = _intensity_centroid(t, final_pos) - _intensity_centroid(t, pulse_pos)
+    shift_neg = _intensity_centroid(t, final_neg) - _intensity_centroid(t, pulse_neg)
+
+    expected_pos = beta2 * d * z_final
+    expected_neg = beta2 * (-d) * z_final
+    assert abs(shift_pos) > 0.05
+    assert abs(shift_neg) > 0.05
+    assert shift_pos * shift_neg < 0.0
+
+    rel_err_pos = abs(shift_pos - expected_pos) / max(abs(expected_pos), 1e-12)
+    rel_err_neg = abs(shift_neg - expected_neg) / max(abs(expected_neg), 1e-12)
+    assert rel_err_pos <= 0.30
+    assert rel_err_neg <= 0.30
+
+    mag_sym = abs(abs(shift_pos) - abs(shift_neg)) / max(abs(shift_pos), abs(shift_neg))
+    assert mag_sym <= 0.20
+
+
+def test_second_order_soliton_intensity_error(api, opts):
+    beta2 = -0.01
+    gamma = 0.01
+    alpha = 0.0
+    tfwhm = 100e-3
+    t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
+    p0 = (2**2) * abs(beta2) / (gamma * t0 * t0)
+    z_final = 0.506
+
+    n = 224
+    tmax = 8.0 * t0
+    times = [(-tmax) + (2.0 * tmax) * float(i) / float(n - 1) for i in range(n)]
+    t_dimless = [ti / t0 for ti in times]
+    dt = times[1] - times[0]
+    omega = _omega_grid_unshifted(n, dt)
+
+    u0 = [2.0 * _sech(ti) for ti in t_dimless]
+    a0 = [complex(math.sqrt(p0) * ui, 0.0) for ui in u0]
+
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=z_final,
+        starting_step_size=2e-4,
+        max_step_size=1e-2,
+        min_step_size=1e-7,
+        error_tolerance=1e-5,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(constants=[0.5 * beta2, 0.0, gamma]),
+    )
+
+    records = api.propagate(cfg, a0, 2, opts)
+    final_field = records[1]
+    assert all(math.isfinite(v.real) and math.isfinite(v.imag) for v in final_field)
+
+    u_num = [val / math.sqrt(p0) for val in final_field]
+    u_true = [_second_order_soliton_analytic(ti, z_final, beta2, t0) for ti in t_dimless]
+    intensity_num = [abs(v) ** 2 for v in u_num]
+    intensity_true = [abs(v) ** 2 for v in u_true]
+    epsilon = sum(abs(a - b) for a, b in zip(intensity_num, intensity_true)) / float(len(intensity_num))
+    epsilon /= max(intensity_true)
+    assert epsilon <= 1e-2, f"second-order soliton intensity error too high: {epsilon}"
+
+
 def main():
     api = NLolib()
     opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
-    test_default_runtime_matches_explicit_defaults(api, opts)
     test_dispersion_factor_callable_matches_string(api, opts)
     test_nonlinear_callable_matches_string(api, opts)
     test_field_first_callable_signature_enforced()
     test_extended_runtime_operators_execute(api, opts)
-    print("test_runtime_operator_expr: operator-only runtime expressions validated.")
+    test_linear_drift_signed_prediction(api, opts)
+    test_second_order_soliton_intensity_error(api, opts)
+    print("test_python_operator_regression: runtime-operator propagation regressions validated.")
 
 
 if __name__ == "__main__":

@@ -87,5 +87,13 @@ nlo_vec_status nlo_vk_op_complex_relative_error(
     double epsilon,
     double* out_error
 );
+nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* fine,
+    const nlo_vec_buffer* coarse,
+    double atol,
+    double rtol,
+    double* out_error
+);
 
 

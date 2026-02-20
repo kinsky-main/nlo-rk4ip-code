@@ -901,3 +901,69 @@ nlo_vec_status nlo_vec_complex_relative_error(
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
+nlo_vec_status nlo_vec_complex_weighted_rms_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* fine,
+    const nlo_vec_buffer* coarse,
+    double atol,
+    double rtol,
+    double* out_error
+)
+{
+    if (backend == NULL || fine == NULL || coarse == NULL || out_error == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (fine->owner != backend || coarse->owner != backend ||
+        fine->kind != NLO_VEC_KIND_COMPLEX64 || coarse->kind != NLO_VEC_KIND_COMPLEX64 ||
+        fine->length != coarse->length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (atol < 0.0) {
+        atol = 0.0;
+    }
+    if (rtol < 0.0) {
+        rtol = 0.0;
+    }
+    if (atol == 0.0 && rtol == 0.0) {
+        rtol = 1e-6;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        const nlo_complex* fine_values = (const nlo_complex*)fine->host_ptr;
+        const nlo_complex* coarse_values = (const nlo_complex*)coarse->host_ptr;
+
+        double numerator = 0.0;
+        double denominator = 0.0;
+        for (size_t i = 0u; i < fine->length; ++i) {
+            const double fine_re = NLO_RE(fine_values[i]);
+            const double fine_im = NLO_IM(fine_values[i]);
+            const double coarse_re = NLO_RE(coarse_values[i]);
+            const double coarse_im = NLO_IM(coarse_values[i]);
+
+            const double diff_re = fine_re - coarse_re;
+            const double diff_im = fine_im - coarse_im;
+            numerator += (diff_re * diff_re) + (diff_im * diff_im);
+
+            const double fine_abs = sqrt((fine_re * fine_re) + (fine_im * fine_im));
+            const double weight = atol + (rtol * fine_abs);
+            denominator += weight * weight;
+        }
+
+        if (denominator <= 0.0) {
+            *out_error = 0.0;
+            return NLO_VEC_STATUS_OK;
+        }
+
+        const double ratio = numerator / denominator;
+        *out_error = sqrt((ratio > 0.0) ? ratio : 0.0);
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        return nlo_vk_op_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
+    }
+
+    return NLO_VEC_STATUS_UNSUPPORTED;
+}
+

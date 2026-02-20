@@ -1,0 +1,58 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+
+layout(local_size_x = 64) in;
+
+layout(push_constant) uniform PushConstants {
+    uint count;
+    uint _pad;
+    double scalar0;
+    double scalar1;
+} pc;
+
+struct nlo_vk_error_pair {
+    double numerator;
+    double denominator;
+};
+
+layout(set = 0, binding = 0, std430) buffer DstBuffer {
+    nlo_vk_error_pair dst_pairs[];
+};
+
+layout(set = 0, binding = 1, std430) readonly buffer SrcBuffer {
+    nlo_vk_error_pair src_pairs[];
+};
+
+shared double shared_num[64];
+shared double shared_den[64];
+
+void main()
+{
+    uint global_idx = gl_GlobalInvocationID.x;
+    uint local_idx = gl_LocalInvocationID.x;
+    uint group_idx = gl_WorkGroupID.x;
+
+    double numerator = 0.0;
+    double denominator = 0.0;
+    if (global_idx < pc.count) {
+        numerator = src_pairs[global_idx].numerator;
+        denominator = src_pairs[global_idx].denominator;
+    }
+
+    shared_num[local_idx] = numerator;
+    shared_den[local_idx] = denominator;
+    barrier();
+
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (local_idx < stride) {
+            shared_num[local_idx] += shared_num[local_idx + stride];
+            shared_den[local_idx] += shared_den[local_idx + stride];
+        }
+        barrier();
+    }
+
+    if (local_idx == 0u) {
+        dst_pairs[group_idx].numerator = shared_num[0u];
+        dst_pairs[group_idx].denominator = shared_den[0u];
+    }
+}

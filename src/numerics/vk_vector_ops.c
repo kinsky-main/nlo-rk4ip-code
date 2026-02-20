@@ -26,6 +26,11 @@ enum {
     NLO_VK_DESCRIPTOR_SET_MAX_COUNT = 4096u
 };
 
+typedef struct {
+    double numerator;
+    double denominator;
+} nlo_vk_error_pair;
+
 static nlo_vec_status nlo_vk_begin_commands_raw(nlo_vector_backend* backend);
 
 static uint32_t nlo_vk_clamp_descriptor_set_count(uint64_t count)
@@ -468,7 +473,9 @@ static nlo_vec_status nlo_vk_create_kernels(nlo_vector_backend* backend)
         NLO_VK_SHADER_COMPLEX_EXP_INPLACE_PATH,
         NLO_VK_SHADER_COMPLEX_REAL_POW_INPLACE_PATH,
         NLO_VK_SHADER_COMPLEX_RELATIVE_ERROR_REDUCE_PATH,
-        NLO_VK_SHADER_REAL_MAX_REDUCE_PATH
+        NLO_VK_SHADER_REAL_MAX_REDUCE_PATH,
+        NLO_VK_SHADER_COMPLEX_WEIGHTED_RMS_REDUCE_PATH,
+        NLO_VK_SHADER_PAIR_SUM_REDUCE_PATH
     };
 
     for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
@@ -1329,6 +1336,228 @@ static nlo_vec_status nlo_vk_dispatch_complex_relative_error(
     return NLO_VEC_STATUS_OK;
 }
 
+static nlo_vec_status nlo_vk_dispatch_complex_weighted_rms_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* fine,
+    const nlo_vec_buffer* coarse,
+    double atol,
+    double rtol,
+    double* out_error
+)
+{
+    if (backend == NULL || fine == NULL || coarse == NULL || out_error == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (fine->length != coarse->length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (fine->length > (size_t)UINT32_MAX) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    uint32_t groups = nlo_vk_dispatch_groups_for_count(fine->length);
+    uint32_t required_sets = 1u;
+    uint32_t reduce_count = groups;
+    while (reduce_count > 1u) {
+        reduce_count = nlo_vk_dispatch_groups_for_count((size_t)reduce_count);
+        required_sets += 1u;
+    }
+
+    nlo_vec_status status = NLO_VEC_STATUS_OK;
+    uint32_t available_sets = backend->vk.descriptor_set_count;
+    if (backend->in_simulation) {
+        const uint32_t used = backend->vk.simulation_descriptor_set_cursor;
+        if (used > available_sets) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+        available_sets -= used;
+    }
+    if (required_sets > available_sets) {
+        if (backend->in_simulation) {
+            status = nlo_vk_simulation_phase_flush(backend);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            available_sets = backend->vk.descriptor_set_count;
+        }
+        if (required_sets > available_sets) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+    }
+
+    status = nlo_vk_ensure_reduction_capacity(backend, (VkDeviceSize)(groups * 2u));
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vk_ensure_staging_capacity(backend, (VkDeviceSize)sizeof(nlo_vk_error_pair));
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vk_begin_commands(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+    status = nlo_vk_acquire_descriptor_set(backend, &descriptor_set);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    VkCommandBuffer cmd = backend->vk.command_buffer;
+    VkDeviceSize complex_bytes = (VkDeviceSize)fine->bytes;
+    VkDeviceSize partial_bytes = (VkDeviceSize)groups * (VkDeviceSize)sizeof(nlo_vk_error_pair);
+    uint64_t dispatch_count = 0u;
+    uint64_t dispatch_pass_count = 0u;
+    uint64_t dispatch_pass_bytes = 0u;
+
+    nlo_vk_cmd_compute_to_compute(cmd, fine->vk_buffer, 0u, complex_bytes);
+    nlo_vk_cmd_compute_to_compute(cmd, coarse->vk_buffer, 0u, complex_bytes);
+    nlo_vk_cmd_compute_to_compute(cmd, backend->vk.reduction_buffer_a, 0u, partial_bytes);
+    nlo_vk_cmd_compute_to_compute(cmd, backend->vk.reduction_buffer_b, 0u, partial_bytes);
+
+    nlo_vk_update_descriptor_set(backend,
+                                 descriptor_set,
+                                 backend->vk.reduction_buffer_a,
+                                 0u,
+                                 partial_bytes,
+                                 fine->vk_buffer,
+                                 0u,
+                                 complex_bytes,
+                                 coarse->vk_buffer,
+                                 0u,
+                                 complex_bytes);
+
+    vkCmdBindPipeline(cmd,
+                      VK_PIPELINE_BIND_POINT_COMPUTE,
+                      backend->vk.kernels[NLO_VK_KERNEL_COMPLEX_WEIGHTED_RMS_REDUCE].pipeline);
+    vkCmdBindDescriptorSets(cmd,
+                            VK_PIPELINE_BIND_POINT_COMPUTE,
+                            backend->vk.pipeline_layout,
+                            0u,
+                            1u,
+                            &descriptor_set,
+                            0u,
+                            NULL);
+
+    nlo_vk_push_constants push = {
+        .count = (uint32_t)fine->length,
+        .pad = 0u,
+        .scalar0 = atol,
+        .scalar1 = rtol
+    };
+    vkCmdPushConstants(cmd,
+                       backend->vk.pipeline_layout,
+                       VK_SHADER_STAGE_COMPUTE_BIT,
+                       0u,
+                       (uint32_t)sizeof(push),
+                       &push);
+    vkCmdDispatch(cmd, groups, 1u, 1u);
+    dispatch_count += 1u;
+    dispatch_pass_count += 2u;
+    dispatch_pass_bytes += (uint64_t)partial_bytes * 2u;
+    nlo_vk_cmd_compute_to_compute(cmd, backend->vk.reduction_buffer_a, 0u, partial_bytes);
+
+    VkBuffer src_buffer = backend->vk.reduction_buffer_a;
+    VkBuffer dst_buffer = backend->vk.reduction_buffer_b;
+    uint32_t count = groups;
+    while (count > 1u) {
+        status = nlo_vk_acquire_descriptor_set(backend, &descriptor_set);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        uint32_t next_groups = nlo_vk_dispatch_groups_for_count((size_t)count);
+        VkDeviceSize src_bytes = (VkDeviceSize)count * (VkDeviceSize)sizeof(nlo_vk_error_pair);
+        VkDeviceSize dst_bytes = (VkDeviceSize)next_groups * (VkDeviceSize)sizeof(nlo_vk_error_pair);
+
+        nlo_vk_update_descriptor_set(backend,
+                                     descriptor_set,
+                                     dst_buffer,
+                                     0u,
+                                     dst_bytes,
+                                     src_buffer,
+                                     0u,
+                                     src_bytes,
+                                     src_buffer,
+                                     0u,
+                                     src_bytes);
+
+        vkCmdBindPipeline(cmd,
+                          VK_PIPELINE_BIND_POINT_COMPUTE,
+                          backend->vk.kernels[NLO_VK_KERNEL_PAIR_SUM_REDUCE].pipeline);
+        vkCmdBindDescriptorSets(cmd,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                backend->vk.pipeline_layout,
+                                0u,
+                                1u,
+                                &descriptor_set,
+                                0u,
+                                NULL);
+
+        push.count = count;
+        push.scalar0 = 0.0;
+        push.scalar1 = 0.0;
+        vkCmdPushConstants(cmd,
+                           backend->vk.pipeline_layout,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0u,
+                           (uint32_t)sizeof(push),
+                           &push);
+        vkCmdDispatch(cmd, next_groups, 1u, 1u);
+        dispatch_count += 1u;
+        dispatch_pass_count += 2u;
+        dispatch_pass_bytes += (uint64_t)src_bytes + (uint64_t)dst_bytes;
+        nlo_vk_cmd_compute_to_compute(cmd, dst_buffer, 0u, dst_bytes);
+
+        VkBuffer tmp = src_buffer;
+        src_buffer = dst_buffer;
+        dst_buffer = tmp;
+        count = next_groups;
+    }
+
+    nlo_vk_cmd_compute_to_transfer(cmd, src_buffer, 0u, (VkDeviceSize)sizeof(nlo_vk_error_pair));
+
+    VkBufferCopy copy = {
+        .srcOffset = 0u,
+        .dstOffset = 0u,
+        .size = (VkDeviceSize)sizeof(nlo_vk_error_pair)
+    };
+    vkCmdCopyBuffer(cmd, src_buffer, backend->vk.staging_buffer, 1u, &copy);
+    nlo_vk_cmd_transfer_to_host(cmd, backend->vk.staging_buffer, 0u, (VkDeviceSize)sizeof(nlo_vk_error_pair));
+
+    status = nlo_vk_submit_commands(backend);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    nlo_perf_profile_add_gpu_dispatch(dispatch_count,
+                                      dispatch_pass_count,
+                                      dispatch_pass_bytes);
+    nlo_perf_profile_add_gpu_host_transfer_copy(1u, (uint64_t)sizeof(nlo_vk_error_pair));
+    nlo_perf_profile_add_gpu_download(1u, (uint64_t)sizeof(nlo_vk_error_pair));
+    if (backend->in_simulation) {
+        status = nlo_vk_simulation_phase_flush(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+    }
+
+    nlo_vk_error_pair pair = {0.0, 0.0};
+    memcpy(&pair, backend->vk.staging_mapped_ptr, sizeof(pair));
+    if (pair.denominator <= 0.0) {
+        *out_error = 0.0;
+        return NLO_VEC_STATUS_OK;
+    }
+
+    double ratio = pair.numerator / pair.denominator;
+    if (ratio < 0.0) {
+        ratio = 0.0;
+    }
+    *out_error = sqrt(ratio);
+    return NLO_VEC_STATUS_OK;
+}
+
 static nlo_vec_status nlo_vk_copy_buffer_chunked(
     nlo_vector_backend* backend,
     VkBuffer src_buffer,
@@ -1735,6 +1964,27 @@ nlo_vec_status nlo_vk_op_complex_relative_error(
         epsilon = 1e-12;
     }
     return nlo_vk_dispatch_complex_relative_error(backend, current, previous, epsilon, out_error);
+}
+
+nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* fine,
+    const nlo_vec_buffer* coarse,
+    double atol,
+    double rtol,
+    double* out_error
+)
+{
+    if (atol < 0.0) {
+        atol = 0.0;
+    }
+    if (rtol < 0.0) {
+        rtol = 0.0;
+    }
+    if (atol == 0.0 && rtol == 0.0) {
+        rtol = 1e-6;
+    }
+    return nlo_vk_dispatch_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
 }
 
 

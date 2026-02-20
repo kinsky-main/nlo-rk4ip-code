@@ -1,0 +1,75 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#extension GL_GOOGLE_include_directive : require
+
+#include "nlo_complex_device.glslinc"
+
+layout(local_size_x = 64) in;
+
+layout(push_constant) uniform PushConstants {
+    uint count;
+    uint _pad;
+    double scalar0;
+    double scalar1;
+} pc;
+
+struct nlo_vk_error_pair {
+    double numerator;
+    double denominator;
+};
+
+layout(set = 0, binding = 0, std430) buffer DstBuffer {
+    nlo_vk_error_pair partial_pairs[];
+};
+
+layout(set = 0, binding = 1, std430) readonly buffer FineBuffer {
+    nlo_vk_complex64 fine_vals[];
+};
+
+layout(set = 0, binding = 2, std430) readonly buffer CoarseBuffer {
+    nlo_vk_complex64 coarse_vals[];
+};
+
+shared double shared_num[64];
+shared double shared_den[64];
+
+void main()
+{
+    uint global_idx = gl_GlobalInvocationID.x;
+    uint local_idx = gl_LocalInvocationID.x;
+    uint group_idx = gl_WorkGroupID.x;
+
+    double numerator = 0.0;
+    double denominator = 0.0;
+    if (global_idx < pc.count) {
+        double fine_re = fine_vals[global_idx].re;
+        double fine_im = fine_vals[global_idx].im;
+        double coarse_re = coarse_vals[global_idx].re;
+        double coarse_im = coarse_vals[global_idx].im;
+
+        double diff_re = fine_re - coarse_re;
+        double diff_im = fine_im - coarse_im;
+        numerator = diff_re * diff_re + diff_im * diff_im;
+
+        double fine_abs = sqrt(fine_re * fine_re + fine_im * fine_im);
+        double weight = pc.scalar0 + pc.scalar1 * fine_abs;
+        denominator = weight * weight;
+    }
+
+    shared_num[local_idx] = numerator;
+    shared_den[local_idx] = denominator;
+    barrier();
+
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (local_idx < stride) {
+            shared_num[local_idx] += shared_num[local_idx + stride];
+            shared_den[local_idx] += shared_den[local_idx + stride];
+        }
+        barrier();
+    }
+
+    if (local_idx == 0u) {
+        partial_pairs[group_idx].numerator = shared_num[0u];
+        partial_pairs[group_idx].denominator = shared_den[0u];
+    }
+}

@@ -243,6 +243,19 @@ nlo_vec_status nlo_vec_complex_relative_error(
     double* out_error
 );
 
+/**
+ * @brief Compute weighted RMS complex error:
+ *        sqrt(sum(|fine-coarse|^2) / sum((atol + rtol*|fine|)^2)).
+ */
+nlo_vec_status nlo_vec_complex_weighted_rms_error(
+    nlo_vector_backend* backend,
+    const nlo_vec_buffer* fine,
+    const nlo_vec_buffer* coarse,
+    double atol,
+    double rtol,
+    double* out_error
+);
+
 #ifdef __cplusplus
 }
 #endif

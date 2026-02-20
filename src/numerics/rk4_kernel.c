@@ -31,8 +31,16 @@
 #define NLO_RK4_STEP_GROW_MAX 2.0
 #endif
 
-#ifndef NLO_RK4_ERROR_EPS
-#define NLO_RK4_ERROR_EPS 1e-12
+#ifndef NLO_RK4_ATOL_SCALE
+#define NLO_RK4_ATOL_SCALE 1e-3
+#endif
+
+#ifndef NLO_RK4_ATOL_MIN
+#define NLO_RK4_ATOL_MIN 1e-14
+#endif
+
+#ifndef NLO_RK4_MAX_REJECTION_ATTEMPTS
+#define NLO_RK4_MAX_REJECTION_ATTEMPTS 32u
 #endif
 
 #ifndef NLO_RK4_STRICT_STATUS_CHECKS
@@ -81,35 +89,6 @@ static int nlo_rk4_debug_enabled_runtime(void)
 {
     const char* env = getenv("NLO_RK4_DEBUG");
     return (env != NULL && *env != '\0' && *env != '0') ? 1 : 0;
-}
-
-static size_t nlo_rk4_error_check_interval(void)
-{
-    static size_t cached_interval = 0u;
-    if (cached_interval != 0u) {
-        return cached_interval;
-    }
-
-    const char* env = getenv("NLO_RK4_ERROR_CHECK_INTERVAL");
-    if (env == NULL || env[0] == '\0') {
-        cached_interval = 1u;
-        return cached_interval;
-    }
-
-    char* end_ptr = NULL;
-    unsigned long long parsed = strtoull(env, &end_ptr, 10);
-    if (end_ptr == env || (end_ptr != NULL && *end_ptr != '\0') || parsed == 0u) {
-        cached_interval = 1u;
-        return cached_interval;
-    }
-
-    if (parsed > (unsigned long long)SIZE_MAX) {
-        cached_interval = SIZE_MAX;
-        return cached_interval;
-    }
-
-    cached_interval = (size_t)parsed;
-    return cached_interval;
 }
 
 static double nlo_record_capture_tolerance(double z_end)
@@ -307,6 +286,70 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     return NLO_VEC_STATUS_OK;
 }
 
+static nlo_vec_status nlo_rk4_attempt_step_doubling(
+    simulation_state* state,
+    double step,
+    size_t step_index,
+    double atol,
+    double rtol,
+    double* out_error
+)
+{
+    if (state == NULL || state->backend == NULL || out_error == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    simulation_working_vectors* work = &state->working_vectors;
+    const double half_step = 0.5 * step;
+
+    nlo_vec_status status = nlo_vec_complex_copy(state->backend,
+                                                 work->previous_field_vec,
+                                                 state->current_field_vec);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    state->current_step_size = step;
+    state->current_half_step_exp = 0.5 * step;
+    status = nlo_rk4_step_device(state, step_index);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_copy(state->backend,
+                                  work->field_magnitude_vec,
+                                  state->current_field_vec);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_copy(state->backend,
+                                  state->current_field_vec,
+                                  work->previous_field_vec);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    state->current_step_size = half_step;
+    state->current_half_step_exp = 0.5 * half_step;
+    status = nlo_rk4_step_device(state, step_index);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_rk4_step_device(state, step_index);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_weighted_rms_error(state->backend,
+                                                state->current_field_vec,
+                                                work->field_magnitude_vec,
+                                                atol,
+                                                rtol,
+                                                out_error);
+    return status;
+}
+
 void solve_rk4(simulation_state *state)
 {
     if (state == NULL || state->backend == NULL || state->config == NULL)
@@ -355,7 +398,8 @@ void solve_rk4(simulation_state *state)
     double record_spacing = 0.0;
     double next_record_z = z_end;
     const double record_capture_eps = nlo_record_capture_tolerance(z_end);
-    const size_t error_check_interval = nlo_rk4_error_check_interval();
+    const double rtol = tol;
+    const double atol = fmax(tol * NLO_RK4_ATOL_SCALE, NLO_RK4_ATOL_MIN);
     if (state->num_recorded_samples > 1u)
     {
         record_spacing = z_end / (double)(state->num_recorded_samples - 1u);
@@ -393,60 +437,81 @@ void solve_rk4(simulation_state *state)
             break;
         }
 
-        state->current_step_size = step;
-        state->current_half_step_exp = 0.5 * step;
-
-        if (nlo_vec_complex_copy(state->backend,
-                                 state->working_vectors.previous_field_vec,
-                                 state->current_field_vec) != NLO_VEC_STATUS_OK)
+        int step_accepted = 0;
+        size_t reject_attempt = 0u;
+        double error = 0.0;
+        double scale = NLO_RK4_STEP_SHRINK_MIN;
+        while (!step_accepted)
         {
-            break;
-        }
-
-        if (nlo_rk4_step_device(state, rk4_step_index) != NLO_VEC_STATUS_OK)
-        {
-            break;
-        }
-
-        const int should_check_error =
-            (error_check_interval <= 1u) ||
-            (((rk4_step_index + 1u) % error_check_interval) == 0u) ||
-            (state->current_z + step + record_capture_eps >= z_end);
-        double error = -1.0;
-        if (should_check_error)
-        {
-            error = 0.0;
-            if (nlo_vec_complex_relative_error(state->backend,
-                                               state->current_field_vec,
-                                               state->working_vectors.previous_field_vec,
-                                               NLO_RK4_ERROR_EPS,
-                                               &error) != NLO_VEC_STATUS_OK)
-            {
-                error = 0.0;
+            nlo_vec_status status = nlo_rk4_attempt_step_doubling(state,
+                                                                  step,
+                                                                  rk4_step_index,
+                                                                  atol,
+                                                                  rtol,
+                                                                  &error);
+            if (status != NLO_VEC_STATUS_OK) {
+                step_accepted = -1;
+                break;
             }
-        }
 
-        state->current_z += step;
-
-        double scale = NLO_RK4_STEP_GROW_MAX;
-        if (!should_check_error)
-        {
-            scale = 1.0;
-        }
-        else if (error > 0.0)
-        {
-            scale = NLO_RK4_ERROR_SAFETY * pow(tol / error, 0.2);
-            if (scale < NLO_RK4_STEP_SHRINK_MIN)
-            {
-                scale = NLO_RK4_STEP_SHRINK_MIN;
+            if (!isfinite(error) || error < 0.0) {
+                error = DBL_MAX;
             }
-            else if (scale > NLO_RK4_STEP_GROW_MAX)
-            {
+
+            if (error > 0.0 && isfinite(error)) {
+                scale = NLO_RK4_ERROR_SAFETY * pow(1.0 / error, 0.2);
+            } else {
                 scale = NLO_RK4_STEP_GROW_MAX;
             }
+            if (scale < NLO_RK4_STEP_SHRINK_MIN) {
+                scale = NLO_RK4_STEP_SHRINK_MIN;
+            } else if (scale > NLO_RK4_STEP_GROW_MAX) {
+                scale = NLO_RK4_STEP_GROW_MAX;
+            }
+
+            if (error <= 1.0 || step <= (min_step * (1.0 + 1e-12))) {
+                state->current_z += step;
+                state->current_step_size = nlo_clamp_step(step * scale, min_step, max_step);
+                step_accepted = 1;
+                break;
+            }
+
+            if (nlo_vec_complex_copy(state->backend,
+                                     state->current_field_vec,
+                                     state->working_vectors.previous_field_vec) != NLO_VEC_STATUS_OK) {
+                step_accepted = -1;
+                break;
+            }
+
+            step = nlo_clamp_step(step * scale, min_step, max_step);
+            const double remaining_retry = z_end - state->current_z;
+            if (step > remaining_retry) {
+                step = remaining_retry;
+            }
+            if (record_spacing > 0.0 &&
+                state->current_record_index < state->num_recorded_samples &&
+                next_record_z > state->current_z) {
+                const double to_next_record = next_record_z - state->current_z;
+                if (to_next_record > 0.0 && step > to_next_record) {
+                    step = to_next_record;
+                }
+            }
+            if (step <= 0.0) {
+                step_accepted = -1;
+                break;
+            }
+
+            reject_attempt += 1u;
+            if (reject_attempt >= NLO_RK4_MAX_REJECTION_ATTEMPTS) {
+                step_accepted = -1;
+                break;
+            }
         }
 
-        state->current_step_size = nlo_clamp_step(step * scale, min_step, max_step);
+        if (step_accepted < 0) {
+            break;
+        }
+
         nlo_rk4_debug_log_error_control(rk4_step_index,
                                         state->current_z,
                                         step,
