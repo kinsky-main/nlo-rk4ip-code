@@ -1,0 +1,10 @@
+#ifndef NLO_COMPLEX_DEVICE_GLSLINC
+#define NLO_COMPLEX_DEVICE_GLSLINC
+
+struct nlo_vk_complex64 {
+    double re;
+    double im;
+};
+
+#endif
+

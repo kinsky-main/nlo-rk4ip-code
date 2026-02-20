@@ -1,15 +1,49 @@
 add_library(nlo_fft_backend INTERFACE)
 
-if(NLO_FFT_BACKEND_FFTW AND NLO_FFT_BACKEND_CUFFT)
-  message(FATAL_ERROR "Only one FFT backend can be enabled at a time.")
+include(NLOFftw)
+nlo_configure_fftw(_nlo_fftw_target _nlo_fftw_include_dirs)
+target_link_libraries(nlo_fft_backend INTERFACE ${_nlo_fftw_target})
+if(_nlo_fftw_include_dirs)
+  target_include_directories(nlo_fft_backend INTERFACE ${_nlo_fftw_include_dirs})
 endif()
 
-if(NLO_FFT_BACKEND_FFTW)
-  find_package(FFTW3 REQUIRED)
-  target_link_libraries(nlo_fft_backend INTERFACE FFTW3::fftw3)
-  target_compile_definitions(nlo_fft_backend INTERFACE NLO_FFT_BACKEND_FFTW)
-elseif(NLO_FFT_BACKEND_CUFFT)
-  target_compile_definitions(nlo_fft_backend INTERFACE NLO_FFT_BACKEND_CUFFT)
-else()
-  message(FATAL_ERROR "No FFT backend enabled. Set NLO_FFT_BACKEND_FFTW or NLO_FFT_BACKEND_CUFFT.")
+include(FetchContent)
+find_package(Vulkan QUIET COMPONENTS glslang)
+if(NOT TARGET Vulkan::glslang)
+  message(FATAL_ERROR
+    "Required target Vulkan::glslang is unavailable.")
+endif()
+
+FetchContent_Declare(
+  vkfft
+  URL https://github.com/DTolm/VkFFT/archive/refs/heads/master.zip
+)
+FetchContent_MakeAvailable(vkfft)
+
+target_include_directories(nlo_fft_backend INTERFACE ${vkfft_SOURCE_DIR})
+target_compile_definitions(nlo_fft_backend INTERFACE VKFFT_BACKEND=0)
+target_link_libraries(nlo_fft_backend INTERFACE Vulkan::glslang)
+
+find_path(NLO_GLSLANG_C_INCLUDE_DIR
+  NAMES glslang_c_interface.h
+  HINTS
+    ENV VULKAN_SDK
+  PATH_SUFFIXES
+    Include/glslang/Include
+    glslang/Include
+)
+if(NLO_GLSLANG_C_INCLUDE_DIR)
+  target_include_directories(nlo_fft_backend INTERFACE ${NLO_GLSLANG_C_INCLUDE_DIR})
+endif()
+
+if(WIN32 AND DEFINED ENV{VULKAN_SDK})
+  target_link_directories(nlo_fft_backend INTERFACE "$ENV{VULKAN_SDK}/Lib")
+  target_link_libraries(nlo_fft_backend INTERFACE
+    $<$<CONFIG:Debug>:MachineIndependentd;OSDependentd;GenericCodeGend;SPIRVd;SPIRV-Toolsd;SPIRV-Tools-optd;glslang-default-resource-limitsd>
+    $<$<NOT:$<CONFIG:Debug>>:MachineIndependent;OSDependent;GenericCodeGen;SPIRV;SPIRV-Tools;SPIRV-Tools-opt;glslang-default-resource-limits>
+  )
+  if(MSVC)
+    # Vulkan/glslang static libs frequently ship without redistributable PDBs.
+    target_link_options(nlo_fft_backend INTERFACE /IGNORE:4099)
+  endif()
 endif()

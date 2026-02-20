@@ -14,7 +14,7 @@
 
 #include "core/state.h"
 #include "core/init.h"
-#include "fft/nlo_complex.h"
+#include "backend/nlo_complex.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,14 +23,16 @@ extern "C" {
 // MARK: Const & Macros
 
 // DLL export/import for Windows builds.
-#if defined(_WIN32)
-  #if defined(NLOLIB_EXPORTS)
-    #define NLOLIB_API __declspec(dllexport)
+#ifndef NLOLIB_API
+  #if defined(_WIN32)
+    #if defined(NLOLIB_EXPORTS)
+      #define NLOLIB_API __declspec(dllexport)
+    #else
+      #define NLOLIB_API __declspec(dllimport)
+    #endif
   #else
-    #define NLOLIB_API __declspec(dllimport)
+    #define NLOLIB_API
   #endif
-#else
-  #define NLOLIB_API
 #endif
 
 // MARK: Typedefs
@@ -45,18 +47,32 @@ typedef enum {
 // MARK: Function Declarations
 
 /**
- * @brief Propagate an input field through the solver.
+ * @brief Propagate an input field and return recorded envelopes across z.
  *
  * @param config Simulation configuration parameters.
- * @param num_time_samples Number of time-domain samples in the input/output arrays.
- * @param input_field Pointer to input field buffer (length: num_time_samples).
- * @param output_field Pointer to output field buffer (length: num_time_samples).
+ * @param num_time_samples Number of samples in the flattened input/output arrays.
+ *        For 1D legacy use this is the temporal sample count.
+ *        For 2D transverse simulations this must equal config->spatial.nx * config->spatial.ny.
+ * @param input_field Pointer to input field buffer (length: num_time_samples),
+ *        flattened in row-major order for 2D transverse mode.
+ * @param num_recorded_samples Number of envelope records to return.
+ * @param output_records Pointer to output record buffer (length:
+ *        num_recorded_samples * num_time_samples). The layout is record-major:
+ *        output_records[record_index * num_time_samples + sample_index].
+ *        For num_recorded_samples == 1, record 0 is the final field at z_end.
+ *        For num_recorded_samples > 1, records are evenly distributed over [0, z_end].
+ * @param exec_options Runtime backend selection/options
+ *        (NULL uses AUTO hardware-detected defaults).
  * @return nlolib_status status code.
  */
-NLOLIB_API nlolib_status nlolib_propagate(const sim_config* config,
-                                         size_t num_time_samples,
-                                         const nlo_complex* input_field,
-                                         nlo_complex* output_field);
+NLOLIB_API nlolib_status nlolib_propagate(
+    const sim_config* config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    size_t num_recorded_samples,
+    nlo_complex* output_records,
+    const nlo_execution_options* exec_options
+);
 
 #ifdef __cplusplus
 }

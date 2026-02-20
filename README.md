@@ -1,64 +1,36 @@
+# TODO List
+- [x] Fix double declarations and definitions of vector operations in backend and numerics
+- [x] Assess whether SPIR-V is required for GPU backend or if Vulkan compute shaders are sufficient. Ideally remove as it is a runtime dependency.
+- [x] Investigate GPU benchmark failure.
+- [x] Investigate why RK4 solver is exploding to NaNs generally.
+- [ ] Write db io for larger datasets and implement checkpointing in solver when problem size exceeds system memory limits.
+- [ ] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
 
-```mermaid
-flowchart LR
-  %% ------------------------------------------------------------
-  %% Execution flow (replicated from diagram)
-  %% ------------------------------------------------------------
+## FFTW
 
-  %% Left / setup pipeline
-  start((Start Solver)):::start
-  setup[setup_gnlse]:::proc
+FFTW is a required dependency and is always built from source and linked statically.
+Vulkan (including loader, headers, and `glslangValidator`) is also required.
 
-  start --> setup
-
-  setup --> dedim[dedimensionalise_params]:::proc
-  setup --> initpulse[create_initial_pulse]:::proc
-  setup --> checkenv[check_envelope_period]:::proc
-  setup --> checkdt[check_time_grid_spacing]:::proc
-
-  initpulse -.- note_wrap[/"Using time window wraparound, from initial Gaussian, pulse (T)."/]:::note
-  checkdt -.- note_nyq[/"Use Nyquist sampling frequency, from initial pulse bandwidth (Δt)."/]:::note
-
-  dedim --> checkdisp[check_dispersion]:::proc
-  checkdisp -.- note_zmax[/"Checks pulse broadening from, dispersion giving lower bound for, (z_max)."/]:::note_zmax
-
-  %% Bundle of values passed onward (as per central label in figure)
-  checkdt --> args[["pulse_period, time_grid_spacing,  z_max,  dispersion_coefficients, initial_pulse_a_t"]]:::bundle
-
-  %% Right / solver
-  args --> run[run_rk45_solver]:::proc
-
-  run --> tgrid[create_time_grid]:::proc2
-  run --> disphalf[create_dispersion_half_step]:::proc2
-
-  %% Main loop subgraph
-  subgraph loop["while z < z_max"]
-    direction TB
-    step[step_rk45]:::proc2
-    ipenv[calculate_ip_envelope]:::proc2
-    dA[calculate_dA_estimates]:::proc2
-
-    step --> ipenv --> dA
-
-    dA --> nan?{check_nans}:::decision
-    nan? -->|No| edges?{check_edges}:::decision
-
-    nan? -->|Yes| break1[break]:::break
-    edges? -->|Yes| break2[break]:::break
-  end
-
-  disphalf --> loop
-  tgrid --> loop
-
-  %% ------------------------------------------------------------
-  %% Styling
-  %% ------------------------------------------------------------
-  classDef start fill:#eaffea,stroke:#2e7d32,stroke-width:2px,color:#000;
-  classDef proc  fill:#ffffff,stroke:#1e88e5,stroke-width:2px,color:#000;
-  classDef proc2 fill:#ffffff,stroke:#444,stroke-width:1.5px,color:#000;
-  classDef decision fill:#ffffff,stroke:#444,stroke-width:1.5px,color:#000;
-  classDef break fill:#ffffff,stroke:#e53935,stroke-width:2px,color:#000;
-  classDef note fill:#ffffff,stroke:#666,stroke-dasharray: 4 4,color:#000;
-  classDef note_zmax fill:#ffffff,stroke:#666,stroke-dasharray: 4 4,color:#000;
-  classDef bundle fill:#ffffff,stroke:#666,stroke-width:1px,color:#000;
+```powershell
+cmake -S . -B build -DNLO_INSTALL_GIT_HOOKS=OFF
+cmake --build build --config Debug
 ```
+
+## Benchmarks
+
+Build benchmark targets by enabling `NLOLIB_BUILD_BENCHMARKS`:
+
+```powershell
+cmake -S . -B build -DNLOLIB_BUILD_BENCHMARKS=ON
+cmake --build build --target bench_solver_backend --config Release
+```
+
+Run CPU vs GPU end-to-end solver benchmark:
+
+```powershell
+.\build\benchmarks\Release\bench_solver_backend.exe --backend=both --sizes=1024,4096 --warmup=2 --runs=8 --csv=benchmarks/results/solver_backend.csv
+```
+
+Output:
+- Console summary statistics per backend and size
+- CSV rows in `benchmarks/results/solver_backend.csv`

@@ -1,0 +1,49 @@
+#version 460
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#extension GL_GOOGLE_include_directive : require
+
+#include "nlo_complex_device.glslinc"
+
+layout(local_size_x = 64) in;
+
+layout(push_constant) uniform PushConstants {
+    uint count;
+    uint _pad;
+    double scalar0;
+    double scalar1;
+} pc;
+
+layout(set = 0, binding = 0, std430) buffer DstBuffer {
+    nlo_vk_complex64 dst[];
+};
+
+void main()
+{
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.count) {
+        return;
+    }
+
+    float exponent_f = float(pc.scalar0);
+    float re_f = float(dst[idx].re);
+    float im_f = float(dst[idx].im);
+    float radius_f = length(vec2(re_f, im_f));
+
+    if (radius_f == 0.0f) {
+        if (exponent_f == 0.0f) {
+            dst[idx].re = 1.0;
+            dst[idx].im = 0.0;
+        } else {
+            dst[idx].re = 0.0;
+            dst[idx].im = 0.0;
+        }
+        return;
+    }
+
+    float angle_f = atan(im_f, re_f);
+    float scaled_angle_f = exponent_f * angle_f;
+    float scaled_radius_f = pow(radius_f, exponent_f);
+
+    dst[idx].re = double(scaled_radius_f * cos(scaled_angle_f));
+    dst[idx].im = double(scaled_radius_f * sin(scaled_angle_f));
+}

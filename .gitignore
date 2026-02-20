@@ -16,6 +16,7 @@ build/
 build-*/
 cmake-build-*/
 out/
+output/
 
 # Compiled files
 *.o
@@ -48,4 +49,7 @@ temp_*
 
 # Vcpkg installed libraries
 vcpkg_installed/
+
+# Docker related artifacts
+.nvmrc
 
