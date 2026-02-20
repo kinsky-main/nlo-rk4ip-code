@@ -7,9 +7,25 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Mapping, Sequence
+
+try:
+    from .runtime_expr import (  # type: ignore[attr-defined]
+        RUNTIME_CONTEXT_DISPERSION_FACTOR,
+        RUNTIME_CONTEXT_DISPERSION,
+        RUNTIME_CONTEXT_NONLINEAR,
+        translate_callable,
+    )
+except ImportError:
+    from runtime_expr import (
+        RUNTIME_CONTEXT_DISPERSION_FACTOR,
+        RUNTIME_CONTEXT_DISPERSION,
+        RUNTIME_CONTEXT_NONLINEAR,
+        translate_callable,
+    )
 
 NT_MAX = 1 << 20
 NLO_RUNTIME_OPERATOR_CONSTANTS_MAX = 16
@@ -50,18 +66,6 @@ class NloVkBackendConfig(ctypes.Structure):
     ]
 
 
-class NonlinearParams(ctypes.Structure):
-    _fields_ = [("gamma", ctypes.c_double)]
-
-
-class DispersionParams(ctypes.Structure):
-    _fields_ = [
-        ("num_dispersion_terms", ctypes.c_size_t),
-        ("betas", ctypes.c_double * NT_MAX),
-        ("alpha", ctypes.c_double),
-    ]
-
-
 class PropagationParams(ctypes.Structure):
     _fields_ = [
         ("starting_step_size", ctypes.c_double),
@@ -89,15 +93,14 @@ class SpatialGrid(ctypes.Structure):
         ("ny", ctypes.c_size_t),
         ("delta_x", ctypes.c_double),
         ("delta_y", ctypes.c_double),
-        ("grin_gx", ctypes.c_double),
-        ("grin_gy", ctypes.c_double),
         ("spatial_frequency_grid", ctypes.POINTER(NloComplex)),
-        ("grin_potential_phase_grid", ctypes.POINTER(NloComplex)),
+        ("potential_grid", ctypes.POINTER(NloComplex)),
     ]
 
 
 class RuntimeOperatorParams(ctypes.Structure):
     _fields_ = [
+        ("dispersion_factor_expr", ctypes.c_char_p),
         ("dispersion_expr", ctypes.c_char_p),
         ("nonlinear_expr", ctypes.c_char_p),
         ("num_constants", ctypes.c_size_t),
@@ -107,8 +110,6 @@ class RuntimeOperatorParams(ctypes.Structure):
 
 class SimConfig(ctypes.Structure):
     _fields_ = [
-        ("nonlinear", NonlinearParams),
-        ("dispersion", DispersionParams),
         ("propagation", PropagationParams),
         ("time", TimeGrid),
         ("frequency", FrequencyGrid),
@@ -251,9 +252,25 @@ def default_execution_options(
 
 @dataclass
 class RuntimeOperators:
+    dispersion_factor_expr: str | None = None
     dispersion_expr: str | None = None
     nonlinear_expr: str | None = None
+    dispersion_factor_fn: Callable[..., object] | None = None
+    dispersion_fn: Callable[..., object] | None = None
+    nonlinear_fn: Callable[..., object] | None = None
     constants: Sequence[float] = ()
+    constant_bindings: Mapping[str, float] | None = None
+    auto_capture_constants: bool = True
+
+
+def _shift_constant_indices(expression: str, offset: int) -> str:
+    if offset == 0:
+        return expression
+
+    def repl(match: re.Match[str]) -> str:
+        return f"c{int(match.group(1)) + offset}"
+
+    return re.sub(r"\bc(\d+)\b", repl, expression)
 
 
 @dataclass
@@ -269,9 +286,6 @@ class PreparedSimConfig:
 def prepare_sim_config(
     num_time_samples: int,
     *,
-    gamma: float,
-    betas: Sequence[float],
-    alpha: float,
     propagation_distance: float,
     starting_step_size: float,
     max_step_size: float,
@@ -284,10 +298,8 @@ def prepare_sim_config(
     spatial_ny: int | None = None,
     delta_x: float = 1.0,
     delta_y: float = 1.0,
-    grin_gx: float = 0.0,
-    grin_gy: float = 0.0,
     spatial_frequency_grid: Sequence[complex] | None = None,
-    grin_potential_phase_grid: Sequence[complex] | None = None,
+    potential_grid: Sequence[complex] | None = None,
     runtime: RuntimeOperators | None = None,
 ) -> PreparedSimConfig:
     """
@@ -295,19 +307,11 @@ def prepare_sim_config(
     """
     if num_time_samples <= 0:
         raise ValueError("num_time_samples must be > 0")
-    if len(betas) > NT_MAX:
-        raise ValueError(f"betas length exceeds NT_MAX={NT_MAX}")
     if len(frequency_grid) != num_time_samples:
         raise ValueError("frequency_grid length must match num_time_samples")
 
     cfg = SimConfig()
     keepalive: list[object] = []
-
-    cfg.nonlinear.gamma = float(gamma)
-    cfg.dispersion.num_dispersion_terms = len(betas)
-    for i, beta in enumerate(betas):
-        cfg.dispersion.betas[i] = float(beta)
-    cfg.dispersion.alpha = float(alpha)
 
     cfg.propagation.propagation_distance = float(propagation_distance)
     cfg.propagation.starting_step_size = float(starting_step_size)
@@ -328,8 +332,6 @@ def prepare_sim_config(
     cfg.spatial.ny = ny
     cfg.spatial.delta_x = float(delta_x)
     cfg.spatial.delta_y = float(delta_y)
-    cfg.spatial.grin_gx = float(grin_gx)
-    cfg.spatial.grin_gy = float(grin_gy)
 
     if spatial_frequency_grid is not None:
         spatial_arr = make_complex_array(spatial_frequency_grid)
@@ -340,40 +342,97 @@ def prepare_sim_config(
     else:
         cfg.spatial.spatial_frequency_grid = None
 
-    if grin_potential_phase_grid is not None:
-        grin_arr = make_complex_array(grin_potential_phase_grid)
-        keepalive.append(grin_arr)
-        cfg.spatial.grin_potential_phase_grid = ctypes.cast(
-            grin_arr, ctypes.POINTER(NloComplex)
+    if potential_grid is not None:
+        potential_arr = make_complex_array(potential_grid)
+        keepalive.append(potential_arr)
+        cfg.spatial.potential_grid = ctypes.cast(
+            potential_arr, ctypes.POINTER(NloComplex)
         )
     else:
-        cfg.spatial.grin_potential_phase_grid = None
+        cfg.spatial.potential_grid = None
 
     if runtime is not None:
-        if runtime.dispersion_expr:
-            disp_bytes = runtime.dispersion_expr.encode("utf-8")
-            keepalive.append(disp_bytes)
-            cfg.runtime.dispersion_expr = ctypes.c_char_p(disp_bytes)
-        else:
-            cfg.runtime.dispersion_expr = None
+        constants = [float(value) for value in runtime.constants]
+        constant_bindings = runtime.constant_bindings
+        auto_capture = bool(runtime.auto_capture_constants)
 
-        if runtime.nonlinear_expr:
-            nonlin_bytes = runtime.nonlinear_expr.encode("utf-8")
-            keepalive.append(nonlin_bytes)
-            cfg.runtime.nonlinear_expr = ctypes.c_char_p(nonlin_bytes)
-        else:
-            cfg.runtime.nonlinear_expr = None
+        if runtime.dispersion_factor_expr and runtime.dispersion_factor_fn is not None:
+            raise ValueError(
+                "runtime.dispersion_factor_expr and runtime.dispersion_factor_fn are mutually exclusive"
+            )
+        if runtime.dispersion_expr and runtime.dispersion_fn is not None:
+            raise ValueError("runtime.dispersion_expr and runtime.dispersion_fn are mutually exclusive")
+        if runtime.nonlinear_expr and runtime.nonlinear_fn is not None:
+            raise ValueError("runtime.nonlinear_expr and runtime.nonlinear_fn are mutually exclusive")
 
-        constants = list(runtime.constants)
+        dispersion_factor_expr = runtime.dispersion_factor_expr
+        if runtime.dispersion_factor_fn is not None:
+            translated = translate_callable(
+                runtime.dispersion_factor_fn,
+                RUNTIME_CONTEXT_DISPERSION_FACTOR,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            dispersion_factor_expr = shifted
+
+        dispersion_expr = runtime.dispersion_expr
+        if runtime.dispersion_fn is not None:
+            translated = translate_callable(
+                runtime.dispersion_fn,
+                RUNTIME_CONTEXT_DISPERSION,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            dispersion_expr = shifted
+
+        nonlinear_expr = runtime.nonlinear_expr
+        if runtime.nonlinear_fn is not None:
+            translated = translate_callable(
+                runtime.nonlinear_fn,
+                RUNTIME_CONTEXT_NONLINEAR,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            nonlinear_expr = shifted
+
         if len(constants) > NLO_RUNTIME_OPERATOR_CONSTANTS_MAX:
             raise ValueError(
                 "runtime.constants length exceeds "
                 f"{NLO_RUNTIME_OPERATOR_CONSTANTS_MAX}"
             )
+
+        if dispersion_factor_expr:
+            disp_factor_bytes = dispersion_factor_expr.encode("utf-8")
+            keepalive.append(disp_factor_bytes)
+            cfg.runtime.dispersion_factor_expr = ctypes.c_char_p(disp_factor_bytes)
+        else:
+            cfg.runtime.dispersion_factor_expr = None
+
+        if dispersion_expr:
+            disp_bytes = dispersion_expr.encode("utf-8")
+            keepalive.append(disp_bytes)
+            cfg.runtime.dispersion_expr = ctypes.c_char_p(disp_bytes)
+        else:
+            cfg.runtime.dispersion_expr = None
+
+        if nonlinear_expr:
+            nonlin_bytes = nonlinear_expr.encode("utf-8")
+            keepalive.append(nonlin_bytes)
+            cfg.runtime.nonlinear_expr = ctypes.c_char_p(nonlin_bytes)
+        else:
+            cfg.runtime.nonlinear_expr = None
+
         cfg.runtime.num_constants = len(constants)
         for i, constant in enumerate(constants):
             cfg.runtime.constants[i] = float(constant)
     else:
+        cfg.runtime.dispersion_factor_expr = None
         cfg.runtime.dispersion_expr = None
         cfg.runtime.nonlinear_expr = None
         cfg.runtime.num_constants = 0

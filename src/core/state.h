@@ -15,7 +15,7 @@
 #endif
 
 #ifndef NLO_WORK_VECTOR_COUNT
-#define NLO_WORK_VECTOR_COUNT 13u
+#define NLO_WORK_VECTOR_COUNT 14u
 #endif
 
 #ifndef NLO_DEFAULT_DEVICE_HEAP_FRACTION
@@ -25,16 +25,6 @@
 #ifndef NLO_RUNTIME_OPERATOR_CONSTANTS_MAX
 #define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16u
 #endif
-
-typedef struct {
-    double gamma;
-} nonlinear_params;
-
-typedef struct {
-    size_t num_dispersion_terms;
-    double betas[NT_MAX];
-    double alpha;
-} dispersion_params;
 
 typedef struct {
     double starting_step_size;
@@ -58,13 +48,12 @@ typedef struct {
     size_t ny;
     double delta_x;
     double delta_y;
-    double grin_gx;
-    double grin_gy;
     nlo_complex* spatial_frequency_grid;
-    nlo_complex* grin_potential_phase_grid;
+    nlo_complex* potential_grid;
 } spatial_grid;
 
 typedef struct {
+    const char* dispersion_factor_expr;
     const char* dispersion_expr;
     const char* nonlinear_expr;
     size_t num_constants;
@@ -72,8 +61,6 @@ typedef struct {
 } runtime_operator_params;
 
 typedef struct {
-    nonlinear_params nonlinear;
-    dispersion_params dispersion;
     propagation_params propagation;
     time_grid time;
     frequency_grid frequency;
@@ -101,9 +88,10 @@ typedef struct {
     nlo_vec_buffer* k_3_vec;
     nlo_vec_buffer* k_4_vec;
     nlo_vec_buffer* dispersion_factor_vec;
+    nlo_vec_buffer* dispersion_operator_vec;
+    nlo_vec_buffer* nonlinear_multiplier_vec;
+    nlo_vec_buffer* potential_vec;
     nlo_vec_buffer* previous_field_vec;
-    nlo_vec_buffer* grin_phase_factor_vec;
-    nlo_vec_buffer* grin_work_vec;
 } simulation_working_vectors;
 
 typedef struct nlo_fft_plan nlo_fft_plan;
@@ -135,11 +123,9 @@ typedef struct {
     double current_z;
     double current_step_size;
     double current_half_step_exp;
-    double last_dispersion_step_size;
     int dispersion_valid;
 
-    int runtime_dispersion_enabled;
-    int runtime_nonlinear_enabled;
+    nlo_operator_program dispersion_factor_operator_program;
     nlo_operator_program dispersion_operator_program;
     nlo_operator_program nonlinear_operator_program;
     size_t runtime_operator_stack_slots;
@@ -157,7 +143,7 @@ simulation_state* create_simulation_state(
 
 void free_simulation_state(simulation_state* state);
 
-sim_config* create_sim_config(size_t num_dispersion_terms, size_t num_time_samples);
+sim_config* create_sim_config(size_t num_time_samples);
 void free_sim_config(sim_config* config);
 
 nlo_vec_status simulation_state_upload_initial_field(simulation_state* state, const nlo_complex* field);

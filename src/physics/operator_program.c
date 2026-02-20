@@ -16,8 +16,10 @@ typedef enum {
     NLO_TOKEN_PLUS = 3,
     NLO_TOKEN_MINUS = 4,
     NLO_TOKEN_STAR = 5,
-    NLO_TOKEN_LPAREN = 6,
-    NLO_TOKEN_RPAREN = 7
+    NLO_TOKEN_SLASH = 6,
+    NLO_TOKEN_CARET = 7,
+    NLO_TOKEN_LPAREN = 8,
+    NLO_TOKEN_RPAREN = 9
 } nlo_token_kind;
 
 typedef struct {
@@ -43,6 +45,39 @@ static int nlo_is_identifier_start(char c)
 static int nlo_is_identifier_char(char c)
 {
     return (c == '_') || isalnum((unsigned char)c);
+}
+
+static int nlo_context_allows_symbol_w(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_DISPERSION);
+}
+
+static int nlo_context_allows_symbol_a(nlo_operator_program_context context)
+{
+    (void)context;
+    return 1;
+}
+
+static int nlo_context_allows_symbol_i(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_NONLINEAR);
+}
+
+static int nlo_context_allows_symbol_d(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION);
+}
+
+static int nlo_context_allows_symbol_v(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION ||
+            context == NLO_OPERATOR_CONTEXT_NONLINEAR);
+}
+
+static int nlo_context_allows_symbol_h(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION);
 }
 
 static int nlo_emit_instruction(
@@ -93,6 +128,16 @@ static int nlo_parser_next_token(nlo_parser* parser)
         parser->current = (nlo_token){.kind = NLO_TOKEN_STAR};
         return 0;
     }
+    if (c == '/') {
+        ++parser->cursor;
+        parser->current = (nlo_token){.kind = NLO_TOKEN_SLASH};
+        return 0;
+    }
+    if (c == '^') {
+        ++parser->cursor;
+        parser->current = (nlo_token){.kind = NLO_TOKEN_CARET};
+        return 0;
+    }
     if (c == '(') {
         ++parser->cursor;
         parser->current = (nlo_token){.kind = NLO_TOKEN_LPAREN};
@@ -139,6 +184,35 @@ static int nlo_parser_next_token(nlo_parser* parser)
 }
 
 static int nlo_parse_expression(nlo_parser* parser);
+static int nlo_parse_term(nlo_parser* parser);
+static int nlo_parse_power(nlo_parser* parser);
+static int nlo_parse_unary(nlo_parser* parser);
+static int nlo_parse_primary(nlo_parser* parser);
+
+static int nlo_parse_function_call(
+    nlo_parser* parser,
+    nlo_operator_opcode opcode
+)
+{
+    if (parser == NULL || parser->program == NULL) {
+        return -1;
+    }
+
+    if (nlo_parser_next_token(parser) != 0 || parser->current.kind != NLO_TOKEN_LPAREN) {
+        return -1;
+    }
+    if (nlo_parser_next_token(parser) != 0) {
+        return -1;
+    }
+    if (nlo_parse_expression(parser) != 0 || parser->current.kind != NLO_TOKEN_RPAREN) {
+        return -1;
+    }
+    if (nlo_emit_instruction(parser->program, opcode, nlo_make(0.0, 0.0)) != 0) {
+        return -1;
+    }
+
+    return nlo_parser_next_token(parser);
+}
 
 static int nlo_parse_primary(nlo_parser* parser)
 {
@@ -159,25 +233,27 @@ static int nlo_parse_primary(nlo_parser* parser)
 
     if (parser->current.kind == NLO_TOKEN_IDENT) {
         if (strcmp(parser->current.ident, "exp") == 0) {
-            if (nlo_parser_next_token(parser) != 0 || parser->current.kind != NLO_TOKEN_LPAREN) {
-                return -1;
-            }
-            if (nlo_parser_next_token(parser) != 0) {
-                return -1;
-            }
-            if (nlo_parse_expression(parser) != 0 || parser->current.kind != NLO_TOKEN_RPAREN) {
-                return -1;
-            }
-            if (nlo_emit_instruction(parser->program,
-                                     NLO_OPERATOR_OP_EXP,
-                                     nlo_make(0.0, 0.0)) != 0) {
-                return -1;
-            }
-            return nlo_parser_next_token(parser);
+            return nlo_parse_function_call(parser, NLO_OPERATOR_OP_EXP);
+        }
+
+        if (strcmp(parser->current.ident, "log") == 0) {
+            return nlo_parse_function_call(parser, NLO_OPERATOR_OP_LOG);
+        }
+
+        if (strcmp(parser->current.ident, "sqrt") == 0) {
+            return nlo_parse_function_call(parser, NLO_OPERATOR_OP_SQRT);
+        }
+
+        if (strcmp(parser->current.ident, "sin") == 0) {
+            return nlo_parse_function_call(parser, NLO_OPERATOR_OP_SIN);
+        }
+
+        if (strcmp(parser->current.ident, "cos") == 0) {
+            return nlo_parse_function_call(parser, NLO_OPERATOR_OP_COS);
         }
 
         if (strcmp(parser->current.ident, "w") == 0) {
-            if (parser->context != NLO_OPERATOR_CONTEXT_DISPERSION) {
+            if (!nlo_context_allows_symbol_w(parser->context)) {
                 return -1;
             }
             if (nlo_emit_instruction(parser->program,
@@ -189,7 +265,7 @@ static int nlo_parse_primary(nlo_parser* parser)
         }
 
         if (strcmp(parser->current.ident, "A") == 0) {
-            if (parser->context != NLO_OPERATOR_CONTEXT_NONLINEAR) {
+            if (!nlo_context_allows_symbol_a(parser->context)) {
                 return -1;
             }
             if (nlo_emit_instruction(parser->program,
@@ -201,11 +277,47 @@ static int nlo_parse_primary(nlo_parser* parser)
         }
 
         if (strcmp(parser->current.ident, "I") == 0) {
-            if (parser->context != NLO_OPERATOR_CONTEXT_NONLINEAR) {
+            if (!nlo_context_allows_symbol_i(parser->context)) {
                 return -1;
             }
             if (nlo_emit_instruction(parser->program,
                                      NLO_OPERATOR_OP_PUSH_SYMBOL_I,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "D") == 0) {
+            if (!nlo_context_allows_symbol_d(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_D,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "V") == 0) {
+            if (!nlo_context_allows_symbol_v(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_V,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "h") == 0) {
+            if (!nlo_context_allows_symbol_h(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_H,
                                      nlo_make(0.0, 0.0)) != 0) {
                 return -1;
             }
@@ -276,18 +388,41 @@ static int nlo_parse_unary(nlo_parser* parser)
     return nlo_parse_primary(parser);
 }
 
-static int nlo_parse_term(nlo_parser* parser)
+static int nlo_parse_power(nlo_parser* parser)
 {
     if (nlo_parse_unary(parser) != 0) {
         return -1;
     }
 
-    while (parser->current.kind == NLO_TOKEN_STAR) {
-        if (nlo_parser_next_token(parser) != 0 || nlo_parse_unary(parser) != 0) {
+    if (parser->current.kind == NLO_TOKEN_CARET) {
+        if (nlo_parser_next_token(parser) != 0 || nlo_parse_power(parser) != 0) {
             return -1;
         }
         if (nlo_emit_instruction(parser->program,
-                                 NLO_OPERATOR_OP_MUL,
+                                 NLO_OPERATOR_OP_POW,
+                                 nlo_make(0.0, 0.0)) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int nlo_parse_term(nlo_parser* parser)
+{
+    if (nlo_parse_power(parser) != 0) {
+        return -1;
+    }
+
+    while (parser->current.kind == NLO_TOKEN_STAR || parser->current.kind == NLO_TOKEN_SLASH) {
+        const nlo_token_kind op = parser->current.kind;
+        if (nlo_parser_next_token(parser) != 0 || nlo_parse_power(parser) != 0) {
+            return -1;
+        }
+        if (nlo_emit_instruction(parser->program,
+                                 (op == NLO_TOKEN_STAR)
+                                     ? NLO_OPERATOR_OP_MUL
+                                     : NLO_OPERATOR_OP_DIV,
                                  nlo_make(0.0, 0.0)) != 0) {
             return -1;
         }
@@ -340,6 +475,9 @@ static int nlo_program_compute_stack_requirements(nlo_operator_program* program)
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_W ||
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_A ||
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_I ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_D ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_V ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_H ||
             op == NLO_OPERATOR_OP_PUSH_IMAG_UNIT) {
             ++depth;
             if (depth > max_depth) {
@@ -348,14 +486,22 @@ static int nlo_program_compute_stack_requirements(nlo_operator_program* program)
             continue;
         }
 
-        if (op == NLO_OPERATOR_OP_NEGATE || op == NLO_OPERATOR_OP_EXP) {
+        if (op == NLO_OPERATOR_OP_NEGATE ||
+            op == NLO_OPERATOR_OP_EXP ||
+            op == NLO_OPERATOR_OP_LOG ||
+            op == NLO_OPERATOR_OP_SQRT ||
+            op == NLO_OPERATOR_OP_SIN ||
+            op == NLO_OPERATOR_OP_COS) {
             if (depth < 1u) {
                 return -1;
             }
             continue;
         }
 
-        if (op == NLO_OPERATOR_OP_ADD || op == NLO_OPERATOR_OP_MUL) {
+        if (op == NLO_OPERATOR_OP_ADD ||
+            op == NLO_OPERATOR_OP_MUL ||
+            op == NLO_OPERATOR_OP_DIV ||
+            op == NLO_OPERATOR_OP_POW) {
             if (depth < 2u) {
                 return -1;
             }
@@ -489,6 +635,42 @@ nlo_vec_status nlo_operator_program_execute(
             continue;
         }
 
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_D) {
+            if (eval_ctx->dispersion_factor == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->dispersion_factor);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_V) {
+            if (eval_ctx->potential == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->potential);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_H) {
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_fill(backend, dst, nlo_make(eval_ctx->half_step_size, 0.0));
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
         if (instruction.opcode == NLO_OPERATOR_OP_PUSH_IMAG_UNIT) {
             nlo_vec_buffer* dst = stack_vectors[stack_depth];
             status = nlo_vec_complex_fill(backend, dst, nlo_make(0.0, 1.0));
@@ -521,6 +703,42 @@ nlo_vec_status nlo_operator_program_execute(
             continue;
         }
 
+        if (instruction.opcode == NLO_OPERATOR_OP_LOG) {
+            nlo_vec_buffer* top = stack_vectors[stack_depth - 1u];
+            status = nlo_vec_complex_log_inplace(backend, top);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_SQRT) {
+            nlo_vec_buffer* top = stack_vectors[stack_depth - 1u];
+            status = nlo_vec_complex_real_pow_inplace(backend, top, 0.5);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_SIN) {
+            nlo_vec_buffer* top = stack_vectors[stack_depth - 1u];
+            status = nlo_vec_complex_sin_inplace(backend, top);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_COS) {
+            nlo_vec_buffer* top = stack_vectors[stack_depth - 1u];
+            status = nlo_vec_complex_cos_inplace(backend, top);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            continue;
+        }
+
         if (stack_depth < 2u) {
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
         }
@@ -538,6 +756,28 @@ nlo_vec_status nlo_operator_program_execute(
 
         if (instruction.opcode == NLO_OPERATOR_OP_MUL) {
             status = nlo_vec_complex_mul_inplace(backend, left, right);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            --stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_DIV) {
+            status = nlo_vec_complex_real_pow_inplace(backend, right, -1.0);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            status = nlo_vec_complex_mul_inplace(backend, left, right);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            --stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_POW) {
+            status = nlo_vec_complex_pow_elementwise_inplace(backend, left, right);
             if (status != NLO_VEC_STATUS_OK) {
                 return status;
             }

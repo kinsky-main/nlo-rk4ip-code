@@ -20,8 +20,9 @@ extern "C" {
 #endif
 
 typedef enum {
-    NLO_OPERATOR_CONTEXT_DISPERSION = 0,
-    NLO_OPERATOR_CONTEXT_NONLINEAR = 1
+    NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR = 0,
+    NLO_OPERATOR_CONTEXT_DISPERSION = 1,
+    NLO_OPERATOR_CONTEXT_NONLINEAR = 2
 } nlo_operator_program_context;
 
 typedef enum {
@@ -29,11 +30,20 @@ typedef enum {
     NLO_OPERATOR_OP_PUSH_SYMBOL_W = 1,
     NLO_OPERATOR_OP_PUSH_SYMBOL_A = 2,
     NLO_OPERATOR_OP_PUSH_SYMBOL_I = 3,
-    NLO_OPERATOR_OP_PUSH_IMAG_UNIT = 4,
-    NLO_OPERATOR_OP_NEGATE = 5,
-    NLO_OPERATOR_OP_ADD = 6,
-    NLO_OPERATOR_OP_MUL = 7,
-    NLO_OPERATOR_OP_EXP = 8
+    NLO_OPERATOR_OP_PUSH_SYMBOL_D = 4,
+    NLO_OPERATOR_OP_PUSH_SYMBOL_V = 5,
+    NLO_OPERATOR_OP_PUSH_SYMBOL_H = 6,
+    NLO_OPERATOR_OP_PUSH_IMAG_UNIT = 7,
+    NLO_OPERATOR_OP_NEGATE = 8,
+    NLO_OPERATOR_OP_ADD = 9,
+    NLO_OPERATOR_OP_MUL = 10,
+    NLO_OPERATOR_OP_EXP = 11,
+    NLO_OPERATOR_OP_DIV = 12,
+    NLO_OPERATOR_OP_POW = 13,
+    NLO_OPERATOR_OP_LOG = 14,
+    NLO_OPERATOR_OP_SQRT = 15,
+    NLO_OPERATOR_OP_SIN = 16,
+    NLO_OPERATOR_OP_COS = 17
 } nlo_operator_opcode;
 
 typedef struct {
@@ -52,6 +62,9 @@ typedef struct {
 typedef struct {
     const nlo_vec_buffer* frequency_grid;
     const nlo_vec_buffer* field;
+    const nlo_vec_buffer* dispersion_factor;
+    const nlo_vec_buffer* potential;
+    double half_step_size;
 } nlo_operator_eval_context;
 
 /**

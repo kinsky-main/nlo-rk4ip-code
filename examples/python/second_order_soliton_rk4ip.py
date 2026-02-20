@@ -11,18 +11,16 @@ from __future__ import annotations
 
 import math
 import sys
-import ctypes
 from pathlib import Path
 
 import numpy as np
-
-try:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
+from backend.plotting import (
+    plot_final_intensity_comparison,
+    plot_final_re_im_comparison,
+    plot_intensity_colormap_vs_propagation,
+    plot_total_error_over_propagation,
+)
+from backend.runner import NloExampleRunner, SimulationOptions, TemporalSimulationConfig
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -72,152 +70,6 @@ def second_order_soliton_normalized_envelope(
     ) * np.exp(0.5j * xi)
     denominator = np.cosh(4.0 * t) + 4.0 * np.cosh(2.0 * t) + 3.0 * np.cos(4.0 * xi)
     return numerator / denominator
-
-
-def _parse_pointer_value(value: int | str) -> int:
-    if isinstance(value, str):
-        text = value.strip().lower()
-        if text.startswith("0x"):
-            return int(text, 16)
-        return int(text, 10)
-    return int(value)
-
-
-def _to_vk_handle(value: int | str | None):
-    if value is None:
-        return None
-    parsed = _parse_pointer_value(value)
-    if parsed == 0:
-        return None
-    return ctypes.c_void_p(parsed)
-
-
-def _build_execution_options(params: dict):
-    from nlolib_ctypes import (
-        NLO_FFT_BACKEND_AUTO,
-        NLO_FFT_BACKEND_FFTW,
-        NLO_FFT_BACKEND_VKFFT,
-        NLO_VECTOR_BACKEND_AUTO,
-        NLO_VECTOR_BACKEND_CPU,
-        NLO_VECTOR_BACKEND_VULKAN,
-        default_execution_options,
-    )
-
-    backend_cfg = params.get("backend", "auto")
-    if backend_cfg is None:
-        backend_cfg = "auto"
-
-    opts = default_execution_options()
-    opts.backend_type = NLO_VECTOR_BACKEND_CPU
-    opts.fft_backend = NLO_FFT_BACKEND_AUTO
-    opts.device_heap_fraction = float(params.get("device_heap_fraction", 0.70))
-    opts.record_ring_target = int(params.get("record_ring_target", 0))
-    opts.forced_device_budget_bytes = int(params.get("forced_device_budget_bytes", 0))
-    opts.vulkan.physical_device = None
-    opts.vulkan.device = None
-    opts.vulkan.queue = None
-    opts.vulkan.queue_family_index = 0
-    opts.vulkan.command_pool = None
-    opts.vulkan.descriptor_set_budget_bytes = 0
-    opts.vulkan.descriptor_set_count_override = 0
-
-    fft_backend = str(params.get("fft_backend", "auto")).strip().lower()
-    fft_backend_map = {
-        "auto": NLO_FFT_BACKEND_AUTO,
-        "fftw": NLO_FFT_BACKEND_FFTW,
-        "vkfft": NLO_FFT_BACKEND_VKFFT,
-    }
-    if fft_backend not in fft_backend_map:
-        raise ValueError("fft_backend must be one of: auto, fftw, vkfft.")
-    opts.fft_backend = fft_backend_map[fft_backend]
-
-    if isinstance(backend_cfg, str):
-        backend_type = backend_cfg.strip().lower()
-        cfg = {}
-    elif isinstance(backend_cfg, dict):
-        backend_type = str(backend_cfg.get("type", "cpu")).strip().lower()
-        cfg = backend_cfg
-    else:
-        raise TypeError("backend must be a string or dict when provided.")
-
-    if backend_type == "cpu":
-        opts.backend_type = NLO_VECTOR_BACKEND_CPU
-        return opts
-
-    if backend_type == "auto":
-        opts.backend_type = NLO_VECTOR_BACKEND_AUTO
-        return opts
-
-    if backend_type != "vulkan":
-        raise ValueError("backend type must be one of: 'cpu', 'auto', or 'vulkan'.")
-
-    vk_cfg = cfg.get("vulkan", cfg)
-    required = ("physical_device", "device", "queue", "queue_family_index")
-    missing = [name for name in required if name not in vk_cfg]
-    if missing:
-        raise ValueError(
-            "vulkan backend requires handle fields: "
-            + ", ".join(required)
-            + ". Missing: "
-            + ", ".join(missing)
-        )
-
-    opts.backend_type = NLO_VECTOR_BACKEND_VULKAN
-    opts.vulkan.physical_device = _to_vk_handle(vk_cfg.get("physical_device"))
-    opts.vulkan.device = _to_vk_handle(vk_cfg.get("device"))
-    opts.vulkan.queue = _to_vk_handle(vk_cfg.get("queue"))
-    opts.vulkan.queue_family_index = int(vk_cfg.get("queue_family_index", 0))
-    opts.vulkan.command_pool = _to_vk_handle(vk_cfg.get("command_pool"))
-    opts.vulkan.descriptor_set_budget_bytes = int(vk_cfg.get("descriptor_set_budget_bytes", 0))
-    opts.vulkan.descriptor_set_count_override = int(vk_cfg.get("descriptor_set_count_override", 0))
-    return opts
-
-
-def rk4ip_solver_recorded(
-    A0: np.ndarray,
-    z_final: float,
-    params: dict,
-    num_recorded_samples: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Run one propagation and return z records and envelope records."""
-    from nlolib_ctypes import NLolib, prepare_sim_config
-
-    api = NLolib()
-
-    if num_recorded_samples <= 0:
-        raise ValueError("num_recorded_samples must be positive.")
-
-    n = int(A0.size)
-    dt = float(params["dt"])
-    omega = np.asarray(params["omega"], dtype=np.float64)
-    if omega.size != n:
-        raise ValueError("omega grid size must match A0 size.")
-
-    cfg = prepare_sim_config(
-        n,
-        gamma=float(params["gamma"]),
-        betas=[0.0, 0.0, float(params["beta2"])],
-        alpha=float(params.get("alpha", 0.0)),
-        propagation_distance=float(z_final),
-        starting_step_size=float(params.get("starting_step_size", 1e-4)),
-        max_step_size=float(params.get("max_step_size", 1e-2)),
-        min_step_size=float(params.get("min_step_size", 1e-4)),
-        error_tolerance=float(params.get("error_tolerance", 1e-8)),
-        pulse_period=float(params.get("pulse_period", n * dt)),
-        delta_time=dt,
-        frequency_grid=[complex(float(om), 0.0) for om in omega],
-    )
-
-    exec_opts = _build_execution_options(params)
-    records = np.asarray(
-        api.propagate(cfg, np.asarray(A0, dtype=np.complex128), int(num_recorded_samples), exec_opts),
-        dtype=np.complex128,
-    )
-    if int(num_recorded_samples) == 1:
-        z_records = np.asarray([float(z_final)], dtype=np.float64)
-    else:
-        z_records = np.linspace(0.0, float(z_final), int(num_recorded_samples))
-    return z_records, records
 
 
 def average_relative_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
@@ -286,82 +138,83 @@ def compute_wavelength_spectral_map_from_records(
     return z_samples, lambda_nm, spec_map
 
 
+def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
+    if records.shape != reference_records.shape:
+        raise ValueError("records and reference_records must have the same shape.")
+
+    out = np.empty(records.shape[0], dtype=np.float64)
+    for i in range(records.shape[0]):
+        ref = np.asarray(reference_records[i], dtype=np.complex128)
+        num = np.asarray(records[i], dtype=np.complex128)
+        ref_norm = float(np.linalg.norm(ref))
+        safe_ref_norm = ref_norm if ref_norm > 0.0 else 1.0
+        out[i] = float(np.linalg.norm(num - ref) / safe_ref_norm)
+    return out
+
+
 def save_plots(
     t: np.ndarray,
     U_num: np.ndarray,
     U_true: np.ndarray,
-    epsilon: float,
+    error_curve: np.ndarray,
     z_final: float,
     z_samples: np.ndarray,
-    lambda0_nm: float,
     lambda_nm: np.ndarray,
     spectral_map: np.ndarray,
-    wavelength_plot_window_nm: float | None,
     output_dir: Path,
 ) -> list[Path]:
-    if plt is None:
-        print("matplotlib not available; skipping plot generation.")
-        return []
-
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
-    intensity_num = np.nan_to_num(np.abs(U_num) ** 2, nan=0.0, posinf=0.0, neginf=0.0)
-    intensity_true = np.nan_to_num(np.abs(U_true) ** 2, nan=0.0, posinf=0.0, neginf=0.0)
-    abs_intensity_error = np.abs(intensity_num - intensity_true)
+    p1 = plot_intensity_colormap_vs_propagation(
+        lambda_nm,
+        z_samples,
+        spectral_map,
+        output_dir / "wavelength_intensity_colormap.png",
+        x_label="Wavelength (nm)",
+        y_label="Propagation distance z (m)",
+        title="Spectral Intensity Envelope vs Propagation Distance",
+        colorbar_label="Normalized spectral intensity",
+        cmap="magma",
+    )
+    if p1 is not None:
+        saved_paths.append(p1)
 
-    fig_1, ax_1 = plt.subplots(figsize=(9.0, 5.0))
-    ax_1.plot(t, intensity_true, lw=2.0, label="Analytical |U_true|^2")
-    ax_1.plot(t, intensity_num, "--", lw=1.5, label="Numerical |U_num|^2")
-    ax_1.set_xlabel("Dimensionless time t = T/T0")
-    ax_1.set_ylabel("Normalized intensity |U|^2")
-    ax_1.set_title(f"Second-Order Soliton at z = {z_final:.3f} m (Normalized)")
-    if np.max(intensity_true) > 0.0:
-        ax_1.set_ylim(0.0, 1.1 * float(np.max(intensity_true)))
-    ax_1.grid(True, alpha=0.3)
-    ax_1.legend()
-    p1 = output_dir / "intensity_comparison.png"
-    fig_1.savefig(p1, dpi=200, bbox_inches="tight")
-    plt.close(fig_1)
-    saved_paths.append(p1)
+    p2 = plot_final_re_im_comparison(
+        t,
+        U_true,
+        U_num,
+        output_dir / "final_re_im_comparison.png",
+        x_label="Dimensionless time t = T/T0",
+        title=f"Second-Order Soliton at z = {z_final:.3f} m: Re/Im Comparison",
+        reference_label="Analytical",
+        final_label="Numerical",
+    )
+    if p2 is not None:
+        saved_paths.append(p2)
 
-    fig_2, ax_2 = plt.subplots(figsize=(9.0, 4.5))
-    ax_2.plot(t, abs_intensity_error, lw=1.5, color="tab:red")
-    ax_2.set_xlabel("Dimensionless time t = T/T0")
-    ax_2.set_ylabel(r"$||U_{num}|^2 - |U_{true}|^2|$")
-    ax_2.set_title(f"Absolute Intensity Error, epsilon = {epsilon:.3e}")
-    ax_2.grid(True, alpha=0.3)
-    p2 = output_dir / "intensity_error.png"
-    fig_2.savefig(p2, dpi=200, bbox_inches="tight")
-    plt.close(fig_2)
-    saved_paths.append(p2)
-
-    if spectral_map.size > 0 and lambda_nm.size > 0 and z_samples.size > 0:
-        plot_lambda_nm = lambda_nm
-        plot_spectral_map = spectral_map
-        if wavelength_plot_window_nm is not None and wavelength_plot_window_nm > 0.0:
-            half_window_nm = 0.5 * float(wavelength_plot_window_nm)
-            window_min_nm = float(lambda0_nm) - half_window_nm
-            window_max_nm = float(lambda0_nm) + half_window_nm
-            window_mask = (lambda_nm >= window_min_nm) & (lambda_nm <= window_max_nm)
-            if int(np.count_nonzero(window_mask)) >= 2:
-                plot_lambda_nm = lambda_nm[window_mask]
-                plot_spectral_map = spectral_map[:, window_mask]
-
-        fig_3, ax_3 = plt.subplots(figsize=(9.0, 5.5))
-        safe_map = np.nan_to_num(plot_spectral_map, nan=0.0, posinf=0.0, neginf=0.0)
-        safe_map = np.clip(safe_map, 0.0, None)
-        spectral_db = 10.0 * np.log10(np.maximum(safe_map, 1e-12))
-        img = ax_3.pcolormesh(plot_lambda_nm, z_samples, spectral_db, shading="auto", cmap="magma", vmin=-80.0, vmax=0.0)
-        ax_3.set_xlabel("Wavelength (nm)")
-        ax_3.set_ylabel("Propagation distance z (m)")
-        ax_3.set_title("Spectral Intensity Envelope vs Propagation Distance")
-        colorbar = fig_3.colorbar(img, ax=ax_3)
-        colorbar.set_label("Normalized spectral intensity (dB)")
-        p3 = output_dir / "wavelength_intensity_colormap.png"
-        fig_3.savefig(p3, dpi=200, bbox_inches="tight")
-        plt.close(fig_3)
+    p3 = plot_final_intensity_comparison(
+        t,
+        U_true,
+        U_num,
+        output_dir / "final_intensity_comparison.png",
+        x_label="Dimensionless time t = T/T0",
+        title=f"Second-Order Soliton at z = {z_final:.3f} m: Intensity Comparison",
+        reference_label="Analytical",
+        final_label="Numerical",
+    )
+    if p3 is not None:
         saved_paths.append(p3)
+
+    p4 = plot_total_error_over_propagation(
+        z_samples,
+        error_curve,
+        output_dir / "total_error_over_propagation.png",
+        title="Second-Order Soliton: Total Error Over Propagation",
+        y_label="Relative L2 error (numerical vs analytical)",
+    )
+    if p4 is not None:
+        saved_paths.append(p4)
 
     return saved_paths
 
@@ -400,27 +253,40 @@ def main() -> float:
     U0 = 2.0 * sech(t)
     A0 = to_physical_envelope(U0, 0.0, p0, alpha)
 
-    params = {
-        "beta2": beta2,
-        "gamma": gamma,
-        "alpha": alpha,
-        "backend": "auto",
-        "fft_backend": "auto",
-        "dt": dt,
-        "omega": omega,
-        "pulse_period": n * dt,
-        "starting_step_size": 1e-4,
-        "max_step_size": 1e-2,
-        "min_step_size": 1e-6,
-        "error_tolerance": 1e-8,
-    }
-
     num_recorded_samples = 200
-    z_records, A_records = rk4ip_solver_recorded(A0, z_final, params, num_recorded_samples)
-    A_num = np.asarray(A_records[-1], dtype=np.complex128)
-    U_true = second_order_soliton_normalized_envelope(t, z_final, beta2, t0)
-    U_num = to_normalized_envelope(A_num, z_final, p0, alpha)
+    sim_cfg = TemporalSimulationConfig(
+        gamma=gamma,
+        beta2=beta2,
+        alpha=alpha,
+        dt=dt,
+        z_final=z_final,
+        num_time_samples=n,
+        pulse_period=n * dt,
+        omega=omega,
+        starting_step_size=1e-4,
+        max_step_size=1e-2,
+        min_step_size=1e-6,
+        error_tolerance=1e-8,
+    )
+    exec_opts = SimulationOptions(backend="auto", fft_backend="auto")
+
+    runner = NloExampleRunner()
+    z_records, A_records = runner.propagate_temporal_records(
+        np.asarray(A0, dtype=np.complex128),
+        sim_cfg,
+        num_recorded_samples,
+        exec_opts,
+    )
+    U_num_records = np.empty_like(A_records, dtype=np.complex128)
+    U_true_records = np.empty_like(A_records, dtype=np.complex128)
+    for i, z in enumerate(z_records):
+        U_num_records[i] = to_normalized_envelope(A_records[i], float(z), p0, alpha)
+        U_true_records[i] = second_order_soliton_normalized_envelope(t, float(z), beta2, t0)
+
+    U_num = U_num_records[-1]
+    U_true = U_true_records[-1]
     epsilon = average_relative_intensity_error(U_num, U_true)
+    error_curve = relative_l2_error_curve(U_num_records, U_true_records)
     z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):
         first_bad_z, max_finite_amplitude = diagnose_first_nonfinite_record(A_records, z_records)
@@ -433,7 +299,6 @@ def main() -> float:
             )
 
     lambda0_nm = 1550.0
-    wavelength_plot_window_nm = 400.0
     z_map, lambda_nm, spectral_map = compute_wavelength_spectral_map_from_records(
         A_records,
         z_records,
@@ -446,13 +311,11 @@ def main() -> float:
         t,
         U_num,
         U_true,
-        epsilon,
+        error_curve,
         z_final,
         z_map,
-        lambda0_nm,
         lambda_nm,
         spectral_map,
-        wavelength_plot_window_nm,
         output_dir,
     )
 

@@ -315,6 +315,52 @@ void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent)
     nlo_complex_pow(dst, dst, n, exponent);
 }
 
+void nlo_complex_pow_elementwise_inplace(
+    nlo_complex *dst,
+    const nlo_complex *exponent,
+    size_t n
+)
+{
+    if (dst == NULL || exponent == NULL)
+    {
+        return;
+    }
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double base_re = NLO_RE(dst[i]);
+        const double base_im = NLO_IM(dst[i]);
+        const double exp_re = NLO_RE(exponent[i]);
+        const double exp_im = NLO_IM(exponent[i]);
+        const double radius = hypot(base_re, base_im);
+
+        if (radius == 0.0)
+        {
+            if (exp_re == 0.0 && exp_im == 0.0)
+            {
+                dst[i] = nlo_make(1.0, 0.0);
+            }
+            else if (exp_im == 0.0 && exp_re > 0.0)
+            {
+                dst[i] = nlo_make(0.0, 0.0);
+            }
+            else
+            {
+                dst[i] = nlo_make(0.0, 0.0);
+            }
+            continue;
+        }
+
+        const double theta = atan2(base_im, base_re);
+        const double log_radius = log(radius);
+        const double scaled_re = (exp_re * log_radius) - (exp_im * theta);
+        const double scaled_im = (exp_re * theta) + (exp_im * log_radius);
+        const double magnitude = exp(scaled_re);
+        dst[i] = nlo_make(magnitude * cos(scaled_im),
+                          magnitude * sin(scaled_im));
+    }
+}
+
 static inline nlo_complex nlo_complex_real_pow_scalar(nlo_complex value, double exponent)
 {
     const double re = NLO_RE(value);
@@ -400,5 +446,39 @@ void nlo_complex_exp_inplace(nlo_complex *dst, size_t n)
         const double im = NLO_IM(dst[i]);
         const double exp_re = exp(re);
         dst[i] = nlo_make(exp_re * cos(im), exp_re * sin(im));
+    }
+}
+
+void nlo_complex_log_inplace(nlo_complex *dst, size_t n)
+{
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double re = NLO_RE(dst[i]);
+        const double im = NLO_IM(dst[i]);
+        const double radius = hypot(re, im);
+        const double angle = atan2(im, re);
+        dst[i] = nlo_make(log(radius), angle);
+    }
+}
+
+void nlo_complex_sin_inplace(nlo_complex *dst, size_t n)
+{
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double re = NLO_RE(dst[i]);
+        const double im = NLO_IM(dst[i]);
+        dst[i] = nlo_make(sin(re) * cosh(im),
+                          cos(re) * sinh(im));
+    }
+}
+
+void nlo_complex_cos_inplace(nlo_complex *dst, size_t n)
+{
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double re = NLO_RE(dst[i]);
+        const double im = NLO_IM(dst[i]);
+        dst[i] = nlo_make(cos(re) * cosh(im),
+                          -sin(re) * sinh(im));
     }
 }

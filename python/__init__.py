@@ -11,6 +11,7 @@ from .nlolib_ctypes import (
     make_complex_array,
     prepare_sim_config,
 )
+from .runtime_expr import translate_callable
 
 __all__ = [
     "NT_MAX",
@@ -24,6 +25,5 @@ __all__ = [
     "load",
     "make_complex_array",
     "prepare_sim_config",
+    "translate_callable",
 ]
-
-__all__ = ["ffi", "load", "NT_MAX"]

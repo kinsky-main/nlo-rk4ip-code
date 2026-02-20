@@ -16,6 +16,8 @@
 - Don't make per step memory allocations; keep all allocations static
 - Do produce a git command that can be copy-pasted to isolate the change
 - Do ensure GPU to host transfers are minimized and efficient
+- Do check API changes are carried across all language bindings
+- Do prioritize the GPU backend
 
 ## Formatting
 - Put doxygen docstrings in function declarations in header files
@@ -28,6 +30,9 @@
 
 ## Tests
 - Run relevant tests if available
+- Create new tests if necessary to cover new functionality or edge cases
+- Ensure tests are deterministic and do not rely on external state
+- Ensure tests run within a reasonable time frame
 - Note when tests were not run
 
 ## PR / review notes

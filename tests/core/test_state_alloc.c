@@ -59,7 +59,7 @@ static void test_init_state_success(void)
     const size_t num_time_samples = 1024;
     const size_t num_records = 64;
 
-    sim_config* config = create_sim_config(4, num_time_samples);
+    sim_config* config = create_sim_config(num_time_samples);
     assert(config != NULL);
 
     nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
@@ -97,7 +97,7 @@ static void test_init_state_invalid_args(void)
     assert(nlo_init_simulation_state(NULL, 8, 1, &exec_options, &info, &state) != 0);
     assert(state == NULL);
 
-    sim_config* config = create_sim_config(1, 8);
+    sim_config* config = create_sim_config(8);
     assert(config != NULL);
 
     assert(nlo_init_simulation_state(config, 0, 1, &exec_options, &info, &state) != 0);
@@ -123,15 +123,14 @@ static void test_init_state_xy_shape_success(void)
     const size_t num_time_samples = nx * ny;
     const size_t num_records = 8;
 
-    sim_config* config = create_sim_config(2, num_time_samples);
+    sim_config* config = create_sim_config(num_time_samples);
     assert(config != NULL);
 
     config->spatial.nx = nx;
     config->spatial.ny = ny;
     config->spatial.delta_x = 0.5;
     config->spatial.delta_y = 0.5;
-    config->spatial.grin_gx = 0.01;
-    config->spatial.grin_gy = 0.02;
+    config->spatial.potential_grid = NULL;
 
     nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
 
@@ -157,7 +156,7 @@ static void test_default_frequency_grid_generated_when_invalid(void)
     const size_t num_time_samples = 16u;
     const double delta_time = 0.25;
 
-    sim_config* config = create_sim_config(4, num_time_samples);
+    sim_config* config = create_sim_config(num_time_samples);
     assert(config != NULL);
 
     config->time.delta_time = delta_time;
@@ -200,7 +199,7 @@ static void test_frequency_grid_preserved_when_valid(void)
     const size_t num_time_samples = 17u;
     const double delta_time = 0.125;
 
-    sim_config* config = create_sim_config(4, num_time_samples);
+    sim_config* config = create_sim_config(num_time_samples);
     assert(config != NULL);
 
     config->time.delta_time = delta_time;
