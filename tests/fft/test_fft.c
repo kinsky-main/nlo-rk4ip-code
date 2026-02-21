@@ -90,6 +90,61 @@ static void test_fft_backend_selection_validation(void)
     printf("test_fft_backend_selection_validation: validates runtime FFT selection guards.\n");
 }
 
+static void test_fft_shape_and_io_validation(void)
+{
+    const size_t n = TEST_FFT_SIZE;
+    nlo_vector_backend* backend = nlo_vector_backend_create_cpu();
+    assert(backend != NULL);
+
+    nlo_fft_plan* plan = NULL;
+    nlo_fft_shape invalid_rank = {
+        .rank = 0u,
+        .dims = {n, 1u, 1u}
+    };
+    assert(nlo_fft_plan_create_shaped_with_backend(backend,
+                                                   &invalid_rank,
+                                                   NLO_FFT_BACKEND_FFTW,
+                                                   &plan) == NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(plan == NULL);
+
+    nlo_fft_shape invalid_dim = {
+        .rank = 2u,
+        .dims = {n, 0u, 1u}
+    };
+    assert(nlo_fft_plan_create_shaped_with_backend(backend,
+                                                   &invalid_dim,
+                                                   NLO_FFT_BACKEND_FFTW,
+                                                   &plan) == NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(plan == NULL);
+
+    assert(nlo_fft_plan_create_with_backend(backend,
+                                            n,
+                                            NLO_FFT_BACKEND_FFTW,
+                                            &plan) == NLO_VEC_STATUS_OK);
+    assert(plan != NULL);
+
+    nlo_vec_buffer* in = NULL;
+    nlo_vec_buffer* out = NULL;
+    nlo_vec_buffer* wrong_len = NULL;
+    nlo_vec_buffer* wrong_kind = NULL;
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n, &in) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n, &out) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n - 1u, &wrong_len) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_REAL64, n, &wrong_kind) == NLO_VEC_STATUS_OK);
+
+    assert(nlo_fft_forward_vec(plan, in, wrong_len) == NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(nlo_fft_forward_vec(plan, in, wrong_kind) == NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(nlo_fft_inverse_vec(plan, wrong_len, out) == NLO_VEC_STATUS_INVALID_ARGUMENT);
+
+    nlo_vec_destroy(backend, wrong_kind);
+    nlo_vec_destroy(backend, wrong_len);
+    nlo_vec_destroy(backend, out);
+    nlo_vec_destroy(backend, in);
+    nlo_fft_plan_destroy(plan);
+    nlo_vector_backend_destroy(backend);
+    printf("test_fft_shape_and_io_validation: validates FFT shape and IO guards.\n");
+}
+
 static void test_fft_round_trip_3d_shape(void)
 {
     const size_t nt = 4u;
@@ -145,6 +200,7 @@ int main(void)
 {
     test_fft_round_trip();
     test_fft_backend_selection_validation();
+    test_fft_shape_and_io_validation();
     test_fft_round_trip_3d_shape();
     printf("test_fft: all subtests completed.\n");
     return 0;

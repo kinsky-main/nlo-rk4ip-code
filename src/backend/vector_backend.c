@@ -40,6 +40,27 @@ static bool nlo_vec_multiply_size(size_t a, size_t b, size_t* out)
     return false;
 }
 
+static nlo_vec_status nlo_vec_validate_mixed_pair(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* lhs,
+    nlo_vec_kind lhs_kind,
+    const nlo_vec_buffer* rhs,
+    nlo_vec_kind rhs_kind
+)
+{
+    if (backend == NULL || lhs == NULL || rhs == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (lhs->owner != backend || rhs->owner != backend ||
+        lhs->kind != lhs_kind || rhs->kind != rhs_kind) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (lhs->length != rhs->length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    return NLO_VEC_STATUS_OK;
+}
+
 static const char* nlo_vk_device_type_to_string(VkPhysicalDeviceType device_type)
 {
     if (device_type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
@@ -617,15 +638,13 @@ nlo_vec_status nlo_vec_complex_axpy_real(
     nlo_complex alpha
 )
 {
-    if (backend == NULL || dst == NULL || src == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-    if (dst->owner != backend || src->owner != backend ||
-        dst->kind != NLO_VEC_KIND_COMPLEX64 || src->kind != NLO_VEC_KIND_REAL64) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-    if (dst->length != src->length) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    nlo_vec_status status = nlo_vec_validate_mixed_pair(backend,
+                                                        dst,
+                                                        NLO_VEC_KIND_COMPLEX64,
+                                                        src,
+                                                        NLO_VEC_KIND_REAL64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
     }
 
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
@@ -857,13 +876,13 @@ nlo_vec_status nlo_vec_complex_relative_error(
     double* out_error
 )
 {
-    if (backend == NULL || current == NULL || previous == NULL || out_error == NULL) {
+    if (out_error == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
-    if (current->owner != backend || previous->owner != backend ||
-        current->kind != NLO_VEC_KIND_COMPLEX64 || previous->kind != NLO_VEC_KIND_COMPLEX64 ||
-        current->length != previous->length) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+
+    nlo_vec_status status = nlo_vec_validate_pair(backend, current, previous, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
     }
     if (epsilon <= 0.0) {
         epsilon = 1e-12;
@@ -910,13 +929,13 @@ nlo_vec_status nlo_vec_complex_weighted_rms_error(
     double* out_error
 )
 {
-    if (backend == NULL || fine == NULL || coarse == NULL || out_error == NULL) {
+    if (out_error == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
-    if (fine->owner != backend || coarse->owner != backend ||
-        fine->kind != NLO_VEC_KIND_COMPLEX64 || coarse->kind != NLO_VEC_KIND_COMPLEX64 ||
-        fine->length != coarse->length) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+
+    nlo_vec_status status = nlo_vec_validate_pair(backend, fine, coarse, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
     }
 
     if (atol < 0.0) {

@@ -1,0 +1,113 @@
+/**
+ * @file sim_dimensions_internal.h
+ * @brief Internal helpers for resolving runtime simulation dimensions.
+ */
+#pragma once
+
+#include "core/state.h"
+#include <stddef.h>
+
+static inline int nlo_sim_dimensions_checked_mul(size_t a, size_t b, size_t* out)
+{
+    if (out == NULL) {
+        return -1;
+    }
+
+    if (a == 0u || b == 0u) {
+        *out = 0u;
+        return 0;
+    }
+
+    if (a > (SIZE_MAX / b)) {
+        return -1;
+    }
+
+    *out = a * b;
+    return 0;
+}
+
+/**
+ * @brief Resolve flattened sample count into runtime (nt, nx, ny) dimensions.
+ *
+ * This keeps legacy flattened XY handling consistent across `nlolib.c`
+ * and `state.c`.
+ */
+static inline int nlo_resolve_sim_dimensions_internal(
+    const sim_config* config,
+    size_t total_samples,
+    size_t* out_nt,
+    size_t* out_nx,
+    size_t* out_ny,
+    int* out_explicit_nd
+)
+{
+    if (config == NULL ||
+        out_nt == NULL ||
+        out_nx == NULL ||
+        out_ny == NULL ||
+        out_explicit_nd == NULL ||
+        total_samples == 0u) {
+        return -1;
+    }
+
+    const size_t configured_nt = config->time.nt;
+    size_t nx = config->spatial.nx;
+    size_t ny = config->spatial.ny;
+
+    if (configured_nt == 0u) {
+        if (nx == 0u && ny == 0u) {
+            *out_nt = total_samples;
+            *out_nx = 1u;
+            *out_ny = 1u;
+            *out_explicit_nd = 0;
+            return 0;
+        }
+        if (nx == 0u || ny == 0u) {
+            return -1;
+        }
+
+        size_t total_points = 0u;
+        if (nlo_sim_dimensions_checked_mul(nx, ny, &total_points) != 0 ||
+            total_points != total_samples) {
+            return -1;
+        }
+
+        if (ny == 1u && nx == total_samples) {
+            *out_nt = total_samples;
+            *out_nx = 1u;
+            *out_ny = 1u;
+            *out_explicit_nd = 0;
+            return 0;
+        }
+
+        *out_nt = 1u;
+        *out_nx = nx;
+        *out_ny = ny;
+        *out_explicit_nd = 0;
+        return 0;
+    }
+
+    if (nx == 0u) {
+        nx = 1u;
+    }
+    if (ny == 0u) {
+        ny = 1u;
+    }
+
+    size_t ntx = 0u;
+    if (nlo_sim_dimensions_checked_mul(configured_nt, nx, &ntx) != 0) {
+        return -1;
+    }
+
+    size_t resolved_total = 0u;
+    if (nlo_sim_dimensions_checked_mul(ntx, ny, &resolved_total) != 0 ||
+        resolved_total != total_samples) {
+        return -1;
+    }
+
+    *out_nt = configured_nt;
+    *out_nx = nx;
+    *out_ny = ny;
+    *out_explicit_nd = 1;
+    return 0;
+}

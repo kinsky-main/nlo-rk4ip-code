@@ -42,7 +42,28 @@ struct nlo_fft_plan {
     VkFence vk_submit_fence;
 };
 
-static nlo_vec_status nlo_fft_vk_begin_commands(nlo_fft_plan* plan)
+static int nlo_fft_shape_valid(const nlo_fft_shape* shape)
+{
+    return (shape != NULL && shape->rank > 0u && shape->rank <= 3u);
+}
+
+static int nlo_fft_checked_mul_size(size_t a, size_t b, size_t* out)
+{
+    if (out == NULL) {
+        return -1;
+    }
+    if (a == 0u || b == 0u) {
+        *out = 0u;
+        return 0;
+    }
+    if (a > (SIZE_MAX / b)) {
+        return -1;
+    }
+    *out = a * b;
+    return 0;
+}
+
+static nlo_vec_status nlo_fft_vk_validate_submit_context(const nlo_fft_plan* plan)
 {
     if (plan == NULL || plan->backend == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -50,6 +71,32 @@ static nlo_vec_status nlo_fft_vk_begin_commands(nlo_fft_plan* plan)
     if (plan->vk_submit_fence == VK_NULL_HANDLE ||
         plan->vk_command_buffer == VK_NULL_HANDLE) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_fft_validate_io_buffers(
+    const nlo_fft_plan* plan,
+    const nlo_vec_buffer* input,
+    const nlo_vec_buffer* output
+)
+{
+    if (plan == NULL || input == NULL || output == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (input->owner != plan->backend || output->owner != plan->backend ||
+        input->kind != NLO_VEC_KIND_COMPLEX64 || output->kind != NLO_VEC_KIND_COMPLEX64 ||
+        input->length != plan->total_size || output->length != plan->total_size) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_fft_vk_begin_commands(nlo_fft_plan* plan)
+{
+    nlo_vec_status validation = nlo_fft_vk_validate_submit_context(plan);
+    if (validation != NLO_VEC_STATUS_OK) {
+        return validation;
     }
 
     nlo_vector_backend* backend = plan->backend;
@@ -76,12 +123,9 @@ static nlo_vec_status nlo_fft_vk_begin_commands(nlo_fft_plan* plan)
 
 static nlo_vec_status nlo_fft_vk_submit_commands(nlo_fft_plan* plan)
 {
-    if (plan == NULL || plan->backend == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-    if (plan->vk_submit_fence == VK_NULL_HANDLE ||
-        plan->vk_command_buffer == VK_NULL_HANDLE) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    nlo_vec_status validation = nlo_fft_vk_validate_submit_context(plan);
+    if (validation != NLO_VEC_STATUS_OK) {
+        return validation;
     }
 
     nlo_vector_backend* backend = plan->backend;
@@ -196,17 +240,16 @@ static nlo_fft_backend_type nlo_fft_resolve_backend(
 
 static int nlo_fft_compute_total_size(const nlo_fft_shape* shape, size_t* out_total)
 {
-    if (shape == NULL || out_total == NULL || shape->rank == 0u || shape->rank > 3u) {
+    if (!nlo_fft_shape_valid(shape) || out_total == NULL) {
         return -1;
     }
 
     size_t total = 1u;
     for (size_t i = 0u; i < shape->rank; ++i) {
         const size_t dim = shape->dims[i];
-        if (dim == 0u || total > (SIZE_MAX / dim)) {
+        if (dim == 0u || nlo_fft_checked_mul_size(total, dim, &total) != 0) {
             return -1;
         }
-        total *= dim;
     }
 
     *out_total = total;
@@ -215,7 +258,7 @@ static int nlo_fft_compute_total_size(const nlo_fft_shape* shape, size_t* out_to
 
 static int nlo_fft_shape_to_fftw_dims(const nlo_fft_shape* shape, int out_dims[3])
 {
-    if (shape == NULL || out_dims == NULL || shape->rank == 0u || shape->rank > 3u) {
+    if (!nlo_fft_shape_valid(shape) || out_dims == NULL) {
         return -1;
     }
 
@@ -489,13 +532,9 @@ nlo_vec_status nlo_fft_forward_vec(
     nlo_vec_buffer* output
 )
 {
-    if (plan == NULL || input == NULL || output == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-    if (input->owner != plan->backend || output->owner != plan->backend ||
-        input->kind != NLO_VEC_KIND_COMPLEX64 || output->kind != NLO_VEC_KIND_COMPLEX64 ||
-        input->length != plan->total_size || output->length != plan->total_size) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    nlo_vec_status validation = nlo_fft_validate_io_buffers(plan, input, output);
+    if (validation != NLO_VEC_STATUS_OK) {
+        return validation;
     }
 
     if (plan->fft_backend == NLO_FFT_BACKEND_FFTW) {
@@ -534,13 +573,9 @@ nlo_vec_status nlo_fft_inverse_vec(
     nlo_vec_buffer* output
 )
 {
-    if (plan == NULL || input == NULL || output == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-    if (input->owner != plan->backend || output->owner != plan->backend ||
-        input->kind != NLO_VEC_KIND_COMPLEX64 || output->kind != NLO_VEC_KIND_COMPLEX64 ||
-        input->length != plan->total_size || output->length != plan->total_size) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    nlo_vec_status validation = nlo_fft_validate_io_buffers(plan, input, output);
+    if (validation != NLO_VEC_STATUS_OK) {
+        return validation;
     }
 
     if (plan->fft_backend == NLO_FFT_BACKEND_FFTW) {
