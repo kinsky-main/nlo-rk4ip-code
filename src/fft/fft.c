@@ -283,6 +283,7 @@ nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
     plan->fft_backend = nlo_fft_resolve_backend(plan->backend_type, fft_backend);
     plan->shape = *shape;
     plan->total_size = total_size;
+    plan->inverse_scale = 1.0 / (double)plan->total_size;
 
     if (plan->fft_backend == NLO_FFT_BACKEND_FFTW) {
         if (plan->backend_type != NLO_VECTOR_BACKEND_CPU) {
@@ -320,7 +321,6 @@ nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
             return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
         }
 
-        plan->inverse_scale = 1.0 / (double)plan->total_size;
         *out_plan = plan;
         return NLO_VEC_STATUS_OK;
     }
@@ -391,7 +391,7 @@ nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
         }
         configuration.numberBatches = 1u;
         configuration.doublePrecision = 1u;
-        configuration.normalize = 1u;
+        configuration.normalize = 0u;
 
         configuration.device = &backend->vk.device;
         configuration.physicalDevice = &backend->vk.physical_device;
@@ -573,7 +573,14 @@ nlo_vec_status nlo_fft_inverse_vec(
                 return status;
             }
         }
-        return nlo_fft_vk_execute_inplace(plan, output, 1);
+        status = nlo_fft_vk_execute_inplace(plan, output, 1);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+
+        return nlo_vec_complex_scalar_mul_inplace(plan->backend,
+                                                  output,
+                                                  nlo_make(plan->inverse_scale, 0.0));
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;

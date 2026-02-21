@@ -141,11 +141,60 @@ static void test_fft_round_trip_3d_shape(void)
     printf("test_fft_round_trip_3d_shape: validates shaped 3D FFT round-trip consistency.\n");
 }
 
+static void test_fft_round_trip_vulkan_if_available(void)
+{
+    const size_t n = TEST_FFT_SIZE;
+    nlo_complex time_domain[TEST_FFT_SIZE];
+    nlo_complex round_trip[TEST_FFT_SIZE];
+
+    for (size_t i = 0u; i < n; ++i) {
+        time_domain[i] = nlo_make((double)i * 0.25, (double)(n - i) * -0.1);
+    }
+
+    nlo_vector_backend* backend = nlo_vector_backend_create_vulkan(NULL);
+    if (backend == NULL) {
+        printf("test_fft_round_trip_vulkan_if_available: Vulkan unavailable, skipping.\n");
+        return;
+    }
+
+    nlo_vec_buffer* in = NULL;
+    nlo_vec_buffer* freq = NULL;
+    nlo_vec_buffer* out = NULL;
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n, &in) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n, &freq) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, n, &out) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_upload(backend, in, time_domain, sizeof(time_domain)) == NLO_VEC_STATUS_OK);
+
+    nlo_fft_plan* plan = NULL;
+    assert(nlo_fft_plan_create_with_backend(backend,
+                                            n,
+                                            NLO_FFT_BACKEND_VKFFT,
+                                            &plan) == NLO_VEC_STATUS_OK);
+    assert(plan != NULL);
+
+    assert(nlo_fft_forward_vec(plan, in, freq) == NLO_VEC_STATUS_OK);
+    assert(nlo_fft_inverse_vec(plan, freq, out) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_download(backend, out, round_trip, sizeof(round_trip)) == NLO_VEC_STATUS_OK);
+
+    for (size_t i = 0u; i < n; ++i) {
+        assert(fabs(NLO_RE(round_trip[i]) - NLO_RE(time_domain[i])) < 1e-8);
+        assert(fabs(NLO_IM(round_trip[i]) - NLO_IM(time_domain[i])) < 1e-8);
+    }
+
+    nlo_fft_plan_destroy(plan);
+    nlo_vec_destroy(backend, in);
+    nlo_vec_destroy(backend, freq);
+    nlo_vec_destroy(backend, out);
+    nlo_vector_backend_destroy(backend);
+    printf("test_fft_round_trip_vulkan_if_available: validates Vulkan forward/inverse FFT consistency.\n");
+}
+
 int main(void)
 {
     test_fft_round_trip();
     test_fft_backend_selection_validation();
     test_fft_round_trip_3d_shape();
+    test_fft_round_trip_vulkan_if_available();
     printf("test_fft: all subtests completed.\n");
     return 0;
 }
