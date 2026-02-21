@@ -177,6 +177,35 @@ def main():
     assert len(explicit_result.records[0]) == n
     print("test_python_api_smoke: explicit operator override path returned expected shape.")
 
+    nt_c = 4
+    nx_c = 4
+    ny_c = 2
+    n_c = nt_c * nx_c * ny_c
+    pulse_coupled = PulseSpec(
+        samples=[0j] * n_c,
+        delta_time=0.001,
+        pulse_period=1.0,
+        time_nt=nt_c,
+        frequency_grid=[0j] * nt_c,
+        spatial_nx=nx_c,
+        spatial_ny=ny_c,
+        spatial_frequency_grid=[0j] * (nx_c * ny_c),
+        potential_grid=[0j] * (nx_c * ny_c),
+    )
+    coupled_result = api.simulate(
+        pulse_coupled,
+        OperatorSpec(expr="i*beta2*w*w-loss", params={"beta2": 0.0, "loss": 0.0}),
+        OperatorSpec(expr="i*gamma*I + i*V", params={"gamma": 0.0}),
+        transverse_operator=OperatorSpec(expr="i*beta_t*w", params={"beta_t": 0.0}),
+        propagation_distance=0.01,
+        records=2,
+        exec_options=cpu_opts,
+    )
+    assert len(coupled_result.records) == 2
+    assert len(coupled_result.records[0]) == n_c
+    assert coupled_result.meta["coupled"] is True
+    print("test_python_api_smoke: coupled transverse simulate returned expected shape.")
+
     try:
         api.simulate(
             pulse,

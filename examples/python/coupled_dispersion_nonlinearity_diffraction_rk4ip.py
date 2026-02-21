@@ -117,25 +117,10 @@ def _run_case(
     k2 = _k2_grid(nx, ny, dx, dy)
     potential = (grin_strength * (xx * xx + yy * yy)).astype(np.complex128)
 
-    runtime = nlo.RuntimeOperators(
-        dispersion_factor_expr="i*c0*w*w-c1",
-        dispersion_expr="exp(h*D)",
-        transverse_factor_expr="i*c3*w",
-        transverse_expr="exp(h*D)",
-        nonlinear_expr="i*c2*I + i*V",
-        constants=[0.5 * beta2, 0.0, gamma, diffraction_coeff],
-    )
-
-    num_points = nt * nx * ny
-    cfg = nlo.prepare_sim_config(
-        num_points,
-        propagation_distance=float(z_final),
-        starting_step_size=8e-4,
-        max_step_size=2e-3,
-        min_step_size=2e-5,
-        error_tolerance=1e-7,
-        pulse_period=float(nt) * dt,
+    pulse = nlo.PulseSpec(
+        samples=field0.reshape(-1).tolist(),
         delta_time=dt,
+        pulse_period=float(nt) * dt,
         time_nt=nt,
         frequency_grid=[complex(float(w), 0.0) for w in omega],
         spatial_nx=nx,
@@ -144,15 +129,34 @@ def _run_case(
         delta_y=dy,
         spatial_frequency_grid=k2.reshape(-1).tolist(),
         potential_grid=potential.reshape(-1).tolist(),
-        runtime=runtime,
+    )
+    linear_operator = nlo.OperatorSpec(
+        expr="i*beta2*w*w-loss",
+        params={"beta2": 0.5 * beta2, "loss": 0.0},
+    )
+    transverse_operator = nlo.OperatorSpec(
+        expr="i*beta_t*w",
+        params={"beta_t": diffraction_coeff},
+    )
+    nonlinear_operator = nlo.OperatorSpec(
+        expr="i*gamma*I + i*V",
+        params={"gamma": gamma},
     )
 
     opts = exec_opts.to_ctypes(nlo)
-    records = np.asarray(
-        api.propagate(cfg, field0.reshape(-1).tolist(), num_records, opts),
-        dtype=np.complex128,
-    ).reshape(num_records, nt, ny, nx)
-    z_records = np.linspace(0.0, z_final, num_records, dtype=np.float64)
+    result = api.simulate(
+        pulse,
+        linear_operator,
+        nonlinear_operator,
+        transverse_operator=transverse_operator,
+        propagation_distance=float(z_final),
+        output="dense",
+        preset="accuracy",
+        records=num_records,
+        exec_options=opts,
+    )
+    records = np.asarray(result.records, dtype=np.complex128).reshape(num_records, nt, ny, nx)
+    z_records = np.asarray(result.z_axis, dtype=np.float64)
     return t, x, y, z_records, field0, records
 
 

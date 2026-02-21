@@ -448,6 +448,12 @@ _LINEAR_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
     "gvd": {"expr": "i*beta2*w*w-loss", "params": {"beta2": -0.5, "loss": 0.0}},
 }
 
+_TRANSVERSE_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
+    "none": {"expr": "0", "params": {}},
+    "diffraction": {"expr": "i*beta_t*w", "params": {"beta_t": 1.0}},
+    "default": {"expr": "i*beta_t*w", "params": {"beta_t": 1.0}},
+}
+
 _NONLINEAR_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
     "none": {"expr": "0", "params": {}},
     "kerr": {"expr": "i*gamma*I", "params": {"gamma": 1.0}},
@@ -489,14 +495,43 @@ def _normalize_pulse_spec(pulse: PulseSpec | Mapping[str, object]) -> PulseSpec:
         )
     else:
         raise ValueError("pulse must be a PulseSpec or mapping")
-
-        if len(spec.samples) == 0:
-            raise ValueError("pulse.samples must be non-empty")
-        if spec.delta_time <= 0.0:
-            raise ValueError("pulse.delta_time must be > 0")
-        if spec.time_nt is not None and int(spec.time_nt) <= 0:
-            raise ValueError("pulse.time_nt must be > 0 when provided")
+    if len(spec.samples) == 0:
+        raise ValueError("pulse.samples must be non-empty")
+    if spec.delta_time <= 0.0:
+        raise ValueError("pulse.delta_time must be > 0")
+    if spec.time_nt is not None and int(spec.time_nt) <= 0:
+        raise ValueError("pulse.time_nt must be > 0 when provided")
     return spec
+
+
+def _validate_coupled_pulse_spec(pulse: PulseSpec) -> None:
+    if pulse.time_nt is None or int(pulse.time_nt) <= 0:
+        raise ValueError("pulse.time_nt must be > 0 for coupled transverse simulations")
+    if pulse.spatial_nx is None or int(pulse.spatial_nx) <= 0:
+        raise ValueError("pulse.spatial_nx must be > 0 for coupled transverse simulations")
+    if pulse.spatial_ny is None or int(pulse.spatial_ny) <= 0:
+        raise ValueError("pulse.spatial_ny must be > 0 for coupled transverse simulations")
+
+    nt = int(pulse.time_nt)
+    nx = int(pulse.spatial_nx)
+    ny = int(pulse.spatial_ny)
+    total = nt * nx * ny
+    if len(pulse.samples) != total:
+        raise ValueError("len(pulse.samples) must equal pulse.time_nt * pulse.spatial_nx * pulse.spatial_ny")
+
+    xy = nx * ny
+    if pulse.spatial_frequency_grid is None:
+        raise ValueError("pulse.spatial_frequency_grid is required for coupled transverse simulations")
+    if len(pulse.spatial_frequency_grid) not in {xy, total}:
+        raise ValueError(
+            "pulse.spatial_frequency_grid length must match pulse.spatial_nx*pulse.spatial_ny "
+            "(or full-volume length)"
+        )
+    if pulse.potential_grid is not None and len(pulse.potential_grid) not in {xy, total}:
+        raise ValueError(
+            "pulse.potential_grid length must match pulse.spatial_nx*pulse.spatial_ny "
+            "(or full-volume length)"
+        )
 
 
 def _solver_profile_defaults(profile: str, propagation_distance: float) -> dict[str, float | int]:
@@ -574,7 +609,12 @@ def _resolve_operator_spec(
     operator: str | OperatorSpec | Mapping[str, object],
     offset: int,
 ) -> tuple[str | None, Callable[..., object] | None, list[float], Mapping[str, float] | None]:
-    presets = _LINEAR_OPERATOR_PRESETS if context == "linear" else _NONLINEAR_OPERATOR_PRESETS
+    if context == "linear":
+        presets = _LINEAR_OPERATOR_PRESETS
+    elif context == "transverse":
+        presets = _TRANSVERSE_OPERATOR_PRESETS
+    else:
+        presets = _NONLINEAR_OPERATOR_PRESETS
 
     spec = _coerce_operator_spec(operator)
     params = spec.params
@@ -601,6 +641,21 @@ def _resolve_operator_spec(
     assert expr is not None
     resolved_expr, constants = _parameterize_expression(expr, params, offset)
     return resolved_expr, None, constants, None
+
+
+def _decode_storage_run_id(raw: bytes) -> str:
+    return raw.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+
+
+def _storage_result_to_meta(storage_result: NloStorageResult) -> dict[str, object]:
+    return {
+        "run_id": _decode_storage_run_id(bytes(storage_result.run_id)),
+        "records_captured": int(storage_result.records_captured),
+        "records_spilled": int(storage_result.records_spilled),
+        "chunks_written": int(storage_result.chunks_written),
+        "db_size_bytes": int(storage_result.db_size_bytes),
+        "truncated": bool(storage_result.truncated),
+    }
 
 
 def _shift_constant_indices(expression: str, offset: int) -> str:
@@ -955,11 +1010,19 @@ class NLolib:
         linear_operator: str | OperatorSpec | Mapping[str, object] = "gvd",
         nonlinear_operator: str | OperatorSpec | Mapping[str, object] = "kerr",
         *,
+        transverse_operator: str | OperatorSpec | Mapping[str, object] = "none",
         propagation_distance: float,
         output: str = "dense",
         preset: str = "balanced",
         records: int | None = None,
         exec_options: NloExecutionOptions | None = None,
+        sqlite_path: str | None = None,
+        run_id: str | None = None,
+        sqlite_max_bytes: int = 0,
+        chunk_records: int = 0,
+        cap_policy: int = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
+        log_final_output_field_to_db: bool = False,
+        return_records: bool = True,
     ) -> PropagationResult:
         """
         High-level propagation facade using pulse/operator specs with defaults.
@@ -977,12 +1040,27 @@ class NLolib:
         linear_expr, linear_fn, linear_constants, linear_bindings = _resolve_operator_spec(
             "linear", linear_operator, 0
         )
+        transverse_requested = not (
+            isinstance(transverse_operator, str) and transverse_operator.strip().lower() == "none"
+        )
+        if transverse_requested:
+            _validate_coupled_pulse_spec(pulse_spec)
+            transverse_expr, transverse_fn, transverse_constants, transverse_bindings = _resolve_operator_spec(
+                "transverse", transverse_operator, len(linear_constants)
+            )
+            if transverse_fn is not None:
+                raise ValueError("transverse callable operators are not supported in the high-level facade")
+        else:
+            transverse_expr = None
+            transverse_fn = None
+            transverse_constants = []
+            transverse_bindings = None
         nonlinear_expr, nonlinear_fn, nonlinear_constants, nonlinear_bindings = _resolve_operator_spec(
-            "nonlinear", nonlinear_operator, len(linear_constants)
+            "nonlinear", nonlinear_operator, len(linear_constants) + len(transverse_constants)
         )
 
         binding_map: dict[str, float] = {}
-        for source in (linear_bindings, nonlinear_bindings):
+        for source in (linear_bindings, transverse_bindings, nonlinear_bindings):
             if source is None:
                 continue
             for key, value in source.items():
@@ -1010,10 +1088,13 @@ class NLolib:
 
         runtime = RuntimeOperators(
             dispersion_factor_expr=linear_expr,
+            transverse_factor_expr=transverse_expr,
+            transverse_expr=("exp(h*D)" if transverse_requested else None),
             nonlinear_expr=nonlinear_expr,
             dispersion_factor_fn=linear_fn,
+            transverse_factor_fn=transverse_fn,
             nonlinear_fn=nonlinear_fn,
-            constants=[*linear_constants, *nonlinear_constants],
+            constants=[*linear_constants, *transverse_constants, *nonlinear_constants],
             constant_bindings=binding_map if binding_map else None,
             auto_capture_constants=(not binding_map),
         )
@@ -1038,7 +1119,26 @@ class NLolib:
             runtime=runtime,
         )
 
-        out_records = self.propagate(config, pulse_spec.samples, num_records, exec_options)
+        storage_result_meta: dict[str, object] | None = None
+        if sqlite_path is None:
+            out_records = self.propagate(config, pulse_spec.samples, num_records, exec_options)
+        else:
+            storage_records, storage_result = self.propagate_with_storage(
+                config,
+                pulse_spec.samples,
+                num_records,
+                sqlite_path=sqlite_path,
+                run_id=run_id,
+                sqlite_max_bytes=sqlite_max_bytes,
+                chunk_records=chunk_records,
+                cap_policy=cap_policy,
+                log_final_output_field_to_db=log_final_output_field_to_db,
+                exec_options=exec_options,
+                return_records=bool(return_records),
+            )
+            storage_result_meta = _storage_result_to_meta(storage_result)
+            out_records = storage_records if storage_records is not None else []
+
         if num_records == 1:
             z_axis = [float(propagation_distance)]
         else:
@@ -1047,20 +1147,32 @@ class NLolib:
                 for i in range(num_records)
             ]
 
+        if len(out_records) == 0:
+            final: list[complex] = []
+        else:
+            final = list(out_records[-1])
+
+        meta: dict[str, Any] = {
+            "preset": preset,
+            "output": output,
+            "records": num_records,
+            "coupled": bool(transverse_requested),
+            "storage_enabled": bool(sqlite_path is not None),
+            "records_returned": bool(len(out_records) > 0),
+            "backend_requested": (
+                int(exec_options.backend_type)
+                if exec_options is not None
+                else int(NLO_VECTOR_BACKEND_AUTO)
+            ),
+        }
+        if storage_result_meta is not None:
+            meta["storage_result"] = storage_result_meta
+
         return PropagationResult(
             records=out_records,
             z_axis=z_axis,
-            final=list(out_records[-1]),
-            meta={
-                "preset": preset,
-                "output": output,
-                "records": num_records,
-                "backend_requested": (
-                    int(exec_options.backend_type)
-                    if exec_options is not None
-                    else int(NLO_VECTOR_BACKEND_AUTO)
-                ),
-            },
+            final=final,
+            meta=meta,
         )
 
     def propagate_with_storage(

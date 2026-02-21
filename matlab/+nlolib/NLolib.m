@@ -192,6 +192,90 @@ classdef NLolib < handle
             tf = logical(calllib(obj.LIBNAME, 'nlolib_storage_is_available'));
         end
 
+        function [records, storageResult] = propagate_with_storage( ...
+                obj, config, inputField, numRecordedSamples, storageOptions, execOptions)
+            %PROPAGATE_WITH_STORAGE Run propagation with SQLite snapshot storage.
+            %   [records, storageResult] = obj.propagate_with_storage(cfg, field, numRecords, storageOptions)
+            %   [records, storageResult] = obj.propagate_with_storage(..., execOpts)
+            if nargin < 6
+                execOptions = struct();
+            end
+            if nargin < 5 || isempty(storageOptions) || ~isstruct(storageOptions)
+                error('nlolib:invalidStorageOptions', 'storageOptions must be a struct');
+            end
+            if ~isfield(storageOptions, 'sqlite_path') || strlength(string(storageOptions.sqlite_path)) == 0
+                error('nlolib:invalidStorageOptions', ...
+                      'storageOptions.sqlite_path is required');
+            end
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_propagate_with_storage')
+                error('nlolib:storageUnavailable', ...
+                      'nlolib_propagate_with_storage is unavailable in this library build.');
+            end
+            if ~obj.storage_is_available()
+                error('nlolib:storageUnavailable', ...
+                      'SQLite storage is not available in this nlolib build.');
+            end
+
+            returnRecords = true;
+            if isfield(storageOptions, 'return_records') && ~isempty(storageOptions.return_records)
+                returnRecords = logical(storageOptions.return_records);
+            end
+
+            numTimeSamples = numel(inputField);
+            numRecordedSamples = uint64(numRecordedSamples);
+
+            [cfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>
+            inPtr = nlolib.pack_complex_array(inputField);
+
+            if returnRecords
+                outLen = uint64(numTimeSamples) * numRecordedSamples;
+                outPtr = nlolib.pack_complex_array(zeros(1, double(outLen)));
+            else
+                outPtr = libpointer('nlo_complexPtr');
+            end
+
+            if isempty(fieldnames(execOptions))
+                execOptsPtr = nlolib.NLolib.make_exec_options(struct());
+            else
+                execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
+            end
+
+            [storageOptsPtr, storageKeepalive] = ...
+                nlolib.NLolib.make_storage_options(storageOptions); %#ok<ASGLU>
+            storageResultRaw = libstruct('nlo_storage_result');
+
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate_with_storage', ...
+                                cfgPtr, ...
+                                uint64(numTimeSamples), ...
+                                inPtr, ...
+                                numRecordedSamples, ...
+                                outPtr, ...
+                                execOptsPtr, ...
+                                storageOptsPtr, ...
+                                storageResultRaw);
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:propagateWithStorageFailed', ...
+                          'nlolib_propagate_with_storage failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:propagateWithStorageFailed', ...
+                          'nlolib_propagate_with_storage failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+
+            if returnRecords
+                records = nlolib.unpack_records(outPtr, ...
+                                                double(numRecordedSamples), ...
+                                                numTimeSamples);
+            else
+                records = zeros(0, numTimeSamples);
+            end
+            storageResult = nlolib.NLolib.to_storage_result_struct(storageResultRaw);
+        end
+
         function result = simulate(obj, pulse, linearOperator, nonlinearOperator, options)
             %SIMULATE High-level pulse/operator facade with balanced defaults.
             %   result = obj.simulate(pulse, linearOperator, nonlinearOperator, options)
@@ -210,12 +294,34 @@ classdef NLolib < handle
 
             [cfg, inputField, numRecords, execOptions, zAxis, meta] = ...
                 nlolib.NLolib.build_simulation_request(pulse, linearOperator, nonlinearOperator, options);
-            records = obj.propagate(cfg, inputField, numRecords, execOptions);
+            storageOptions = struct();
+            if isfield(options, 'storage') && ~isempty(options.storage)
+                if ~isstruct(options.storage)
+                    error('nlolib:invalidStorageOptions', ...
+                          'options.storage must be a struct');
+                end
+                storageOptions = options.storage;
+            end
+
+            if ~isempty(fieldnames(storageOptions))
+                [records, storageResult] = obj.propagate_with_storage( ...
+                    cfg, inputField, numRecords, storageOptions, execOptions);
+                meta.storage_enabled = true;
+                meta.storage_result = storageResult;
+            else
+                records = obj.propagate(cfg, inputField, numRecords, execOptions);
+                meta.storage_enabled = false;
+            end
+            meta.records_returned = size(records, 1) > 0;
 
             result = struct();
             result.records = records;
             result.z_axis = zAxis;
-            result.final = records(end, :);
+            if size(records, 1) > 0
+                result.final = records(end, :);
+            else
+                result.final = [];
+            end
             result.meta = meta;
         end
 
@@ -513,6 +619,54 @@ classdef NLolib < handle
             ptr = s;
         end
 
+        function [opts, keepalive] = make_storage_options(storage)
+            %MAKE_STORAGE_OPTIONS Build nlo_storage_options libstruct.
+            keepalive = {};
+            if ~isstruct(storage)
+                error('nlolib:invalidStorageOptions', 'storage options must be a struct');
+            end
+            if ~isfield(storage, 'sqlite_path') || strlength(string(storage.sqlite_path)) == 0
+                error('nlolib:invalidStorageOptions', ...
+                      'storage.sqlite_path must be a non-empty string');
+            end
+
+            opts = libstruct('nlo_storage_options');
+            sqlitePathPtr = libpointer('cstring', char(string(storage.sqlite_path)));
+            keepalive{end + 1} = sqlitePathPtr; %#ok<AGROW>
+            opts.sqlite_path = sqlitePathPtr;
+
+            if isfield(storage, 'run_id') && strlength(string(storage.run_id)) > 0
+                runIdPtr = libpointer('cstring', char(string(storage.run_id)));
+                keepalive{end + 1} = runIdPtr; %#ok<AGROW>
+                opts.run_id = runIdPtr;
+            else
+                opts.run_id = libpointer();
+            end
+
+            opts.sqlite_max_bytes = uint64(getfield_safe(storage, 'sqlite_max_bytes', 0));
+            opts.chunk_records = uint64(getfield_safe(storage, 'chunk_records', 0));
+            opts.cap_policy = int32(getfield_safe(storage, 'cap_policy', 0));
+            opts.log_final_output_field_to_db = int32(logical(getfield_safe(storage, ...
+                                                                              'log_final_output_field_to_db', ...
+                                                                              false)));
+        end
+
+        function out = to_storage_result_struct(storageResultRaw)
+            %TO_STORAGE_RESULT_STRUCT Convert nlo_storage_result to MATLAB struct.
+            out = struct();
+            runIdRaw = char(storageResultRaw.run_id(:).');
+            nul = find(runIdRaw == char(0), 1);
+            if ~isempty(nul)
+                runIdRaw = runIdRaw(1:(nul - 1));
+            end
+            out.run_id = string(runIdRaw);
+            out.records_captured = double(storageResultRaw.records_captured);
+            out.records_spilled = double(storageResultRaw.records_spilled);
+            out.chunks_written = double(storageResultRaw.chunks_written);
+            out.db_size_bytes = double(storageResultRaw.db_size_bytes);
+            out.truncated = logical(storageResultRaw.truncated);
+        end
+
         function [cfg, inputField, numRecords, execOptions, zAxis, meta] = ...
                 build_simulation_request(pulse, linearOperator, nonlinearOperator, options)
             if ~isstruct(options)
@@ -568,10 +722,31 @@ classdef NLolib < handle
             inputField = pulseSpec.samples;
             numTimeSamples = numel(inputField);
 
+            transverseOperator = "none";
+            if isfield(options, 'transverse_operator') && ~isempty(options.transverse_operator)
+                transverseOperator = options.transverse_operator;
+            elseif isfield(options, 'transverseOperator') && ~isempty(options.transverseOperator)
+                transverseOperator = options.transverseOperator;
+            end
+            transverseRequested = ~(ischar(transverseOperator) || isstring(transverseOperator)) || ...
+                                  ~strcmpi(strtrim(char(string(transverseOperator))), 'none');
+            if transverseRequested
+                nlolib.NLolib.validate_coupled_pulse_spec(pulseSpec);
+            end
+
             [linearExpr, linearFn, linearConstants] = ...
                 nlolib.NLolib.resolve_operator_spec('linear', linearOperator, 0);
+            if transverseRequested
+                [transverseExpr, transverseFn, transverseConstants] = ...
+                    nlolib.NLolib.resolve_operator_spec('transverse', transverseOperator, numel(linearConstants));
+            else
+                transverseExpr = "";
+                transverseFn = [];
+                transverseConstants = [];
+            end
             [nonlinearExpr, nonlinearFn, nonlinearConstants] = ...
-                nlolib.NLolib.resolve_operator_spec('nonlinear', nonlinearOperator, numel(linearConstants));
+                nlolib.NLolib.resolve_operator_spec('nonlinear', nonlinearOperator, ...
+                                                    numel(linearConstants) + numel(transverseConstants));
 
             runtime = struct();
             if strlength(linearExpr) > 0
@@ -580,13 +755,21 @@ classdef NLolib < handle
             if ~isempty(linearFn)
                 runtime.dispersion_factor_fn = linearFn;
             end
+            if strlength(transverseExpr) > 0
+                runtime.transverse_factor_expr = char(transverseExpr);
+                runtime.transverse_expr = 'exp(h*D)';
+            end
+            if ~isempty(transverseFn)
+                runtime.transverse_factor_fn = transverseFn;
+                runtime.transverse_expr = 'exp(h*D)';
+            end
             if strlength(nonlinearExpr) > 0
                 runtime.nonlinear_expr = char(nonlinearExpr);
             end
             if ~isempty(nonlinearFn)
                 runtime.nonlinear_fn = nonlinearFn;
             end
-            runtime.constants = [linearConstants, nonlinearConstants];
+            runtime.constants = [linearConstants, transverseConstants, nonlinearConstants];
 
             cfg = struct();
             cfg.num_time_samples = numTimeSamples;
@@ -627,6 +810,7 @@ classdef NLolib < handle
             meta.preset = char(preset);
             meta.output = char(output);
             meta.records = double(numRecords);
+            meta.coupled = logical(transverseRequested);
         end
 
         function pulse = normalize_pulse_spec(pulseInput)
@@ -702,6 +886,48 @@ classdef NLolib < handle
             pulse.potential_grid = [];
             if isfield(pulseInput, 'potential_grid') && ~isempty(pulseInput.potential_grid)
                 pulse.potential_grid = pulseInput.potential_grid;
+            end
+        end
+
+        function validate_coupled_pulse_spec(pulse)
+            if ~isfield(pulse, 'time_nt') || isempty(pulse.time_nt) || double(pulse.time_nt) <= 0
+                error('nlolib:invalidPulseSpec', ...
+                      'pulse.time_nt must be > 0 for coupled transverse simulations');
+            end
+            if ~isfield(pulse, 'spatial_nx') || isempty(pulse.spatial_nx) || double(pulse.spatial_nx) <= 0
+                error('nlolib:invalidPulseSpec', ...
+                      'pulse.spatial_nx must be > 0 for coupled transverse simulations');
+            end
+            if ~isfield(pulse, 'spatial_ny') || isempty(pulse.spatial_ny) || double(pulse.spatial_ny) <= 0
+                error('nlolib:invalidPulseSpec', ...
+                      'pulse.spatial_ny must be > 0 for coupled transverse simulations');
+            end
+
+            nt = double(pulse.time_nt);
+            nx = double(pulse.spatial_nx);
+            ny = double(pulse.spatial_ny);
+            expected = nt * nx * ny;
+            if numel(pulse.samples) ~= expected
+                error('nlolib:invalidPulseSpec', ...
+                      'numel(pulse.samples) must equal pulse.time_nt * pulse.spatial_nx * pulse.spatial_ny');
+            end
+
+            if ~isfield(pulse, 'spatial_frequency_grid') || isempty(pulse.spatial_frequency_grid)
+                error('nlolib:invalidPulseSpec', ...
+                      'pulse.spatial_frequency_grid is required for coupled transverse simulations');
+            end
+            xy = nx * ny;
+            sfLen = numel(pulse.spatial_frequency_grid);
+            if sfLen ~= xy && sfLen ~= expected
+                error('nlolib:invalidPulseSpec', ...
+                      'spatial_frequency_grid length must equal spatial_nx*spatial_ny or full-volume size');
+            end
+            if isfield(pulse, 'potential_grid') && ~isempty(pulse.potential_grid)
+                potentialLen = numel(pulse.potential_grid);
+                if potentialLen ~= xy && potentialLen ~= expected
+                    error('nlolib:invalidPulseSpec', ...
+                          'potential_grid length must equal spatial_nx*spatial_ny or full-volume size');
+                end
             end
         end
 
@@ -793,6 +1019,11 @@ classdef NLolib < handle
                       '%s operator must define expr/fn or a known preset', context);
             end
 
+            if strcmpi(char(string(context)), 'transverse') && ~isempty(fn)
+                error('nlolib:invalidOperatorSpec', ...
+                      'transverse callable operators are not supported in MATLAB facade');
+            end
+
             if ~isempty(fn)
                 if ~isempty(params)
                     error('nlolib:invalidOperatorSpec', ...
@@ -827,6 +1058,18 @@ classdef NLolib < handle
                         case {'kerr', 'default'}
                             expr = "i*gamma*I";
                             params = struct('gamma', 1.0);
+                        case 'none'
+                            expr = "0";
+                            params = struct();
+                        otherwise
+                            expr = string(name);
+                            matched = false;
+                    end
+                case 'transverse'
+                    switch key
+                        case {'diffraction', 'default'}
+                            expr = "i*beta_t*w";
+                            params = struct('beta_t', 1.0);
                         case 'none'
                             expr = "0";
                             params = struct();

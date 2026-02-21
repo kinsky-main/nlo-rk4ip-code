@@ -44,10 +44,10 @@ if totalSamples > double(runtimeLimits.max_num_time_samples_runtime)
           totalSamples, runtimeLimits.max_num_time_samples_runtime);
 end
 
-[t, x, y, zRecords, fullRecords, fullInfo] = run_case( ...
+[t, x, y, zRecords, fullRecords] = run_case( ...
     api, gammaFull, nt, nx, ny, dt, dx, dy, zFinal, numRecords, beta2, ...
     diffractionCoeff, grinStrength, temporalWidth, spatialWidth, chirp, simOptions);
-[~, ~, ~, ~, linearRecords, linearInfo] = run_case( ...
+[~, ~, ~, ~, linearRecords] = run_case( ...
     api, 0.0, nt, nx, ny, dt, dx, dy, zFinal, numRecords, beta2, ...
     diffractionCoeff, grinStrength, temporalWidth, spatialWidth, chirp, simOptions);
 
@@ -72,10 +72,6 @@ powerDriftLinear = abs(powerLinear(end) - powerLinear(1)) / max(powerLinear(1), 
 fprintf("coupled propagation completed: grid=(t=%d,y=%d,x=%d), records=%d, final_full_vs_linear_error=%.6e\n", ...
         nt, ny, nx, numRecords, errorCurve(end));
 fprintf("power drift: full=%.6e, linear=%.6e\n", powerDriftFull, powerDriftLinear);
-fprintf("full backend requested=%s used=%s fallback=%d\n", ...
-        fullInfo.requested_backend, fullInfo.used_backend, fullInfo.used_fallback);
-fprintf("linear backend requested=%s used=%s fallback=%d\n", ...
-        linearInfo.requested_backend, linearInfo.used_backend, linearInfo.used_fallback);
 
 outputDir = fullfile(repoRoot, "examples", "matlab", "output", ...
                      "coupled_dispersion_nonlinearity_diffraction");
@@ -165,7 +161,7 @@ for idx = 1:numel(savedPaths)
 end
 end
 
-function [t, x, y, zRecords, records, info] = run_case( ...
+function [t, x, y, zRecords, records] = run_case( ...
     api, gamma, nt, nx, ny, dt, dx, dy, zFinal, numRecords, beta2, ...
     diffractionCoeff, grinStrength, temporalWidth, spatialWidth, chirp, simOptions)
 
@@ -186,35 +182,44 @@ omega = backend.angular_frequency_grid(nt, dt);
 k2 = k2_grid(nx, ny, dx, dy);
 potential = grinStrength * (xx .* xx + yy .* yy);
 
-cfg = struct();
-cfg.num_time_samples = nt * nx * ny;
-cfg.propagation_distance = zFinal;
-cfg.starting_step_size = 8e-4;
-cfg.max_step_size = 2e-3;
-cfg.min_step_size = 2e-5;
-cfg.error_tolerance = 1e-7;
-cfg.pulse_period = nt * dt;
-cfg.delta_time = dt;
-cfg.time_nt = nt;
-cfg.frequency_grid = complex(omega, zeros(1, nt));
-cfg.spatial_nx = nx;
-cfg.spatial_ny = ny;
-cfg.delta_x = dx;
-cfg.delta_y = dy;
-cfg.spatial_frequency_grid = flatten_xy_row_major(k2);
-cfg.potential_grid = flatten_xy_row_major(complex(potential, zeros(size(potential))));
-cfg.runtime = struct( ...
-    'dispersion_factor_expr', "i*c0*w*w-c1", ...
-    'dispersion_expr', "exp(h*D)", ...
-    'transverse_factor_expr', "i*c3*w", ...
-    'transverse_expr', "exp(h*D)", ...
-    'nonlinear_expr', "i*c2*I + i*V", ...
-    'constants', [0.5 * beta2, 0.0, gamma, diffractionCoeff]);
-
 field0Flat = flatten_tyx_row_major(field0);
-[recordsFlat, info] = backend.propagate_with_fallback(api, cfg, field0Flat, numRecords, simOptions);
+pulse = struct();
+pulse.samples = field0Flat;
+pulse.delta_time = dt;
+pulse.pulse_period = nt * dt;
+pulse.time_nt = nt;
+pulse.frequency_grid = complex(omega, zeros(1, nt));
+pulse.spatial_nx = nx;
+pulse.spatial_ny = ny;
+pulse.delta_x = dx;
+pulse.delta_y = dy;
+pulse.spatial_frequency_grid = flatten_xy_row_major(k2);
+pulse.potential_grid = flatten_xy_row_major(complex(potential, zeros(size(potential))));
+
+linearOperator = struct();
+linearOperator.expr = "i*beta2*w*w-loss";
+linearOperator.params = struct('beta2', 0.5 * beta2, 'loss', 0.0);
+
+transverseOperator = struct();
+transverseOperator.expr = "i*beta_t*w";
+transverseOperator.params = struct('beta_t', diffractionCoeff);
+
+nonlinearOperator = struct();
+nonlinearOperator.expr = "i*gamma*I + i*V";
+nonlinearOperator.params = struct('gamma', gamma);
+
+execOptions = backend.make_exec_options(simOptions, numRecords);
+simulateOptions = struct();
+simulateOptions.propagation_distance = zFinal;
+simulateOptions.records = numRecords;
+simulateOptions.preset = "accuracy";
+simulateOptions.exec_options = execOptions;
+simulateOptions.transverse_operator = transverseOperator;
+result = api.simulate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+
+recordsFlat = result.records;
 records = unflatten_tyx_records(recordsFlat, numRecords, nt, ny, nx);
-zRecords = linspace(0.0, zFinal, numRecords);
+zRecords = result.z_axis;
 end
 
 function k2 = k2_grid(nx, ny, dx, dy)

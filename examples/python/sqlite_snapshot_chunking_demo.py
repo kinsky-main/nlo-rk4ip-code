@@ -6,13 +6,15 @@ from __future__ import annotations
 
 import math
 import sqlite3
+import sys
 from pathlib import Path
 
-from nlolib_ctypes import NLolib, prepare_sim_config
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PYTHON_API_DIR = REPO_ROOT / "python"
+if str(PYTHON_API_DIR) not in sys.path:
+    sys.path.insert(0, str(PYTHON_API_DIR))
 
-
-def _decode_run_id(raw: bytes) -> str:
-    return raw.split(b"\x00", 1)[0].decode("utf-8", errors="replace")
+from nlolib_ctypes import NLolib, OperatorSpec, PulseSpec
 
 
 def main() -> None:
@@ -29,17 +31,14 @@ def main() -> None:
     field0 = [complex(math.exp(-(u * u)), 0.0) for u in t]
     freq = [complex(i, 0.0) for i in range(nt)]
 
-    cfg = prepare_sim_config(
-        nt,
-        propagation_distance=0.2,
-        starting_step_size=0.01,
-        max_step_size=0.02,
-        min_step_size=1e-4,
-        error_tolerance=1e-6,
-        pulse_period=1.0,
+    pulse = PulseSpec(
+        samples=field0,
         delta_time=1.0 / nt,
+        pulse_period=1.0,
         frequency_grid=freq,
     )
+    linear = OperatorSpec(expr="0")
+    nonlinear = OperatorSpec(expr="0")
 
     out_dir = Path(__file__).resolve().parent / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -47,26 +46,31 @@ def main() -> None:
     if db_path.exists():
         db_path.unlink()
 
-    _, storage_result = api.propagate_with_storage(
-        cfg,
-        field0,
-        num_records,
+    result = api.simulate(
+        pulse,
+        linear,
+        nonlinear,
+        propagation_distance=0.2,
+        records=num_records,
+        output="dense",
+        preset="balanced",
         sqlite_path=str(db_path),
         chunk_records=6,
         sqlite_max_bytes=50 * 1024 * 1024 * 1024,
         return_records=False,
     )
+    storage_result = result.meta.get("storage_result", {})
 
-    run_id = _decode_run_id(bytes(storage_result.run_id))
+    run_id = str(storage_result.get("run_id", ""))
     print(f"sqlite db: {db_path}")
     print(f"run_id: {run_id}")
     print(
         "storage summary: "
-        f"captured={storage_result.records_captured} "
-        f"spilled={storage_result.records_spilled} "
-        f"chunks={storage_result.chunks_written} "
-        f"truncated={storage_result.truncated} "
-        f"db_size_bytes={storage_result.db_size_bytes}"
+        f"captured={storage_result.get('records_captured', 0)} "
+        f"spilled={storage_result.get('records_spilled', 0)} "
+        f"chunks={storage_result.get('chunks_written', 0)} "
+        f"truncated={int(bool(storage_result.get('truncated', False)))} "
+        f"db_size_bytes={storage_result.get('db_size_bytes', 0)}"
     )
 
     with sqlite3.connect(db_path) as con:
