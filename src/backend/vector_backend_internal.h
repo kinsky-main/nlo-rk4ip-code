@@ -13,10 +13,15 @@
 #include <vulkan/vulkan.h>
 
 enum {
+    /** Vulkan compute local size used by kernels in this backend. */
     NLO_VK_LOCAL_SIZE_X = 64u,
+    /** Default staging-buffer size used for host/device transfers. */
     NLO_VK_DEFAULT_STAGING_BYTES = 8u * 1024u * 1024u
 };
 
+/**
+ * @brief Internal kernel identifiers mapped to compiled Vulkan pipelines.
+ */
 typedef enum {
     NLO_VK_KERNEL_REAL_FILL = 0,
     NLO_VK_KERNEL_REAL_MUL_INPLACE = 1,
@@ -34,6 +39,9 @@ typedef enum {
     NLO_VK_KERNEL_COUNT = 13
 } nlo_vk_kernel_id;
 
+/**
+ * @brief Common push-constant payload shared by vector kernels.
+ */
 typedef struct {
     uint32_t count;
     uint32_t pad;
@@ -41,10 +49,16 @@ typedef struct {
     double scalar1;
 } nlo_vk_push_constants;
 
+/**
+ * @brief Cached Vulkan pipeline wrapper for one compute kernel.
+ */
 typedef struct {
     VkPipeline pipeline;
 } nlo_vk_kernel;
 
+/**
+ * @brief Internal Vulkan backend runtime state and resources.
+ */
 typedef struct {
     VkInstance instance;
     VkPhysicalDevice physical_device;
@@ -89,12 +103,18 @@ typedef struct {
     uint32_t simulation_descriptor_set_cursor;
 } nlo_vk_backend;
 
+/**
+ * @brief Concrete backend instance shared across CPU/Vulkan paths.
+ */
 struct nlo_vector_backend {
     nlo_vector_backend_type type;
     bool in_simulation;
     nlo_vk_backend vk;
 };
 
+/**
+ * @brief Opaque buffer storage used by backend operations.
+ */
 struct nlo_vec_buffer {
     nlo_vector_backend* owner;
     nlo_vec_kind kind;
@@ -105,13 +125,45 @@ struct nlo_vec_buffer {
     VkDeviceMemory vk_memory;
 };
 
+/**
+ * @brief Return byte size of one element for a logical vector kind.
+ *
+ * @param kind Vector element kind.
+ * @return size_t Element size in bytes.
+ */
 size_t nlo_vec_element_size(nlo_vec_kind kind);
+
+/**
+ * @brief Validate backend handle and internal invariants.
+ *
+ * @param backend Backend handle to validate.
+ * @return nlo_vec_status Validation status.
+ */
 nlo_vec_status nlo_vec_validate_backend(const nlo_vector_backend* backend);
+
+/**
+ * @brief Validate one buffer against backend ownership and expected kind.
+ *
+ * @param backend Expected owner backend.
+ * @param buffer Buffer to validate.
+ * @param kind Expected element kind.
+ * @return nlo_vec_status Validation status.
+ */
 nlo_vec_status nlo_vec_validate_buffer(
     const nlo_vector_backend* backend,
     const nlo_vec_buffer* buffer,
     nlo_vec_kind kind
 );
+
+/**
+ * @brief Validate two buffers for paired operations.
+ *
+ * @param backend Expected owner backend.
+ * @param a First buffer.
+ * @param b Second buffer.
+ * @param kind Expected element kind for both buffers.
+ * @return nlo_vec_status Validation status.
+ */
 nlo_vec_status nlo_vec_validate_pair(
     const nlo_vector_backend* backend,
     const nlo_vec_buffer* a,

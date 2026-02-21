@@ -7,6 +7,14 @@
 #include "core/state.h"
 #include <stddef.h>
 
+/**
+ * @brief Multiply two `size_t` values with overflow detection.
+ *
+ * @param a Left operand.
+ * @param b Right operand.
+ * @param out Destination result on success.
+ * @return int 0 on success, nonzero on overflow/invalid output pointer.
+ */
 static inline int nlo_sim_dimensions_checked_mul(size_t a, size_t b, size_t* out)
 {
     if (out == NULL) {
@@ -31,6 +39,14 @@ static inline int nlo_sim_dimensions_checked_mul(size_t a, size_t b, size_t* out
  *
  * This keeps legacy flattened XY handling consistent across `nlolib.c`
  * and `state.c`.
+ *
+ * @param config Simulation configuration.
+ * @param total_samples Flattened sample count.
+ * @param out_nt Destination temporal sample count.
+ * @param out_nx Destination x-dimension sample count.
+ * @param out_ny Destination y-dimension sample count.
+ * @param out_explicit_nd Destination flag for explicit ND mode.
+ * @return int 0 on success, nonzero when dimensions are inconsistent.
  */
 static inline int nlo_resolve_sim_dimensions_internal(
     const sim_config* config,

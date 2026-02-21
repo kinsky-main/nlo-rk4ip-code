@@ -55,14 +55,20 @@
  * Constants
  * ------------------------------------------------------------------- */
 
+/** @brief Unbounded sample-count sentinel for limit query APIs. */
 #define NT_MAX ((size_t)-1) /* Unbounded sentinel; use nlolib_query_runtime_limits(). */
+/** @brief Maximum runtime scalar constants accepted by expression programs. */
 #define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16
+/** @brief Maximum persisted run-id length (including terminator). */
 #define NLO_STORAGE_RUN_ID_MAX 64
 
 /* -------------------------------------------------------------------
  * nlo_complex
  * ------------------------------------------------------------------- */
 
+/**
+ * @brief Complex scalar represented as two double values.
+ */
 typedef struct
 {
     double re;
@@ -73,6 +79,9 @@ typedef struct
  * Simulation configuration sub-structs
  * ------------------------------------------------------------------- */
 
+/**
+ * @brief Propagation solver controls along the z dimension.
+ */
 typedef struct
 {
     double starting_step_size;
@@ -82,6 +91,9 @@ typedef struct
     double propagation_distance;
 } propagation_params;
 
+/**
+ * @brief Temporal grid metadata.
+ */
 typedef struct
 {
     size_t nt;
@@ -89,11 +101,17 @@ typedef struct
     double delta_time;
 } time_grid;
 
+/**
+ * @brief Optional precomputed temporal-frequency vector.
+ */
 typedef struct
 {
     nlo_complex *frequency_grid;
 } nlo_frequency_grid;
 
+/**
+ * @brief Spatial grid metadata and optional spatial buffers.
+ */
 typedef struct
 {
     size_t nx;
@@ -104,6 +122,9 @@ typedef struct
     nlo_complex *potential_grid;
 } spatial_grid;
 
+/**
+ * @brief Runtime expression settings for dispersion/nonlinearity operators.
+ */
 typedef struct
 {
     const char *dispersion_factor_expr;
@@ -115,6 +136,9 @@ typedef struct
     double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
 } runtime_operator_params;
 
+/**
+ * @brief Full simulation input configuration.
+ */
 typedef struct
 {
     propagation_params propagation;
@@ -128,6 +152,9 @@ typedef struct
  * Backend / execution option enums
  * ------------------------------------------------------------------- */
 
+/**
+ * @brief Backend selection mode.
+ */
 typedef enum
 {
     NLO_VECTOR_BACKEND_CPU = 0,
@@ -135,6 +162,9 @@ typedef enum
     NLO_VECTOR_BACKEND_AUTO = 2
 } nlo_vector_backend_type;
 
+/**
+ * @brief FFT implementation selector.
+ */
 typedef enum
 {
     NLO_FFT_BACKEND_AUTO = 0,
@@ -151,6 +181,9 @@ typedef void *VkDevice;
 typedef void *VkQueue;
 typedef void *VkCommandPool;
 
+/**
+ * @brief Vulkan backend configuration with opaque handle placeholders.
+ */
 typedef struct
 {
     VkPhysicalDevice physical_device;
@@ -166,6 +199,9 @@ typedef struct
  * Execution options
  * ------------------------------------------------------------------- */
 
+/**
+ * @brief Runtime backend/resource selection options.
+ */
 typedef struct
 {
     nlo_vector_backend_type backend_type;
@@ -176,6 +212,9 @@ typedef struct
     nlo_vk_backend_config vulkan;
 } nlo_execution_options;
 
+/**
+ * @brief Runtime limits/estimates for current backend and configuration.
+ */
 typedef struct
 {
     size_t max_num_time_samples_runtime;
@@ -190,6 +229,9 @@ typedef struct
  * Status codes
  * ------------------------------------------------------------------- */
 
+/**
+ * @brief Public status codes returned by nlolib APIs.
+ */
 typedef enum
 {
     NLOLIB_STATUS_OK = 0,
@@ -198,12 +240,18 @@ typedef enum
     NLOLIB_STATUS_NOT_IMPLEMENTED = 3
 } nlolib_status;
 
+/**
+ * @brief Database size-limit behavior when snapshot storage reaches its cap.
+ */
 typedef enum
 {
     NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
     NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
 } nlo_storage_db_cap_policy;
 
+/**
+ * @brief SQLite snapshot storage controls.
+ */
 typedef struct
 {
     const char *sqlite_path;
@@ -214,6 +262,9 @@ typedef struct
     int log_final_output_field_to_db;
 } nlo_storage_options;
 
+/**
+ * @brief Summary of captured/spilled records from storage-enabled runs.
+ */
 typedef struct
 {
     char run_id[NLO_STORAGE_RUN_ID_MAX];
@@ -228,6 +279,11 @@ typedef struct
  * Public API
  * ------------------------------------------------------------------- */
 
+/**
+ * @brief MATLAB FFI mirror of nlolib_propagate().
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
 nlolib_status nlolib_propagate(
     const sim_config *config,
     size_t num_time_samples,
@@ -236,11 +292,21 @@ nlolib_status nlolib_propagate(
     nlo_complex *output_records,
     const nlo_execution_options *exec_options);
 
+/**
+ * @brief MATLAB FFI mirror of nlolib_query_runtime_limits().
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
 nlolib_status nlolib_query_runtime_limits(
     const sim_config *config,
     const nlo_execution_options *exec_options,
     nlo_runtime_limits *out_limits);
 
+/**
+ * @brief MATLAB FFI mirror of nlolib_propagate_interleaved().
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
 nlolib_status nlolib_propagate_interleaved(
     const sim_config *config,
     size_t num_time_samples,
@@ -249,6 +315,11 @@ nlolib_status nlolib_propagate_interleaved(
     double *output_records_interleaved,
     const nlo_execution_options *exec_options);
 
+/**
+ * @brief MATLAB FFI mirror of nlolib_propagate_with_storage().
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
 nlolib_status nlolib_propagate_with_storage(
     const sim_config *config,
     size_t num_time_samples,
@@ -259,6 +330,11 @@ nlolib_status nlolib_propagate_with_storage(
     const nlo_storage_options *storage_options,
     nlo_storage_result *storage_result);
 
+/**
+ * @brief Return whether SQLite snapshot storage is available in this build.
+ *
+ * See `nlolib.h` for full return-value semantics.
+ */
 int nlolib_storage_is_available(void);
 
 #endif /* NLOLIB_MATLAB_H */

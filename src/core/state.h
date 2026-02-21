@@ -10,26 +10,44 @@
 #include "physics/operator_program.h"
 #include <stddef.h>
 
+/**
+ * @brief Unbounded sample-count sentinel used by limit query APIs.
+ */
 #ifndef NT_MAX
 #define NT_MAX ((size_t)-1) /* Unbounded sentinel; runtime limits are query-driven. */
 #endif
 
+/**
+ * @brief Number of persistent work vectors reserved by the solver state.
+ */
 #ifndef NLO_WORK_VECTOR_COUNT
 #define NLO_WORK_VECTOR_COUNT 14u
 #endif
 
+/**
+ * @brief Default fraction of device-local memory considered usable.
+ */
 #ifndef NLO_DEFAULT_DEVICE_HEAP_FRACTION
 #define NLO_DEFAULT_DEVICE_HEAP_FRACTION 0.70
 #endif
 
+/**
+ * @brief Maximum number of runtime operator scalar constants.
+ */
 #ifndef NLO_RUNTIME_OPERATOR_CONSTANTS_MAX
 #define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16u
 #endif
 
+/**
+ * @brief Maximum length (including terminator) for persisted run IDs.
+ */
 #ifndef NLO_STORAGE_RUN_ID_MAX
 #define NLO_STORAGE_RUN_ID_MAX 64u
 #endif
 
+/**
+ * @brief Propagation solver controls along the z dimension.
+ */
 typedef struct {
     double starting_step_size;
     double max_step_size;
@@ -38,16 +56,27 @@ typedef struct {
     double propagation_distance;
 } propagation_params;
 
+/**
+ * @brief Temporal grid metadata.
+ *
+ * `nt` is the number of temporal samples in explicit ND mode.
+ */
 typedef struct {
     size_t nt;
     double pulse_period;
     double delta_time;
 } time_grid;
 
+/**
+ * @brief Optional precomputed temporal-frequency grid input.
+ */
 typedef struct {
     nlo_complex* frequency_grid;
 } frequency_grid;
 
+/**
+ * @brief Spatial grid metadata and optional precomputed buffers.
+ */
 typedef struct {
     size_t nx;
     size_t ny;
@@ -57,6 +86,11 @@ typedef struct {
     nlo_complex* potential_grid;
 } spatial_grid;
 
+/**
+ * @brief Runtime expression settings for dispersion/nonlinearity operators.
+ *
+ * String expressions are compiled at runtime into operator programs.
+ */
 typedef struct {
     const char* dispersion_factor_expr;
     const char* dispersion_expr;
@@ -67,6 +101,9 @@ typedef struct {
     double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
 } runtime_operator_params;
 
+/**
+ * @brief Full simulation input configuration.
+ */
 typedef struct {
     propagation_params propagation;
     time_grid time;
@@ -75,6 +112,9 @@ typedef struct {
     runtime_operator_params runtime;
 } sim_config;
 
+/**
+ * @brief Runtime execution/backend selection and resource tuning options.
+ */
 typedef struct {
     nlo_vector_backend_type backend_type;
     nlo_fft_backend_type fft_backend;
@@ -84,6 +124,9 @@ typedef struct {
     nlo_vk_backend_config vulkan;
 } nlo_execution_options;
 
+/**
+ * @brief Estimated runtime limits for current configuration/backend choices.
+ */
 typedef struct {
     size_t max_num_time_samples_runtime;
     size_t max_num_recorded_samples_in_memory;
@@ -93,11 +136,19 @@ typedef struct {
     int storage_available;
 } nlo_runtime_limits;
 
+/**
+ * @brief Database size-limit policy for snapshot storage.
+ */
 typedef enum {
+    /** Stop writing new chunks once cap is reached; run continues. */
     NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
+    /** Treat cap violation as an error status. */
     NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
 } nlo_storage_db_cap_policy;
 
+/**
+ * @brief Snapshot persistence controls for SQLite-backed output chunking.
+ */
 typedef struct {
     const char* sqlite_path;
     const char* run_id;
@@ -107,6 +158,9 @@ typedef struct {
     int log_final_output_field_to_db;
 } nlo_storage_options;
 
+/**
+ * @brief Summary of snapshot capture/storage results after a run.
+ */
 typedef struct {
     char run_id[NLO_STORAGE_RUN_ID_MAX];
     size_t records_captured;
@@ -116,8 +170,14 @@ typedef struct {
     int truncated;
 } nlo_storage_result;
 
+/**
+ * @brief Opaque snapshot store handle.
+ */
 typedef struct nlo_snapshot_store nlo_snapshot_store;
 
+/**
+ * @brief Internal set of preallocated working buffers used by RK4 propagation.
+ */
 typedef struct {
     nlo_vec_buffer* ip_field_vec;
     nlo_vec_buffer* field_magnitude_vec;
@@ -137,6 +197,9 @@ typedef struct {
 
 typedef struct nlo_fft_plan nlo_fft_plan;
 
+/**
+ * @brief Internal mutable simulation runtime state.
+ */
 typedef struct {
     const sim_config* config;
     nlo_execution_options exec_options;
@@ -187,16 +250,51 @@ typedef struct {
     nlo_vec_buffer* runtime_operator_stack_vec[NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS];
 } simulation_state;
 
+/**
+ * @brief Build default execution options for the selected backend family.
+ *
+ * @param backend_type Backend mode preference (CPU, Vulkan, or AUTO).
+ * @return nlo_execution_options Initialized option block.
+ */
 nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type);
+
+/**
+ * @brief Build default SQLite storage options.
+ *
+ * @return nlo_storage_options Initialized storage option block.
+ */
 nlo_storage_options nlo_storage_options_default(void);
+
+/**
+ * @brief Build default runtime limit descriptor values.
+ *
+ * @return nlo_runtime_limits Initialized runtime limits descriptor.
+ */
 nlo_runtime_limits nlo_runtime_limits_default(void);
 
+/**
+ * @brief Internal runtime-limit query helper used by public wrappers.
+ *
+ * @param config Optional simulation configuration.
+ * @param exec_options Optional execution options.
+ * @param out_limits Destination limits descriptor.
+ * @return int 0 on success, nonzero on invalid inputs/backend failure.
+ */
 int nlo_query_runtime_limits_internal(
     const sim_config* config,
     const nlo_execution_options* exec_options,
     nlo_runtime_limits* out_limits
 );
 
+/**
+ * @brief Allocate and initialize simulation state without storage persistence.
+ *
+ * @param config Simulation configuration.
+ * @param num_time_samples Flattened sample count per record.
+ * @param num_recorded_samples Number of records to capture.
+ * @param exec_options Optional execution overrides (NULL for defaults).
+ * @return simulation_state* Initialized state, or NULL on failure.
+ */
 simulation_state* create_simulation_state(
     const sim_config* config,
     size_t num_time_samples,
@@ -204,6 +302,16 @@ simulation_state* create_simulation_state(
     const nlo_execution_options* exec_options
 );
 
+/**
+ * @brief Allocate and initialize simulation state with optional storage support.
+ *
+ * @param config Simulation configuration.
+ * @param num_time_samples Flattened sample count per record.
+ * @param num_recorded_samples Number of records to capture.
+ * @param exec_options Optional execution overrides (NULL for defaults).
+ * @param storage_options Optional storage controls (NULL disables storage).
+ * @return simulation_state* Initialized state, or NULL on failure.
+ */
 simulation_state* create_simulation_state_with_storage(
     const sim_config* config,
     size_t num_time_samples,
@@ -212,17 +320,69 @@ simulation_state* create_simulation_state_with_storage(
     const nlo_storage_options* storage_options
 );
 
+/**
+ * @brief Release all resources owned by a simulation state.
+ *
+ * @param state State to destroy (NULL is allowed).
+ */
 void free_simulation_state(simulation_state* state);
 
+/**
+ * @brief Allocate a default simulation configuration sized for a sample count.
+ *
+ * @param num_time_samples Initial temporal sample count hint.
+ * @return sim_config* Newly allocated config, or NULL on failure.
+ */
 sim_config* create_sim_config(size_t num_time_samples);
+
+/**
+ * @brief Free a simulation configuration allocated by create_sim_config().
+ *
+ * @param config Configuration object to free.
+ */
 void free_sim_config(sim_config* config);
 
+/**
+ * @brief Upload the initial field into backend-resident simulation buffers.
+ *
+ * @param state Active simulation state.
+ * @param field Host input field buffer with num_time_samples elements.
+ * @return nlo_vec_status Upload/validation status.
+ */
 nlo_vec_status simulation_state_upload_initial_field(simulation_state* state, const nlo_complex* field);
+
+/**
+ * @brief Download the current backend field into host memory.
+ *
+ * @param state Active simulation state.
+ * @param out_field Host output buffer with num_time_samples elements.
+ * @return nlo_vec_status Download/validation status.
+ */
 nlo_vec_status simulation_state_download_current_field(const simulation_state* state, nlo_complex* out_field);
 
+/**
+ * @brief Capture one snapshot record into host ring/storage buffers.
+ *
+ * @param state Active simulation state.
+ * @return nlo_vec_status Capture status.
+ */
 nlo_vec_status simulation_state_capture_snapshot(simulation_state* state);
+
+/**
+ * @brief Flush any pending snapshot data to host/storage sinks.
+ *
+ * @param state Active simulation state.
+ * @return nlo_vec_status Flush status.
+ */
 nlo_vec_status simulation_state_flush_snapshots(simulation_state* state);
 
+/**
+ * @brief Return a pointer to a host-side record slot by index.
+ *
+ * @param state Active simulation state.
+ * @param record_index Zero-based record index.
+ * @return nlo_complex* Pointer to record start, or NULL when unavailable.
+ */
 static inline nlo_complex* simulation_state_get_field_record(simulation_state* state, size_t record_index)
 {
     if (state == NULL || state->field_buffer == NULL || record_index >= state->num_host_records) {

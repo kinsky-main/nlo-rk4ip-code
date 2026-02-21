@@ -22,10 +22,14 @@
 
 /**
  * @brief Perform full RK4 propagation on the simulation state.
+ *
+ * @param state Mutable simulation state.
  */
 void solve_rk4(simulation_state* state);
 
 /**
  * @brief Perform a single RK4 step on the simulation state.
+ *
+ * @param state Mutable simulation state.
  */
 void step_rk4(simulation_state* state);

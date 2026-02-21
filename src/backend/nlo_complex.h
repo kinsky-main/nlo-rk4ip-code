@@ -28,6 +28,13 @@ typedef struct { double re, im; } nlo_complex;
 
 // MARK: Function Declarations
 
+/**
+ * @brief Construct a complex scalar from real and imaginary parts.
+ *
+ * @param re Real component.
+ * @param im Imaginary component.
+ * @return nlo_complex Constructed complex value.
+ */
 static inline nlo_complex nlo_make(double re, double im)
 {
     nlo_complex z;
@@ -36,12 +43,26 @@ static inline nlo_complex nlo_make(double re, double im)
     return z;
 }
 
+/**
+ * @brief Complex addition helper.
+ *
+ * @param a Left operand.
+ * @param b Right operand.
+ * @return nlo_complex Sum `a + b`.
+ */
 static inline nlo_complex nlo_add(nlo_complex a, nlo_complex b)
 {
     return nlo_make(NLO_RE(a) + NLO_RE(b),
                     NLO_IM(a) + NLO_IM(b));
 }
 
+/**
+ * @brief Complex multiplication helper.
+ *
+ * @param a Left operand.
+ * @param b Right operand.
+ * @return nlo_complex Product `a * b`.
+ */
 static inline nlo_complex nlo_mul(nlo_complex a, nlo_complex b)
 {
     return nlo_make(NLO_RE(a) * NLO_RE(b) - NLO_IM(a) * NLO_IM(b),

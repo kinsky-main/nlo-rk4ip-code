@@ -35,6 +35,7 @@ nlo_vec_status nlo_apply_dispersion_operator_program_vec(
  *
  * @param backend Active vector backend.
  * @param program Compiled nonlinear program.
+ * @param eval_ctx Program evaluation symbols.
  * @param field Input field vector.
  * @param multiplier_vec Scratch/output multiplier vector.
  * @param out_field Output field vector.

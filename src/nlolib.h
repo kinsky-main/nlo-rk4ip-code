@@ -38,9 +38,13 @@ extern "C" {
 // MARK: Typedefs
 
 typedef enum {
+    /** Operation completed successfully. */
     NLOLIB_STATUS_OK = 0,
+    /** Input parameters were invalid or inconsistent. */
     NLOLIB_STATUS_INVALID_ARGUMENT = 1,
+    /** Required allocation failed. */
     NLOLIB_STATUS_ALLOCATION_FAILED = 2,
+    /** Requested behavior is not available in current build/runtime. */
     NLOLIB_STATUS_NOT_IMPLEMENTED = 3
 } nlolib_status;
 
@@ -145,6 +149,8 @@ NLOLIB_API nlolib_status nlolib_propagate_with_storage(
 
 /**
  * @brief Returns nonzero when SQLite storage support is available.
+ *
+ * @return int Nonzero when storage backend support is compiled in.
  */
 NLOLIB_API int nlolib_storage_is_available(void);
 
