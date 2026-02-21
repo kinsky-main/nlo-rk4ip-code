@@ -8,10 +8,12 @@
 
 - CMake `3.28.3+`
 - C99 compiler toolchain
-- Vulkan loader library (runtime + link-time)
-- Vulkan headers (auto-discovered or fetched by CMake)
-- Vulkan SDK/glslang development components that provide CMake target `Vulkan::glslang`
-- `glslangValidator` on `PATH` (or available via `VULKAN_SDK`)
+- FFTW build prerequisites (handled by CMake fetch/in-tree build)
+- Vulkan toolchain only when `NLO_ENABLE_VULKAN_BACKEND=ON`:
+  - Vulkan loader library (runtime + link-time)
+  - Vulkan headers (auto-discovered or fetched by CMake)
+  - Vulkan SDK/glslang development components that provide CMake target `Vulkan::glslang`
+  - `glslangValidator` on `PATH` (or available via `VULKAN_SDK`)
 
 ### Optional but commonly needed
 
@@ -85,6 +87,8 @@ Current top-level CMake options and cache variables:
 | `NLOLIB_BUILD_DOCS` | `ON` | Enables `docs` target when Doxygen is found. |
 | `NLOLIB_BUILD_BENCHMARKS` | `ON` | Builds benchmark targets in `benchmarks/`. |
 | `NLOLIB_BUILD_EXAMPLES` | `ON` | Builds example targets in `examples/`. |
+| `NLO_ENABLE_VULKAN_BACKEND` | `ON` | Enables Vulkan backend and shader compilation path. |
+| `NLO_ENABLE_VKFFT` | `ON` | Enables VkFFT FFT path (auto-forced `OFF` when Vulkan backend is disabled). |
 | `NLO_BUMP_PATCH_ON_BUILD` | `ON` | Adds `nlo_patch_bump_on_build` target to patch-bump version on successful build. |
 | `NLO_SQLITE_USE_FETCHCONTENT` | `OFF` | If `ON`, always fetch SQLite amalgamation; otherwise try system SQLite first. |
 | `NLO_CPU_SIMD_LEVEL` | `AUTO` | CPU SIMD mode: `AUTO`, `AVX2`, `AVX`, `SCALAR`. |
@@ -106,11 +110,11 @@ Multi-config generators use `--config <type>` during build/test.
 ## Dependency Resolution Behavior
 
 - FFTW is resolved through CMake FetchContent and linked as static FFTW3 target.
-- VkFFT is fetched via CMake FetchContent for FFT backend integration.
-- Vulkan headers are found via `find_package(Vulkan)` or fetched from `NLO_VULKAN_HEADERS_URL`.
-- Vulkan loader must be present locally (`vulkan`/`vulkan-1` library).
-- `glslangValidator` is required to compile compute shaders to SPIR-V during build.
-- CMake target `Vulkan::glslang` must be resolvable for FFT backend linking.
+- When `NLO_ENABLE_VKFFT=ON`, VkFFT is fetched via CMake FetchContent for Vulkan FFT integration.
+- When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan headers are found via `find_package(Vulkan)` or fetched from `NLO_VULKAN_HEADERS_URL`.
+- When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan loader must be present locally (`vulkan`/`vulkan-1` library).
+- When `NLO_ENABLE_VULKAN_BACKEND=ON`, `glslangValidator` is required to compile compute shaders to SPIR-V during build.
+- When `NLO_ENABLE_VKFFT=ON`, CMake target `Vulkan::glslang` must be resolvable for FFT backend linking.
 - SQLite is discovered from system/Conda hints unless `NLO_SQLITE_USE_FETCHCONTENT=ON`; fallback fetch is supported.
 
 ## Build Targets and Usage
@@ -229,6 +233,17 @@ export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
 python3 examples/python/runtime_temporal_demo.py
 ```
 
+Build wheel artifacts manually:
+
+```powershell
+.\tools\release\build_wheel_windows.ps1 -BuildDir build-wheel-win -Config Release
+```
+
+```bash
+./tools/release/build_wheel_linux.sh build-wheel-linux Release
+./tools/release/build_wheel_macos.sh build-wheel-macos Release
+```
+
 ## MATLAB Usage
 
 Stage MATLAB package artifacts:
@@ -261,6 +276,18 @@ nlolib_setup();
 - `src/nlolib_matlab.h` into `build/matlab_toolbox/lib`
 
 You can override runtime library lookup with `NLOLIB_LIBRARY`.
+
+Create a toolbox bundle manually:
+
+```powershell
+matlab -batch "addpath('matlab'); package_mltbx('build', 'Release')"
+```
+
+```bash
+matlab -batch "addpath('matlab'); package_mltbx('build', 'Release')"
+```
+
+Additional manual publication steps are documented in `docs/release_manual.md`.
 
 ## Preset Workflow (Optional)
 

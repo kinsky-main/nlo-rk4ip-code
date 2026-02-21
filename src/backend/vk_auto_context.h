@@ -6,7 +6,23 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#ifndef NLO_ENABLE_VULKAN_BACKEND
+#define NLO_ENABLE_VULKAN_BACKEND 1
+#endif
+
+#if NLO_ENABLE_VULKAN_BACKEND
 #include <vulkan/vulkan.h>
+#else
+typedef void* VkInstance;
+typedef void* VkPhysicalDevice;
+typedef void* VkDevice;
+typedef void* VkQueue;
+typedef int VkPhysicalDeviceType;
+#ifndef VK_MAX_PHYSICAL_DEVICE_NAME_SIZE
+#define VK_MAX_PHYSICAL_DEVICE_NAME_SIZE 256
+#endif
+#endif
 
 /**
  * @brief Auto-detected Vulkan handles and device metadata.

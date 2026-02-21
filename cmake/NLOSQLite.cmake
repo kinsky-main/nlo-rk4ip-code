@@ -1,7 +1,35 @@
 function(nlo_configure_sqlite target_name)
+  set(NLO_SQLITE_RUNTIME_HINTS "" CACHE INTERNAL
+      "Candidate sqlite runtime library paths for packaging helpers" FORCE)
+
+  function(_nlo_set_sqlite_runtime_hints)
+    set(_nlo_sqlite_hints_local "")
+    foreach(_nlo_candidate IN LISTS ARGN)
+      if(_nlo_candidate AND EXISTS "${_nlo_candidate}")
+        list(APPEND _nlo_sqlite_hints_local "${_nlo_candidate}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES _nlo_sqlite_hints_local)
+    set(NLO_SQLITE_RUNTIME_HINTS "${_nlo_sqlite_hints_local}" CACHE INTERNAL
+        "Candidate sqlite runtime library paths for packaging helpers" FORCE)
+  endfunction()
+
   if(NOT NLO_SQLITE_USE_FETCHCONTENT)
     find_package(SQLite3 QUIET)
     if(SQLite3_FOUND)
+      if(TARGET SQLite::SQLite3)
+        get_target_property(_nlo_sqlite_imported_location
+          SQLite::SQLite3 IMPORTED_LOCATION)
+        get_target_property(_nlo_sqlite_imported_location_release
+          SQLite::SQLite3 IMPORTED_LOCATION_RELEASE)
+        get_target_property(_nlo_sqlite_imported_location_debug
+          SQLite::SQLite3 IMPORTED_LOCATION_DEBUG)
+        _nlo_set_sqlite_runtime_hints(
+          "${_nlo_sqlite_imported_location}"
+          "${_nlo_sqlite_imported_location_release}"
+          "${_nlo_sqlite_imported_location_debug}"
+        )
+      endif()
       target_link_libraries(${target_name} PRIVATE SQLite::SQLite3)
       target_compile_definitions(${target_name} PRIVATE NLO_HAVE_SQLITE3=1)
       return()
@@ -28,6 +56,14 @@ function(nlo_configure_sqlite target_name)
     )
 
     if(NLO_SQLITE3_INCLUDE_DIR AND NLO_SQLITE3_LIBRARY)
+      get_filename_component(_nlo_sqlite_lib_dir "${NLO_SQLITE3_LIBRARY}" DIRECTORY)
+      get_filename_component(_nlo_sqlite_lib_name "${NLO_SQLITE3_LIBRARY}" NAME_WE)
+      _nlo_set_sqlite_runtime_hints(
+        "${_nlo_sqlite_lib_dir}/sqlite3.dll"
+        "${_nlo_sqlite_lib_dir}/${_nlo_sqlite_lib_name}.dll"
+        "${_nlo_sqlite_lib_dir}/../bin/sqlite3.dll"
+        "${_nlo_sqlite_lib_dir}/../sqlite3.dll"
+      )
       target_include_directories(${target_name} PRIVATE ${NLO_SQLITE3_INCLUDE_DIR})
       target_link_libraries(${target_name} PRIVATE ${NLO_SQLITE3_LIBRARY})
       target_compile_definitions(${target_name} PRIVATE NLO_HAVE_SQLITE3=1)
@@ -73,6 +109,8 @@ function(nlo_configure_sqlite target_name)
     target_include_directories(nlo_sqlite3 PUBLIC "${_nlo_sqlite_inc_dir}")
   endif()
 
+  set(NLO_SQLITE_RUNTIME_HINTS "" CACHE INTERNAL
+      "Candidate sqlite runtime library paths for packaging helpers" FORCE)
   target_link_libraries(${target_name} PRIVATE nlo_sqlite3)
   target_compile_definitions(${target_name} PRIVATE NLO_HAVE_SQLITE3=1)
 endfunction()

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nlolib"
+version = "0.8.0"
+description = "Nonlinear optics runtime wrapper with bundled nlolib shared libraries."
+readme = "python/README_PYPI.md"
+requires-python = ">=3.9"
+license = {text = "GPL-2.0-or-later"}
+authors = [
+  {name = "Wenzel Kinsky"}
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS :: MacOS X",
+  "Topic :: Scientific/Engineering"
+]
+
+[tool.setuptools]
+package-dir = {"" = "python"}
+packages = ["nlolib"]
+py-modules = ["nlolib_ctypes", "runtime_expr"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+nlolib = ["*.dll", "*.so", "*.dylib", "LICENSE*", "README*"]

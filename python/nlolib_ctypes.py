@@ -182,10 +182,12 @@ def _candidate_library_paths() -> list[str]:
         candidates.append(env_path)
 
     here = Path(__file__).resolve().parent
+    package_dir = here / "nlolib"
     root = here.parent
     if os.name == "nt":
         candidates.extend(
             [
+                str(package_dir / "nlolib.dll"),
                 str(here / "nlolib.dll"),
                 str(here / "Debug" / "nlolib.dll"),
                 str(here / "Release" / "nlolib.dll"),
@@ -205,8 +207,10 @@ def _candidate_library_paths() -> list[str]:
     elif os.name == "posix":
         candidates.extend(
             [
+                str(package_dir / "libnlolib.so"),
                 str(here / "libnlolib.so"),
                 str(root / "libnlolib.so"),
+                str(package_dir / "libnlolib.dylib"),
                 str(here / "libnlolib.dylib"),
                 str(root / "libnlolib.dylib"),
             ]

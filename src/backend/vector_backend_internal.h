@@ -10,7 +10,41 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef NLO_ENABLE_VULKAN_BACKEND
+#define NLO_ENABLE_VULKAN_BACKEND 1
+#endif
+
+#if NLO_ENABLE_VULKAN_BACKEND
 #include <vulkan/vulkan.h>
+#else
+typedef void* VkInstance;
+typedef void* VkPhysicalDevice;
+typedef void* VkDevice;
+typedef void* VkQueue;
+typedef void* VkCommandPool;
+typedef void* VkCommandBuffer;
+typedef void* VkFence;
+typedef void* VkDescriptorSetLayout;
+typedef void* VkDescriptorPool;
+typedef void* VkDescriptorSet;
+typedef void* VkPipelineLayout;
+typedef void* VkPipelineCache;
+typedef void* VkPipeline;
+typedef void* VkBuffer;
+typedef void* VkDeviceMemory;
+typedef uint64_t VkDeviceSize;
+typedef int VkPhysicalDeviceType;
+typedef struct {
+    uint32_t maxComputeWorkGroupCount[3];
+    uint64_t maxStorageBufferRange;
+} VkPhysicalDeviceLimits;
+#ifndef VK_MAX_PHYSICAL_DEVICE_NAME_SIZE
+#define VK_MAX_PHYSICAL_DEVICE_NAME_SIZE 256
+#endif
+#ifndef VK_NULL_HANDLE
+#define VK_NULL_HANDLE ((void*)0)
+#endif
+#endif
 
 enum {
     /** Vulkan compute local size used by kernels in this backend. */

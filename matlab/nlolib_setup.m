@@ -29,7 +29,9 @@ end
 if ispc
     dllDirs = {
         fullfile(matlabRoot, "lib")
+        fullfile(matlabRoot, "lib", "win64")
         fullfile(repoRoot, "build", "matlab_toolbox", "lib")
+        fullfile(repoRoot, "build", "matlab_toolbox", "lib", "win64")
         fullfile(repoRoot, "build", "src", "Release")
         fullfile(repoRoot, "build", "src", "Debug")
         fullfile(repoRoot, "build", "src", "RelWithDebInfo")
@@ -39,6 +41,26 @@ if ispc
         fullfile(repoRoot, "python")
     };
     prepend_dirs_to_path(dllDirs);
+elseif ismac
+    dyldDirs = {
+        fullfile(matlabRoot, "lib")
+        fullfile(matlabRoot, "lib", "maci64")
+        fullfile(repoRoot, "build", "matlab_toolbox", "lib")
+        fullfile(repoRoot, "build", "matlab_toolbox", "lib", "maci64")
+        fullfile(repoRoot, "build", "src")
+        fullfile(repoRoot, "python")
+    };
+    prepend_dirs_to_path(dyldDirs);
+else
+    soDirs = {
+        fullfile(matlabRoot, "lib")
+        fullfile(matlabRoot, "lib", "glnxa64")
+        fullfile(repoRoot, "build", "matlab_toolbox", "lib")
+        fullfile(repoRoot, "build", "matlab_toolbox", "lib", "glnxa64")
+        fullfile(repoRoot, "build", "src")
+        fullfile(repoRoot, "python")
+    };
+    prepend_dirs_to_path(soDirs);
 end
 
 if saveToPath

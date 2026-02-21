@@ -17,6 +17,7 @@ build-*/
 cmake-build-*/
 out/
 output/
+dist/
 
 # Compiled files
 *.o

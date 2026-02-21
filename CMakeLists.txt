@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 nlo_configure_build_configurations()
 
-project(nlolib VERSION 0.11.0 LANGUAGES C)
+project(nlolib VERSION 0.12.0 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -14,8 +14,18 @@ option(NLO_INSTALL_GIT_HOOKS "Install repository git hooks during CMake configur
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
+option(NLO_ENABLE_VULKAN_BACKEND "Enable Vulkan vector backend and shader compilation path" ON)
+option(NLO_ENABLE_VKFFT "Enable VkFFT backend integration for Vulkan FFT execution" ON)
 option(NLO_BUMP_PATCH_ON_BUILD "Bump patch version in CMakeLists.txt after successful builds" ON)
 option(NLO_SQLITE_USE_FETCHCONTENT "Fetch SQLite amalgamation via CMake instead of system SQLite discovery" OFF)
+
+if(NOT NLO_ENABLE_VULKAN_BACKEND)
+  set(NLO_ENABLE_VKFFT OFF CACHE BOOL "Enable VkFFT backend integration for Vulkan FFT execution" FORCE)
+  if(NLOLIB_BUILD_BENCHMARKS)
+    message(WARNING "Disabling NLOLIB_BUILD_BENCHMARKS because NLO_ENABLE_VULKAN_BACKEND=OFF.")
+    set(NLOLIB_BUILD_BENCHMARKS OFF CACHE BOOL "Build benchmark executables" FORCE)
+  endif()
+endif()
 
 set(NLO_VULKAN_HEADERS_URL
   "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/heads/main.zip"

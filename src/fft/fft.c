@@ -13,11 +13,18 @@
 
 #include <fftw3.h>
 
+#ifndef NLO_ENABLE_VKFFT
+#define NLO_ENABLE_VKFFT 1
+#endif
+
 #ifndef VKFFT_BACKEND
 #define VKFFT_BACKEND 0
 #endif
+
+#if NLO_ENABLE_VKFFT
 #include <vulkan/vulkan.h>
 #include <vkFFT/vkFFT.h>
+#endif
 
 struct nlo_fft_plan {
     nlo_vector_backend* backend;
@@ -32,6 +39,7 @@ struct nlo_fft_plan {
     fftw_complex* plan_out;
     double inverse_scale;
 
+#if NLO_ENABLE_VKFFT
     VkFFTApplication vk_app;
     nlo_vec_buffer* vk_placeholder_vec;
     VkBuffer vk_buffer_binding;
@@ -40,6 +48,7 @@ struct nlo_fft_plan {
     VkCommandBuffer vk_command_buffer;
     VkFence vkfft_internal_fence;
     VkFence vk_submit_fence;
+#endif
 };
 
 static int nlo_fft_shape_valid(const nlo_fft_shape* shape)
@@ -63,6 +72,7 @@ static int nlo_fft_checked_mul_size(size_t a, size_t b, size_t* out)
     return 0;
 }
 
+#if NLO_ENABLE_VKFFT
 static nlo_vec_status nlo_fft_vk_validate_submit_context(const nlo_fft_plan* plan)
 {
     if (plan == NULL || plan->backend == NULL) {
@@ -74,6 +84,7 @@ static nlo_vec_status nlo_fft_vk_validate_submit_context(const nlo_fft_plan* pla
     }
     return NLO_VEC_STATUS_OK;
 }
+#endif
 
 static nlo_vec_status nlo_fft_validate_io_buffers(
     const nlo_fft_plan* plan,
@@ -92,6 +103,7 @@ static nlo_vec_status nlo_fft_validate_io_buffers(
     return NLO_VEC_STATUS_OK;
 }
 
+#if NLO_ENABLE_VKFFT
 static nlo_vec_status nlo_fft_vk_begin_commands(nlo_fft_plan* plan)
 {
     nlo_vec_status validation = nlo_fft_vk_validate_submit_context(plan);
@@ -120,7 +132,9 @@ static nlo_vec_status nlo_fft_vk_begin_commands(nlo_fft_plan* plan)
 
     return NLO_VEC_STATUS_OK;
 }
+#endif
 
+#if NLO_ENABLE_VKFFT
 static nlo_vec_status nlo_fft_vk_submit_commands(nlo_fft_plan* plan)
 {
     nlo_vec_status validation = nlo_fft_vk_validate_submit_context(plan);
@@ -148,7 +162,9 @@ static nlo_vec_status nlo_fft_vk_submit_commands(nlo_fft_plan* plan)
 
     return NLO_VEC_STATUS_OK;
 }
+#endif
 
+#if NLO_ENABLE_VKFFT
 static void nlo_fft_vk_cmd_compute_barrier(VkCommandBuffer cmd, VkBuffer buffer, VkDeviceSize size)
 {
     VkBufferMemoryBarrier barrier = {
@@ -173,7 +189,9 @@ static void nlo_fft_vk_cmd_compute_barrier(VkCommandBuffer cmd, VkBuffer buffer,
                          0u,
                          NULL);
 }
+#endif
 
+#if NLO_ENABLE_VKFFT
 static nlo_vec_status nlo_fft_vk_execute_inplace(
     nlo_fft_plan* plan,
     nlo_vec_buffer* target,
@@ -218,6 +236,7 @@ static nlo_vec_status nlo_fft_vk_execute_inplace(
     }
     return nlo_fft_vk_submit_commands(plan);
 }
+#endif
 
 static nlo_fft_backend_type nlo_fft_resolve_backend(
     nlo_vector_backend_type backend_type,
@@ -369,6 +388,7 @@ nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
     }
 
     if (plan->fft_backend == NLO_FFT_BACKEND_VKFFT) {
+#if NLO_ENABLE_VKFFT
         if (plan->backend_type != NLO_VECTOR_BACKEND_VULKAN) {
             nlo_fft_plan_destroy(plan);
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
@@ -452,6 +472,10 @@ nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
 
         *out_plan = plan;
         return NLO_VEC_STATUS_OK;
+#else
+        nlo_fft_plan_destroy(plan);
+        return NLO_VEC_STATUS_UNSUPPORTED;
+#endif
     }
 
     nlo_fft_plan_destroy(plan);
@@ -484,8 +508,11 @@ void nlo_fft_plan_destroy(nlo_fft_plan* plan)
     }
 
     if (plan->fft_backend == NLO_FFT_BACKEND_VKFFT) {
+#if NLO_ENABLE_VKFFT
         deleteVkFFT(&plan->vk_app);
+#endif
     }
+#if NLO_ENABLE_VKFFT
     if (plan->backend != NULL &&
         plan->backend->type == NLO_VECTOR_BACKEND_VULKAN &&
         plan->backend->vk.device != VK_NULL_HANDLE &&
@@ -522,6 +549,7 @@ void nlo_fft_plan_destroy(nlo_fft_plan* plan)
         nlo_vec_destroy(plan->backend, plan->vk_placeholder_vec);
         plan->vk_placeholder_vec = NULL;
     }
+#endif
 
     free(plan);
 }
@@ -554,6 +582,7 @@ nlo_vec_status nlo_fft_forward_vec(
     }
 
     if (plan->fft_backend == NLO_FFT_BACKEND_VKFFT) {
+#if NLO_ENABLE_VKFFT
         nlo_vec_status status = NLO_VEC_STATUS_OK;
         if (input != output) {
             status = nlo_vec_complex_copy(plan->backend, output, input);
@@ -562,6 +591,9 @@ nlo_vec_status nlo_fft_forward_vec(
             }
         }
         return nlo_fft_vk_execute_inplace(plan, output, 0);
+#else
+        return NLO_VEC_STATUS_UNSUPPORTED;
+#endif
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
@@ -601,6 +633,7 @@ nlo_vec_status nlo_fft_inverse_vec(
     }
 
     if (plan->fft_backend == NLO_FFT_BACKEND_VKFFT) {
+#if NLO_ENABLE_VKFFT
         nlo_vec_status status = NLO_VEC_STATUS_OK;
         if (input != output) {
             status = nlo_vec_complex_copy(plan->backend, output, input);
@@ -616,6 +649,9 @@ nlo_vec_status nlo_fft_inverse_vec(
         return nlo_vec_complex_scalar_mul_inplace(plan->backend,
                                                   output,
                                                   nlo_make(plan->inverse_scale, 0.0));
+#else
+        return NLO_VEC_STATUS_UNSUPPORTED;
+#endif
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;

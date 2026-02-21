@@ -63,6 +63,7 @@ static nlo_vec_status nlo_vec_validate_mixed_pair(
 
 static const char* nlo_vk_device_type_to_string(VkPhysicalDeviceType device_type)
 {
+#if NLO_ENABLE_VULKAN_BACKEND
     if (device_type == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
         return "discrete";
     }
@@ -76,6 +77,10 @@ static const char* nlo_vk_device_type_to_string(VkPhysicalDeviceType device_type
         return "cpu";
     }
     return "other";
+#else
+    (void)device_type;
+    return "disabled";
+#endif
 }
 
 static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template);
@@ -301,6 +306,7 @@ nlo_vec_status nlo_vec_query_memory_info(
     }
 
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+#if NLO_ENABLE_VULKAN_BACKEND
         VkPhysicalDeviceMemoryProperties memory_properties;
         vkGetPhysicalDeviceMemoryProperties(backend->vk.physical_device, &memory_properties);
 
@@ -322,6 +328,9 @@ nlo_vec_status nlo_vec_query_memory_info(
         out_info->max_compute_workgroups_x = (size_t)backend->vk.limits.maxComputeWorkGroupCount[0];
         out_info->max_kernel_chunk_bytes = (size_t)backend->vk.max_kernel_chunk_bytes;
         return NLO_VEC_STATUS_OK;
+#else
+        return NLO_VEC_STATUS_UNSUPPORTED;
+#endif
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
