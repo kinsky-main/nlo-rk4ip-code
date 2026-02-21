@@ -8,6 +8,7 @@
 
 #include "nlolib.h"
 #include "backend/nlo_complex.h"
+#include "core/sim_dimensions_internal.h"
 #include "io/snapshot_store.h"
 #include "numerics/rk4_kernel.h"
 #include <stddef.h>
@@ -86,85 +87,6 @@ NLOLIB_API nlolib_status nlolib_query_runtime_limits(
     return NLOLIB_STATUS_OK;
 }
 
-static int nlo_resolve_sim_dimensions(
-    const sim_config* config,
-    size_t total_samples,
-    size_t* out_nt,
-    size_t* out_nx,
-    size_t* out_ny,
-    int* out_explicit_nd
-)
-{
-    if (config == NULL ||
-        out_nt == NULL ||
-        out_nx == NULL ||
-        out_ny == NULL ||
-        out_explicit_nd == NULL ||
-        total_samples == 0u) {
-        return -1;
-    }
-
-    const size_t configured_nt = config->time.nt;
-    size_t nx = config->spatial.nx;
-    size_t ny = config->spatial.ny;
-
-    if (configured_nt == 0u) {
-        if (nx == 0u && ny == 0u) {
-            *out_nt = total_samples;
-            *out_nx = 1u;
-            *out_ny = 1u;
-            *out_explicit_nd = 0;
-            return 0;
-        }
-        if (nx == 0u || ny == 0u) {
-            return -1;
-        }
-        if (nx > (SIZE_MAX / ny)) {
-            return -1;
-        }
-        if ((nx * ny) != total_samples) {
-            return -1;
-        }
-
-        if (ny == 1u && nx == total_samples) {
-            *out_nt = total_samples;
-            *out_nx = 1u;
-            *out_ny = 1u;
-            *out_explicit_nd = 0;
-            return 0;
-        }
-
-        *out_nt = 1u;
-        *out_nx = nx;
-        *out_ny = ny;
-        *out_explicit_nd = 0;
-        return 0;
-    }
-
-    if (nx == 0u) {
-        nx = 1u;
-    }
-    if (ny == 0u) {
-        ny = 1u;
-    }
-    if (configured_nt > (SIZE_MAX / nx)) {
-        return -1;
-    }
-    size_t ntx = configured_nt * nx;
-    if (ntx > (SIZE_MAX / ny)) {
-        return -1;
-    }
-    if ((ntx * ny) != total_samples) {
-        return -1;
-    }
-
-    *out_nt = configured_nt;
-    *out_nx = nx;
-    *out_ny = ny;
-    *out_explicit_nd = 1;
-    return 0;
-}
-
 static void nlo_log_nlse_propagate_call(
     const sim_config* config,
     size_t num_time_samples,
@@ -187,7 +109,7 @@ static void nlo_log_nlse_propagate_call(
     size_t ny = 0u;
     int explicit_nd = 0;
     const int has_spatial_shape =
-        (nlo_resolve_sim_dimensions(config, num_time_samples, &nt, &nx, &ny, &explicit_nd) == 0);
+        (nlo_resolve_sim_dimensions_internal(config, num_time_samples, &nt, &nx, &ny, &explicit_nd) == 0);
 
     fprintf(stderr,
             "[nlolib] nlse propagate backend=%s | "
@@ -298,12 +220,12 @@ static nlolib_status nlo_propagate_impl(
         size_t nx = 0u;
         size_t ny = 0u;
         int explicit_nd = 0;
-        if (nlo_resolve_sim_dimensions(config,
-                                       num_time_samples,
-                                       &nt,
-                                       &nx,
-                                       &ny,
-                                       &explicit_nd) != 0) {
+        if (nlo_resolve_sim_dimensions_internal(config,
+                                                num_time_samples,
+                                                &nt,
+                                                &nx,
+                                                &ny,
+                                                &explicit_nd) != 0) {
             return nlo_propagate_fail("validate.spatial_dimensions", NLOLIB_STATUS_INVALID_ARGUMENT);
         }
     }

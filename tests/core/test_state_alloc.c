@@ -151,6 +151,102 @@ static void test_init_state_xy_shape_success(void)
     printf("test_init_state_xy_shape_success: validates flattened XY shape handling.\n");
 }
 
+static void test_init_state_explicit_nd_shape_rules(void)
+{
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    nlo_allocation_info info = {0};
+    simulation_state* state = NULL;
+
+    {
+        const size_t nt = 8u;
+        const size_t nx = 4u;
+        const size_t ny = 2u;
+        const size_t total_samples = nt * nx * ny;
+
+        sim_config* config = create_sim_config(total_samples);
+        assert(config != NULL);
+        config->time.nt = nt;
+        config->spatial.nx = nx;
+        config->spatial.ny = ny;
+
+        assert(nlo_init_simulation_state(config,
+                                         total_samples,
+                                         4u,
+                                         &exec_options,
+                                         &info,
+                                         &state) == 0);
+        assert(state != NULL);
+        assert(state->nt == nt);
+        assert(state->nx == nx);
+        assert(state->ny == ny);
+        assert(state->num_points_xy == nx * ny);
+        free_simulation_state(state);
+        state = NULL;
+        free_sim_config(config);
+    }
+
+    {
+        const size_t nt = 6u;
+        const size_t nx = 3u;
+        const size_t total_samples = nt * nx;
+
+        sim_config* config = create_sim_config(total_samples);
+        assert(config != NULL);
+        config->time.nt = nt;
+        config->spatial.nx = nx;
+        config->spatial.ny = 0u;
+
+        assert(nlo_init_simulation_state(config,
+                                         total_samples,
+                                         2u,
+                                         &exec_options,
+                                         &info,
+                                         &state) == 0);
+        assert(state != NULL);
+        assert(state->nt == nt);
+        assert(state->nx == nx);
+        assert(state->ny == 1u);
+        free_simulation_state(state);
+        state = NULL;
+        free_sim_config(config);
+    }
+
+    {
+        const size_t total_samples = 16u;
+        sim_config* config = create_sim_config(total_samples);
+        assert(config != NULL);
+        config->time.nt = 4u;
+        config->spatial.nx = 2u;
+        config->spatial.ny = 3u;
+        assert(nlo_init_simulation_state(config,
+                                         total_samples,
+                                         2u,
+                                         &exec_options,
+                                         &info,
+                                         &state) != 0);
+        assert(state == NULL);
+        free_sim_config(config);
+    }
+
+    {
+        sim_config* config = create_sim_config(16u);
+        assert(config != NULL);
+        config->time.nt = (size_t)-1;
+        config->spatial.nx = 2u;
+        config->spatial.ny = 2u;
+        assert(nlo_init_simulation_state(config,
+                                         16u,
+                                         1u,
+                                         &exec_options,
+                                         &info,
+                                         &state) != 0);
+        assert(state == NULL);
+        free_sim_config(config);
+    }
+
+    printf("test_init_state_explicit_nd_shape_rules: validates explicit-dimension shape rules.\n");
+}
+
 static void test_default_frequency_grid_generated_when_invalid(void)
 {
     const size_t num_time_samples = 16u;
@@ -235,6 +331,7 @@ int main(void)
     test_init_state_success();
     test_init_state_invalid_args();
     test_init_state_xy_shape_success();
+    test_init_state_explicit_nd_shape_rules();
     test_default_frequency_grid_generated_when_invalid();
     test_frequency_grid_preserved_when_valid();
     printf("test_core_state_alloc: all subtests completed.\n");

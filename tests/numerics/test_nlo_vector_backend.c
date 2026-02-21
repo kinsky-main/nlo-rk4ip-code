@@ -68,10 +68,42 @@ static void test_transfer_guard(void)
     printf("test_transfer_guard: validates simulation transfer guard.\n");
 }
 
+static void test_validation_contracts(void)
+{
+    nlo_vector_backend* backend = nlo_vector_backend_create_cpu();
+    assert(backend != NULL);
+
+    nlo_vec_buffer* real_a = NULL;
+    nlo_vec_buffer* real_b = NULL;
+    nlo_vec_buffer* real_short = NULL;
+    nlo_vec_buffer* complex_vec = NULL;
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_REAL64, 4u, &real_a) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_REAL64, 4u, &real_b) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_REAL64, 3u, &real_short) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, 4u, &complex_vec) == NLO_VEC_STATUS_OK);
+
+    assert(nlo_vec_real_copy(backend, real_a, real_short) == NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(nlo_vec_complex_axpy_real(backend, complex_vec, complex_vec, nlo_make(1.0, 0.0)) ==
+           NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(nlo_vec_complex_relative_error(backend, complex_vec, complex_vec, 1e-9, NULL) ==
+           NLO_VEC_STATUS_INVALID_ARGUMENT);
+    assert(nlo_vec_complex_weighted_rms_error(backend, complex_vec, complex_vec, 1e-9, 1e-9, NULL) ==
+           NLO_VEC_STATUS_INVALID_ARGUMENT);
+
+    nlo_vec_destroy(backend, complex_vec);
+    nlo_vec_destroy(backend, real_short);
+    nlo_vec_destroy(backend, real_b);
+    nlo_vec_destroy(backend, real_a);
+    nlo_vector_backend_destroy(backend);
+
+    printf("test_validation_contracts: validates backend vector guard contracts.\n");
+}
+
 int main(void)
 {
     test_real_pipeline();
     test_transfer_guard();
+    test_validation_contracts();
     printf("test_nlo_vector_backend: all subtests completed.\n");
     return 0;
 }

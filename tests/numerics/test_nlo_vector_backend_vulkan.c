@@ -13,6 +13,10 @@ int main(void)
     nlo_vector_backend* auto_backend = nlo_vector_backend_create_vulkan(NULL);
     if (auto_backend != NULL) {
         assert(nlo_vector_backend_get_type(auto_backend) == NLO_VECTOR_BACKEND_VULKAN);
+        assert(nlo_vec_begin_simulation(auto_backend) == NLO_VEC_STATUS_OK);
+        assert(nlo_vec_begin_simulation(auto_backend) == NLO_VEC_STATUS_OK);
+        assert(nlo_vec_end_simulation(auto_backend) == NLO_VEC_STATUS_OK);
+        assert(nlo_vec_end_simulation(auto_backend) == NLO_VEC_STATUS_OK);
         nlo_vector_backend_destroy(auto_backend);
     }
 

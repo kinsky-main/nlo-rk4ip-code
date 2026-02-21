@@ -4,6 +4,7 @@
  */
 
 #include "core/state.h"
+#include "core/sim_dimensions_internal.h"
 #include "fft/fft.h"
 #include "io/snapshot_store.h"
 #include "physics/operators.h"
@@ -53,14 +54,6 @@
 #endif
 
 static int checked_mul_size_t(size_t a, size_t b, size_t* out);
-static int nlo_resolve_sim_dimensions(
-    const sim_config* config,
-    size_t total_samples,
-    size_t* out_nt,
-    size_t* out_nx,
-    size_t* out_ny,
-    int* out_explicit_nd
-);
 static size_t query_available_system_memory_bytes(void);
 static size_t apply_memory_headroom(size_t available_bytes);
 static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records);
@@ -146,83 +139,6 @@ static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer**
 static nlo_vec_status nlo_create_complex_vec(nlo_vector_backend* backend, size_t length, nlo_vec_buffer** out_vec)
 {
     return nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, length, out_vec);
-}
-
-static int nlo_resolve_sim_dimensions(
-    const sim_config* config,
-    size_t total_samples,
-    size_t* out_nt,
-    size_t* out_nx,
-    size_t* out_ny,
-    int* out_explicit_nd
-)
-{
-    if (config == NULL ||
-        out_nt == NULL ||
-        out_nx == NULL ||
-        out_ny == NULL ||
-        out_explicit_nd == NULL ||
-        total_samples == 0u) {
-        return -1;
-    }
-
-    const size_t configured_nt = config->time.nt;
-    size_t nx = config->spatial.nx;
-    size_t ny = config->spatial.ny;
-
-    if (configured_nt == 0u) {
-        if (nx == 0u && ny == 0u) {
-            *out_nt = total_samples;
-            *out_nx = 1u;
-            *out_ny = 1u;
-            *out_explicit_nd = 0;
-            return 0;
-        }
-        if (nx == 0u || ny == 0u) {
-            return -1;
-        }
-
-        size_t total_points = 0u;
-        if (checked_mul_size_t(nx, ny, &total_points) != 0 || total_points != total_samples) {
-            return -1;
-        }
-
-        if (ny == 1u && nx == total_samples) {
-            *out_nt = total_samples;
-            *out_nx = 1u;
-            *out_ny = 1u;
-            *out_explicit_nd = 0;
-            return 0;
-        }
-
-        *out_nt = 1u;
-        *out_nx = nx;
-        *out_ny = ny;
-        *out_explicit_nd = 0;
-        return 0;
-    }
-
-    if (nx == 0u) {
-        nx = 1u;
-    }
-    if (ny == 0u) {
-        ny = 1u;
-    }
-
-    size_t ntxy = 0u;
-    if (checked_mul_size_t(configured_nt, nx, &ntxy) != 0) {
-        return -1;
-    }
-    size_t resolved_total = 0u;
-    if (checked_mul_size_t(ntxy, ny, &resolved_total) != 0 || resolved_total != total_samples) {
-        return -1;
-    }
-
-    *out_nt = configured_nt;
-    *out_nx = nx;
-    *out_ny = ny;
-    *out_explicit_nd = 1;
-    return 0;
 }
 
 static double nlo_expected_omega_unshifted(size_t index, size_t num_time_samples, double omega_step)
@@ -780,12 +696,12 @@ simulation_state* create_simulation_state_with_storage(
     size_t spatial_nx = 0u;
     size_t spatial_ny = 0u;
     int explicit_nd = 0;
-    if (nlo_resolve_sim_dimensions(config,
-                                   num_time_samples,
-                                   &resolved_nt,
-                                   &spatial_nx,
-                                   &spatial_ny,
-                                   &explicit_nd) != 0) {
+    if (nlo_resolve_sim_dimensions_internal(config,
+                                            num_time_samples,
+                                            &resolved_nt,
+                                            &spatial_nx,
+                                            &spatial_ny,
+                                            &explicit_nd) != 0) {
         return NULL;
     }
 

@@ -51,6 +51,8 @@ def _base_case(api: NLolib, db_path: Path) -> None:
 
     with sqlite3.connect(db_path) as con:
         cur = con.cursor()
+        assert _table_exists(cur, "io_runs")
+        assert _table_exists(cur, "io_record_chunks")
         assert cur.execute("SELECT COUNT(*) FROM io_runs").fetchone()[0] == 1
         assert cur.execute("SELECT COUNT(*) FROM io_record_chunks").fetchone()[0] == result.chunks_written
         if _table_exists(cur, "io_final_output_fields"):
