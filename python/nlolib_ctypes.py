@@ -28,6 +28,7 @@ except ImportError:
     )
 
 NT_MAX = ctypes.c_size_t(-1).value  # Unbounded sentinel; prefer query_runtime_limits().
+LEGACY_NT_MAX = 1 << 20
 NLO_RUNTIME_OPERATOR_CONSTANTS_MAX = 16
 NLO_STORAGE_RUN_ID_MAX = 64
 
@@ -154,6 +155,7 @@ class NloStorageOptions(ctypes.Structure):
         ("sqlite_max_bytes", ctypes.c_size_t),
         ("chunk_records", ctypes.c_size_t),
         ("cap_policy", ctypes.c_int),
+        ("log_final_output_field_to_db", ctypes.c_int),
     ]
 
 
@@ -184,6 +186,22 @@ def _candidate_library_paths() -> list[str]:
                 str(here / "Release" / "nlolib.dll"),
                 str(here / "RelWithDebInfo" / "nlolib.dll"),
                 str(here / "MinSizeRel" / "nlolib.dll"),
+                str(root / "build" / "src" / "Release" / "nlolib.dll"),
+                str(root / "build" / "src" / "Debug" / "nlolib.dll"),
+                str(root / "build" / "src" / "RelWithDebInfo" / "nlolib.dll"),
+                str(root / "build" / "src" / "MinSizeRel" / "nlolib.dll"),
+                str(root / "build-local-path" / "src" / "Release" / "nlolib.dll"),
+                str(root / "build-local-path" / "src" / "Debug" / "nlolib.dll"),
+                str(root / "build-local-path" / "src" / "RelWithDebInfo" / "nlolib.dll"),
+                str(root / "build-local-path" / "src" / "MinSizeRel" / "nlolib.dll"),
+                str(root / "build" / "examples" / "Release" / "nlolib.dll"),
+                str(root / "build" / "examples" / "Debug" / "nlolib.dll"),
+                str(root / "build" / "examples" / "RelWithDebInfo" / "nlolib.dll"),
+                str(root / "build" / "examples" / "MinSizeRel" / "nlolib.dll"),
+                str(root / "build-local-path" / "examples" / "Release" / "nlolib.dll"),
+                str(root / "build-local-path" / "examples" / "Debug" / "nlolib.dll"),
+                str(root / "build-local-path" / "examples" / "RelWithDebInfo" / "nlolib.dll"),
+                str(root / "build-local-path" / "examples" / "MinSizeRel" / "nlolib.dll"),
                 str(root / "nlolib.dll"),
             ]
         )
@@ -211,24 +229,43 @@ def load(path: str | None = None) -> ctypes.CDLL:
     Set NLOLIB_LIBRARY to override discovery.
     """
     lib_path: str | None = path
-    if lib_path is None:
+    env_override = os.environ.get("NLOLIB_LIBRARY")
+    if lib_path is None and env_override:
+        lib_path = env_override
+
+    if lib_path is not None:
+        lib = ctypes.CDLL(lib_path)
+    else:
+        preferred_lib = None
+        preferred_path = None
+        fallback_lib = None
+        fallback_path = None
         for candidate in _candidate_library_paths():
             try:
-                lib = ctypes.CDLL(candidate)
-                lib_path = candidate
-                break
+                loaded = ctypes.CDLL(candidate)
             except OSError:
                 continue
+
+            if hasattr(loaded, "nlolib_query_runtime_limits"):
+                preferred_lib = loaded
+                preferred_path = candidate
+                break
+
+            if fallback_lib is None and hasattr(loaded, "nlolib_propagate"):
+                fallback_lib = loaded
+                fallback_path = candidate
+
+        if preferred_lib is not None:
+            lib = preferred_lib
+            lib_path = preferred_path
+        elif fallback_lib is not None:
+            lib = fallback_lib
+            lib_path = fallback_path
         else:
             raise OSError(
                 "Unable to locate NLOLib shared library. "
                 "Set NLOLIB_LIBRARY to the full path."
             )
-
-        if lib_path is None:
-            raise OSError("Unable to locate NLOLib shared library.")
-    else:
-        lib = ctypes.CDLL(lib_path)
 
     lib.nlolib_propagate.argtypes = [
         ctypes.POINTER(SimConfig),
@@ -273,6 +310,7 @@ def load(path: str | None = None) -> ctypes.CDLL:
     except AttributeError:
         lib._has_storage_is_available = False
 
+    lib._nlo_loaded_path = str(lib_path) if lib_path is not None else ""
     return lib
 
 
@@ -330,6 +368,7 @@ def default_storage_options(
     sqlite_max_bytes: int = 0,
     chunk_records: int = 0,
     cap_policy: int = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
+    log_final_output_field_to_db: bool = False,
 ) -> tuple[NloStorageOptions, list[bytes]]:
     """
     Build storage options and return keepalive byte buffers for ctypes strings.
@@ -353,6 +392,7 @@ def default_storage_options(
     opts.sqlite_max_bytes = int(sqlite_max_bytes)
     opts.chunk_records = int(chunk_records)
     opts.cap_policy = int(cap_policy)
+    opts.log_final_output_field_to_db = int(bool(log_final_output_field_to_db))
     return opts, keepalive
 
 
@@ -654,9 +694,11 @@ class NLolib:
         """
         if not bool(getattr(self.lib, "_has_query_runtime_limits", False)):
             out = NloRuntimeLimits()
-            out.max_num_time_samples_runtime = int(NT_MAX)
-            out.max_num_recorded_samples_in_memory = int(NT_MAX)
-            out.max_num_recorded_samples_with_storage = int(NT_MAX)
+            # Conservative fallback for legacy libraries that predate
+            # nlolib_query_runtime_limits and enforce NT_MAX in C.
+            out.max_num_time_samples_runtime = int(LEGACY_NT_MAX)
+            out.max_num_recorded_samples_in_memory = int(LEGACY_NT_MAX)
+            out.max_num_recorded_samples_with_storage = int(LEGACY_NT_MAX)
             out.estimated_required_working_set_bytes = 0
             out.estimated_device_budget_bytes = 0
             out.storage_available = 1 if self.storage_is_available() else 0
@@ -728,6 +770,7 @@ class NLolib:
         sqlite_max_bytes: int = 0,
         chunk_records: int = 0,
         cap_policy: int = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
+        log_final_output_field_to_db: bool = False,
         exec_options: NloExecutionOptions | None = None,
         return_records: bool = False,
     ) -> tuple[list[list[complex]] | None, NloStorageResult]:
@@ -762,6 +805,7 @@ class NLolib:
             sqlite_max_bytes=sqlite_max_bytes,
             chunk_records=chunk_records,
             cap_policy=cap_policy,
+            log_final_output_field_to_db=log_final_output_field_to_db,
         )
         storage_result = NloStorageResult()
         _ = storage_keepalive  # Keep ctypes-backed strings alive for call duration.

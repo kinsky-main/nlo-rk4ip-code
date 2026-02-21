@@ -30,6 +30,7 @@ struct nlo_snapshot_store {
     sqlite3* db;
     sqlite3_stmt* insert_chunk_stmt;
     sqlite3_stmt* update_run_stmt;
+    sqlite3_stmt* upsert_final_output_stmt;
     sqlite3_stmt* page_count_stmt;
     sqlite3_stmt* page_size_stmt;
     nlo_complex* chunk_buffer;
@@ -416,6 +417,13 @@ static int nlo_store_initialize_schema(sqlite3* db)
         "  PRIMARY KEY(run_id, chunk_index),"
         "  UNIQUE(run_id, record_start),"
         "  FOREIGN KEY(run_id) REFERENCES io_runs(run_id) ON DELETE CASCADE"
+        ");"
+        "CREATE TABLE IF NOT EXISTS io_final_output_fields ("
+        "  run_id TEXT PRIMARY KEY,"
+        "  num_time_samples INTEGER NOT NULL,"
+        "  payload BLOB NOT NULL,"
+        "  created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  FOREIGN KEY(run_id) REFERENCES io_runs(run_id) ON DELETE CASCADE"
         ");";
 
     return nlo_sqlite_exec(db, schema_sql);
@@ -592,6 +600,13 @@ nlo_snapshot_store* nlo_snapshot_store_open(const nlo_snapshot_store_open_params
                     "UPDATE io_runs SET records_written=?, chunks_written=?, db_size_bytes=?, truncated=? "
                     "WHERE run_id=?;",
                     &store->update_run_stmt) != 0 ||
+        nlo_prepare(store->db,
+                    "INSERT INTO io_final_output_fields(run_id, num_time_samples, payload) "
+                    "VALUES(?,?,?) "
+                    "ON CONFLICT(run_id) DO UPDATE SET "
+                    "num_time_samples=excluded.num_time_samples, "
+                    "payload=excluded.payload;",
+                    &store->upsert_final_output_stmt) != 0 ||
         nlo_prepare(store->db, "PRAGMA page_count;", &store->page_count_stmt) != 0 ||
         nlo_prepare(store->db, "PRAGMA page_size;", &store->page_size_stmt) != 0) {
         nlo_snapshot_store_close(store);
@@ -628,6 +643,45 @@ nlo_snapshot_store_status nlo_snapshot_store_write_record(
 
     if (store->chunk_fill >= store->chunk_records) {
         return nlo_store_flush_chunk(store);
+    }
+
+    return NLO_SNAPSHOT_STORE_STATUS_OK;
+}
+
+nlo_snapshot_store_status nlo_snapshot_store_write_final_output_field(
+    nlo_snapshot_store* store,
+    const nlo_complex* field,
+    size_t num_time_samples
+)
+{
+    if (store == NULL ||
+        field == NULL ||
+        store->upsert_final_output_stmt == NULL ||
+        num_time_samples != store->num_time_samples) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+
+    size_t payload_bytes = 0u;
+    if (nlo_checked_mul_size_t(num_time_samples, sizeof(nlo_complex), &payload_bytes) != 0 ||
+        payload_bytes > (size_t)INT_MAX) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+
+    if (nlo_bind_text(store->upsert_final_output_stmt, 1, store->result.run_id) != 0) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    if (sqlite3_bind_int64(store->upsert_final_output_stmt, 2, (sqlite3_int64)num_time_samples) != SQLITE_OK) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    if (sqlite3_bind_blob(store->upsert_final_output_stmt,
+                          3,
+                          field,
+                          (int)payload_bytes,
+                          SQLITE_TRANSIENT) != SQLITE_OK) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    if (nlo_step_done(store->upsert_final_output_stmt) != 0) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
     }
 
     return NLO_SNAPSHOT_STORE_STATUS_OK;
@@ -682,6 +736,10 @@ void nlo_snapshot_store_close(nlo_snapshot_store* store)
         sqlite3_finalize(store->update_run_stmt);
         store->update_run_stmt = NULL;
     }
+    if (store->upsert_final_output_stmt != NULL) {
+        sqlite3_finalize(store->upsert_final_output_stmt);
+        store->upsert_final_output_stmt = NULL;
+    }
     if (store->page_count_stmt != NULL) {
         sqlite3_finalize(store->page_count_stmt);
         store->page_count_stmt = NULL;
@@ -726,6 +784,18 @@ nlo_snapshot_store_status nlo_snapshot_store_write_record(
     (void)store;
     (void)record_index;
     (void)record;
+    (void)num_time_samples;
+    return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+}
+
+nlo_snapshot_store_status nlo_snapshot_store_write_final_output_field(
+    nlo_snapshot_store* store,
+    const nlo_complex* field,
+    size_t num_time_samples
+)
+{
+    (void)store;
+    (void)field;
     (void)num_time_samples;
     return NLO_SNAPSHOT_STORE_STATUS_ERROR;
 }

@@ -160,14 +160,14 @@ def main() -> None:
     runner = NloExampleRunner()
     exec_opts = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
 
-    nt = 16
+    nt = 256
     nx = 64
     ny = 64
     dt = 0.02
     dx = 0.8
     dy = 0.8
     z_final = 0.20
-    num_records = 10
+    num_records = 50
 
     beta2 = 0.06
     gamma_full = 0.45

@@ -45,6 +45,7 @@ def _base_case(api: NLolib, db_path: Path) -> None:
         cur = con.cursor()
         assert cur.execute("SELECT COUNT(*) FROM io_runs").fetchone()[0] == 1
         assert cur.execute("SELECT COUNT(*) FROM io_record_chunks").fetchone()[0] == result.chunks_written
+        assert cur.execute("SELECT COUNT(*) FROM io_final_output_fields").fetchone()[0] == 0
 
 
 def _cap_case(api: NLolib, db_path: Path) -> None:
@@ -103,6 +104,41 @@ def _legacy_ntmax_exceed_case(api: NLolib, db_path: Path) -> None:
     assert result.records_captured >= 1
 
 
+def _final_output_logging_case(api: NLolib, db_path: Path) -> None:
+    n = 32
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.1,
+        starting_step_size=0.01,
+        max_step_size=0.02,
+        min_step_size=1e-4,
+        error_tolerance=1e-6,
+        pulse_period=1.0,
+        delta_time=1.0 / n,
+        frequency_grid=[complex(i, 0.0) for i in range(n)],
+    )
+    field0 = [complex(math.exp(-(((i - (n / 2.0)) / 8.0) ** 2)), 0.0) for i in range(n)]
+
+    _, _ = api.propagate_with_storage(
+        cfg,
+        field0,
+        4,
+        sqlite_path=str(db_path),
+        chunk_records=2,
+        log_final_output_field_to_db=True,
+        return_records=False,
+    )
+
+    with sqlite3.connect(db_path) as con:
+        cur = con.cursor()
+        row = cur.execute(
+            "SELECT num_time_samples, length(payload) FROM io_final_output_fields LIMIT 1"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == n
+        assert row[1] == n * 16
+
+
 def main() -> None:
     api = NLolib()
     if not api.storage_is_available():
@@ -113,9 +149,11 @@ def main() -> None:
     base_db = tmp / "base.db"
     cap_db = tmp / "cap.db"
     ntmax_db = tmp / "ntmax_exceed.db"
+    final_output_db = tmp / "final_output.db"
     _base_case(api, base_db)
     _cap_case(api, cap_db)
     _legacy_ntmax_exceed_case(api, ntmax_db)
+    _final_output_logging_case(api, final_output_db)
     print("test_python_storage_chunking: passed")
 
 

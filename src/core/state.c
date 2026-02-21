@@ -526,6 +526,7 @@ nlo_storage_options nlo_storage_options_default(void)
     options.sqlite_max_bytes = 0u;
     options.chunk_records = 0u;
     options.cap_policy = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES;
+    options.log_final_output_field_to_db = 0;
     return options;
 }
 

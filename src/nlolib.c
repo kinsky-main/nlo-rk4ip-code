@@ -64,6 +64,11 @@ static int nlo_storage_enabled(const nlo_storage_options* storage_options)
             storage_options->sqlite_path[0] != '\0');
 }
 
+static int nlo_storage_log_final_output_enabled(const nlo_storage_options* storage_options)
+{
+    return (storage_options != NULL && storage_options->log_final_output_field_to_db != 0);
+}
+
 NLOLIB_API nlolib_status nlolib_query_runtime_limits(
     const sim_config* config,
     const nlo_execution_options* exec_options,
@@ -345,6 +350,7 @@ static nlolib_status nlo_propagate_impl(
     }
 
     int final_downloaded = 0;
+    const nlo_complex* final_output_field_cached = NULL;
     if (num_recorded_samples == 1u && state->snapshot_store != NULL) {
         nlo_complex* final_record = output_records;
         if (final_record == NULL) {
@@ -362,6 +368,7 @@ static nlolib_status nlo_propagate_impl(
             free_simulation_state(state);
             return nlo_propagate_fail("storage.download_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
+        final_output_field_cached = final_record;
         final_downloaded = (final_record == output_records) ? 1 : 0;
 
         const nlo_snapshot_store_status write_status =
@@ -386,6 +393,7 @@ static nlolib_status nlo_propagate_impl(
             free_simulation_state(state);
             return nlo_propagate_fail("download_current_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
+        final_output_field_cached = output_records;
     } else if (output_records != NULL) {
         if (state->num_host_records != num_recorded_samples || state->field_buffer == NULL) {
             free_simulation_state(state);
@@ -398,6 +406,36 @@ static nlolib_status nlo_propagate_impl(
             return nlo_propagate_fail("validate.output_record_bytes", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
         memcpy(output_records, state->field_buffer, records_bytes);
+        final_output_field_cached = output_records + ((num_recorded_samples - 1u) * state->num_time_samples);
+    }
+
+    if (state->snapshot_store != NULL && nlo_storage_log_final_output_enabled(storage_options)) {
+        const nlo_complex* final_output_field = final_output_field_cached;
+
+        nlo_complex* final_output_scratch = NULL;
+        if (final_output_field == NULL) {
+            final_output_scratch = simulation_state_get_field_record(state, num_recorded_samples - 1u);
+            if (final_output_scratch == NULL) {
+                final_output_scratch = state->snapshot_scratch_record;
+            }
+            if (final_output_scratch == NULL) {
+                free_simulation_state(state);
+                return nlo_propagate_fail("storage.final_output_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
+            }
+            if (simulation_state_download_current_field(state, final_output_scratch) != NLO_VEC_STATUS_OK) {
+                free_simulation_state(state);
+                return nlo_propagate_fail("storage.download_output_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+            }
+            final_output_field = final_output_scratch;
+        }
+
+        if (nlo_snapshot_store_write_final_output_field(state->snapshot_store,
+                                                        final_output_field,
+                                                        state->num_time_samples) ==
+            NLO_SNAPSHOT_STORE_STATUS_ERROR) {
+            free_simulation_state(state);
+            return nlo_propagate_fail("storage.write_output_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+        }
     }
 
     if (storage_result != NULL) {

@@ -211,6 +211,7 @@ typedef struct
     size_t sqlite_max_bytes;
     size_t chunk_records;
     nlo_storage_db_cap_policy cap_policy;
+    int log_final_output_field_to_db;
 } nlo_storage_options;
 
 typedef struct

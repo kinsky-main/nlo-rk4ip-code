@@ -45,6 +45,15 @@ nlo_snapshot_store_status nlo_snapshot_store_write_record(
 );
 
 /**
+ * @brief Persist the final output field for a run as a dedicated DB row.
+ */
+nlo_snapshot_store_status nlo_snapshot_store_write_final_output_field(
+    nlo_snapshot_store* store,
+    const nlo_complex* field,
+    size_t num_time_samples
+);
+
+/**
  * @brief Flush any pending chunk to persistent storage.
  */
 nlo_snapshot_store_status nlo_snapshot_store_flush(nlo_snapshot_store* store);

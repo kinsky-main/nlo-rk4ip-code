@@ -127,6 +127,8 @@ NLOLIB_API nlolib_status nlolib_propagate_interleaved(
  *        nlolib_propagate). Pass NULL for storage-only capture.
  * @param exec_options Runtime backend selection/options.
  * @param storage_options Optional storage configuration (NULL disables storage).
+ *        Set storage_options->log_final_output_field_to_db nonzero to persist
+ *        the final output field at z_end in a dedicated DB row.
  * @param storage_result Optional output summary for persisted chunks/run state.
  * @return nlolib_status status code.
  */
