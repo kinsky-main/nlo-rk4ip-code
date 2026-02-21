@@ -26,6 +26,21 @@ for idx = 1:numel(candidates)
     end
 end
 
+if ispc
+    dllDirs = {
+        fullfile(matlabRoot, "lib")
+        fullfile(repoRoot, "build", "matlab_toolbox", "lib")
+        fullfile(repoRoot, "build", "src", "Release")
+        fullfile(repoRoot, "build", "src", "Debug")
+        fullfile(repoRoot, "build", "src", "RelWithDebInfo")
+        fullfile(repoRoot, "build", "src")
+        fullfile(repoRoot, "python", "Release")
+        fullfile(repoRoot, "python", "Debug")
+        fullfile(repoRoot, "python")
+    };
+    prepend_dirs_to_path(dllDirs);
+end
+
 if saveToPath
     savepath();
 end
@@ -33,4 +48,30 @@ end
 if nargout > 0
     addedPaths = cellstr(added);
 end
+end
+
+function prepend_dirs_to_path(dirs)
+currentPath = string(getenv("PATH"));
+parts = split(currentPath, ";");
+normParts = lower(strtrim(parts));
+
+for idx = 1:numel(dirs)
+    folder = dirs{idx};
+    if ~isfolder(folder)
+        continue;
+    end
+    token = lower(string(folder));
+    if any(normParts == token)
+        continue;
+    end
+    if strlength(currentPath) > 0
+        currentPath = string(folder) + ";" + currentPath;
+    else
+        currentPath = string(folder);
+    end
+    parts = split(currentPath, ";");
+    normParts = lower(strtrim(parts));
+end
+
+setenv("PATH", char(currentPath));
 end

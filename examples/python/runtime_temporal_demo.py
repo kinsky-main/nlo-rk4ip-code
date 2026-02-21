@@ -54,6 +54,9 @@ def main() -> None:
         fft_backend=NLO_FFT_BACKEND_VKFFT,
     )
     api = NLolib()
+    api.set_log_buffer(256 * 1024)
+    api.set_log_level(2)
+    api.set_progress_options(enabled=True, milestone_percent=10, emit_on_step_adjust=False)
     result = api.simulate(
         pulse,
         linear_operator,
@@ -69,6 +72,9 @@ def main() -> None:
     final_field = records[-1]
     print(f"runtime_temporal_demo_py: propagated {n} samples.")
     print(f"initial power={np.sum(np.abs(field0) ** 2):.6e} final power={np.sum(np.abs(final_field) ** 2):.6e}")
+    runtime_logs = api.read_log_buffer(consume=True)
+    if runtime_logs:
+        print(runtime_logs, end="" if runtime_logs.endswith("\n") else "\n")
 
 
 if __name__ == "__main__":

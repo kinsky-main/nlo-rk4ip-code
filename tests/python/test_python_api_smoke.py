@@ -37,6 +37,12 @@ def _base_config(n: int):
 
 def main():
     api = NLolib()
+    api.set_log_buffer(128 * 1024)
+    api.set_log_level(2)
+    api.set_progress_options(enabled=True, milestone_percent=20, emit_on_step_adjust=True)
+    api.clear_log_buffer()
+    print("test_python_api_smoke: runtime log API configured.")
+
     cpu_opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
     limits = api.query_runtime_limits(exec_options=cpu_opts)
     assert int(limits.max_num_time_samples_runtime) > 0
@@ -49,6 +55,9 @@ def main():
     out_records = api.propagate(cfg, input_field, 4, cpu_opts)
     assert len(out_records) == 4
     assert len(out_records[0]) == n
+    log_text = api.read_log_buffer(consume=True)
+    assert "propagate request" in log_text
+    assert "field_size" in log_text
     print("test_python_api_smoke: CPU 1D propagation returned expected record-major shape.")
 
     auto_opts = default_execution_options(NLO_VECTOR_BACKEND_AUTO)

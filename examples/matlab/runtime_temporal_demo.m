@@ -23,6 +23,9 @@ nonlinearOperator.expr = "i*gamma*I + i*V";
 nonlinearOperator.params = struct('gamma', 0.01);
 
 api = nlolib.NLolib();
+api.set_log_buffer(uint64(256 * 1024));
+api.set_log_level(int32(2));
+api.set_progress_options(true, int32(10), false);
 simOptions = backend.default_simulation_options( ...
     "backend", "auto", ...
     "fft_backend", "vkfft");
@@ -32,6 +35,8 @@ simulateOptions.propagation_distance = 0.25;
 simulateOptions.records = 2;
 simulateOptions.preset = "accuracy";
 simulateOptions.exec_options = execOptions;
+simulateOptions.exec_options.matlab_stream_logs = true;
+simulateOptions.exec_options.matlab_log_buffer_bytes = uint64(256 * 1024);
 result = api.simulate(pulse, linearOperator, nonlinearOperator, simulateOptions);
 records = result.records;
 finalField = records(end, :).';

@@ -28,3 +28,12 @@ add_custom_command(TARGET matlab_stage POST_BUILD
         "${NLO_MATLAB_STAGE_DIR}/lib/$<TARGET_FILE_NAME:nlolib>"
     COMMENT "Copying MATLAB wrapper, setup script, examples, header, and shared library to ${NLO_MATLAB_STAGE_DIR}"
 )
+
+if(WIN32)
+  add_custom_command(TARGET matlab_stage POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "$<TARGET_FILE_DIR:nlolib>"
+          "${NLO_MATLAB_STAGE_DIR}/lib"
+      COMMENT "Copying nlolib output directory (including dependent DLLs) to ${NLO_MATLAB_STAGE_DIR}/lib"
+  )
+endif()

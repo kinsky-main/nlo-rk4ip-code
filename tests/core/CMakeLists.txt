@@ -10,6 +10,8 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/physics/operators.c
   ${CMAKE_SOURCE_DIR}/src/physics/operator_program.c
   ${CMAKE_SOURCE_DIR}/src/numerics/rk4_kernel.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_format.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
   ${CMAKE_SOURCE_DIR}/src/io/snapshot_store.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
   ${CMAKE_SOURCE_DIR}/src/utility/rk4_debug.c
@@ -45,3 +47,16 @@ string(REPLACE ";" "\\;" _NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}")
 set_tests_properties(test_core_state_alloc PROPERTIES
   ENVIRONMENT "PATH=${_NLOLIB_TEST_PATH}"
 )
+
+add_executable(test_core_log_sink
+  ${CMAKE_CURRENT_LIST_DIR}/test_log_sink.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_format.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
+)
+
+target_include_directories(test_core_log_sink PRIVATE ${CMAKE_SOURCE_DIR}/src)
+if(UNIX)
+  target_link_libraries(test_core_log_sink PRIVATE m)
+endif()
+
+add_test(NAME test_core_log_sink COMMAND test_core_log_sink)

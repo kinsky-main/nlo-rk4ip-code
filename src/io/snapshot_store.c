@@ -4,6 +4,7 @@
  */
 
 #include "io/snapshot_store.h"
+#include "io/log_sink.h"
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -172,7 +173,10 @@ static int nlo_sqlite_exec(sqlite3* db, const char* sql)
     const int rc = sqlite3_exec(db, sql, NULL, NULL, &err);
     if (rc != SQLITE_OK) {
         if (err != NULL) {
-            fprintf(stderr, "[nlolib][io] sqlite exec error: %s\n", err);
+            nlo_log_emit(NLO_LOG_LEVEL_ERROR,
+                         "[nlolib][io] sqlite exec error:\n"
+                         "  - detail: %s",
+                         err);
         }
         sqlite3_free(err);
         return -1;

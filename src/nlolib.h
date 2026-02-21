@@ -49,6 +49,20 @@ typedef enum {
 } nlolib_status;
 
 /**
+ * @brief Public log-level thresholds for nlolib runtime logging.
+ */
+typedef enum {
+    /** Emit only error-level log entries. */
+    NLOLIB_LOG_LEVEL_ERROR = 0,
+    /** Emit warning and error-level log entries. */
+    NLOLIB_LOG_LEVEL_WARN = 1,
+    /** Emit informational, warning, and error-level log entries. */
+    NLOLIB_LOG_LEVEL_INFO = 2,
+    /** Emit debug, informational, warning, and error-level log entries. */
+    NLOLIB_LOG_LEVEL_DEBUG = 3
+} nlolib_log_level;
+
+/**
  * @brief Query runtime-derived limits for current backend/config selection.
  *
  * @param config Optional simulation configuration used to estimate
@@ -153,6 +167,70 @@ NLOLIB_API nlolib_status nlolib_propagate_with_storage(
  * @return int Nonzero when storage backend support is compiled in.
  */
 NLOLIB_API int nlolib_storage_is_available(void);
+
+/**
+ * @brief Configure optional runtime log file output.
+ *
+ * @param path_utf8 UTF-8 path to output log file.
+ *        Pass NULL or empty string to disable file sink.
+ * @param append Nonzero appends to existing file; zero truncates file.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_set_log_file(const char* path_utf8, int append);
+
+/**
+ * @brief Configure optional in-memory runtime log ring buffer.
+ *
+ * @param capacity_bytes Ring capacity in bytes.
+ *        Pass zero to disable in-memory buffering.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_set_log_buffer(size_t capacity_bytes);
+
+/**
+ * @brief Clear buffered in-memory runtime logs.
+ *
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_clear_log_buffer(void);
+
+/**
+ * @brief Read buffered runtime logs into caller memory.
+ *
+ * @param dst Destination text buffer.
+ * @param dst_bytes Capacity of @p dst in bytes.
+ * @param out_written Number of bytes written to @p dst (excluding null terminator).
+ * @param consume Nonzero consumes copied bytes from ring buffer.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_read_log_buffer(
+    char* dst,
+    size_t dst_bytes,
+    size_t* out_written,
+    int consume
+);
+
+/**
+ * @brief Set global runtime logging level threshold.
+ *
+ * @param level Log-level threshold (see @ref nlolib_log_level).
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_set_log_level(int level);
+
+/**
+ * @brief Configure runtime progress logging behavior.
+ *
+ * @param enabled Nonzero enables progress logging.
+ * @param milestone_percent Percent milestone cadence in [1, 100].
+ * @param emit_on_step_adjust Nonzero emits step-adjustment entries.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_set_progress_options(
+    int enabled,
+    int milestone_percent,
+    int emit_on_step_adjust
+);
 
 #ifdef __cplusplus
 }

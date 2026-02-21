@@ -5,6 +5,7 @@
 
 #include "numerics/rk4_kernel.h"
 #include "fft/fft.h"
+#include "io/log_sink.h"
 #include "physics/operators.h"
 #include "utility/perf_profile.h"
 #include "utility/rk4_debug.h"
@@ -411,6 +412,8 @@ void solve_rk4(simulation_state *state)
         }
     }
 
+    nlo_log_progress_begin(state->current_z, z_end);
+
     double record_spacing = 0.0;
     double next_record_z = z_end;
     const double record_capture_eps = nlo_record_capture_tolerance(z_end);
@@ -423,11 +426,13 @@ void solve_rk4(simulation_state *state)
     }
 
     size_t rk4_step_index = 0u;
+    int terminated_early = 0;
     while (state->current_z < z_end)
     {
         double step = nlo_clamp_step(state->current_step_size, min_step, max_step);
         if (step <= 0.0)
         {
+            terminated_early = 1;
             break;
         }
 
@@ -450,6 +455,7 @@ void solve_rk4(simulation_state *state)
 
         if (step <= 0.0)
         {
+            terminated_early = 1;
             break;
         }
 
@@ -488,6 +494,12 @@ void solve_rk4(simulation_state *state)
             if (error <= 1.0 || step <= (min_step * (1.0 + 1e-12))) {
                 state->current_z += step;
                 state->current_step_size = nlo_clamp_step(step * scale, min_step, max_step);
+                nlo_log_progress_step_accepted(rk4_step_index,
+                                               state->current_z,
+                                               z_end,
+                                               step,
+                                               error,
+                                               state->current_step_size);
                 step_accepted = 1;
                 break;
             }
@@ -499,25 +511,35 @@ void solve_rk4(simulation_state *state)
                 break;
             }
 
-            step = nlo_clamp_step(step * scale, min_step, max_step);
+            const double attempted_step = step;
+            double retry_step = nlo_clamp_step(step * scale, min_step, max_step);
             const double remaining_retry = z_end - state->current_z;
-            if (step > remaining_retry) {
-                step = remaining_retry;
+            if (retry_step > remaining_retry) {
+                retry_step = remaining_retry;
             }
             if (record_spacing > 0.0 &&
                 state->current_record_index < state->num_recorded_samples &&
                 next_record_z > state->current_z) {
                 const double to_next_record = next_record_z - state->current_z;
-                if (to_next_record > 0.0 && step > to_next_record) {
-                    step = to_next_record;
+                if (to_next_record > 0.0 && retry_step > to_next_record) {
+                    retry_step = to_next_record;
                 }
             }
-            if (step <= 0.0) {
+            if (retry_step <= 0.0) {
                 step_accepted = -1;
                 break;
             }
 
             reject_attempt += 1u;
+            nlo_log_progress_step_rejected(rk4_step_index,
+                                           state->current_z,
+                                           z_end,
+                                           attempted_step,
+                                           error,
+                                           retry_step,
+                                           reject_attempt);
+
+            step = retry_step;
             if (reject_attempt >= NLO_RK4_MAX_REJECTION_ATTEMPTS) {
                 step_accepted = -1;
                 break;
@@ -525,6 +547,7 @@ void solve_rk4(simulation_state *state)
         }
 
         if (step_accepted < 0) {
+            terminated_early = 1;
             break;
         }
 
@@ -562,6 +585,9 @@ void solve_rk4(simulation_state *state)
 
     (void)nlo_vec_end_simulation(state->backend);
     (void)simulation_state_flush_snapshots(state);
+    nlo_log_progress_finish(state->current_z,
+                            z_end,
+                            (terminated_early == 0 && state->current_z + record_capture_eps >= z_end) ? 1 : 0);
 }
 
 void step_rk4(simulation_state *state)

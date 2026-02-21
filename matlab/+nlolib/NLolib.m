@@ -50,11 +50,31 @@ classdef NLolib < handle
 
             if ~libisloaded(obj.LIBNAME)
                 headerPath = nlolib.NLolib.resolve_header();
-                dllPath    = nlolib.NLolib.resolve_library(libraryPath);
-                [notfound, loadWarnings] = loadlibrary(dllPath, headerPath, ...
-                                                       'alias', obj.LIBNAME);
-                nlolib.NLolib.validate_load_result(notfound, loadWarnings, ...
-                                                   dllPath, headerPath);
+                dllCandidates = nlolib.NLolib.resolve_library_candidates(libraryPath);
+                loaded = false;
+                loadErrors = strings(0, 1);
+                for idx = 1:numel(dllCandidates)
+                    dllPath = dllCandidates{idx};
+                    try
+                        nlolib.NLolib.prepend_library_dir_to_path(dllPath);
+                        [notfound, loadWarnings] = loadlibrary(dllPath, headerPath, ...
+                                                               'alias', obj.LIBNAME);
+                        nlolib.NLolib.validate_load_result(notfound, loadWarnings, ...
+                                                           dllPath, headerPath);
+                        loaded = true;
+                        break;
+                    catch ME
+                        loadErrors(end + 1, 1) = string(dllPath) + " -> " + string(ME.message); %#ok<AGROW>
+                        if libisloaded(obj.LIBNAME)
+                            unloadlibrary(obj.LIBNAME);
+                        end
+                    end
+                end
+                if ~loaded
+                    error('nlolib:libraryLoadFailed', ...
+                          'Failed to load nlolib from candidates:\n  %s', ...
+                          strjoin(cellstr(loadErrors), '\n  '));
+                end
             end
             nlolib.NLolib.ensure_types_loaded();
         end
@@ -116,6 +136,22 @@ classdef NLolib < handle
                 execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
             end
 
+            streamLogs = false;
+            streamLogBufferBytes = uint64(262144);
+            if isstruct(execOptions) && isfield(execOptions, 'matlab_stream_logs')
+                streamLogs = logical(execOptions.matlab_stream_logs);
+                streamLogs = any(streamLogs(:));
+            end
+            if isstruct(execOptions) && isfield(execOptions, 'matlab_log_buffer_bytes')
+                streamLogBufferBytes = uint64(execOptions.matlab_log_buffer_bytes);
+            end
+            if streamLogs && ...
+                    nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_log_buffer') && ...
+                    nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_clear_log_buffer')
+                obj.set_log_buffer(streamLogBufferBytes);
+                obj.clear_log_buffer();
+            end
+
             if useInterleaved
                 statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate_interleaved', ...
                                     cfgPtr, ...
@@ -137,9 +173,17 @@ classdef NLolib < handle
                 postProbe = nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
                                                            "post-call", true);
             end
+
+            streamedLogs = "";
+            if streamLogs && nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_read_log_buffer')
+                streamedLogs = obj.tail_logs(true, streamLogBufferBytes);
+            end
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
 
             if statusCode ~= 0
+                if streamLogs && strlength(streamedLogs) > 0
+                    statusDetail = statusDetail + newline + "runtime logs:" + newline + streamedLogs;
+                end
                 if matlabDebug
                     if isstruct(postProbe) && isfield(postProbe, 'value_size')
                         sizeText = join(string(double(postProbe.value_size(:).')), "x");
@@ -192,6 +236,203 @@ classdef NLolib < handle
             tf = logical(calllib(obj.LIBNAME, 'nlolib_storage_is_available'));
         end
 
+        function set_log_file(obj, path, append)
+            %SET_LOG_FILE Configure optional runtime file logging.
+            if nargin < 3
+                append = false;
+            end
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_log_file')
+                error('nlolib:logUnavailable', ...
+                      'nlolib_set_log_file is not available in this library build.');
+            end
+
+            if nargin < 2 || strlength(string(path)) == 0
+                pathPtr = libpointer();
+            else
+                pathPtr = libpointer('cstring', char(string(path)));
+            end
+
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_set_log_file', ...
+                                pathPtr, int32(logical(append)));
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:logFileFailed', ...
+                          'nlolib_set_log_file failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:logFileFailed', ...
+                          'nlolib_set_log_file failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+        end
+
+        function set_log_buffer(obj, capacityBytes)
+            %SET_LOG_BUFFER Configure in-memory runtime log ring buffer.
+            if nargin < 2 || isempty(capacityBytes)
+                capacityBytes = uint64(262144);
+            end
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_log_buffer')
+                error('nlolib:logUnavailable', ...
+                      'nlolib_set_log_buffer is not available in this library build.');
+            end
+
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_set_log_buffer', uint64(capacityBytes));
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:logBufferFailed', ...
+                          'nlolib_set_log_buffer failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:logBufferFailed', ...
+                          'nlolib_set_log_buffer failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+        end
+
+        function clear_log_buffer(obj)
+            %CLEAR_LOG_BUFFER Clear in-memory runtime log ring buffer.
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_clear_log_buffer')
+                error('nlolib:logUnavailable', ...
+                      'nlolib_clear_log_buffer is not available in this library build.');
+            end
+
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_clear_log_buffer');
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:logBufferFailed', ...
+                          'nlolib_clear_log_buffer failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:logBufferFailed', ...
+                          'nlolib_clear_log_buffer failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+        end
+
+        function text = read_log_buffer(obj, consume, maxBytes)
+            %READ_LOG_BUFFER Read buffered runtime logs.
+            if nargin < 2
+                consume = true;
+            end
+            if nargin < 3 || isempty(maxBytes)
+                maxBytes = uint64(262144);
+            end
+            if uint64(maxBytes) < uint64(2)
+                error('nlolib:invalidLogBufferRead', ...
+                      'maxBytes must be >= 2');
+            end
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_read_log_buffer')
+                error('nlolib:logUnavailable', ...
+                      'nlolib_read_log_buffer is not available in this library build.');
+            end
+
+            outPtr = libpointer('uint8Ptr', zeros(1, double(maxBytes), 'uint8'));
+            writtenPtr = libpointer('uint64Ptr', uint64(0));
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_read_log_buffer', ...
+                                outPtr, uint64(maxBytes), writtenPtr, int32(logical(consume)));
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:logBufferReadFailed', ...
+                          'nlolib_read_log_buffer failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:logBufferReadFailed', ...
+                          'nlolib_read_log_buffer failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+
+            byteCount = double(writtenPtr.Value);
+            if byteCount <= 0
+                text = "";
+                return;
+            end
+            bytes = outPtr.Value(1:byteCount);
+            text = string(native2unicode(bytes, 'UTF-8'));
+        end
+
+        function text = tail_logs(obj, consume, maxBytes)
+            %TAIL_LOGS Print buffered runtime logs to MATLAB Command Window.
+            if nargin < 2
+                consume = true;
+            end
+            if nargin < 3
+                maxBytes = uint64(262144);
+            end
+            text = obj.read_log_buffer(consume, maxBytes);
+            if strlength(text) == 0
+                return;
+            end
+            fprintf('%s', char(text));
+            if ~endsWith(text, newline)
+                fprintf('\n');
+            end
+        end
+
+        function set_log_level(obj, level)
+            %SET_LOG_LEVEL Configure runtime log level threshold.
+            if nargin < 2 || isempty(level)
+                level = int32(2);
+            end
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_log_level')
+                error('nlolib:logUnavailable', ...
+                      'nlolib_set_log_level is not available in this library build.');
+            end
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_set_log_level', int32(level));
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:logLevelFailed', ...
+                          'nlolib_set_log_level failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:logLevelFailed', ...
+                          'nlolib_set_log_level failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+        end
+
+        function set_progress_options(obj, enabled, milestonePercent, emitOnStepAdjust)
+            %SET_PROGRESS_OPTIONS Configure runtime progress log behavior.
+            if nargin < 2 || isempty(enabled)
+                enabled = true;
+            end
+            if nargin < 3 || isempty(milestonePercent)
+                milestonePercent = int32(5);
+            end
+            if nargin < 4 || isempty(emitOnStepAdjust)
+                emitOnStepAdjust = false;
+            end
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_progress_options')
+                error('nlolib:logUnavailable', ...
+                      'nlolib_set_progress_options is not available in this library build.');
+            end
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_set_progress_options', ...
+                                int32(logical(enabled)), ...
+                                int32(milestonePercent), ...
+                                int32(logical(emitOnStepAdjust)));
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:progressOptionsFailed', ...
+                          'nlolib_set_progress_options failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:progressOptionsFailed', ...
+                          'nlolib_set_progress_options failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+        end
+
         function [records, storageResult] = propagate_with_storage( ...
                 obj, config, inputField, numRecordedSamples, storageOptions, execOptions)
             %PROPAGATE_WITH_STORAGE Run propagation with SQLite snapshot storage.
@@ -240,6 +481,22 @@ classdef NLolib < handle
                 execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
             end
 
+            streamLogs = false;
+            streamLogBufferBytes = uint64(262144);
+            if isstruct(execOptions) && isfield(execOptions, 'matlab_stream_logs')
+                streamLogs = logical(execOptions.matlab_stream_logs);
+                streamLogs = any(streamLogs(:));
+            end
+            if isstruct(execOptions) && isfield(execOptions, 'matlab_log_buffer_bytes')
+                streamLogBufferBytes = uint64(execOptions.matlab_log_buffer_bytes);
+            end
+            if streamLogs && ...
+                    nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_log_buffer') && ...
+                    nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_clear_log_buffer')
+                obj.set_log_buffer(streamLogBufferBytes);
+                obj.clear_log_buffer();
+            end
+
             [storageOptsPtr, storageKeepalive] = ...
                 nlolib.NLolib.make_storage_options(storageOptions); %#ok<ASGLU>
             storageResultRaw = libstruct('nlo_storage_result');
@@ -253,8 +510,16 @@ classdef NLolib < handle
                                 execOptsPtr, ...
                                 storageOptsPtr, ...
                                 storageResultRaw);
+
+            streamedLogs = "";
+            if streamLogs && nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_read_log_buffer')
+                streamedLogs = obj.tail_logs(true, streamLogBufferBytes);
+            end
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
             if statusCode ~= 0
+                if streamLogs && strlength(streamedLogs) > 0
+                    statusDetail = statusDetail + newline + "runtime logs:" + newline + streamedLogs;
+                end
                 if strlength(statusDetail) > 0
                     error('nlolib:propagateWithStorageFailed', ...
                           'nlolib_propagate_with_storage failed with status=%d (%s). %s', ...
@@ -495,14 +760,20 @@ classdef NLolib < handle
 
         function dllPath = resolve_library(userPath)
             %RESOLVE_LIBRARY Locate the nlolib shared library.
+            candidates = nlolib.NLolib.resolve_library_candidates(userPath);
+            dllPath = candidates{1};
+        end
+
+        function candidates = resolve_library_candidates(userPath)
+            %RESOLVE_LIBRARY_CANDIDATES Locate candidate nlolib shared libraries.
             if strlength(string(userPath)) > 0 && isfile(userPath)
-                dllPath = char(userPath);
+                candidates = {char(userPath)};
                 return;
             end
 
             envPath = getenv('NLOLIB_LIBRARY');
             if ~isempty(envPath) && isfile(envPath)
-                dllPath = envPath;
+                candidates = {envPath};
                 return;
             end
 
@@ -557,13 +828,35 @@ classdef NLolib < handle
                 end
             end
             if ~isempty(foundPaths)
-                [~, newestIdx] = max(foundDatenum);
-                dllPath = foundPaths{newestIdx};
+                [~, order] = sort(foundDatenum, 'descend');
+                candidates = foundPaths(order);
                 return;
             end
             error('nlolib:libraryNotFound', ...
                   'Cannot locate %s. Set NLOLIB_LIBRARY or pass path.', ...
                   libFile);
+        end
+
+        function prepend_library_dir_to_path(dllPath)
+            %PREPEND_LIBRARY_DIR_TO_PATH Ensure DLL folder is discoverable on Windows.
+            if ~ispc
+                return;
+            end
+            dllDir = fileparts(char(string(dllPath)));
+            if strlength(string(dllDir)) == 0 || ~isfolder(dllDir)
+                return;
+            end
+            currentPath = string(getenv('PATH'));
+            parts = split(currentPath, ';');
+            normParts = lower(strtrim(parts));
+            if any(normParts == lower(string(dllDir)))
+                return;
+            end
+            if strlength(currentPath) > 0
+                setenv('PATH', char(string(dllDir) + ";" + currentPath));
+            else
+                setenv('PATH', char(string(dllDir)));
+            end
         end
 
         function tf = has_library_function(libName, functionName)
@@ -583,7 +876,7 @@ classdef NLolib < handle
             if isfield(opts, 'backend_type')
                 s.backend_type = int32(opts.backend_type);
             else
-                s.backend_type = int32(0);   % CPU (portable default for MATLAB)
+                s.backend_type = int32(2);   % AUTO (parity with Python wrapper default)
             end
             if isfield(opts, 'fft_backend')
                 s.fft_backend = int32(opts.fft_backend);

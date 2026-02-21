@@ -18,7 +18,7 @@ pulse.pulse_period = n * dt;
 pulse.frequency_grid = complex(backend.angular_frequency_grid(n, dt), zeros(1, n));
 
 linearOperator = struct();
-linearOperator.fn = @(A, w) i * scale .* (w .^ 2);
+linearOperator.fn = @(A, w) i * scale .* (w .* w);
 
 nonlinearOperator = struct();
 nonlinearOperator.fn = @(A, I) 0 .* I;

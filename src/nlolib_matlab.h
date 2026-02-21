@@ -241,6 +241,17 @@ typedef enum
 } nlolib_status;
 
 /**
+ * @brief Public log-level thresholds for nlolib runtime logging.
+ */
+typedef enum
+{
+    NLOLIB_LOG_LEVEL_ERROR = 0,
+    NLOLIB_LOG_LEVEL_WARN = 1,
+    NLOLIB_LOG_LEVEL_INFO = 2,
+    NLOLIB_LOG_LEVEL_DEBUG = 3
+} nlolib_log_level;
+
+/**
  * @brief Database size-limit behavior when snapshot storage reaches its cap.
  */
 typedef enum
@@ -336,5 +347,54 @@ nlolib_status nlolib_propagate_with_storage(
  * See `nlolib.h` for full return-value semantics.
  */
 int nlolib_storage_is_available(void);
+
+/**
+ * @brief Configure optional runtime log file output.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_set_log_file(const char *path_utf8, int append);
+
+/**
+ * @brief Configure optional in-memory runtime log ring buffer.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_set_log_buffer(size_t capacity_bytes);
+
+/**
+ * @brief Clear buffered in-memory runtime logs.
+ *
+ * See `nlolib.h` for full return-value semantics.
+ */
+nlolib_status nlolib_clear_log_buffer(void);
+
+/**
+ * @brief Read buffered runtime logs into caller memory.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_read_log_buffer(
+    char *dst,
+    size_t dst_bytes,
+    size_t *out_written,
+    int consume);
+
+/**
+ * @brief Set global runtime logging level threshold.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_set_log_level(int level);
+
+/**
+ * @brief Configure runtime progress logging behavior.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_set_progress_options(
+    int enabled,
+    int milestone_percent,
+    int emit_on_step_adjust);
 
 #endif /* NLOLIB_MATLAB_H */

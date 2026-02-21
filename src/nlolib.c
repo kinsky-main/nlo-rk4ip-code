@@ -9,9 +9,12 @@
 #include "nlolib.h"
 #include "backend/nlo_complex.h"
 #include "core/sim_dimensions_internal.h"
+#include "io/log_format.h"
+#include "io/log_sink.h"
 #include "io/snapshot_store.h"
 #include "numerics/rk4_kernel.h"
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -32,11 +35,28 @@ static const char* nlo_backend_type_to_string(nlo_vector_backend_type backend_ty
 
 static nlolib_status nlo_propagate_fail(const char* stage, nlolib_status status)
 {
-    fprintf(stderr,
-            "[nlolib] nlse propagate failed stage=%s status=%d\n",
-            (stage != NULL) ? stage : "unknown",
-            (int)status);
+    nlo_log_emit(NLO_LOG_LEVEL_ERROR,
+                 "[nlolib] propagate failed:\n"
+                 "  - stage: %s\n"
+                 "  - status: %d",
+                 (stage != NULL) ? stage : "unknown",
+                 (int)status);
     return status;
+}
+
+static nlolib_status nlo_map_log_status(int status)
+{
+    if (status == 0) {
+        return NLOLIB_STATUS_OK;
+    }
+    if (status == 1) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    if (status == 2) {
+        return NLOLIB_STATUS_ALLOCATION_FAILED;
+    }
+
+    return NLOLIB_STATUS_INVALID_ARGUMENT;
 }
 
 static size_t nlo_compute_input_bytes(size_t count, size_t stride)
@@ -103,51 +123,152 @@ static void nlo_log_nlse_propagate_call(
 
     const size_t field_bytes = nlo_compute_input_bytes(num_time_samples, sizeof(nlo_complex));
     const size_t records_bytes = nlo_compute_record_bytes(num_recorded_samples, num_time_samples);
-    const size_t frequency_grid_bytes = nlo_compute_input_bytes(num_time_samples, sizeof(nlo_complex));
     size_t nt = 0u;
     size_t nx = 0u;
     size_t ny = 0u;
     int explicit_nd = 0;
     const int has_spatial_shape =
         (nlo_resolve_sim_dimensions_internal(config, num_time_samples, &nt, &nx, &ny, &explicit_nd) == 0);
+    size_t frequency_grid_samples = num_time_samples;
+    if (has_spatial_shape && nt > 0u) {
+        frequency_grid_samples = nt;
+    }
+    const size_t frequency_grid_bytes = nlo_compute_input_bytes(frequency_grid_samples, sizeof(nlo_complex));
 
-    fprintf(stderr,
-            "[nlolib] nlse propagate backend=%s | "
-            "num_time_samples=%zu num_recorded_samples=%zu field_bytes=%zu record_bytes=%zu | "
-            "config=%p(size=%zu) input_field=%p(size=%zu) output_records=%p(size=%zu) "
-            "exec_options=%p(size=%zu) | "
-            "frequency_grid=%p(size=%zu) runtime(constants=%zu df=%p d=%p tf=%p t=%p n=%p) | "
-            "spatial(nt=%zu nx=%zu ny=%zu explicit_nd=%d valid=%d dx=%.9e dy=%.9e spatial_frequency_grid=%p potential_grid=%p)\n",
-            nlo_backend_type_to_string(local_exec_options.backend_type),
-            num_time_samples,
-            num_recorded_samples,
-            field_bytes,
-            records_bytes,
-            (const void*)config,
-            sizeof(sim_config),
-            (const void*)input_field,
-            field_bytes,
-            (const void*)output_records,
-            records_bytes,
-            (const void*)exec_options,
-            sizeof(nlo_execution_options),
-            (config != NULL) ? (const void*)config->frequency.frequency_grid : NULL,
-            frequency_grid_bytes,
-            (config != NULL) ? config->runtime.num_constants : 0u,
-            (config != NULL) ? (const void*)config->runtime.dispersion_factor_expr : NULL,
-            (config != NULL) ? (const void*)config->runtime.dispersion_expr : NULL,
-            (config != NULL) ? (const void*)config->runtime.transverse_factor_expr : NULL,
-            (config != NULL) ? (const void*)config->runtime.transverse_expr : NULL,
-            (config != NULL) ? (const void*)config->runtime.nonlinear_expr : NULL,
-            nt,
-            nx,
-            ny,
-            explicit_nd,
-            has_spatial_shape,
-            (config != NULL) ? config->spatial.delta_x : 0.0,
-            (config != NULL) ? config->spatial.delta_y : 0.0,
-            (config != NULL) ? (const void*)config->spatial.spatial_frequency_grid : NULL,
-            (config != NULL) ? (const void*)config->spatial.potential_grid : NULL);
+    char num_time_samples_text[48];
+    char num_recorded_samples_text[48];
+    char field_bytes_text[48];
+    char records_bytes_text[48];
+    char field_size_text[32];
+    char records_size_text[32];
+    char frequency_size_text[32];
+    char frequency_bytes_text[48];
+    char runtime_constants_text[48];
+    char nt_text[48];
+    char nx_text[48];
+    char ny_text[48];
+
+    (void)nlo_log_format_u64_grouped(num_time_samples_text,
+                                     sizeof(num_time_samples_text),
+                                     (uint64_t)num_time_samples);
+    (void)nlo_log_format_u64_grouped(num_recorded_samples_text,
+                                     sizeof(num_recorded_samples_text),
+                                     (uint64_t)num_recorded_samples);
+    (void)nlo_log_format_u64_grouped(field_bytes_text, sizeof(field_bytes_text), (uint64_t)field_bytes);
+    (void)nlo_log_format_u64_grouped(records_bytes_text, sizeof(records_bytes_text), (uint64_t)records_bytes);
+    (void)nlo_log_format_u64_grouped(runtime_constants_text,
+                                     sizeof(runtime_constants_text),
+                                     (uint64_t)((config != NULL) ? config->runtime.num_constants : 0u));
+    (void)nlo_log_format_u64_grouped(frequency_bytes_text,
+                                     sizeof(frequency_bytes_text),
+                                     (uint64_t)frequency_grid_bytes);
+    (void)nlo_log_format_u64_grouped(nt_text, sizeof(nt_text), (uint64_t)nt);
+    (void)nlo_log_format_u64_grouped(nx_text, sizeof(nx_text), (uint64_t)nx);
+    (void)nlo_log_format_u64_grouped(ny_text, sizeof(ny_text), (uint64_t)ny);
+    (void)nlo_log_format_bytes_human(field_size_text, sizeof(field_size_text), field_bytes);
+    (void)nlo_log_format_bytes_human(records_size_text, sizeof(records_size_text), records_bytes);
+    (void)nlo_log_format_bytes_human(frequency_size_text, sizeof(frequency_size_text), frequency_grid_bytes);
+
+    char constants_lines[768];
+    size_t constants_len = 0u;
+    constants_lines[0] = '\0';
+    if (config != NULL && config->runtime.num_constants > 0u) {
+        const size_t max_constants =
+            (config->runtime.num_constants < NLO_RUNTIME_OPERATOR_CONSTANTS_MAX)
+                ? config->runtime.num_constants
+                : NLO_RUNTIME_OPERATOR_CONSTANTS_MAX;
+        for (size_t idx = 0u; idx < max_constants; ++idx) {
+            const int written = snprintf(constants_lines + constants_len,
+                                         sizeof(constants_lines) - constants_len,
+                                         "    - c%zu: %.9e\n",
+                                         idx,
+                                         config->runtime.constants[idx]);
+            if (written < 0) {
+                break;
+            }
+            const size_t add = (size_t)written;
+            if (add >= (sizeof(constants_lines) - constants_len)) {
+                constants_len = sizeof(constants_lines) - 1u;
+                break;
+            }
+            constants_len += add;
+        }
+    } else {
+        (void)snprintf(constants_lines, sizeof(constants_lines), "    - (none)\n");
+    }
+
+    char message[4096];
+    const int written = snprintf(
+        message,
+        sizeof(message),
+        "[nlolib] propagate request:\n"
+        "  - backend_requested: %s\n"
+        "  - num_time_samples: %s\n"
+        "  - num_recorded_samples: %s\n"
+        "  - field_size: %s (%s B)\n"
+        "  - records_size: %s (%s B)\n"
+        "  - pointers:\n"
+        "    - config: %p\n"
+        "    - input_field: %p\n"
+        "    - output_records: %p\n"
+        "    - exec_options: %p\n"
+        "  - runtime_expressions:\n"
+        "    - dispersion_factor_expr: %s\n"
+        "    - dispersion_expr: %s\n"
+        "    - transverse_factor_expr: %s\n"
+        "    - transverse_expr: %s\n"
+        "    - nonlinear_expr: %s\n"
+        "  - runtime_constants (%s):\n"
+        "%s"
+        "  - grids:\n"
+        "    - frequency_grid: %p (%s)\n"
+        "    - frequency_grid_bytes: %s B\n"
+        "    - spatial_dimensions: nt=%s nx=%s ny=%s\n"
+        "    - explicit_nd: %d\n"
+        "    - dimensions_valid: %d\n"
+        "    - delta_x: %.9e\n"
+        "    - delta_y: %.9e\n"
+        "    - spatial_frequency_grid: %p\n"
+        "    - potential_grid: %p\n",
+        nlo_backend_type_to_string(local_exec_options.backend_type),
+        num_time_samples_text,
+        num_recorded_samples_text,
+        field_size_text,
+        field_bytes_text,
+        records_size_text,
+        records_bytes_text,
+        (const void*)config,
+        (const void*)input_field,
+        (const void*)output_records,
+        (const void*)exec_options,
+        (config != NULL && config->runtime.dispersion_factor_expr != NULL)
+            ? config->runtime.dispersion_factor_expr
+            : "(null)",
+        (config != NULL && config->runtime.dispersion_expr != NULL) ? config->runtime.dispersion_expr : "(null)",
+        (config != NULL && config->runtime.transverse_factor_expr != NULL)
+            ? config->runtime.transverse_factor_expr
+            : "(null)",
+        (config != NULL && config->runtime.transverse_expr != NULL) ? config->runtime.transverse_expr : "(null)",
+        (config != NULL && config->runtime.nonlinear_expr != NULL) ? config->runtime.nonlinear_expr : "(null)",
+        runtime_constants_text,
+        constants_lines,
+        (config != NULL) ? (const void*)config->frequency.frequency_grid : NULL,
+        frequency_size_text,
+        frequency_bytes_text,
+        nt_text,
+        nx_text,
+        ny_text,
+        explicit_nd,
+        has_spatial_shape,
+        (config != NULL) ? config->spatial.delta_x : 0.0,
+        (config != NULL) ? config->spatial.delta_y : 0.0,
+        (config != NULL) ? (const void*)config->spatial.spatial_frequency_grid : NULL,
+        (config != NULL) ? (const void*)config->spatial.potential_grid : NULL);
+
+    if (written > 0) {
+        const size_t length = (size_t)((written < (int)sizeof(message)) ? written : (int)(sizeof(message) - 1u));
+        nlo_log_emit_raw(NLO_LOG_LEVEL_INFO, message, length);
+    }
 }
 
 NLOLIB_API nlolib_status nlolib_propagate(
@@ -254,10 +375,12 @@ static nlolib_status nlo_propagate_impl(
         return nlo_propagate_fail("init_simulation_state", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
 
-    fprintf(stderr,
-            "[nlolib] nlse backend resolved requested=%s actual=%s\n",
-            nlo_backend_type_to_string(local_exec_options.backend_type),
-            nlo_backend_type_to_string(nlo_vector_backend_get_type(state->backend)));
+    nlo_log_emit(NLO_LOG_LEVEL_INFO,
+                 "[nlolib] backend resolved:\n"
+                 "  - requested: %s\n"
+                 "  - actual: %s",
+                 nlo_backend_type_to_string(local_exec_options.backend_type),
+                 nlo_backend_type_to_string(nlo_vector_backend_get_type(state->backend)));
 
     if (simulation_state_upload_initial_field(state, input_field) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
@@ -422,4 +545,44 @@ NLOLIB_API nlolib_status nlolib_propagate_interleaved(
 NLOLIB_API int nlolib_storage_is_available(void)
 {
     return nlo_snapshot_store_is_available();
+}
+
+NLOLIB_API nlolib_status nlolib_set_log_file(const char* path_utf8, int append)
+{
+    return nlo_map_log_status(nlo_log_set_file(path_utf8, append));
+}
+
+NLOLIB_API nlolib_status nlolib_set_log_buffer(size_t capacity_bytes)
+{
+    return nlo_map_log_status(nlo_log_set_buffer(capacity_bytes));
+}
+
+NLOLIB_API nlolib_status nlolib_clear_log_buffer(void)
+{
+    return nlo_map_log_status(nlo_log_clear_buffer());
+}
+
+NLOLIB_API nlolib_status nlolib_read_log_buffer(
+    char* dst,
+    size_t dst_bytes,
+    size_t* out_written,
+    int consume
+)
+{
+    return nlo_map_log_status(nlo_log_read_buffer(dst, dst_bytes, out_written, consume));
+}
+
+NLOLIB_API nlolib_status nlolib_set_log_level(int level)
+{
+    return nlo_map_log_status(nlo_log_set_level(level));
+}
+
+NLOLIB_API nlolib_status nlolib_set_progress_options(
+    int enabled,
+    int milestone_percent,
+    int emit_on_step_adjust
+)
+{
+    return nlo_map_log_status(
+        nlo_log_set_progress_options(enabled, milestone_percent, emit_on_step_adjust));
 }

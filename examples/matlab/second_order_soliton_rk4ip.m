@@ -200,6 +200,20 @@ maxValue = max(specMap, [], "all");
 if maxValue > 0.0
     specMap = specMap / maxValue;
 end
+
+% Keep only occupied spectral support to avoid near-zero bins stretching
+% wavelength axes into an effectively blank image.
+if ~isempty(specMap)
+    spectralProfile = max(specMap, [], 1);
+    supportThreshold = max(max(spectralProfile) * 1e-3, 1e-12);
+    supportIdx = find(spectralProfile >= supportThreshold);
+    if numel(supportIdx) >= 8
+        left = max(supportIdx(1) - 2, 1);
+        right = min(supportIdx(end) + 2, numel(lambdaNm));
+        lambdaNm = lambdaNm(left:right);
+        specMap = specMap(:, left:right);
+    end
+end
 zMap = zSamples;
 end
 
