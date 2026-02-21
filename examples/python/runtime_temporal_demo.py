@@ -21,9 +21,9 @@ from nlolib_ctypes import (  # noqa: E402
     NLO_FFT_BACKEND_VKFFT,
     NLO_VECTOR_BACKEND_AUTO,
     NLolib,
-    RuntimeOperators,
+    OperatorSpec,
+    PulseSpec,
     default_execution_options,
-    prepare_sim_config,
 )
 
 def main() -> None:
@@ -35,22 +35,18 @@ def main() -> None:
     field0 = np.exp(-((t / 0.25) ** 2)) * np.exp((-1.0j) * 8.0 * t)
     omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
 
-    runtime = RuntimeOperators(
-        dispersion_factor_fn=lambda A, w: (1.0j * (beta2 / 2.0)) * (w * w),
-        constants=[beta2 / 2.0, 0.0, 0.01],
-    )
-
-    cfg = prepare_sim_config(
-        n,
-        propagation_distance=0.25,
-        starting_step_size=1e-3,
-        max_step_size=5e-3,
-        min_step_size=1e-5,
-        error_tolerance=1e-7,
-        pulse_period=n * dt,
+    pulse = PulseSpec(
+        samples=field0.tolist(),
         delta_time=dt,
+        pulse_period=n * dt,
         frequency_grid=[complex(float(w), 0.0) for w in omega],
-        runtime=runtime,
+    )
+    linear_operator = OperatorSpec(
+        fn=lambda A, w: (1.0j * (beta2 / 2.0)) * (w * w),
+    )
+    nonlinear_operator = OperatorSpec(
+        expr="i*gamma*I + i*V",
+        params={"gamma": 0.01},
     )
 
     opts = default_execution_options(
@@ -58,10 +54,17 @@ def main() -> None:
         fft_backend=NLO_FFT_BACKEND_VKFFT,
     )
     api = NLolib()
-    records = np.asarray(
-        api.propagate(cfg, field0.tolist(), 2, opts),
-        dtype=np.complex128,
+    result = api.simulate(
+        pulse,
+        linear_operator,
+        nonlinear_operator,
+        propagation_distance=0.25,
+        output="dense",
+        preset="accuracy",
+        records=2,
+        exec_options=opts,
     )
+    records = np.asarray(result.records, dtype=np.complex128)
 
     final_field = records[-1]
     print(f"runtime_temporal_demo_py: propagated {n} samples.")

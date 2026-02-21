@@ -5,6 +5,8 @@ function savedPath = plot_3d_intensity_scatter_propagation( ...
 p = inputParser;
 addParameter(p, "intensity_cutoff", 0.05);
 addParameter(p, "xy_stride", 16);
+addParameter(p, "adaptive_cutoff", false);
+addParameter(p, "target_point_count", 20000);
 addParameter(p, "min_marker_size", 2.0);
 addParameter(p, "max_marker_size", 36.0);
 addParameter(p, "title", "3D Propagation Intensity Scatter");
@@ -21,11 +23,21 @@ end
 if size(records, 1) ~= numel(z) || size(records, 2) ~= numel(y) || size(records, 3) ~= numel(x)
     error("Axis lengths must match fieldRecords shape.");
 end
-if p.Results.xy_stride <= 0
-    error("xy_stride must be positive.");
-end
 if p.Results.intensity_cutoff < 0.0 || p.Results.intensity_cutoff >= 1.0
     error("intensity_cutoff must be in [0, 1).");
+end
+if p.Results.target_point_count <= 0
+    error("target_point_count must be positive.");
+end
+xyStrideRaw = p.Results.xy_stride;
+if isnumeric(xyStrideRaw)
+    if xyStrideRaw <= 0
+        error("xy_stride must be positive.");
+    end
+elseif ~(ischar(xyStrideRaw) || isstring(xyStrideRaw))
+    error("xy_stride must be numeric or ""auto"".");
+elseif ~strcmpi(string(xyStrideRaw), "auto")
+    error("xy_stride string value must be ""auto"".");
 end
 
 if isreal(records)
@@ -49,12 +61,29 @@ zPoints = [];
 cPoints = [];
 sPoints = [];
 
-stride = double(p.Results.xy_stride);
+normalizedIntensity = intensity ./ maxIntensity;
+cutoff = double(p.Results.intensity_cutoff);
+if p.Results.adaptive_cutoff
+    nonZero = normalizedIntensity(normalizedIntensity > 0.0);
+    if ~isempty(nonZero)
+        cutoff = min(cutoff, max(0.005, prctile(nonZero, 70.0)));
+    end
+end
+
+if isnumeric(xyStrideRaw)
+    stride = max(1, round(double(xyStrideRaw)));
+else
+    totalPoints = numel(z) * numel(y) * numel(x);
+    targetPoints = max(1, round(double(p.Results.target_point_count)));
+    stride = max(1, floor(sqrt(double(totalPoints) / double(targetPoints))));
+end
+targetPoints = max(1, round(double(p.Results.target_point_count)));
+
 for zi = 1:numel(z)
     for yi = 1:stride:numel(y)
         for xi = 1:stride:numel(x)
-            normIntensity = intensity(zi, yi, xi) / maxIntensity;
-            if normIntensity < p.Results.intensity_cutoff
+            normIntensity = normalizedIntensity(zi, yi, xi);
+            if normIntensity < cutoff
                 continue;
             end
             xPoints(end + 1) = x(xi); %#ok<AGROW>
@@ -71,6 +100,16 @@ if isempty(xPoints)
     warning("plot3d:noPoints", "No points passed intensity cutoff; skipping 3D scatter.");
     savedPath = [];
     return;
+end
+
+if numel(xPoints) > targetPoints
+    keepStride = ceil(numel(xPoints) / targetPoints);
+    keepIdx = 1:keepStride:numel(xPoints);
+    xPoints = xPoints(keepIdx);
+    yPoints = yPoints(keepIdx);
+    zPoints = zPoints(keepIdx);
+    cPoints = cPoints(keepIdx);
+    sPoints = sPoints(keepIdx);
 end
 
 savedPath = backend_save_figure_path(outputPath);

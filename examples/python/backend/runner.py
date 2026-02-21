@@ -187,6 +187,15 @@ class NloExampleRunner:
             forced_device_budget_bytes=options.forced_device_budget_bytes,
         )
 
+    @staticmethod
+    def _preset_from_error_tolerance(error_tolerance: float) -> str:
+        tol = float(error_tolerance)
+        if tol <= 1e-7:
+            return "accuracy"
+        if tol <= 5e-6:
+            return "balanced"
+        return "fast"
+
     def propagate_temporal_records(
         self,
         field0: np.ndarray,
@@ -204,42 +213,67 @@ class NloExampleRunner:
 
         omega = sim_cfg.resolved_omega()
         runtime_cfg = sim_cfg.runtime
-        if runtime_cfg is None:
-            runtime_cfg = self.nlo.RuntimeOperators(
-                constants=[
-                    0.5 * float(sim_cfg.beta2),
-                    0.5 * float(sim_cfg.alpha),
-                    float(sim_cfg.gamma),
-                ]
-            )
-        prepared = self.nlo.prepare_sim_config(
-            n,
-            propagation_distance=float(sim_cfg.z_final),
-            starting_step_size=float(sim_cfg.starting_step_size),
-            max_step_size=float(sim_cfg.max_step_size),
-            min_step_size=float(sim_cfg.min_step_size),
-            error_tolerance=float(sim_cfg.error_tolerance),
-            pulse_period=float(sim_cfg.resolved_pulse_period()),
-            delta_time=float(sim_cfg.dt),
-            frequency_grid=[complex(float(om), 0.0) for om in omega],
-            spatial_nx=n,
-            spatial_ny=1,
-            delta_x=1.0,
-            delta_y=1.0,
-            runtime=runtime_cfg,
-        )
 
         options = exec_options if exec_options is not None else SimulationOptions()
         effective_options = self._effective_options(options, int(num_records))
         opts = effective_options.to_ctypes(self.nlo)
-        records = np.asarray(
-            self.api.propagate(prepared, field.tolist(), int(num_records), opts),
-            dtype=np.complex128,
-        ).reshape(int(num_records), n)
-        if int(num_records) == 1:
-            z_records = np.asarray([float(sim_cfg.z_final)], dtype=np.float64)
-        else:
-            z_records = np.linspace(0.0, float(sim_cfg.z_final), int(num_records))
+
+        if runtime_cfg is not None:
+            prepared = self.nlo.prepare_sim_config(
+                n,
+                propagation_distance=float(sim_cfg.z_final),
+                starting_step_size=float(sim_cfg.starting_step_size),
+                max_step_size=float(sim_cfg.max_step_size),
+                min_step_size=float(sim_cfg.min_step_size),
+                error_tolerance=float(sim_cfg.error_tolerance),
+                pulse_period=float(sim_cfg.resolved_pulse_period()),
+                delta_time=float(sim_cfg.dt),
+                frequency_grid=[complex(float(om), 0.0) for om in omega],
+                spatial_nx=n,
+                spatial_ny=1,
+                delta_x=1.0,
+                delta_y=1.0,
+                runtime=runtime_cfg,
+            )
+            records = np.asarray(
+                self.api.propagate(prepared, field.tolist(), int(num_records), opts),
+                dtype=np.complex128,
+            ).reshape(int(num_records), n)
+            if int(num_records) == 1:
+                z_records = np.asarray([float(sim_cfg.z_final)], dtype=np.float64)
+            else:
+                z_records = np.linspace(0.0, float(sim_cfg.z_final), int(num_records))
+            return z_records, records
+
+        pulse = self.nlo.PulseSpec(
+            samples=field.tolist(),
+            delta_time=float(sim_cfg.dt),
+            pulse_period=float(sim_cfg.resolved_pulse_period()),
+            frequency_grid=[complex(float(om), 0.0) for om in omega],
+        )
+        linear_operator = self.nlo.OperatorSpec(
+            expr="i*beta2*w*w-loss",
+            params={
+                "beta2": 0.5 * float(sim_cfg.beta2),
+                "loss": 0.5 * float(sim_cfg.alpha),
+            },
+        )
+        nonlinear_operator = self.nlo.OperatorSpec(
+            expr="i*gamma*I + i*V",
+            params={"gamma": float(sim_cfg.gamma)},
+        )
+        result = self.api.simulate(
+            pulse,
+            linear_operator,
+            nonlinear_operator,
+            propagation_distance=float(sim_cfg.z_final),
+            output=("final" if int(num_records) == 1 else "dense"),
+            preset=self._preset_from_error_tolerance(sim_cfg.error_tolerance),
+            records=int(num_records),
+            exec_options=opts,
+        )
+        z_records = np.asarray(result.z_axis, dtype=np.float64)
+        records = np.asarray(result.records, dtype=np.complex128).reshape(int(num_records), n)
         return z_records, records
 
     def propagate_flattened_xy_records(
@@ -290,24 +324,44 @@ class NloExampleRunner:
                 raise ValueError("potential_grid length must equal nx * ny.")
 
         runtime_cfg = runtime
-        if runtime_cfg is None:
-            runtime_cfg = self.nlo.RuntimeOperators(
-                constants=[
-                    0.0,
-                    0.5 * float(alpha),
-                    float(gamma),
-                ]
-            )
 
-        prepared = self.nlo.prepare_sim_config(
-            nxy,
-            propagation_distance=float(propagation_distance),
-            starting_step_size=float(starting_step_size),
-            max_step_size=float(max_step_size),
-            min_step_size=float(min_step_size),
-            error_tolerance=float(error_tolerance),
-            pulse_period=float(nx),
+        options = exec_options if exec_options is not None else SimulationOptions()
+        effective_options = self._effective_options(options, int(num_records))
+        opts = effective_options.to_ctypes(self.nlo)
+
+        if runtime_cfg is not None:
+            prepared = self.nlo.prepare_sim_config(
+                nxy,
+                propagation_distance=float(propagation_distance),
+                starting_step_size=float(starting_step_size),
+                max_step_size=float(max_step_size),
+                min_step_size=float(min_step_size),
+                error_tolerance=float(error_tolerance),
+                pulse_period=float(nx),
+                delta_time=1.0,
+                frequency_grid=freq_values.tolist(),
+                spatial_nx=int(nx),
+                spatial_ny=int(ny),
+                delta_x=float(delta_x),
+                delta_y=float(delta_y),
+                spatial_frequency_grid=(None if spatial_values is None else spatial_values.tolist()),
+                potential_grid=(None if potential_values is None else potential_values.tolist()),
+                runtime=runtime_cfg,
+            )
+            records = np.asarray(
+                self.api.propagate(prepared, field.tolist(), int(num_records), opts),
+                dtype=np.complex128,
+            ).reshape(int(num_records), int(ny), int(nx))
+            if int(num_records) == 1:
+                z_records = np.asarray([float(propagation_distance)], dtype=np.float64)
+            else:
+                z_records = np.linspace(0.0, float(propagation_distance), int(num_records))
+            return z_records, records
+
+        pulse = self.nlo.PulseSpec(
+            samples=field.tolist(),
             delta_time=1.0,
+            pulse_period=float(nx),
             frequency_grid=freq_values.tolist(),
             spatial_nx=int(nx),
             spatial_ny=int(ny),
@@ -315,18 +369,28 @@ class NloExampleRunner:
             delta_y=float(delta_y),
             spatial_frequency_grid=(None if spatial_values is None else spatial_values.tolist()),
             potential_grid=(None if potential_values is None else potential_values.tolist()),
-            runtime=runtime_cfg,
         )
-
-        options = exec_options if exec_options is not None else SimulationOptions()
-        effective_options = self._effective_options(options, int(num_records))
-        opts = effective_options.to_ctypes(self.nlo)
-        records = np.asarray(
-            self.api.propagate(prepared, field.tolist(), int(num_records), opts),
-            dtype=np.complex128,
-        ).reshape(int(num_records), int(ny), int(nx))
-        if int(num_records) == 1:
-            z_records = np.asarray([float(propagation_distance)], dtype=np.float64)
-        else:
-            z_records = np.linspace(0.0, float(propagation_distance), int(num_records))
+        linear_operator = self.nlo.OperatorSpec(
+            expr="i*beta2*w*w-loss",
+            params={
+                "beta2": 0.0,
+                "loss": 0.5 * float(alpha),
+            },
+        )
+        nonlinear_operator = self.nlo.OperatorSpec(
+            expr="i*gamma*I + i*V",
+            params={"gamma": float(gamma)},
+        )
+        result = self.api.simulate(
+            pulse,
+            linear_operator,
+            nonlinear_operator,
+            propagation_distance=float(propagation_distance),
+            output=("final" if int(num_records) == 1 else "dense"),
+            preset=self._preset_from_error_tolerance(error_tolerance),
+            records=int(num_records),
+            exec_options=opts,
+        )
+        z_records = np.asarray(result.z_axis, dtype=np.float64)
+        records = np.asarray(result.records, dtype=np.complex128).reshape(int(num_records), int(ny), int(nx))
         return z_records, records

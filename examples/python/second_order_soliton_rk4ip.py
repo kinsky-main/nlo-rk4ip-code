@@ -288,9 +288,6 @@ def main() -> float:
         num_time_samples=n,
         pulse_period=n * dt,
         omega=omega,
-        starting_step_size=2e-4,
-        max_step_size=1e-2,
-        min_step_size=1e-7,
         error_tolerance=5e-6,
     )
     exec_opts = SimulationOptions(backend="auto", fft_backend="auto")

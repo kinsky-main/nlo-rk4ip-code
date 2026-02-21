@@ -53,25 +53,34 @@ field0 = exp(-(((xx - scenario.x_offset) .^ 2 + (yy - scenario.y_offset) .^ 2) /
 field0 = complex(field0, zeros(size(field0)));
 field0Flat = flatten_xy_row_major(field0);
 
-cfg = struct();
-cfg.num_time_samples = nxy;
-cfg.propagation_distance = scenario.propagation_distance;
-cfg.starting_step_size = 1e-3;
-cfg.max_step_size = 2e-3;
-cfg.min_step_size = 5e-5;
-cfg.error_tolerance = 1e-7;
-cfg.pulse_period = double(nx);
-cfg.delta_time = 1.0;
-cfg.frequency_grid = complex(zeros(1, nxy), zeros(1, nxy));
-cfg.spatial_nx = nx;
-cfg.spatial_ny = ny;
-cfg.delta_x = scenario.dx;
-cfg.delta_y = scenario.dy;
-cfg.potential_grid = flatten_xy_row_major(complex(phaseUnit, zeros(size(phaseUnit))));
-cfg.runtime = struct('constants', [0.0, 0.0, 0.0]);
+pulse = struct();
+pulse.samples = field0Flat;
+pulse.delta_time = 1.0;
+pulse.pulse_period = double(nx);
+pulse.frequency_grid = complex(zeros(1, nxy), zeros(1, nxy));
+pulse.spatial_nx = nx;
+pulse.spatial_ny = ny;
+pulse.delta_x = scenario.dx;
+pulse.delta_y = scenario.dy;
+pulse.potential_grid = flatten_xy_row_major(complex(phaseUnit, zeros(size(phaseUnit))));
 
-[recordsFlat, info] = backend.propagate_with_fallback(api, cfg, field0Flat, numRecords, simOptions);
-zRecords = linspace(0.0, scenario.propagation_distance, numRecords);
+linearOperator = struct();
+linearOperator.expr = "i*beta2*w*w-loss";
+linearOperator.params = struct('beta2', 0.0, 'loss', 0.0);
+
+nonlinearOperator = struct();
+nonlinearOperator.expr = "i*gamma*I + i*V";
+nonlinearOperator.params = struct('gamma', 0.0);
+
+execOptions = backend.make_exec_options(simOptions, numRecords);
+simulateOptions = struct();
+simulateOptions.propagation_distance = scenario.propagation_distance;
+simulateOptions.records = numRecords;
+simulateOptions.preset = "accuracy";
+simulateOptions.exec_options = execOptions;
+result = api.simulate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+recordsFlat = result.records;
+zRecords = result.z_axis;
 records = unflatten_records_row_major(recordsFlat, numRecords, ny, nx);
 
 analyticalRecords = zeros(size(records));
@@ -155,8 +164,8 @@ outPower = sum(abs(squeeze(records(end, :, :))).^2, "all");
 powerDrift = abs(outPower - inPower) / max(inPower, 1e-12);
 finalError = fullError(end);
 finalProfileError = profileError(end);
-fprintf("%s: records=%d, grid=(%d,%d), final_full_error=%.6e, final_profile_error=%.6e, power_drift=%.6e, backend_used=%s\n", ...
-        scenario.scenario_name, numRecords, ny, nx, finalError, finalProfileError, powerDrift, info.used_backend);
+fprintf("%s: records=%d, grid=(%d,%d), final_full_error=%.6e, final_profile_error=%.6e, power_drift=%.6e\n", ...
+        scenario.scenario_name, numRecords, ny, nx, finalError, finalProfileError, powerDrift);
 end
 
 function flat = flatten_xy_row_major(field)

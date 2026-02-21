@@ -192,6 +192,33 @@ classdef NLolib < handle
             tf = logical(calllib(obj.LIBNAME, 'nlolib_storage_is_available'));
         end
 
+        function result = simulate(obj, pulse, linearOperator, nonlinearOperator, options)
+            %SIMULATE High-level pulse/operator facade with balanced defaults.
+            %   result = obj.simulate(pulse, linearOperator, nonlinearOperator, options)
+            %
+            %   pulse.samples    : complex input field (required)
+            %   pulse.delta_time : temporal spacing (required)
+            %   options.propagation_distance : propagation distance (required)
+            %
+            %   result.records : dense record-major output matrix
+            %   result.z_axis  : z locations of returned records
+            %   result.final   : final output field (last row of records)
+            %   result.meta    : request metadata
+            if nargin < 5
+                options = struct();
+            end
+
+            [cfg, inputField, numRecords, execOptions, zAxis, meta] = ...
+                nlolib.NLolib.build_simulation_request(pulse, linearOperator, nonlinearOperator, options);
+            records = obj.propagate(cfg, inputField, numRecords, execOptions);
+
+            result = struct();
+            result.records = records;
+            result.z_axis = zAxis;
+            result.final = records(end, :);
+            result.meta = meta;
+        end
+
         function limits = query_runtime_limits(obj, config, execOptions)
             %QUERY_RUNTIME_LIMITS Query runtime-derived solver limits.
             if nargin < 2
@@ -484,6 +511,361 @@ classdef NLolib < handle
             s.vulkan.descriptor_set_count_override = uint32(0);
 
             ptr = s;
+        end
+
+        function [cfg, inputField, numRecords, execOptions, zAxis, meta] = ...
+                build_simulation_request(pulse, linearOperator, nonlinearOperator, options)
+            if ~isstruct(options)
+                error('nlolib:invalidSimulateOptions', 'options must be a struct');
+            end
+            if ~isfield(options, 'propagation_distance')
+                error('nlolib:invalidSimulateOptions', ...
+                      'options.propagation_distance is required');
+            end
+
+            zEnd = double(options.propagation_distance);
+            if zEnd <= 0.0
+                error('nlolib:invalidSimulateOptions', ...
+                      'options.propagation_distance must be > 0');
+            end
+
+            preset = "balanced";
+            if isfield(options, 'preset') && ~isempty(options.preset)
+                preset = lower(string(options.preset));
+            end
+            defaults = nlolib.NLolib.solver_defaults(preset, zEnd);
+
+            output = "dense";
+            if isfield(options, 'output') && ~isempty(options.output)
+                output = lower(string(options.output));
+            end
+
+            numRecords = defaults.records;
+            if isfield(options, 'records') && ~isempty(options.records)
+                numRecords = double(options.records);
+            end
+            if output == "final"
+                numRecords = 1;
+            elseif output ~= "dense"
+                error('nlolib:invalidSimulateOptions', ...
+                      'options.output must be ''dense'' or ''final''');
+            end
+            if ~isscalar(numRecords) || numRecords <= 0 || floor(numRecords) ~= numRecords
+                error('nlolib:invalidSimulateOptions', ...
+                      'options.records must be a positive integer');
+            end
+            numRecords = uint64(numRecords);
+
+            if isfield(options, 'exec_options') && ~isempty(options.exec_options)
+                execOptions = options.exec_options;
+            elseif isfield(options, 'execOptions') && ~isempty(options.execOptions)
+                execOptions = options.execOptions;
+            else
+                execOptions = struct();
+            end
+
+            pulseSpec = nlolib.NLolib.normalize_pulse_spec(pulse);
+            inputField = pulseSpec.samples;
+            numTimeSamples = numel(inputField);
+
+            [linearExpr, linearFn, linearConstants] = ...
+                nlolib.NLolib.resolve_operator_spec('linear', linearOperator, 0);
+            [nonlinearExpr, nonlinearFn, nonlinearConstants] = ...
+                nlolib.NLolib.resolve_operator_spec('nonlinear', nonlinearOperator, numel(linearConstants));
+
+            runtime = struct();
+            if strlength(linearExpr) > 0
+                runtime.dispersion_factor_expr = char(linearExpr);
+            end
+            if ~isempty(linearFn)
+                runtime.dispersion_factor_fn = linearFn;
+            end
+            if strlength(nonlinearExpr) > 0
+                runtime.nonlinear_expr = char(nonlinearExpr);
+            end
+            if ~isempty(nonlinearFn)
+                runtime.nonlinear_fn = nonlinearFn;
+            end
+            runtime.constants = [linearConstants, nonlinearConstants];
+
+            cfg = struct();
+            cfg.num_time_samples = numTimeSamples;
+            cfg.propagation_distance = zEnd;
+            cfg.starting_step_size = defaults.starting_step_size;
+            cfg.max_step_size = defaults.max_step_size;
+            cfg.min_step_size = defaults.min_step_size;
+            cfg.error_tolerance = defaults.error_tolerance;
+            cfg.delta_time = pulseSpec.delta_time;
+            cfg.pulse_period = pulseSpec.pulse_period;
+            cfg.frequency_grid = pulseSpec.frequency_grid;
+            if ~isempty(pulseSpec.time_nt)
+                cfg.time_nt = pulseSpec.time_nt;
+            end
+            if ~isempty(pulseSpec.spatial_nx)
+                cfg.spatial_nx = pulseSpec.spatial_nx;
+            end
+            if ~isempty(pulseSpec.spatial_ny)
+                cfg.spatial_ny = pulseSpec.spatial_ny;
+            end
+            if ~isempty(pulseSpec.spatial_frequency_grid)
+                cfg.spatial_frequency_grid = pulseSpec.spatial_frequency_grid;
+            end
+            if ~isempty(pulseSpec.potential_grid)
+                cfg.potential_grid = pulseSpec.potential_grid;
+            end
+            cfg.delta_x = pulseSpec.delta_x;
+            cfg.delta_y = pulseSpec.delta_y;
+            cfg.runtime = runtime;
+
+            if double(numRecords) == 1
+                zAxis = zEnd;
+            else
+                zAxis = linspace(0.0, zEnd, double(numRecords));
+            end
+
+            meta = struct();
+            meta.preset = char(preset);
+            meta.output = char(output);
+            meta.records = double(numRecords);
+        end
+
+        function pulse = normalize_pulse_spec(pulseInput)
+            if ~isstruct(pulseInput)
+                error('nlolib:invalidPulseSpec', 'pulse must be a struct');
+            end
+            if ~isfield(pulseInput, 'samples') || ~isfield(pulseInput, 'delta_time')
+                error('nlolib:invalidPulseSpec', ...
+                      'pulse must define samples and delta_time');
+            end
+
+            samples = pulseInput.samples;
+            if isempty(samples)
+                error('nlolib:invalidPulseSpec', 'pulse.samples must be non-empty');
+            end
+
+            deltaTime = double(pulseInput.delta_time);
+            if deltaTime <= 0.0
+                error('nlolib:invalidPulseSpec', 'pulse.delta_time must be > 0');
+            end
+
+            n = numel(samples);
+            temporalSamples = n;
+            if isfield(pulseInput, 'time_nt') && ~isempty(pulseInput.time_nt)
+                temporalSamples = double(pulseInput.time_nt);
+                if temporalSamples <= 0 || floor(temporalSamples) ~= temporalSamples
+                    error('nlolib:invalidPulseSpec', ...
+                          'pulse.time_nt must be a positive integer');
+                end
+            end
+            pulse = struct();
+            pulse.samples = reshape(samples, 1, n);
+            pulse.delta_time = deltaTime;
+            if isfield(pulseInput, 'pulse_period') && ~isempty(pulseInput.pulse_period)
+                pulse.pulse_period = double(pulseInput.pulse_period);
+            else
+                pulse.pulse_period = double(temporalSamples) * deltaTime;
+            end
+
+            if isfield(pulseInput, 'frequency_grid') && ~isempty(pulseInput.frequency_grid)
+                pulse.frequency_grid = pulseInput.frequency_grid;
+            else
+                pulse.frequency_grid = nlolib.NLolib.default_frequency_grid(temporalSamples, deltaTime);
+            end
+
+            pulse.time_nt = [];
+            if isfield(pulseInput, 'time_nt') && ~isempty(pulseInput.time_nt)
+                pulse.time_nt = double(pulseInput.time_nt);
+            end
+
+            pulse.spatial_nx = [];
+            if isfield(pulseInput, 'spatial_nx') && ~isempty(pulseInput.spatial_nx)
+                pulse.spatial_nx = double(pulseInput.spatial_nx);
+            end
+            pulse.spatial_ny = [];
+            if isfield(pulseInput, 'spatial_ny') && ~isempty(pulseInput.spatial_ny)
+                pulse.spatial_ny = double(pulseInput.spatial_ny);
+            end
+
+            pulse.delta_x = 1.0;
+            if isfield(pulseInput, 'delta_x') && ~isempty(pulseInput.delta_x)
+                pulse.delta_x = double(pulseInput.delta_x);
+            end
+            pulse.delta_y = 1.0;
+            if isfield(pulseInput, 'delta_y') && ~isempty(pulseInput.delta_y)
+                pulse.delta_y = double(pulseInput.delta_y);
+            end
+
+            pulse.spatial_frequency_grid = [];
+            if isfield(pulseInput, 'spatial_frequency_grid') && ~isempty(pulseInput.spatial_frequency_grid)
+                pulse.spatial_frequency_grid = pulseInput.spatial_frequency_grid;
+            end
+            pulse.potential_grid = [];
+            if isfield(pulseInput, 'potential_grid') && ~isempty(pulseInput.potential_grid)
+                pulse.potential_grid = pulseInput.potential_grid;
+            end
+        end
+
+        function defaults = solver_defaults(preset, propagationDistance)
+            switch char(lower(string(preset)))
+                case 'balanced'
+                    defaults = struct( ...
+                        'starting_step_size', propagationDistance / 200.0, ...
+                        'max_step_size', propagationDistance / 25.0, ...
+                        'min_step_size', propagationDistance / 20000.0, ...
+                        'error_tolerance', 1e-6, ...
+                        'records', 128);
+                case 'fast'
+                    defaults = struct( ...
+                        'starting_step_size', propagationDistance / 120.0, ...
+                        'max_step_size', propagationDistance / 12.0, ...
+                        'min_step_size', propagationDistance / 4000.0, ...
+                        'error_tolerance', 5e-6, ...
+                        'records', 64);
+                case 'accuracy'
+                    defaults = struct( ...
+                        'starting_step_size', propagationDistance / 400.0, ...
+                        'max_step_size', propagationDistance / 50.0, ...
+                        'min_step_size', propagationDistance / 80000.0, ...
+                        'error_tolerance', 1e-7, ...
+                        'records', 192);
+                otherwise
+                    error('nlolib:invalidSimulatePreset', ...
+                          'unsupported simulate preset ''%s''', char(string(preset)));
+            end
+        end
+
+        function omega = default_frequency_grid(numTimeSamples, deltaTime)
+            twoPi = 2.0 * pi;
+            omegaStep = twoPi / (double(numTimeSamples) * deltaTime);
+            positiveLimit = floor((double(numTimeSamples) - 1.0) / 2.0);
+            omega = zeros(1, numTimeSamples);
+            for idx = 1:numTimeSamples
+                i = idx - 1;
+                if i <= positiveLimit
+                    omega(idx) = double(i) * omegaStep;
+                else
+                    omega(idx) = -(double(numTimeSamples - i) * omegaStep);
+                end
+            end
+            omega = complex(omega, 0.0);
+        end
+
+        function [expr, fn, constants] = resolve_operator_spec(context, operator, offset)
+            expr = "";
+            fn = [];
+            constants = [];
+
+            params = [];
+            if ischar(operator) || isstring(operator)
+                expr = string(operator);
+            elseif isstruct(operator)
+                if isfield(operator, 'expr') && ~isempty(operator.expr)
+                    expr = string(operator.expr);
+                end
+                if isfield(operator, 'fn') && ~isempty(operator.fn)
+                    fn = operator.fn;
+                end
+                if isfield(operator, 'params') && ~isempty(operator.params)
+                    params = operator.params;
+                end
+            else
+                error('nlolib:invalidOperatorSpec', ...
+                      '%s operator must be a preset string or struct', context);
+            end
+
+            if strlength(expr) > 0 && ~isempty(fn)
+                error('nlolib:invalidOperatorSpec', ...
+                      '%s operator cannot define both expr and fn', context);
+            end
+
+            if strlength(expr) > 0 && isempty(fn)
+                [presetExpr, presetParams, isPreset] = nlolib.NLolib.operator_preset(context, expr);
+                if isPreset
+                    expr = presetExpr;
+                    if isempty(params)
+                        params = presetParams;
+                    end
+                end
+            end
+
+            if strlength(expr) == 0 && isempty(fn)
+                error('nlolib:invalidOperatorSpec', ...
+                      '%s operator must define expr/fn or a known preset', context);
+            end
+
+            if ~isempty(fn)
+                if ~isempty(params)
+                    error('nlolib:invalidOperatorSpec', ...
+                          '%s callable operator params are not supported in MATLAB facade', ...
+                          context);
+                end
+                return;
+            end
+
+            [expr, constants] = nlolib.NLolib.parameterize_expression(expr, params, offset);
+        end
+
+        function [expr, params, matched] = operator_preset(context, name)
+            matched = true;
+            params = [];
+            key = char(lower(string(name)));
+            switch char(lower(string(context)))
+                case 'linear'
+                    switch key
+                        case {'gvd', 'default'}
+                            expr = "i*beta2*w*w-loss";
+                            params = struct('beta2', -0.5, 'loss', 0.0);
+                        case 'none'
+                            expr = "0";
+                            params = struct();
+                        otherwise
+                            expr = string(name);
+                            matched = false;
+                    end
+                case 'nonlinear'
+                    switch key
+                        case {'kerr', 'default'}
+                            expr = "i*gamma*I";
+                            params = struct('gamma', 1.0);
+                        case 'none'
+                            expr = "0";
+                            params = struct();
+                        otherwise
+                            expr = string(name);
+                            matched = false;
+                    end
+                otherwise
+                    expr = string(name);
+                    matched = false;
+            end
+        end
+
+        function [expression, constants] = parameterize_expression(expressionInput, params, offset)
+            expression = string(expressionInput);
+            constants = [];
+            if isempty(params)
+                return;
+            end
+
+            if isnumeric(params)
+                constants = double(params(:).');
+                return;
+            end
+
+            if ~isstruct(params)
+                error('nlolib:invalidOperatorSpec', ...
+                      'operator params must be numeric or struct');
+            end
+
+            names = fieldnames(params);
+            constants = zeros(1, numel(names));
+            for idx = 1:numel(names)
+                key = names{idx};
+                constants(idx) = double(params.(key));
+                token = sprintf('c%d', offset + idx - 1);
+                pattern = ['(?<![A-Za-z0-9_])' regexptranslate('escape', key) '(?![A-Za-z0-9_])'];
+                expression = regexprep(expression, pattern, token);
+            end
         end
 
         function roots = resolve_roots()

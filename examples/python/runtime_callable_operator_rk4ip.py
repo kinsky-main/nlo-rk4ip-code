@@ -5,17 +5,18 @@ Runtime operator callable example using the unified example runner backend.
 from __future__ import annotations
 
 import numpy as np
-from backend.runner import (
-    NloExampleRunner,
-    SimulationOptions,
-    TemporalSimulationConfig,
-    centered_time_grid,
+from backend.runner import centered_time_grid
+from nlolib_ctypes import (
+    NLO_FFT_BACKEND_VKFFT,
+    NLO_VECTOR_BACKEND_AUTO,
+    NLolib,
+    OperatorSpec,
+    PulseSpec,
+    default_execution_options,
 )
 
 
 def main() -> None:
-    from nlolib_ctypes import RuntimeOperators
-
     n = 1024
     dt = 0.01
     beta2 = 0.05
@@ -24,32 +25,34 @@ def main() -> None:
     t = centered_time_grid(n, dt)
     field0 = np.exp(-((t / 0.20) ** 2)) * np.exp((-1.0j) * 12.0 * t)
 
-    runtime = RuntimeOperators(
-        dispersion_factor_fn=lambda A, w: (1.0j * scale) * (w * w),
-        nonlinear_fn=lambda A, I: (1.0j * 0.0) * I,
+    pulse = PulseSpec(
+        samples=field0.astype(np.complex128).tolist(),
+        delta_time=dt,
+        pulse_period=n * dt,
     )
-
-    sim_cfg = TemporalSimulationConfig(
-        gamma=0.0,
-        beta2=0.0,
-        alpha=0.0,
-        dt=dt,
-        z_final=z_final,
-        num_time_samples=n,
-        runtime=runtime,
-        starting_step_size=1e-3,
-        max_step_size=5e-3,
-        min_step_size=1e-5,
-        error_tolerance=1e-7,
+    linear_operator = OperatorSpec(
+        fn=lambda A, w: (1.0j * scale) * (w * w),
     )
-
-    runner = NloExampleRunner()
-    z_records, records = runner.propagate_temporal_records(
-        field0.astype(np.complex128),
-        sim_cfg,
-        num_records=2,
-        exec_options=SimulationOptions(backend="auto", fft_backend="vkfft"),
+    nonlinear_operator = OperatorSpec(
+        fn=lambda A, I: (1.0j * 0.0) * I,
     )
+    opts = default_execution_options(
+        backend_type=NLO_VECTOR_BACKEND_AUTO,
+        fft_backend=NLO_FFT_BACKEND_VKFFT,
+    )
+    api = NLolib()
+    result = api.simulate(
+        pulse,
+        linear_operator,
+        nonlinear_operator,
+        propagation_distance=z_final,
+        output="dense",
+        preset="accuracy",
+        records=2,
+        exec_options=opts,
+    )
+    z_records = np.asarray(result.z_axis, dtype=np.float64)
+    records = np.asarray(result.records, dtype=np.complex128)
 
     print("runtime callable example completed.")
     print(f"z records: {z_records}")

@@ -10,7 +10,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 try:
     from .runtime_expr import (  # type: ignore[attr-defined]
@@ -413,6 +413,196 @@ class RuntimeOperators:
     auto_capture_constants: bool = True
 
 
+@dataclass
+class PulseSpec:
+    samples: Sequence[complex]
+    delta_time: float
+    pulse_period: float | None = None
+    frequency_grid: Sequence[complex] | None = None
+    time_nt: int | None = None
+    spatial_nx: int | None = None
+    spatial_ny: int | None = None
+    delta_x: float = 1.0
+    delta_y: float = 1.0
+    spatial_frequency_grid: Sequence[complex] | None = None
+    potential_grid: Sequence[complex] | None = None
+
+
+@dataclass
+class OperatorSpec:
+    expr: str | None = None
+    fn: Callable[..., object] | None = None
+    params: Mapping[str, float] | Sequence[float] | None = None
+
+
+@dataclass
+class PropagationResult:
+    records: list[list[complex]]
+    z_axis: list[float]
+    final: list[complex]
+    meta: dict[str, Any]
+
+
+_LINEAR_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
+    "none": {"expr": "0", "params": {}},
+    "gvd": {"expr": "i*beta2*w*w-loss", "params": {"beta2": -0.5, "loss": 0.0}},
+}
+
+_NONLINEAR_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
+    "none": {"expr": "0", "params": {}},
+    "kerr": {"expr": "i*gamma*I", "params": {"gamma": 1.0}},
+}
+
+
+def _default_frequency_grid(num_time_samples: int, delta_time: float) -> list[complex]:
+    two_pi = 2.0 * 3.141592653589793
+    omega_step = two_pi / (float(num_time_samples) * delta_time)
+    positive_limit = (num_time_samples - 1) // 2
+    out: list[complex] = [0j] * num_time_samples
+    for i in range(num_time_samples):
+        if i <= positive_limit:
+            omega = float(i) * omega_step
+        else:
+            omega = -(float(num_time_samples - i) * omega_step)
+        out[i] = complex(omega, 0.0)
+    return out
+
+
+def _normalize_pulse_spec(pulse: PulseSpec | Mapping[str, object]) -> PulseSpec:
+    if isinstance(pulse, PulseSpec):
+        spec = pulse
+    elif isinstance(pulse, Mapping):
+        if "samples" not in pulse or "delta_time" not in pulse:
+            raise ValueError("pulse mapping must define 'samples' and 'delta_time'")
+        spec = PulseSpec(
+            samples=pulse["samples"],  # type: ignore[arg-type]
+            delta_time=float(pulse["delta_time"]),  # type: ignore[arg-type]
+            pulse_period=float(pulse["pulse_period"]) if pulse.get("pulse_period") is not None else None,
+            frequency_grid=pulse.get("frequency_grid"),  # type: ignore[arg-type]
+            time_nt=int(pulse["time_nt"]) if pulse.get("time_nt") is not None else None,
+            spatial_nx=int(pulse["spatial_nx"]) if pulse.get("spatial_nx") is not None else None,
+            spatial_ny=int(pulse["spatial_ny"]) if pulse.get("spatial_ny") is not None else None,
+            delta_x=float(pulse.get("delta_x", 1.0)),
+            delta_y=float(pulse.get("delta_y", 1.0)),
+            spatial_frequency_grid=pulse.get("spatial_frequency_grid"),  # type: ignore[arg-type]
+            potential_grid=pulse.get("potential_grid"),  # type: ignore[arg-type]
+        )
+    else:
+        raise ValueError("pulse must be a PulseSpec or mapping")
+
+        if len(spec.samples) == 0:
+            raise ValueError("pulse.samples must be non-empty")
+        if spec.delta_time <= 0.0:
+            raise ValueError("pulse.delta_time must be > 0")
+        if spec.time_nt is not None and int(spec.time_nt) <= 0:
+            raise ValueError("pulse.time_nt must be > 0 when provided")
+    return spec
+
+
+def _solver_profile_defaults(profile: str, propagation_distance: float) -> dict[str, float | int]:
+    if propagation_distance <= 0.0:
+        raise ValueError("propagation_distance must be > 0")
+
+    if profile == "balanced":
+        return {
+            "starting_step_size": propagation_distance / 200.0,
+            "max_step_size": propagation_distance / 25.0,
+            "min_step_size": propagation_distance / 20000.0,
+            "error_tolerance": 1e-6,
+            "records": 128,
+        }
+    if profile == "fast":
+        return {
+            "starting_step_size": propagation_distance / 120.0,
+            "max_step_size": propagation_distance / 12.0,
+            "min_step_size": propagation_distance / 4000.0,
+            "error_tolerance": 5e-6,
+            "records": 64,
+        }
+    if profile == "accuracy":
+        return {
+            "starting_step_size": propagation_distance / 400.0,
+            "max_step_size": propagation_distance / 50.0,
+            "min_step_size": propagation_distance / 80000.0,
+            "error_tolerance": 1e-7,
+            "records": 192,
+        }
+    raise ValueError(f"unsupported preset '{profile}'")
+
+
+def _parameterize_expression(
+    expression: str,
+    params: Mapping[str, float] | Sequence[float] | None,
+    offset: int,
+) -> tuple[str, list[float]]:
+    if params is None:
+        return expression, []
+
+    if isinstance(params, Mapping):
+        rewritten = expression
+        constants: list[float] = []
+        for idx, (name, value) in enumerate(params.items()):
+            if not re.match(r"^[A-Za-z_]\w*$", name):
+                raise ValueError(f"invalid parameter name '{name}'")
+            rewritten = re.sub(rf"\b{re.escape(name)}\b", f"c{offset + idx}", rewritten)
+            constants.append(float(value))
+        return rewritten, constants
+
+    constants = [float(value) for value in params]
+    return expression, constants
+
+
+def _coerce_operator_spec(operator: str | OperatorSpec | Mapping[str, object]) -> OperatorSpec:
+    if isinstance(operator, OperatorSpec):
+        return operator
+    if isinstance(operator, str):
+        return OperatorSpec(expr=operator)
+    if isinstance(operator, Mapping):
+        expr = operator.get("expr")
+        fn = operator.get("fn")
+        params = operator.get("params")
+        return OperatorSpec(
+            expr=str(expr) if expr is not None else None,
+            fn=fn if callable(fn) else None,
+            params=params if params is None or isinstance(params, (Mapping, Sequence)) else None,
+        )
+    raise ValueError("operator must be a preset string, OperatorSpec, or mapping")
+
+
+def _resolve_operator_spec(
+    context: str,
+    operator: str | OperatorSpec | Mapping[str, object],
+    offset: int,
+) -> tuple[str | None, Callable[..., object] | None, list[float], Mapping[str, float] | None]:
+    presets = _LINEAR_OPERATOR_PRESETS if context == "linear" else _NONLINEAR_OPERATOR_PRESETS
+
+    spec = _coerce_operator_spec(operator)
+    params = spec.params
+    expr = spec.expr
+    fn = spec.fn
+
+    if expr is not None and fn is not None:
+        raise ValueError(f"{context} operator cannot define both expr and fn")
+
+    if fn is None and expr is not None and expr in presets:
+        preset_entry = presets[expr]
+        expr = str(preset_entry["expr"])
+        params = preset_entry.get("params")  # type: ignore[assignment]
+
+    if expr is None and fn is None:
+        raise ValueError(f"{context} operator must define expr/fn or a known preset")
+
+    if fn is not None:
+        if params is not None and not isinstance(params, Mapping):
+            raise ValueError(f"{context} callable operator params must be a mapping")
+        bindings = {name: float(value) for name, value in params.items()} if isinstance(params, Mapping) else None
+        return None, fn, [], bindings
+
+    assert expr is not None
+    resolved_expr, constants = _parameterize_expression(expr, params, offset)
+    return resolved_expr, None, constants, None
+
+
 def _shift_constant_indices(expression: str, offset: int) -> str:
     if offset == 0:
         return expression
@@ -759,6 +949,120 @@ class NLolib:
             records.append(flat[start : start + n])
         return records
 
+    def simulate(
+        self,
+        pulse: PulseSpec | Mapping[str, object],
+        linear_operator: str | OperatorSpec | Mapping[str, object] = "gvd",
+        nonlinear_operator: str | OperatorSpec | Mapping[str, object] = "kerr",
+        *,
+        propagation_distance: float,
+        output: str = "dense",
+        preset: str = "balanced",
+        records: int | None = None,
+        exec_options: NloExecutionOptions | None = None,
+    ) -> PropagationResult:
+        """
+        High-level propagation facade using pulse/operator specs with defaults.
+        """
+        pulse_spec = _normalize_pulse_spec(pulse)
+        profile = _solver_profile_defaults(preset, float(propagation_distance))
+        num_records = int(records) if records is not None else int(profile["records"])
+        if output == "final":
+            num_records = 1
+        elif output != "dense":
+            raise ValueError("output must be 'dense' or 'final'")
+        if num_records <= 0:
+            raise ValueError("records must be > 0")
+
+        linear_expr, linear_fn, linear_constants, linear_bindings = _resolve_operator_spec(
+            "linear", linear_operator, 0
+        )
+        nonlinear_expr, nonlinear_fn, nonlinear_constants, nonlinear_bindings = _resolve_operator_spec(
+            "nonlinear", nonlinear_operator, len(linear_constants)
+        )
+
+        binding_map: dict[str, float] = {}
+        for source in (linear_bindings, nonlinear_bindings):
+            if source is None:
+                continue
+            for key, value in source.items():
+                existing = binding_map.get(key)
+                if existing is not None and existing != value:
+                    raise ValueError(f"conflicting callable param '{key}' across operators")
+                binding_map[key] = value
+
+        num_time_samples = len(pulse_spec.samples)
+        temporal_samples = (
+            int(pulse_spec.time_nt)
+            if pulse_spec.time_nt is not None and int(pulse_spec.time_nt) > 0
+            else num_time_samples
+        )
+        pulse_period = (
+            float(pulse_spec.pulse_period)
+            if pulse_spec.pulse_period is not None
+            else float(pulse_spec.delta_time) * float(temporal_samples)
+        )
+        frequency_grid = (
+            list(pulse_spec.frequency_grid)
+            if pulse_spec.frequency_grid is not None
+            else _default_frequency_grid(temporal_samples, pulse_spec.delta_time)
+        )
+
+        runtime = RuntimeOperators(
+            dispersion_factor_expr=linear_expr,
+            nonlinear_expr=nonlinear_expr,
+            dispersion_factor_fn=linear_fn,
+            nonlinear_fn=nonlinear_fn,
+            constants=[*linear_constants, *nonlinear_constants],
+            constant_bindings=binding_map if binding_map else None,
+            auto_capture_constants=(not binding_map),
+        )
+
+        config = prepare_sim_config(
+            num_time_samples,
+            propagation_distance=float(propagation_distance),
+            starting_step_size=float(profile["starting_step_size"]),
+            max_step_size=float(profile["max_step_size"]),
+            min_step_size=float(profile["min_step_size"]),
+            error_tolerance=float(profile["error_tolerance"]),
+            pulse_period=float(pulse_period),
+            delta_time=float(pulse_spec.delta_time),
+            time_nt=pulse_spec.time_nt,
+            frequency_grid=frequency_grid,
+            spatial_nx=pulse_spec.spatial_nx,
+            spatial_ny=pulse_spec.spatial_ny,
+            delta_x=float(pulse_spec.delta_x),
+            delta_y=float(pulse_spec.delta_y),
+            spatial_frequency_grid=pulse_spec.spatial_frequency_grid,
+            potential_grid=pulse_spec.potential_grid,
+            runtime=runtime,
+        )
+
+        out_records = self.propagate(config, pulse_spec.samples, num_records, exec_options)
+        if num_records == 1:
+            z_axis = [float(propagation_distance)]
+        else:
+            z_axis = [
+                (float(propagation_distance) * float(i)) / float(num_records - 1)
+                for i in range(num_records)
+            ]
+
+        return PropagationResult(
+            records=out_records,
+            z_axis=z_axis,
+            final=list(out_records[-1]),
+            meta={
+                "preset": preset,
+                "output": output,
+                "records": num_records,
+                "backend_requested": (
+                    int(exec_options.backend_type)
+                    if exec_options is not None
+                    else int(NLO_VECTOR_BACKEND_AUTO)
+                ),
+            },
+        )
+
     def propagate_with_storage(
         self,
         config: PreparedSimConfig | SimConfig,
@@ -858,6 +1162,9 @@ __all__ = [
     "NloStorageOptions",
     "NloStorageResult",
     "NloVkBackendConfig",
+    "OperatorSpec",
+    "PropagationResult",
+    "PulseSpec",
     "PreparedSimConfig",
     "RuntimeOperators",
     "NLolib",

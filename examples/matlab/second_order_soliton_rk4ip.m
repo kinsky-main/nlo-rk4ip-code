@@ -22,24 +22,33 @@ u0 = 2.0 * sech_array(t);
 a0 = to_physical_envelope(u0, 0.0, p0, alpha);
 
 numRecords = 160;
-cfg = struct();
-cfg.num_time_samples = n;
-cfg.propagation_distance = zFinal;
-cfg.starting_step_size = 2e-4;
-cfg.max_step_size = 1e-2;
-cfg.min_step_size = 1e-7;
-cfg.error_tolerance = 5e-6;
-cfg.pulse_period = n * dt;
-cfg.delta_time = dt;
-cfg.frequency_grid = complex(omega, zeros(1, n));
-cfg.runtime = struct('constants', [0.5 * beta2, 0.5 * alpha, gamma]);
+pulse = struct();
+pulse.samples = a0;
+pulse.delta_time = dt;
+pulse.pulse_period = n * dt;
+pulse.frequency_grid = complex(omega, zeros(1, n));
+
+linearOperator = struct();
+linearOperator.expr = "i*beta2*w*w-loss";
+linearOperator.params = struct('beta2', 0.5 * beta2, 'loss', 0.5 * alpha);
+
+nonlinearOperator = struct();
+nonlinearOperator.expr = "i*gamma*I + i*V";
+nonlinearOperator.params = struct('gamma', gamma);
 
 api = nlolib.NLolib();
 simOptions = backend.default_simulation_options( ...
     "backend", "auto", ...
     "fft_backend", "auto");
-[aRecords, info] = backend.propagate_with_fallback(api, cfg, a0, numRecords, simOptions);
-zRecords = linspace(0.0, zFinal, numRecords);
+execOptions = backend.make_exec_options(simOptions, numRecords);
+simulateOptions = struct();
+simulateOptions.propagation_distance = zFinal;
+simulateOptions.records = numRecords;
+simulateOptions.preset = "balanced";
+simulateOptions.exec_options = execOptions;
+result = api.simulate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+aRecords = result.records;
+zRecords = result.z_axis;
 
 ensure_finite_records_or_error(aRecords, zRecords);
 
@@ -110,8 +119,6 @@ fprintf("normalized NLSE coefficients: sgn(beta2)=%+d, 1/(2*LD)=%.6e 1/m, exp(-a
         int32(sgnBeta2), 0.5 / ld, exp(-alpha * zFinal) / lnl);
 fprintf("analytical z=0 envelope max error = %.6e\n", z0AnalyticError);
 fprintf("epsilon = %.6e\n", epsilon);
-fprintf("backend requested=%s used=%s fallback=%d\n", ...
-        info.requested_backend, info.used_backend, info.used_fallback);
 for idx = 1:numel(savedPaths)
     fprintf("saved plot: %s\n", savedPaths(idx));
 end

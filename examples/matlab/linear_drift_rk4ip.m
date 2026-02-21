@@ -15,24 +15,33 @@ numRecords = 180;
 t = backend.centered_time_grid(numSamples, dt);
 field0 = gaussian_with_phase_ramp(t, sigma, chirp);
 
-cfg = struct();
-cfg.num_time_samples = numSamples;
-cfg.propagation_distance = zFinal;
-cfg.starting_step_size = 1e-3;
-cfg.max_step_size = 5e-3;
-cfg.min_step_size = 1e-5;
-cfg.error_tolerance = 1e-7;
-cfg.pulse_period = numSamples * dt;
-cfg.delta_time = dt;
-cfg.frequency_grid = complex(backend.angular_frequency_grid(numSamples, dt), zeros(1, numSamples));
-cfg.runtime = struct('constants', [0.5 * beta2, 0.0, gamma]);
+pulse = struct();
+pulse.samples = field0;
+pulse.delta_time = dt;
+pulse.pulse_period = numSamples * dt;
+pulse.frequency_grid = complex(backend.angular_frequency_grid(numSamples, dt), zeros(1, numSamples));
+
+linearOperator = struct();
+linearOperator.expr = "i*beta2*w*w-loss";
+linearOperator.params = struct('beta2', 0.5 * beta2, 'loss', 0.0);
+
+nonlinearOperator = struct();
+nonlinearOperator.expr = "i*gamma*I + i*V";
+nonlinearOperator.params = struct('gamma', gamma);
 
 api = nlolib.NLolib();
 simOptions = backend.default_simulation_options( ...
     "backend", "auto", ...
     "fft_backend", "auto");
-[records, info] = backend.propagate_with_fallback(api, cfg, field0, numRecords, simOptions);
-zRecords = linspace(0.0, zFinal, numRecords);
+execOptions = backend.make_exec_options(simOptions, numRecords);
+simulateOptions = struct();
+simulateOptions.propagation_distance = zFinal;
+simulateOptions.records = numRecords;
+simulateOptions.preset = "accuracy";
+simulateOptions.exec_options = execOptions;
+result = api.simulate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+records = result.records;
+zRecords = result.z_axis;
 
 recordNorms = vecnorm(records, 2, 2);
 centroid = centroid_curve(t, records);
@@ -88,8 +97,6 @@ fprintf("centroid shift: z0=%.6e, z_end=%.6e\n", centroidShift(1), centroidShift
 fprintf("slope (signed): measured=%.6e, predicted=%.6e\n", measuredSlope, predictedSlope);
 fprintf("slope relative error: %.6e\n", slopeRelError);
 fprintf("centroid theory final shift: %.6e\n", theoryShift(end));
-fprintf("backend requested=%s used=%s fallback=%d\n", ...
-        info.requested_backend, info.used_backend, info.used_fallback);
 for idx = 1:numel(savedPaths)
     fprintf("saved plot: %s\n", savedPaths(idx));
 end
