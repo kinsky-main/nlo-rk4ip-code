@@ -26,7 +26,8 @@ size_t nlo_log_format_u64_grouped(char* dst, size_t dst_size, uint64_t value)
 
     size_t out_index = 0u;
     for (size_t i = 0u; i < digit_count; ++i) {
-        if (i > 0u && (i % 3u) == 0u) {
+        size_t remaining = digit_count - i;
+        if (remaining > 1u && (remaining % 3u) == 1u) {
             if (out_index + 1u >= dst_size) {
                 break;
             }
