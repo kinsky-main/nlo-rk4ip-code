@@ -42,7 +42,6 @@ dist/
 #cmake-build-*
 
 # Outputs
-docs/
 data/
 
 # Temp files
