@@ -144,7 +144,7 @@ def _run_case(
     )
 
     opts = exec_opts.to_ctypes(nlo)
-    result = api.simulate(
+    result = api.propagate(
         pulse,
         linear_operator,
         nonlinear_operator,

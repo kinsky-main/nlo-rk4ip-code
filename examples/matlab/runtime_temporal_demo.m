@@ -37,7 +37,7 @@ simulateOptions.preset = "accuracy";
 simulateOptions.exec_options = execOptions;
 simulateOptions.exec_options.matlab_stream_logs = true;
 simulateOptions.exec_options.matlab_log_buffer_bytes = uint64(256 * 1024);
-result = api.simulate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+result = api.propagate(pulse, linearOperator, nonlinearOperator, simulateOptions);
 records = result.records;
 finalField = records(end, :).';
 

@@ -215,7 +215,7 @@ simulateOptions.records = numRecords;
 simulateOptions.preset = "accuracy";
 simulateOptions.exec_options = execOptions;
 simulateOptions.transverse_operator = transverseOperator;
-result = api.simulate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+result = api.propagate(pulse, linearOperator, nonlinearOperator, simulateOptions);
 
 recordsFlat = result.records;
 records = unflatten_tyx_records(recordsFlat, numRecords, nt, ny, nx);

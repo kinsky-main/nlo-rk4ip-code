@@ -21,6 +21,8 @@
 - [ ] Implement more efficient GPU memory management and data transfer strategies, e.g. pinned memory, async transfers, etc.
 - [ ] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
 - [ ] Move transverse operator into main nonlinear and dispersion operators, may be required for certain potentials.
+- [ ] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
+- [ ] Loading bar with estimated time remaining for long-running simulations.
 
 ## Extensions
 

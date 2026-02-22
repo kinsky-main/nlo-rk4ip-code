@@ -31,7 +31,7 @@ classdef NLolib < handle
     %   QUICK START
     %     api = nlolib.NLolib();
     %     cfg = struct(...);
-    %     records = api.propagate(cfg, field0, numRecords);
+    %     result = api.propagate(cfg, field0, numRecords);
     %
     %   See also: examples/matlab/runtime_temporal_demo.m
 
@@ -85,11 +85,111 @@ classdef NLolib < handle
             % Call nlolib.NLolib.unload() explicitly if needed.
         end
 
-        function records = propagate(obj, config, inputField, ...
-                                     numRecordedSamples, execOptions)
-            %PROPAGATE Run a nonlinear propagation simulation.
-            %   records = obj.propagate(cfg, field, numRecords)
-            %   records = obj.propagate(cfg, field, numRecords, execOpts)
+        function result = propagate(obj, primary, varargin)
+            %PROPAGATE Unified propagation entrypoint.
+            %   Low-level:
+            %     result = obj.propagate(cfg, field, numRecords)
+            %     result = obj.propagate(cfg, field, numRecords, execOpts)
+            %     result = obj.propagate(cfg, field, numRecords, execOpts, storageOpts)
+            %   High-level:
+            %     result = obj.propagate(pulse, linearOp, nonlinearOp, options)
+            if nargin < 2
+                error('nlolib:invalidPropagateCall', ...
+                      'propagate requires at least a primary argument');
+            end
+
+            if nlolib.NLolib.looks_like_pulse_spec(primary)
+                linearOperator = "gvd";
+                nonlinearOperator = "kerr";
+                options = struct();
+                if numel(varargin) >= 1
+                    linearOperator = varargin{1};
+                end
+                if numel(varargin) >= 2
+                    nonlinearOperator = varargin{2};
+                end
+                if numel(varargin) >= 3
+                    options = varargin{3};
+                end
+                if numel(varargin) > 3
+                    error('nlolib:invalidPropagateCall', ...
+                          'high-level propagate accepts at most 3 trailing arguments');
+                end
+                result = obj.propagate_high_level(primary, linearOperator, nonlinearOperator, options);
+                return;
+            end
+
+            if numel(varargin) < 2
+                error('nlolib:invalidPropagateCall', ...
+                      'low-level propagate requires config, inputField, and numRecordedSamples');
+            end
+            config = primary;
+            inputField = varargin{1};
+            numRecordedSamples = varargin{2};
+            execOptions = struct();
+            storageOptions = struct();
+            if numel(varargin) >= 3
+                candidate = varargin{3};
+                if isstruct(candidate) && isfield(candidate, 'sqlite_path')
+                    storageOptions = candidate;
+                else
+                    execOptions = candidate;
+                end
+            end
+            if numel(varargin) >= 4
+                candidate = varargin{4};
+                if ~(isstruct(candidate) && isfield(candidate, 'sqlite_path'))
+                    error('nlolib:invalidPropagateCall', ...
+                          'fifth low-level argument must be storage options');
+                end
+                storageOptions = candidate;
+            end
+            if numel(varargin) > 4
+                error('nlolib:invalidPropagateCall', ...
+                      'low-level propagate accepts at most 4 trailing arguments');
+            end
+
+            distance = nlolib.NLolib.resolve_propagation_distance(config);
+            if ~isempty(fieldnames(storageOptions))
+                [records, storageResult] = obj.propagate_low_level_with_storage( ...
+                    config, inputField, numRecordedSamples, storageOptions, execOptions);
+                storageEnabled = true;
+            else
+                records = obj.propagate_low_level_records(config, inputField, numRecordedSamples, execOptions);
+                storageResult = struct();
+                storageEnabled = false;
+            end
+
+            result = struct();
+            result.records = records;
+            if size(records, 1) > 0
+                result.final = records(end, :);
+            else
+                result.final = [];
+            end
+            result.z_axis = nlolib.NLolib.make_z_axis(distance, double(numRecordedSamples));
+            result.meta = struct();
+            result.meta.output = char("dense");
+            if double(numRecordedSamples) == 1
+                result.meta.output = char("final");
+            end
+            result.meta.records = double(numRecordedSamples);
+            result.meta.storage_enabled = logical(storageEnabled);
+            result.meta.records_returned = size(records, 1) > 0;
+            if isstruct(execOptions) && isfield(execOptions, 'backend_type')
+                result.meta.backend_requested = double(execOptions.backend_type);
+            else
+                result.meta.backend_requested = 2;
+            end
+            result.meta.coupled = nlolib.NLolib.is_coupled_config(config);
+            if storageEnabled
+                result.meta.storage_result = storageResult;
+            end
+        end
+
+        function records = propagate_low_level_records(obj, config, inputField, ...
+                                                       numRecordedSamples, execOptions)
+            %PROPAGATE_LOW_LEVEL_RECORDS Low-level propagation that returns records matrix.
             if nargin < 5
                 execOptions = struct();
             end
@@ -433,11 +533,9 @@ classdef NLolib < handle
             end
         end
 
-        function [records, storageResult] = propagate_with_storage( ...
+        function [records, storageResult] = propagate_low_level_with_storage( ...
                 obj, config, inputField, numRecordedSamples, storageOptions, execOptions)
-            %PROPAGATE_WITH_STORAGE Run propagation with SQLite snapshot storage.
-            %   [records, storageResult] = obj.propagate_with_storage(cfg, field, numRecords, storageOptions)
-            %   [records, storageResult] = obj.propagate_with_storage(..., execOpts)
+            %PROPAGATE_LOW_LEVEL_WITH_STORAGE Low-level propagation with SQLite storage.
             if nargin < 6
                 execOptions = struct();
             end
@@ -541,9 +639,9 @@ classdef NLolib < handle
             storageResult = nlolib.NLolib.to_storage_result_struct(storageResultRaw);
         end
 
-        function result = simulate(obj, pulse, linearOperator, nonlinearOperator, options)
-            %SIMULATE High-level pulse/operator facade with balanced defaults.
-            %   result = obj.simulate(pulse, linearOperator, nonlinearOperator, options)
+        function result = propagate_high_level(obj, pulse, linearOperator, nonlinearOperator, options)
+            %PROPAGATE_HIGH_LEVEL High-level pulse/operator facade with balanced defaults.
+            %   result = obj.propagate_high_level(pulse, linearOperator, nonlinearOperator, options)
             %
             %   pulse.samples    : complex input field (required)
             %   pulse.delta_time : temporal spacing (required)
@@ -569,12 +667,12 @@ classdef NLolib < handle
             end
 
             if ~isempty(fieldnames(storageOptions))
-                [records, storageResult] = obj.propagate_with_storage( ...
+                [records, storageResult] = obj.propagate_low_level_with_storage( ...
                     cfg, inputField, numRecords, storageOptions, execOptions);
                 meta.storage_enabled = true;
                 meta.storage_result = storageResult;
             else
-                records = obj.propagate(cfg, inputField, numRecords, execOptions);
+                records = obj.propagate_low_level_records(cfg, inputField, numRecords, execOptions);
                 meta.storage_enabled = false;
             end
             meta.records_returned = size(records, 1) > 0;
@@ -634,6 +732,51 @@ classdef NLolib < handle
     end
 
     methods (Static)
+        function tf = looks_like_pulse_spec(candidate)
+            tf = isstruct(candidate) && ...
+                 isfield(candidate, 'samples') && ...
+                 isfield(candidate, 'delta_time') && ...
+                 ~isfield(candidate, 'num_time_samples');
+        end
+
+        function tf = is_coupled_config(config)
+            tf = false;
+            if ~isstruct(config)
+                return;
+            end
+            if isfield(config, 'spatial_nx') && isfield(config, 'spatial_ny')
+                tf = (double(config.spatial_nx) > 1) || (double(config.spatial_ny) > 1);
+                return;
+            end
+            if isfield(config, 'spatial') && isstruct(config.spatial) && ...
+                    isfield(config.spatial, 'nx') && isfield(config.spatial, 'ny')
+                tf = (double(config.spatial.nx) > 1) || (double(config.spatial.ny) > 1);
+            end
+        end
+
+        function zAxis = make_z_axis(distance, numRecords)
+            if numRecords <= 1
+                zAxis = distance;
+                return;
+            end
+            zAxis = linspace(0.0, distance, numRecords);
+        end
+
+        function distance = resolve_propagation_distance(config)
+            distance = 0.0;
+            if ~isstruct(config)
+                return;
+            end
+            if isfield(config, 'propagation_distance')
+                distance = double(config.propagation_distance);
+                return;
+            end
+            if isfield(config, 'propagation') && isstruct(config.propagation) && ...
+                    isfield(config.propagation, 'propagation_distance')
+                distance = double(config.propagation.propagation_distance);
+            end
+        end
+
         function unload()
             %UNLOAD Explicitly unload the nlolib shared library.
             if libisloaded('nlolib')

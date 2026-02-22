@@ -41,7 +41,7 @@ def main() -> None:
         fft_backend=NLO_FFT_BACKEND_VKFFT,
     )
     api = NLolib()
-    result = api.simulate(
+    result = api.propagate(
         pulse,
         linear_operator,
         nonlinear_operator,

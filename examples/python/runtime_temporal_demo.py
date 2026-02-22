@@ -57,7 +57,7 @@ def main() -> None:
     api.set_log_buffer(256 * 1024)
     api.set_log_level(2)
     api.set_progress_options(enabled=True, milestone_percent=10, emit_on_step_adjust=False)
-    result = api.simulate(
+    result = api.propagate(
         pulse,
         linear_operator,
         nonlinear_operator,

@@ -46,7 +46,7 @@ def main() -> None:
     if db_path.exists():
         db_path.unlink()
 
-    result = api.simulate(
+    result = api.propagate(
         pulse,
         linear,
         nonlinear,

@@ -244,6 +244,10 @@ Build wheel artifacts manually:
 ./tools/release/build_wheel_macos.sh build-wheel-macos Release
 ```
 
+These release scripts use CMake-managed patch bumps (`x.y.Z`) and then sync
+`pyproject.toml` from `CMakeLists.txt` so Python and MATLAB distribution
+versions stay aligned.
+
 ## MATLAB Usage
 
 Stage MATLAB package artifacts:

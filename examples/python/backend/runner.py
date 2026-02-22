@@ -235,8 +235,9 @@ class NloExampleRunner:
                 delta_y=1.0,
                 runtime=runtime_cfg,
             )
+            low_result = self.api.propagate(prepared, field.tolist(), int(num_records), opts)
             records = np.asarray(
-                self.api.propagate(prepared, field.tolist(), int(num_records), opts),
+                low_result.records,
                 dtype=np.complex128,
             ).reshape(int(num_records), n)
             if int(num_records) == 1:
@@ -262,7 +263,7 @@ class NloExampleRunner:
             expr="i*gamma*I + i*V",
             params={"gamma": float(sim_cfg.gamma)},
         )
-        result = self.api.simulate(
+        result = self.api.propagate(
             pulse,
             linear_operator,
             nonlinear_operator,
@@ -348,8 +349,9 @@ class NloExampleRunner:
                 potential_grid=(None if potential_values is None else potential_values.tolist()),
                 runtime=runtime_cfg,
             )
+            low_result = self.api.propagate(prepared, field.tolist(), int(num_records), opts)
             records = np.asarray(
-                self.api.propagate(prepared, field.tolist(), int(num_records), opts),
+                low_result.records,
                 dtype=np.complex128,
             ).reshape(int(num_records), int(ny), int(nx))
             if int(num_records) == 1:
@@ -381,7 +383,7 @@ class NloExampleRunner:
             expr="i*gamma*I + i*V",
             params={"gamma": float(gamma)},
         )
-        result = self.api.simulate(
+        result = self.api.propagate(
             pulse,
             linear_operator,
             nonlinear_operator,

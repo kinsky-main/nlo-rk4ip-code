@@ -37,7 +37,7 @@ def _base_case(api: NLolib, db_path: Path) -> None:
     field0 = [complex(math.exp(-(((i - (n / 2.0)) / 10.0) ** 2)), 0.0) for i in range(n)]
     num_records = 10
 
-    _, result = api.propagate_with_storage(
+    result_obj = api.propagate(
         cfg,
         field0,
         num_records,
@@ -45,18 +45,19 @@ def _base_case(api: NLolib, db_path: Path) -> None:
         chunk_records=4,
         return_records=False,
     )
+    storage = result_obj.meta.get("storage_result", {})
 
-    assert result.records_captured == num_records
-    assert result.records_spilled == num_records
-    assert result.chunks_written > 0
-    assert result.truncated == 0
+    assert int(storage.get("records_captured", 0)) == num_records
+    assert int(storage.get("records_spilled", 0)) == num_records
+    assert int(storage.get("chunks_written", 0)) > 0
+    assert int(storage.get("truncated", 0)) == 0
 
     with sqlite3.connect(db_path) as con:
         cur = con.cursor()
         assert _table_exists(cur, "io_runs")
         assert _table_exists(cur, "io_record_chunks")
         assert cur.execute("SELECT COUNT(*) FROM io_runs").fetchone()[0] == 1
-        assert cur.execute("SELECT COUNT(*) FROM io_record_chunks").fetchone()[0] == result.chunks_written
+        assert cur.execute("SELECT COUNT(*) FROM io_record_chunks").fetchone()[0] == int(storage.get("chunks_written", 0))
         if _table_exists(cur, "io_final_output_fields"):
             assert cur.execute("SELECT COUNT(*) FROM io_final_output_fields").fetchone()[0] == 0
 
@@ -76,7 +77,7 @@ def _cap_case(api: NLolib, db_path: Path) -> None:
     )
     field0 = [complex(math.exp(-(((i - (n / 2.0)) / 10.0) ** 2)), 0.0) for i in range(n)]
 
-    _, result = api.propagate_with_storage(
+    result_obj = api.propagate(
         cfg,
         field0,
         10,
@@ -85,8 +86,9 @@ def _cap_case(api: NLolib, db_path: Path) -> None:
         sqlite_max_bytes=1024,
         return_records=False,
     )
+    storage = result_obj.meta.get("storage_result", {})
 
-    assert result.truncated == 1
+    assert int(storage.get("truncated", 0)) == 1
 
 
 def _legacy_ntmax_exceed_case(api: NLolib, db_path: Path) -> None:
@@ -106,7 +108,7 @@ def _legacy_ntmax_exceed_case(api: NLolib, db_path: Path) -> None:
     field0 = [complex(1.0, 0.0)] * n
 
     try:
-        _, result = api.propagate_with_storage(
+        result_obj = api.propagate(
             cfg,
             field0,
             legacy_ntmax + 1,
@@ -115,7 +117,8 @@ def _legacy_ntmax_exceed_case(api: NLolib, db_path: Path) -> None:
             exec_options=default_execution_options(NLO_VECTOR_BACKEND_CPU),
             return_records=False,
         )
-        assert result.records_captured >= 1
+        storage = result_obj.meta.get("storage_result", {})
+        assert int(storage.get("records_captured", 0)) >= 1
     except RuntimeError as exc:
         # Current builds reject oversize record requests explicitly.
         assert "status=1" in str(exc)
@@ -136,7 +139,7 @@ def _final_output_logging_case(api: NLolib, db_path: Path) -> None:
     )
     field0 = [complex(math.exp(-(((i - (n / 2.0)) / 8.0) ** 2)), 0.0) for i in range(n)]
 
-    _, _ = api.propagate_with_storage(
+    _ = api.propagate(
         cfg,
         field0,
         4,
@@ -165,7 +168,7 @@ def _simulate_storage_facade_case(api: NLolib, db_path: Path) -> None:
         pulse_period=1.0,
         frequency_grid=[complex(i, 0.0) for i in range(n)],
     )
-    result = api.simulate(
+    result = api.propagate(
         pulse,
         OperatorSpec(expr="0"),
         OperatorSpec(expr="0"),

@@ -111,8 +111,8 @@ def test_dispersion_factor_callable_matches_string(api, opts):
         **common,
     )
 
-    string_final = api.propagate(string_cfg, input_field, 2, opts)[1]
-    callable_final = api.propagate(callable_cfg, input_field, 2, opts)[1]
+    string_final = api.propagate(string_cfg, input_field, 2, opts).records[1]
+    callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
     err = _max_abs_diff(string_final, callable_final)
     assert err <= 2e-8, f"dispersion factor callable mismatch: err={err}"
 
@@ -155,8 +155,8 @@ def test_nonlinear_callable_matches_string(api, opts):
         **common,
     )
 
-    string_final = api.propagate(string_cfg, input_field, 2, opts)[1]
-    callable_final = api.propagate(callable_cfg, input_field, 2, opts)[1]
+    string_final = api.propagate(string_cfg, input_field, 2, opts).records[1]
+    callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
     err = _max_abs_diff(string_final, callable_final)
     assert err <= 2e-8, f"nonlinear callable mismatch: err={err}"
 
@@ -207,7 +207,7 @@ def test_extended_runtime_operators_execute(api, opts):
         ),
     )
 
-    records = api.propagate(cfg, input_field, 2, opts)
+    records = api.propagate(cfg, input_field, 2, opts).records
     assert len(records) == 2
     assert len(records[0]) == n
 
@@ -260,8 +260,8 @@ def test_transverse_runtime_callable_matches_string(api, opts):
         **common,
     )
 
-    string_final = api.propagate(string_cfg, input_field, 2, opts)[1]
-    callable_final = api.propagate(callable_cfg, input_field, 2, opts)[1]
+    string_final = api.propagate(string_cfg, input_field, 2, opts).records[1]
+    callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
     err = _max_abs_diff(string_final, callable_final)
     assert err <= 2e-8, f"transverse callable mismatch: err={err}"
 
@@ -293,8 +293,8 @@ def test_linear_drift_signed_prediction(api, opts):
     pulse_pos = _gaussian_with_phase(t, sigma, d)
     pulse_neg = _gaussian_with_phase(t, sigma, -d)
 
-    final_pos = api.propagate(cfg, pulse_pos, 2, opts)[1]
-    final_neg = api.propagate(cfg, pulse_neg, 2, opts)[1]
+    final_pos = api.propagate(cfg, pulse_pos, 2, opts).records[1]
+    final_neg = api.propagate(cfg, pulse_neg, 2, opts).records[1]
 
     shift_pos = _intensity_centroid(t, final_pos) - _intensity_centroid(t, pulse_pos)
     shift_neg = _intensity_centroid(t, final_neg) - _intensity_centroid(t, pulse_neg)
@@ -346,7 +346,7 @@ def test_second_order_soliton_intensity_error(api, opts):
         runtime=RuntimeOperators(constants=[0.5 * beta2, 0.0, gamma]),
     )
 
-    records = api.propagate(cfg, a0, 2, opts)
+    records = api.propagate(cfg, a0, 2, opts).records
     final_field = records[1]
     assert all(math.isfinite(v.real) and math.isfinite(v.imag) for v in final_field)
 

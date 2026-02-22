@@ -1093,73 +1093,184 @@ class NLolib:
             raise RuntimeError(f"nlolib_query_runtime_limits failed with status={status}")
         return out
 
-    def propagate(
+    def propagate(self, primary: Any, *args: Any, **kwargs: Any) -> PropagationResult:
+        """
+        Unified propagation entrypoint.
+
+        Low-level form:
+            propagate(config, input_field, num_recorded_samples, exec_options=None, **storage_kwargs)
+
+        High-level form:
+            propagate(
+                pulse,
+                linear_operator="gvd",
+                nonlinear_operator="kerr",
+                *,
+                propagation_distance=...,
+                ...
+            )
+        """
+        if isinstance(primary, (PreparedSimConfig, SimConfig)):
+            return self._propagate_low_level(primary, *args, **kwargs)
+        return self._propagate_high_level(primary, *args, **kwargs)
+
+    def _propagate_low_level(
         self,
         config: PreparedSimConfig | SimConfig,
-        input_field: Sequence[complex],
-        num_recorded_samples: int,
-        exec_options: NloExecutionOptions | None = None,
-    ) -> list[list[complex]]:
-        """
-        Propagate an input field and return record-major complex samples.
-        """
-        if num_recorded_samples <= 0:
+        *args: Any,
+        **kwargs: Any,
+    ) -> PropagationResult:
+        input_field = kwargs.pop("input_field", None)
+        num_recorded_samples = kwargs.pop("num_recorded_samples", None)
+        exec_options = kwargs.pop("exec_options", None)
+
+        if len(args) > 3:
+            raise TypeError("low-level propagate accepts at most three positional args after config")
+        if len(args) >= 1:
+            if input_field is not None:
+                raise TypeError("input_field provided in both args and kwargs")
+            input_field = args[0]
+        if len(args) >= 2:
+            if num_recorded_samples is not None:
+                raise TypeError("num_recorded_samples provided in both args and kwargs")
+            num_recorded_samples = args[1]
+        if len(args) == 3:
+            if exec_options is not None:
+                raise TypeError("exec_options provided in both args and kwargs")
+            exec_options = args[2]
+
+        if input_field is None or num_recorded_samples is None:
+            raise TypeError("low-level propagate requires input_field and num_recorded_samples")
+
+        sqlite_path = kwargs.pop("sqlite_path", None)
+        run_id = kwargs.pop("run_id", None)
+        sqlite_max_bytes = int(kwargs.pop("sqlite_max_bytes", 0))
+        chunk_records = int(kwargs.pop("chunk_records", 0))
+        cap_policy = int(kwargs.pop("cap_policy", NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES))
+        log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
+        return_records = bool(kwargs.pop("return_records", True))
+        if kwargs:
+            raise TypeError(f"unexpected low-level propagate kwargs: {sorted(kwargs.keys())}")
+
+        num_records = int(num_recorded_samples)
+        if num_records <= 0:
             raise ValueError("num_recorded_samples must be > 0")
 
-        n = len(input_field)
+        input_seq = list(input_field)
+        n = len(input_seq)
         if n == 0:
             raise ValueError("input_field must be non-empty")
-
-        in_arr = make_complex_array(input_field)
-        out_arr = make_complex_array(n * int(num_recorded_samples))
 
         cfg = config.config if isinstance(config, PreparedSimConfig) else config
         cfg_ptr = ctypes.pointer(cfg)
         opts_ptr = ctypes.pointer(exec_options) if exec_options is not None else None
+        in_arr = make_complex_array(input_seq)
+        out_records: list[list[complex]]
+        storage_result_meta: dict[str, object] | None = None
 
-        status = int(
-            self.lib.nlolib_propagate(
-                cfg_ptr,
-                n,
-                ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
-                int(num_recorded_samples),
-                ctypes.cast(out_arr, ctypes.POINTER(NloComplex)),
-                opts_ptr,
+        if sqlite_path is None:
+            out_arr = make_complex_array(n * num_records)
+            status = int(
+                self.lib.nlolib_propagate(
+                    cfg_ptr,
+                    n,
+                    ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
+                    num_records,
+                    ctypes.cast(out_arr, ctypes.POINTER(NloComplex)),
+                    opts_ptr,
+                )
             )
-        )
-        if status != NLOLIB_STATUS_OK:
-            raise RuntimeError(f"nlolib_propagate failed with status={status}")
+            if status != NLOLIB_STATUS_OK:
+                raise RuntimeError(f"nlolib_propagate failed with status={status}")
+            out_records = self._records_from_complex_array(out_arr, n, num_records)
+        else:
+            if not bool(getattr(self.lib, "_has_propagate_with_storage", False)):
+                raise RuntimeError(
+                    "nlolib_propagate_with_storage is unavailable in the loaded nlolib build"
+                )
+            if not self.storage_is_available():
+                raise RuntimeError("SQLite storage is not available in this nlolib build")
 
-        flat = complex_array_to_list(out_arr, n * int(num_recorded_samples))
-        records: list[list[complex]] = []
-        for i in range(int(num_recorded_samples)):
-            start = i * n
-            records.append(flat[start : start + n])
-        return records
+            out_arr = make_complex_array(n * num_records) if return_records else None
+            storage_opts, storage_keepalive = default_storage_options(
+                sqlite_path=str(sqlite_path),
+                run_id=run_id,
+                sqlite_max_bytes=sqlite_max_bytes,
+                chunk_records=chunk_records,
+                cap_policy=cap_policy,
+                log_final_output_field_to_db=log_final_output_field_to_db,
+            )
+            storage_result = NloStorageResult()
+            _ = storage_keepalive
+            status = int(
+                self.lib.nlolib_propagate_with_storage(
+                    cfg_ptr,
+                    n,
+                    ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
+                    num_records,
+                    ctypes.cast(out_arr, ctypes.POINTER(NloComplex)) if out_arr is not None else None,
+                    opts_ptr,
+                    ctypes.pointer(storage_opts),
+                    ctypes.pointer(storage_result),
+                )
+            )
+            if status != NLOLIB_STATUS_OK:
+                raise RuntimeError(f"nlolib_propagate_with_storage failed with status={status}")
+            storage_result_meta = _storage_result_to_meta(storage_result)
+            if out_arr is None:
+                out_records = []
+            else:
+                out_records = self._records_from_complex_array(out_arr, n, num_records)
 
-    def simulate(
-        self,
-        pulse: PulseSpec | Mapping[str, object],
-        linear_operator: str | OperatorSpec | Mapping[str, object] = "gvd",
-        nonlinear_operator: str | OperatorSpec | Mapping[str, object] = "kerr",
-        *,
-        transverse_operator: str | OperatorSpec | Mapping[str, object] = "none",
-        propagation_distance: float,
-        output: str = "dense",
-        preset: str = "balanced",
-        records: int | None = None,
-        exec_options: NloExecutionOptions | None = None,
-        sqlite_path: str | None = None,
-        run_id: str | None = None,
-        sqlite_max_bytes: int = 0,
-        chunk_records: int = 0,
-        cap_policy: int = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
-        log_final_output_field_to_db: bool = False,
-        return_records: bool = True,
-    ) -> PropagationResult:
-        """
-        High-level propagation facade using pulse/operator specs with defaults.
-        """
+        distance = float(cfg.propagation.propagation_distance)
+        z_axis = self._build_z_axis(distance, num_records)
+        final = list(out_records[-1]) if out_records else []
+        meta: dict[str, Any] = {
+            "output": "final" if num_records == 1 else "dense",
+            "records": num_records,
+            "storage_enabled": bool(sqlite_path is not None),
+            "records_returned": bool(len(out_records) > 0),
+            "backend_requested": (
+                int(exec_options.backend_type)
+                if exec_options is not None
+                else int(NLO_VECTOR_BACKEND_AUTO)
+            ),
+            "coupled": bool(int(cfg.spatial.nx) > 1 or int(cfg.spatial.ny) > 1),
+        }
+        if storage_result_meta is not None:
+            meta["storage_result"] = storage_result_meta
+
+        return PropagationResult(records=out_records, z_axis=z_axis, final=final, meta=meta)
+
+    def _propagate_high_level(self, pulse: Any, *args: Any, **kwargs: Any) -> PropagationResult:
+        if len(args) > 2:
+            raise TypeError("high-level propagate accepts at most two positional operator args")
+
+        linear_operator = kwargs.pop("linear_operator", "gvd")
+        nonlinear_operator = kwargs.pop("nonlinear_operator", "kerr")
+        if len(args) >= 1:
+            linear_operator = args[0]
+        if len(args) >= 2:
+            nonlinear_operator = args[1]
+
+        transverse_operator = kwargs.pop("transverse_operator", "none")
+        propagation_distance = kwargs.pop("propagation_distance", None)
+        output = kwargs.pop("output", "dense")
+        preset = kwargs.pop("preset", "balanced")
+        records = kwargs.pop("records", None)
+        exec_options = kwargs.pop("exec_options", None)
+        sqlite_path = kwargs.pop("sqlite_path", None)
+        run_id = kwargs.pop("run_id", None)
+        sqlite_max_bytes = int(kwargs.pop("sqlite_max_bytes", 0))
+        chunk_records = int(kwargs.pop("chunk_records", 0))
+        cap_policy = int(kwargs.pop("cap_policy", NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES))
+        log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
+        return_records = bool(kwargs.pop("return_records", True))
+        if kwargs:
+            raise TypeError(f"unexpected high-level propagate kwargs: {sorted(kwargs.keys())}")
+        if propagation_distance is None:
+            raise TypeError("high-level propagate requires propagation_distance")
+
         pulse_spec = _normalize_pulse_spec(pulse)
         profile = _solver_profile_defaults(preset, float(propagation_distance))
         num_records = int(records) if records is not None else int(profile["records"])
@@ -1252,137 +1363,45 @@ class NLolib:
             runtime=runtime,
         )
 
-        storage_result_meta: dict[str, object] | None = None
-        if sqlite_path is None:
-            out_records = self.propagate(config, pulse_spec.samples, num_records, exec_options)
-        else:
-            storage_records, storage_result = self.propagate_with_storage(
-                config,
-                pulse_spec.samples,
-                num_records,
-                sqlite_path=sqlite_path,
-                run_id=run_id,
-                sqlite_max_bytes=sqlite_max_bytes,
-                chunk_records=chunk_records,
-                cap_policy=cap_policy,
-                log_final_output_field_to_db=log_final_output_field_to_db,
-                exec_options=exec_options,
-                return_records=bool(return_records),
-            )
-            storage_result_meta = _storage_result_to_meta(storage_result)
-            out_records = storage_records if storage_records is not None else []
-
-        if num_records == 1:
-            z_axis = [float(propagation_distance)]
-        else:
-            z_axis = [
-                (float(propagation_distance) * float(i)) / float(num_records - 1)
-                for i in range(num_records)
-            ]
-
-        if len(out_records) == 0:
-            final: list[complex] = []
-        else:
-            final = list(out_records[-1])
-
-        meta: dict[str, Any] = {
-            "preset": preset,
-            "output": output,
-            "records": num_records,
-            "coupled": bool(transverse_requested),
-            "storage_enabled": bool(sqlite_path is not None),
-            "records_returned": bool(len(out_records) > 0),
-            "backend_requested": (
-                int(exec_options.backend_type)
-                if exec_options is not None
-                else int(NLO_VECTOR_BACKEND_AUTO)
-            ),
-        }
-        if storage_result_meta is not None:
-            meta["storage_result"] = storage_result_meta
-
-        return PropagationResult(
-            records=out_records,
-            z_axis=z_axis,
-            final=final,
-            meta=meta,
-        )
-
-    def propagate_with_storage(
-        self,
-        config: PreparedSimConfig | SimConfig,
-        input_field: Sequence[complex],
-        num_recorded_samples: int,
-        *,
-        sqlite_path: str,
-        run_id: str | None = None,
-        sqlite_max_bytes: int = 0,
-        chunk_records: int = 0,
-        cap_policy: int = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
-        log_final_output_field_to_db: bool = False,
-        exec_options: NloExecutionOptions | None = None,
-        return_records: bool = False,
-    ) -> tuple[list[list[complex]] | None, NloStorageResult]:
-        """
-        Propagate and persist snapshot chunks into SQLite.
-        """
-        if not bool(getattr(self.lib, "_has_propagate_with_storage", False)):
-            raise RuntimeError(
-                "nlolib_propagate_with_storage is unavailable in the loaded nlolib build"
-            )
-
-        if num_recorded_samples <= 0:
-            raise ValueError("num_recorded_samples must be > 0")
-
-        n = len(input_field)
-        if n == 0:
-            raise ValueError("input_field must be non-empty")
-
-        if not self.storage_is_available():
-            raise RuntimeError("SQLite storage is not available in this nlolib build")
-
-        in_arr = make_complex_array(input_field)
-        out_arr = make_complex_array(n * int(num_recorded_samples)) if return_records else None
-
-        cfg = config.config if isinstance(config, PreparedSimConfig) else config
-        cfg_ptr = ctypes.pointer(cfg)
-        opts_ptr = ctypes.pointer(exec_options) if exec_options is not None else None
-
-        storage_opts, storage_keepalive = default_storage_options(
+        result = self._propagate_low_level(
+            config,
+            pulse_spec.samples,
+            num_records,
+            exec_options=exec_options,
             sqlite_path=sqlite_path,
             run_id=run_id,
             sqlite_max_bytes=sqlite_max_bytes,
             chunk_records=chunk_records,
             cap_policy=cap_policy,
             log_final_output_field_to_db=log_final_output_field_to_db,
+            return_records=return_records,
         )
-        storage_result = NloStorageResult()
-        _ = storage_keepalive  # Keep ctypes-backed strings alive for call duration.
+        result.meta["preset"] = preset
+        result.meta["output"] = output
+        result.meta["coupled"] = bool(transverse_requested)
+        return result
 
-        status = int(
-            self.lib.nlolib_propagate_with_storage(
-                cfg_ptr,
-                n,
-                ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
-                int(num_recorded_samples),
-                ctypes.cast(out_arr, ctypes.POINTER(NloComplex)) if out_arr is not None else None,
-                opts_ptr,
-                ctypes.pointer(storage_opts),
-                ctypes.pointer(storage_result),
-            )
-        )
-        if status != NLOLIB_STATUS_OK:
-            raise RuntimeError(f"nlolib_propagate_with_storage failed with status={status}")
-
-        if out_arr is None:
-            return None, storage_result
-
-        flat = complex_array_to_list(out_arr, n * int(num_recorded_samples))
+    @staticmethod
+    def _records_from_complex_array(
+        out_arr: ctypes.Array,
+        num_time_samples: int,
+        num_recorded_samples: int,
+    ) -> list[list[complex]]:
+        flat = complex_array_to_list(out_arr, num_time_samples * num_recorded_samples)
         records: list[list[complex]] = []
-        for i in range(int(num_recorded_samples)):
-            start = i * n
-            records.append(flat[start : start + n])
-        return records, storage_result
+        for i in range(num_recorded_samples):
+            start = i * num_time_samples
+            records.append(flat[start : start + num_time_samples])
+        return records
+
+    @staticmethod
+    def _build_z_axis(distance: float, num_records: int) -> list[float]:
+        if num_records == 1:
+            return [distance]
+        return [
+            (distance * float(i)) / float(num_records - 1)
+            for i in range(num_records)
+        ]
 
 
 __all__ = [

@@ -19,7 +19,19 @@ if(NLO_ENABLE_VKFFT)
     vkfft
     URL https://github.com/DTolm/VkFFT/archive/refs/heads/master.zip
   )
-  FetchContent_MakeAvailable(vkfft)
+  # VkFFT is used as headers-only; avoid adding its CMake sub-build because it
+  # can inject fragile transitive glslang library paths on Windows generators.
+  FetchContent_GetProperties(vkfft)
+  if(NOT vkfft_POPULATED)
+    if(POLICY CMP0169)
+      cmake_policy(PUSH)
+      cmake_policy(SET CMP0169 OLD)
+      FetchContent_Populate(vkfft)
+      cmake_policy(POP)
+    else()
+      FetchContent_Populate(vkfft)
+    endif()
+  endif()
 
   target_include_directories(nlo_fft_backend INTERFACE ${vkfft_SOURCE_DIR})
   target_compile_definitions(nlo_fft_backend INTERFACE VKFFT_BACKEND=0)

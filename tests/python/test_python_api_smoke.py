@@ -52,7 +52,7 @@ def main():
     cfg = _base_config(n)
     input_field = [0j] * n
 
-    out_records = api.propagate(cfg, input_field, 4, cpu_opts)
+    out_records = api.propagate(cfg, input_field, 4, cpu_opts).records
     assert len(out_records) == 4
     assert len(out_records[0]) == n
     log_text = api.read_log_buffer(consume=True)
@@ -78,7 +78,7 @@ def main():
         ),
     )
     gaussian = [complex(math.exp(-((i - 0.5 * n) / 18.0) ** 2), 0.0) for i in range(n)]
-    identity_records = api.propagate(identity_cfg, gaussian, 3, auto_opts)
+    identity_records = api.propagate(identity_cfg, gaussian, 3, auto_opts).records
     baseline_norm = _l2_norm(identity_records[0])
     final_norm = _l2_norm(identity_records[-1])
     rel_drift = abs(final_norm - baseline_norm) / max(baseline_norm, 1e-12)
@@ -104,7 +104,7 @@ def main():
         potential_grid=[1 + 0j] * nxy,
         runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
     )
-    out_2d = api.propagate(cfg_2d, [0j] * nxy, 1, cpu_opts)
+    out_2d = api.propagate(cfg_2d, [0j] * nxy, 1, cpu_opts).records
     assert len(out_2d) == 1
     assert len(out_2d[0]) == nxy
     print("test_python_api_smoke: flattened 2D propagation returned expected shape.")
@@ -130,7 +130,7 @@ def main():
         potential_grid=[0j] * (nx3 * ny3),
         runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0, 0.0]),
     )
-    out_3d = api.propagate(cfg_3d, [0j] * n3, 1, cpu_opts)
+    out_3d = api.propagate(cfg_3d, [0j] * n3, 1, cpu_opts).records
     assert len(out_3d) == 1
     assert len(out_3d[0]) == n3
     print("test_python_api_smoke: explicit 3+1D layout propagation returned expected shape.")
@@ -160,7 +160,7 @@ def main():
         samples=input_field,
         delta_time=0.001,
     )
-    sim_result = api.simulate(
+    sim_result = api.propagate(
         pulse,
         "gvd",
         "kerr",
@@ -172,9 +172,9 @@ def main():
     assert len(sim_result.records[0]) == n
     assert len(sim_result.z_axis) == 128
     assert _max_abs_diff(sim_result.final, sim_result.records[-1]) == 0.0
-    print("test_python_api_smoke: high-level simulate facade returned dense output.")
+    print("test_python_api_smoke: high-level propagate facade returned dense output.")
 
-    explicit_result = api.simulate(
+    explicit_result = api.propagate(
         pulse,
         OperatorSpec(expr="i*beta2*w*w", params={"beta2": -0.5}),
         OperatorSpec(expr="i*gamma*I", params={"gamma": 1.0}),
@@ -201,7 +201,7 @@ def main():
         spatial_frequency_grid=[0j] * (nx_c * ny_c),
         potential_grid=[0j] * (nx_c * ny_c),
     )
-    coupled_result = api.simulate(
+    coupled_result = api.propagate(
         pulse_coupled,
         OperatorSpec(expr="i*beta2*w*w-loss", params={"beta2": 0.0, "loss": 0.0}),
         OperatorSpec(expr="i*gamma*I + i*V", params={"gamma": 0.0}),
@@ -213,10 +213,10 @@ def main():
     assert len(coupled_result.records) == 2
     assert len(coupled_result.records[0]) == n_c
     assert coupled_result.meta["coupled"] is True
-    print("test_python_api_smoke: coupled transverse simulate returned expected shape.")
+    print("test_python_api_smoke: coupled transverse propagate returned expected shape.")
 
     try:
-        api.simulate(
+        api.propagate(
             pulse,
             OperatorSpec(expr="0", fn=lambda A, w: 0.0),  # noqa: E731
             "kerr",

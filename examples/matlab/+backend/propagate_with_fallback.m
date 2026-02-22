@@ -19,7 +19,8 @@ info.used_fallback = false;
 info.primary_error = "";
 
 try
-    records = api.propagate(cfg, inputField, numRecords, primaryExec);
+    result = api.propagate(cfg, inputField, numRecords, primaryExec);
+    records = result.records;
 catch primaryME
     if primaryBackend ~= "auto"
         rethrow(primaryME);
@@ -39,7 +40,8 @@ catch primaryME
         fallbackOpts.fft_backend = "auto";
     end
     fallbackExec = make_exec_options(fallbackOpts);
-    records = api.propagate(cfg, inputField, numRecords, fallbackExec);
+    result = api.propagate(cfg, inputField, numRecords, fallbackExec);
+    records = result.records;
     info.used_backend = "cpu";
 end
 end

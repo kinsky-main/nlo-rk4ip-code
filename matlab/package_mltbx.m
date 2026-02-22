@@ -40,13 +40,37 @@ platformTag = package_mltbx_platform_tag();
 artifactName = sprintf('nlolib-%s-%s.mltbx', version, platformTag);
 artifactPath = fullfile(distDir, artifactName);
 
-zipStem = fullfile(tempdir, ['nlolib_mltbx_' char(java.util.UUID.randomUUID())]); %#ok<CHARTEN>
-zip(zipStem, {'*'}, stageDir);
-zipPath = [zipStem '.zip'];
 if isfile(artifactPath)
     delete(artifactPath);
 end
-movefile(zipPath, artifactPath, 'f');
+
+identifier = sprintf('nlolib-%s', platformTag);
+opts = matlab.addons.toolbox.ToolboxOptions(stageDir, identifier);
+opts.ToolboxName = "nlolib";
+opts.ToolboxVersion = char(version);
+opts.Summary = "GPU-first nonlinear optics propagation library";
+opts.Description = sprintf(['nlolib MATLAB bindings and staged runtime libraries.\n' ...
+                            'Includes +nlolib wrapper files, nlolib_setup.m, examples,\n' ...
+                            'and platform-specific shared libraries under lib/.']);
+opts.AuthorName = "nlolib";
+opts.MinimumMatlabRelease = "R2019b";
+opts.OutputFile = artifactPath;
+opts.ToolboxMatlabPath = {char(stageDir), char(fullfile(stageDir, "examples", "matlab"))};
+supportedPlatforms = opts.SupportedPlatforms;
+supportedPlatforms.Win64 = false;
+supportedPlatforms.Glnxa64 = false;
+supportedPlatforms.Maci64 = false;
+supportedPlatforms.MatlabOnline = false;
+if ispc
+    supportedPlatforms.Win64 = true;
+elseif ismac
+    supportedPlatforms.Maci64 = true;
+else
+    supportedPlatforms.Glnxa64 = true;
+end
+opts.SupportedPlatforms = supportedPlatforms;
+
+matlab.addons.toolbox.packageToolbox(opts);
 
 fprintf('Created toolbox bundle: %s\n', artifactPath);
 end

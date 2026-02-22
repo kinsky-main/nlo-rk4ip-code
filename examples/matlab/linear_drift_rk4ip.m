@@ -39,7 +39,7 @@ simulateOptions.propagation_distance = zFinal;
 simulateOptions.records = numRecords;
 simulateOptions.preset = "accuracy";
 simulateOptions.exec_options = execOptions;
-result = api.simulate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+result = api.propagate(pulse, linearOperator, nonlinearOperator, simulateOptions);
 records = result.records;
 zRecords = result.z_axis;
 
