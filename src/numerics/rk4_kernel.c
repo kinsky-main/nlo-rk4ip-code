@@ -156,6 +156,9 @@ static nlo_vec_status nlo_apply_nonlinear_operator_stage(
     return status;
 }
 
+// TODO: These should be under operator.c
+// TODO: Dispersion currently recalculated each step, need to implement logic to separate constant factor from precalculated multiplier
+
 static nlo_vec_status nlo_apply_dispersion_operator_stage(
     simulation_state* state,
     nlo_vec_buffer* freq_domain_envelope

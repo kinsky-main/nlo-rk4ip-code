@@ -5,6 +5,8 @@
 
 #include "physics/operators.h"
 
+// TODO: Remove pointless wrapper here
+
 nlo_vec_status nlo_apply_dispersion_operator_program_vec(
     nlo_vector_backend* backend,
     const nlo_operator_program* program,

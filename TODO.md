@@ -15,6 +15,9 @@
 - [ ] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
 - [ ] Package and distribute library for Windows and Linux.
 - [ ] Go over soliton analytical solution and ensure it is correct as there is still an oscillatory L2 error in the solver compared to analytical solution.
+- [ ] Fix MATLAB output for installed packages where progress is not printed.
+- [ ] Improve printout for progress of solver, showing estimated time of completion.
+- [ ] Remove redundant wrappers and functions from MATLAB and Python bindings, duplications of factor expressions and dispersion expressions.
 
 ## Potentially Required Tasks
 
