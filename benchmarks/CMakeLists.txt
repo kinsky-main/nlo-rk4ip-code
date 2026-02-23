@@ -4,6 +4,8 @@ add_executable(bench_solver_backend
   ${CMAKE_CURRENT_LIST_DIR}/bench_solver_backend.c
   ${CMAKE_SOURCE_DIR}/src/core/state.c
   ${CMAKE_SOURCE_DIR}/src/core/init.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_format.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
   ${CMAKE_SOURCE_DIR}/src/io/snapshot_store.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
@@ -75,6 +77,7 @@ endif()
 
 if(WIN32)
   target_compile_definitions(bench_solver_backend PRIVATE NLOLIB_EXPORTS)
+  target_link_options(bench_solver_backend PRIVATE /IGNORE:4099)
 endif()
 
 if(UNIX)

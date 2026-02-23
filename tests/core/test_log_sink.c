@@ -15,8 +15,16 @@ static void test_grouped_integer_format(void)
     char text[64];
     (void)nlo_log_format_u64_grouped(text, sizeof(text), 0u);
     assert(strcmp(text, "0") == 0);
+    (void)nlo_log_format_u64_grouped(text, sizeof(text), 24u);
+    assert(strcmp(text, "24") == 0);
+    (void)nlo_log_format_u64_grouped(text, sizeof(text), 60u);
+    assert(strcmp(text, "60") == 0);
     (void)nlo_log_format_u64_grouped(text, sizeof(text), 1000u);
     assert(strcmp(text, "1,000") == 0);
+    (void)nlo_log_format_u64_grouped(text, sizeof(text), 16384u);
+    assert(strcmp(text, "16,384") == 0);
+    (void)nlo_log_format_u64_grouped(text, sizeof(text), 2621440u);
+    assert(strcmp(text, "2,621,440") == 0);
     (void)nlo_log_format_u64_grouped(text, sizeof(text), 1234567890ull);
     assert(strcmp(text, "1,234,567,890") == 0);
     printf("test_grouped_integer_format: passed.\n");
@@ -29,6 +37,10 @@ static void test_size_format(void)
     assert(strcmp(text, "512 B") == 0);
     (void)nlo_log_format_bytes_human(text, sizeof(text), 2048u);
     assert(strcmp(text, "2.0 KB") == 0);
+    (void)nlo_log_format_bytes_human(text, sizeof(text), 16384u);
+    assert(strcmp(text, "16.0 KB") == 0);
+    (void)nlo_log_format_bytes_human(text, sizeof(text), 2621440u);
+    assert(strcmp(text, "2.5 MB") == 0);
     (void)nlo_log_format_bytes_human(text, sizeof(text), (size_t)(3u * 1024u * 1024u));
     assert(strcmp(text, "3.0 MB") == 0);
     printf("test_size_format: passed.\n");
