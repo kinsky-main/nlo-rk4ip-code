@@ -18,6 +18,10 @@
 - [ ] Fix MATLAB output for installed packages where progress is not printed.
 - [ ] Improve printout for progress of solver, showing estimated time of completion.
 - [ ] Remove redundant wrappers and functions from MATLAB and Python bindings, duplications of factor expressions and dispersion expressions.
+- [ ] Remove bloat in nlolib.c which results in 3 pointless function wrappers for the same operations.
+- [ ] Remove bloat in wrappers which mirrors public API functions in nlolib.c bloat.
+- [ ] Fix soliton example, actually find original reference for analytical solution and ensure it is correct.
+- [ ] Check linear drift solution to see why error is bouncing around 0.6 z units, there is some characteristic in the error which should not be there.
 
 ## Potentially Required Tasks
 
@@ -27,9 +31,10 @@
 - [ ] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
 - [ ] Loading bar with estimated time remaining for long-running simulations.
 - [ ] Refactor state.c into respective init files.
+- [ ] Remap (3+1)D problems to use full size tensors rather than flattening to 1D arrays, this will also require implementation of dedicated GPU kernels for (3+1)D problems.
 
 ## Extensions
 
 - [ ] Add Massively Parallel Algorithm solver mode for coupled mode problems.
 - [ ] OpenMP backend for multi-core CPU parallelism.
-- [ ] Add example problem documentation on the physics of the problems (Do this in the report first ;).
+- [ ] Add example problem documentation on the physics of the problems (Do this in the report first ;)).

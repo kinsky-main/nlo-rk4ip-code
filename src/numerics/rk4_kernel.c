@@ -232,7 +232,7 @@ static nlo_vec_status nlo_rk4_attempt_step_doubling(
     if (state == NULL || state->backend == NULL || out_error == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
-
+    // TODO: This function currently performs two full RK4 steps to compute the error this should not be the case. Also error is computed each step which is not ideal.
     simulation_working_vectors* work = &state->working_vectors;
     const double half_step = 0.5 * step;
 
