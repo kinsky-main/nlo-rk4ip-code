@@ -267,6 +267,8 @@ def load(path: str | None = None) -> ctypes.CDLL:
                 "Unable to locate NLOLib shared library. "
                 "Set NLOLIB_LIBRARY to the full path."
             )
+            
+    print(f"Loaded NLOLib from '{lib_path}'")
 
     lib.nlolib_propagate.argtypes = [
         ctypes.POINTER(SimConfig),

@@ -62,6 +62,7 @@ classdef NLolib < handle
                         nlolib.NLolib.validate_load_result(notfound, loadWarnings, ...
                                                            dllPath, headerPath);
                         loaded = true;
+                        sprintf("Loaded nlolib library from %s with header %s\n", dllPath, headerPath);
                         break;
                     catch ME
                         loadErrors(end + 1, 1) = string(dllPath) + " -> " + string(ME.message); %#ok<AGROW>
