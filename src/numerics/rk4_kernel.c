@@ -7,7 +7,6 @@
 #include "fft/fft.h"
 #include "io/log_sink.h"
 #include "physics/operators.h"
-#include "utility/perf_profile.h"
 #include "utility/rk4_debug.h"
 #include <assert.h>
 #include <float.h>
@@ -120,91 +119,6 @@ static void nlo_rk4_debug_log_solver_config(const simulation_state* state, doubl
             config->propagation.min_step_size,
             config->propagation.max_step_size,
             tol);
-}
-
-static nlo_vec_status nlo_apply_nonlinear_operator_stage(
-    simulation_state* state,
-    const nlo_vec_buffer* field,
-    nlo_vec_buffer* out_field
-)
-{
-    if (state == NULL || state->backend == NULL || state->config == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    const nlo_operator_eval_context eval_ctx = {
-        .frequency_grid = state->frequency_grid_vec,
-        .field = field,
-        .dispersion_factor = state->working_vectors.dispersion_factor_vec,
-        .potential = state->working_vectors.potential_vec,
-        .half_step_size = state->current_half_step_exp
-    };
-
-    const double start_ms = nlo_perf_profile_now_ms();
-    const nlo_vec_status status = nlo_apply_nonlinear_operator_program_vec(state->backend,
-                                                                           &state->nonlinear_operator_program,
-                                                                           &eval_ctx,
-                                                                           field,
-                                                                           state->working_vectors.nonlinear_multiplier_vec,
-                                                                           out_field,
-                                                                           state->runtime_operator_stack_vec,
-                                                                           state->runtime_operator_stack_slots);
-    const double end_ms = nlo_perf_profile_now_ms();
-    if (status == NLO_VEC_STATUS_OK) {
-        nlo_perf_profile_add_nonlinear_time(end_ms - start_ms);
-    }
-    return status;
-}
-
-// TODO: These should be under operator.c
-// TODO: Dispersion currently recalculated each step, need to implement logic to separate constant factor from precalculated multiplier
-
-static nlo_vec_status nlo_apply_dispersion_operator_stage(
-    simulation_state* state,
-    nlo_vec_buffer* freq_domain_envelope
-)
-{
-    if (state == NULL || state->backend == NULL || state->config == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    const nlo_operator_eval_context eval_ctx = {
-        .frequency_grid = state->frequency_grid_vec,
-        .field = freq_domain_envelope,
-        .dispersion_factor = state->working_vectors.dispersion_factor_vec,
-        .potential = state->working_vectors.potential_vec,
-        .half_step_size = state->current_half_step_exp
-    };
-
-    const double start_ms = nlo_perf_profile_now_ms();
-    nlo_vec_status status = nlo_apply_dispersion_operator_program_vec(state->backend,
-                                                                      &state->dispersion_operator_program,
-                                                                      &eval_ctx,
-                                                                      freq_domain_envelope,
-                                                                      state->working_vectors.dispersion_operator_vec,
-                                                                      state->runtime_operator_stack_vec,
-                                                                      state->runtime_operator_stack_slots);
-    if (status == NLO_VEC_STATUS_OK && state->transverse_active) {
-        const nlo_operator_eval_context transverse_eval_ctx = {
-            .frequency_grid = state->spatial_frequency_grid_vec,
-            .field = freq_domain_envelope,
-            .dispersion_factor = state->transverse_factor_vec,
-            .potential = state->working_vectors.potential_vec,
-            .half_step_size = state->current_half_step_exp
-        };
-        status = nlo_apply_dispersion_operator_program_vec(state->backend,
-                                                           &state->transverse_operator_program,
-                                                           &transverse_eval_ctx,
-                                                           freq_domain_envelope,
-                                                           state->transverse_operator_vec,
-                                                           state->runtime_operator_stack_vec,
-                                                           state->runtime_operator_stack_slots);
-    }
-    const double end_ms = nlo_perf_profile_now_ms();
-    if (status == NLO_VEC_STATUS_OK) {
-        nlo_perf_profile_add_dispersion_time(end_ms - start_ms);
-    }
-    return status;
 }
 
 static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_index)
