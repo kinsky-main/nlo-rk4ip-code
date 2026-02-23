@@ -22,6 +22,11 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      - name: Install docs dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
       - name: Configure CMake (docs-only)
         run: >
           cmake -S . -B build-docs
