@@ -238,6 +238,72 @@ Doc generation details:
 - `doxygen-awesome-css` is fetched automatically during configure when docs are enabled.
 - Doxygen input is `src/` (`*.h`, `*.c`), with call and directory graphs enabled.
 
+### Publish Docs to GitHub Pages (Manual Trigger)
+
+The repository includes a manual GitHub Actions workflow at
+`.github/workflows/docs-pages.yml` that builds docs and deploys
+`build-docs/docs/html` to GitHub Pages.
+
+One-time GitHub Pages setup can be done with the existing secret token:
+
+```powershell
+$token = Get-Secret -Name GithubAdminToken -AsPlainText
+$origin = git remote get-url origin
+$null = $origin -match 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/.]+)(\.git)?$'
+$owner = $Matches.owner
+$repo = $Matches.repo
+$headers = @{
+  Authorization = "Bearer $token"
+  Accept = "application/vnd.github+json"
+  "User-Agent" = "nlolib-pages-setup"
+  "X-GitHub-Api-Version" = "2022-11-28"
+}
+$body = @{ build_type = "workflow" } | ConvertTo-Json
+try {
+  Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$owner/$repo/pages" -Headers $headers -Body $body -ContentType "application/json"
+} catch {
+  Invoke-RestMethod -Method Put -Uri "https://api.github.com/repos/$owner/$repo/pages" -Headers $headers -Body $body -ContentType "application/json"
+}
+```
+
+```bash
+token="$GITHUB_TOKEN"
+origin="$(git remote get-url origin)"
+owner="$(echo "$origin" | sed -E 's#.*github.com[:/]([^/]+)/([^/.]+)(\\.git)?#\\1#')"
+repo="$(echo "$origin" | sed -E 's#.*github.com[:/]([^/]+)/([^/.]+)(\\.git)?#\\2#')"
+payload='{"build_type":"workflow"}'
+curl -L -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer ${token}" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "https://api.github.com/repos/${owner}/${repo}/pages" \
+  -d "${payload}" || \
+curl -L -X PUT \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer ${token}" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "https://api.github.com/repos/${owner}/${repo}/pages" \
+  -d "${payload}"
+```
+
+For Linux/macOS, set `GITHUB_TOKEN` to a token with Pages admin permission
+before running the command.
+
+Then run the workflow from GitHub Actions UI:
+
+- Workflow: `docs-pages`
+- Trigger: `Run workflow`
+- Branch: `main`
+
+After a successful run, the site is published at:
+
+- `https://<owner>.github.io/<repo>/`
+
+Troubleshooting:
+
+- If configure says Doxygen is missing, install Doxygen and rerun.
+- First Pages deployment may require a short propagation delay before URL is live.
+
 ## Python Usage
 
 `python/CMakeLists.txt` places the built shared library next to the Python package for direct `ctypes` loading.

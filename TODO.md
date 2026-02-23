@@ -32,6 +32,7 @@
 - [ ] Loading bar with estimated time remaining for long-running simulations.
 - [ ] Refactor state.c into respective init files.
 - [ ] Remap (3+1)D problems to use full size tensors rather than flattening to 1D arrays, this will also require implementation of dedicated GPU kernels for (3+1)D problems.
+- [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.
 
 ## Extensions
 
