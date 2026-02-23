@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 nlo_configure_build_configurations()
 
-project(nlolib VERSION 1.3.0 LANGUAGES C)
+project(nlolib VERSION 1.4.0 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -14,6 +14,7 @@ option(NLO_INSTALL_GIT_HOOKS "Install repository git hooks during CMake configur
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
+option(NLOLIB_BUILD_MATLAB_TESTS "Enable MATLAB runtime-handle parser tests when MATLAB is available" OFF)
 option(NLO_ENABLE_VULKAN_BACKEND "Enable Vulkan vector backend and shader compilation path" ON)
 option(NLO_ENABLE_VKFFT "Enable VkFFT backend integration for Vulkan FFT execution" ON)
 option(NLO_BUMP_PATCH_ON_BUILD "Bump patch version in CMakeLists.txt after successful builds" ON)

@@ -266,6 +266,162 @@ def test_transverse_runtime_callable_matches_string(api, opts):
     assert err <= 2e-8, f"transverse callable mismatch: err={err}"
 
 
+def test_beta_sum_callable_matches_string(api, opts):
+    n = 192
+    dt = 0.02
+    beta2 = 0.04
+    beta3 = -0.003
+    beta4 = 0.0002
+    omega = _omega_grid_unshifted(n, dt)
+    input_field = _random_input_field(n, seed=71)
+
+    common = dict(
+        propagation_distance=0.08,
+        starting_step_size=1e-3,
+        max_step_size=5e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(w, 0.0) for w in omega],
+    )
+
+    string_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="i*(c0*(w^2)+c1*(w^3)+c2*(w^4))",
+            constants=[beta2, beta3, beta4, 0.0],
+        ),
+        **common,
+    )
+
+    beta_sum_fn = lambda A, w: (1j * (beta2 * (w**2) + beta3 * (w**3) + beta4 * (w**4)))  # noqa: E731
+    callable_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_fn=beta_sum_fn,
+            constants=[0.0, 0.0, 0.0, 0.0],
+        ),
+        **common,
+    )
+
+    string_final = api.propagate(string_cfg, input_field, 2, opts).records[1]
+    callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
+    err = _max_abs_diff(string_final, callable_final)
+    assert err <= 2e-6, f"beta-sum callable mismatch: err={err}"
+
+
+def test_diffraction_callable_matches_string(api, opts):
+    nt = 4
+    nx = 6
+    ny = 4
+    n = nt * nx * ny
+    beta_t = -0.018
+    input_field = _random_input_field(n, seed=101)
+    k2 = [complex(float((i % (nx * ny)) + 1), 0.0) for i in range(nx * ny)]
+
+    common = dict(
+        propagation_distance=0.01,
+        starting_step_size=1e-3,
+        max_step_size=2e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(nt) * 0.02,
+        delta_time=0.02,
+        time_nt=nt,
+        frequency_grid=[0j] * nt,
+        spatial_nx=nx,
+        spatial_ny=ny,
+        spatial_frequency_grid=k2,
+        potential_grid=[0j] * (nx * ny),
+    )
+
+    string_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            transverse_factor_expr="i*c3*w",
+            transverse_expr="exp(h*D)",
+            nonlinear_expr="0",
+            constants=[0.0, 0.0, 0.0, beta_t],
+        ),
+        **common,
+    )
+    callable_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            transverse_factor_fn=lambda A, w: (1j * beta_t) * w,  # noqa: E731
+            transverse_fn=lambda A, D, h: cmath.exp(h * D),  # noqa: E731
+            nonlinear_expr="0",
+            constants=[0.0, 0.0, 0.0, 0.0],
+        ),
+        **common,
+    )
+
+    string_final = api.propagate(string_cfg, input_field, 2, opts).records[1]
+    callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
+    err = _max_abs_diff(string_final, callable_final)
+    assert err <= 2e-8, f"diffraction callable mismatch: err={err}"
+
+
+def test_raman_like_nonlinear_callable_matches_string(api, opts):
+    nt = 4
+    nx = 4
+    ny = 4
+    n = nt * nx * ny
+    gamma = 0.015
+    f_r = 0.18
+    beta_t = -0.01
+    input_field = _random_input_field(n, seed=131)
+    k2 = [complex(float((i % (nx * ny)) + 1), 0.0) for i in range(nx * ny)]
+    potential = [complex(0.02 * float(i + 1), 0.0) for i in range(nx * ny)]
+
+    common = dict(
+        propagation_distance=0.008,
+        starting_step_size=8e-4,
+        max_step_size=2e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(nt) * 0.02,
+        delta_time=0.02,
+        time_nt=nt,
+        frequency_grid=[0j] * nt,
+        spatial_nx=nx,
+        spatial_ny=ny,
+        spatial_frequency_grid=k2,
+        potential_grid=potential,
+    )
+
+    string_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            transverse_factor_expr="i*c3*w",
+            transverse_expr="exp(h*D)",
+            nonlinear_expr="i*A*(c0*(1.0-c1)*I + c0*c1*V)",
+            constants=[gamma, f_r, 0.0, beta_t],
+        ),
+        **common,
+    )
+    callable_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            transverse_factor_fn=lambda A, w: (1j * beta_t) * w,  # noqa: E731
+            transverse_fn=lambda A, D, h: cmath.exp(h * D),  # noqa: E731
+            nonlinear_fn=lambda A, I, V: (1j * A) * (gamma * (1.0 - f_r) * I + gamma * f_r * V),  # noqa: E731
+            constants=[0.0, 0.0, 0.0, 0.0],
+        ),
+        **common,
+    )
+
+    string_final = api.propagate(string_cfg, input_field, 2, opts).records[1]
+    callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
+    err = _max_abs_diff(string_final, callable_final)
+    assert err <= 2e-8, f"Raman-like callable mismatch: err={err}"
+
+
 def test_linear_drift_signed_prediction(api, opts):
     n = 384
     dt = 0.01
@@ -367,6 +523,9 @@ def main():
     test_field_first_callable_signature_enforced()
     test_extended_runtime_operators_execute(api, opts)
     test_transverse_runtime_callable_matches_string(api, opts)
+    test_beta_sum_callable_matches_string(api, opts)
+    test_diffraction_callable_matches_string(api, opts)
+    test_raman_like_nonlinear_callable_matches_string(api, opts)
     test_linear_drift_signed_prediction(api, opts)
     test_second_order_soliton_intensity_error(api, opts)
     print("test_python_operator_regression: runtime-operator propagation regressions validated.")

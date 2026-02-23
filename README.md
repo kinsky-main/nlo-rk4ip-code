@@ -87,6 +87,7 @@ Current top-level CMake options and cache variables:
 | `NLOLIB_BUILD_DOCS` | `ON` | Enables `docs` target when Doxygen is found. |
 | `NLOLIB_BUILD_BENCHMARKS` | `ON` | Builds benchmark targets in `benchmarks/`. |
 | `NLOLIB_BUILD_EXAMPLES` | `ON` | Builds example targets in `examples/`. |
+| `NLOLIB_BUILD_MATLAB_TESTS` | `OFF` | Enables optional MATLAB parser/runtime tests under `tests/matlab` when MATLAB is available. |
 | `NLO_ENABLE_VULKAN_BACKEND` | `ON` | Enables Vulkan backend and shader compilation path. |
 | `NLO_ENABLE_VKFFT` | `ON` | Enables VkFFT FFT path (auto-forced `OFF` when Vulkan backend is disabled). |
 | `NLO_BUMP_PATCH_ON_BUILD` | `ON` | Adds `nlo_patch_bump_on_build` target to patch-bump version on successful build. |
@@ -180,12 +181,36 @@ ctest --test-dir build -R "^test_python_.*" --output-on-failure
 ctest --test-dir build -R "^test_nlo_.*" --output-on-failure
 ```
 
+Run the new Python callable-translation test directly:
+
+```bash
+ctest --test-dir build -R "^test_python_runtime_expr_translation$" --output-on-failure
+```
+
+Enable and run optional MATLAB parser/runtime tests:
+
+```powershell
+cmake -S . -B build `
+  -DBUILD_TESTING=ON `
+  -DNLOLIB_BUILD_MATLAB_TESTS=ON
+ctest --test-dir build --build-config Debug -R "^test_matlab_runtime_handle_parser$" --output-on-failure
+```
+
+```bash
+cmake -S . -B build \
+  -DBUILD_TESTING=ON \
+  -DNLOLIB_BUILD_MATLAB_TESTS=ON
+ctest --test-dir build -R "^test_matlab_runtime_handle_parser$" --output-on-failure
+```
+
 Current test groups:
 
 - FFT tests: `test_nlo_complex`, `test_fft`
 - Core tests: `test_core_state_alloc`
 - Numerics/backend tests: `test_nlo_numerics`, `test_nlo_vector_backend`, `test_nlo_simd_wrapper`, `test_nlo_vector_backend_vulkan`
 - Python tests: `test_python_api_smoke`, `test_python_operator_regression`, `test_python_storage_chunking`
+- Python translation test: `test_python_runtime_expr_translation`
+- MATLAB tests (optional): `test_matlab_runtime_handle_parser` when `NLOLIB_BUILD_MATLAB_TESTS=ON` and MATLAB is found
 
 Note: Python tests require a discoverable Python interpreter at CMake configure time.
 

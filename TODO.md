@@ -13,7 +13,7 @@
 - [x] Remove old API and just have custom functions for dispersion and nonlinearity, this removes the complications of additional vector operators.
 - [x] Implement new GRIN operations using preferred kernels for (2+1)D operations.
 - [ ] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
-- [ ] Package and distribute library for Windows and Linux.
+- [x] Package and distribute library for Windows and Linux.
 - [ ] Go over soliton analytical solution and ensure it is correct as there is still an oscillatory L2 error in the solver compared to analytical solution.
 - [ ] Fix MATLAB output for installed packages where progress is not printed.
 - [ ] Improve printout for progress of solver, showing estimated time of completion.
@@ -26,6 +26,7 @@
 - [ ] Move transverse operator into main nonlinear and dispersion operators, may be required for certain potentials.
 - [ ] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
 - [ ] Loading bar with estimated time remaining for long-running simulations.
+- [ ] Refactor state.c into respective init files.
 
 ## Extensions
 
