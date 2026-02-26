@@ -290,14 +290,14 @@ def main() -> float:
         omega=omega,
         error_tolerance=5e-6,
     )
-    exec_opts = SimulationOptions(backend="auto", fft_backend="auto")
+    exec_options = SimulationOptions(backend="auto", fft_backend="auto")
 
     runner = NloExampleRunner()
     z_records, A_records = runner.propagate_temporal_records(
         np.asarray(A0, dtype=np.complex128),
         sim_cfg,
         num_recorded_samples,
-        exec_opts,
+        exec_options,
     )
     ensure_finite_records_or_raise(A_records, z_records)
     U_num_records = np.empty_like(A_records, dtype=np.complex128)

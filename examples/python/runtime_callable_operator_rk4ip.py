@@ -36,7 +36,7 @@ def main() -> None:
     nonlinear_operator = OperatorSpec(
         fn=lambda A, I: (1.0j * 0.0) * I,
     )
-    opts = default_execution_options(
+    exec_options = default_execution_options(
         backend_type=NLO_VECTOR_BACKEND_AUTO,
         fft_backend=NLO_FFT_BACKEND_VKFFT,
     )
@@ -49,7 +49,7 @@ def main() -> None:
         output="dense",
         preset="accuracy",
         records=2,
-        exec_options=opts,
+        exec_options=exec_options,
     )
     z_records = np.asarray(result.z_axis, dtype=np.float64)
     records = np.asarray(result.records, dtype=np.complex128)

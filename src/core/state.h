@@ -102,7 +102,24 @@ typedef struct {
 } runtime_operator_params;
 
 /**
- * @brief Full simulation input configuration.
+ * @brief Simulation-only input configuration (no runtime physics program).
+ */
+typedef struct {
+    propagation_params propagation;
+    time_grid time;
+    frequency_grid frequency;
+    spatial_grid spatial;
+} nlo_simulation_config;
+
+/**
+ * @brief Physics/operator input configuration used by runtime evaluators.
+ */
+typedef runtime_operator_params nlo_physics_config;
+
+/**
+ * @brief Full internal simulation input configuration.
+ *
+ * This combines public simulation and physics sections for solver internals.
  */
 typedef struct {
     propagation_params propagation;

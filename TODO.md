@@ -25,6 +25,7 @@
 - [ ] Plot pulse evolution in the soliton example against the step size to show convergence of the solver.
 - [ ] Create benchmark to run multiple fixed step sizes to evaluate convergence of the solver and show that it is consistent with the expected order of the RK4 method.
 - [ ] Remap (3+1)D problems to use full size tensors rather than flattening to 1D arrays, this will also require implementation of dedicated GPU kernels for (3+1)D problems.
+- [ ] Redefine nonlinear operator inputs to not separate the field, it should allow for non-seperable nonlinear operators.
 
 ## Potentially Required Tasks
 

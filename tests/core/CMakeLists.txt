@@ -34,6 +34,13 @@ if(TARGET nlo_vk_shaders)
 endif()
 if(WIN32)
   target_compile_definitions(test_core_state_alloc PRIVATE NLOLIB_EXPORTS)
+  add_custom_command(TARGET test_core_state_alloc POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_core_state_alloc>"
+            -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_core_state_alloc>"
+            -DNLO_RUNTIME_HINTS="${NLO_SQLITE_RUNTIME_HINTS}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
+  )
 endif()
 if(UNIX)
   target_link_libraries(test_core_state_alloc PRIVATE m)

@@ -34,12 +34,12 @@ simOptions = backend.default_simulation_options( ...
     "backend", "auto", ...
     "fft_backend", "auto");
 execOptions = backend.make_exec_options(simOptions, numRecords);
-simulateOptions = struct();
-simulateOptions.propagation_distance = zFinal;
-simulateOptions.records = numRecords;
-simulateOptions.preset = "accuracy";
-simulateOptions.exec_options = execOptions;
-result = api.propagate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+propagateOptions = struct();
+propagateOptions.propagation_distance = zFinal;
+propagateOptions.records = numRecords;
+propagateOptions.preset = "accuracy";
+propagateOptions.exec_options = execOptions;
+result = api.propagate(pulse, linearOperator, nonlinearOperator, propagateOptions);
 records = result.records;
 zRecords = result.z_axis;
 

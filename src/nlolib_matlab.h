@@ -137,7 +137,23 @@ typedef struct
 } runtime_operator_params;
 
 /**
- * @brief Full simulation input configuration.
+ * @brief Simulation-only input configuration.
+ */
+typedef struct
+{
+    propagation_params propagation;
+    time_grid time;
+    nlo_frequency_grid frequency;
+    spatial_grid spatial;
+} nlo_simulation_config;
+
+/**
+ * @brief Physics/operator input configuration.
+ */
+typedef runtime_operator_params nlo_physics_config;
+
+/**
+ * @brief Full internal simulation input configuration.
  */
 typedef struct
 {
@@ -286,6 +302,38 @@ typedef struct
     int truncated;
 } nlo_storage_result;
 
+/**
+ * @brief Propagation record output mode.
+ */
+typedef enum
+{
+    NLO_PROPAGATE_OUTPUT_DENSE = 0,
+    NLO_PROPAGATE_OUTPUT_FINAL_ONLY = 1
+} nlo_propagate_output_mode;
+
+/**
+ * @brief Unified propagation request options.
+ */
+typedef struct
+{
+    size_t num_recorded_samples;
+    nlo_propagate_output_mode output_mode;
+    int return_records;
+    const nlo_execution_options *exec_options;
+    const nlo_storage_options *storage_options;
+} nlo_propagate_options;
+
+/**
+ * @brief Unified propagation output metadata and buffers.
+ */
+typedef struct
+{
+    nlo_complex *output_records;
+    size_t output_record_capacity;
+    size_t *records_written;
+    nlo_storage_result *storage_result;
+} nlo_propagate_output;
+
 /* -------------------------------------------------------------------
  * Public API
  * ------------------------------------------------------------------- */
@@ -296,12 +344,12 @@ typedef struct
  * See `nlolib.h` for full parameter and return-value semantics.
  */
 nlolib_status nlolib_propagate(
-    const sim_config *config,
+    const nlo_simulation_config *simulation_config,
+    const nlo_physics_config *physics_config,
     size_t num_time_samples,
     const nlo_complex *input_field,
-    size_t num_recorded_samples,
-    nlo_complex *output_records,
-    const nlo_execution_options *exec_options);
+    const nlo_propagate_options *options,
+    nlo_propagate_output *output);
 
 /**
  * @brief MATLAB FFI mirror of nlolib_query_runtime_limits().
@@ -309,37 +357,10 @@ nlolib_status nlolib_propagate(
  * See `nlolib.h` for full parameter and return-value semantics.
  */
 nlolib_status nlolib_query_runtime_limits(
-    const sim_config *config,
+    const nlo_simulation_config *simulation_config,
+    const nlo_physics_config *physics_config,
     const nlo_execution_options *exec_options,
     nlo_runtime_limits *out_limits);
-
-/**
- * @brief MATLAB FFI mirror of nlolib_propagate_interleaved().
- *
- * See `nlolib.h` for full parameter and return-value semantics.
- */
-nlolib_status nlolib_propagate_interleaved(
-    const sim_config *config,
-    size_t num_time_samples,
-    const double *input_field_interleaved,
-    size_t num_recorded_samples,
-    double *output_records_interleaved,
-    const nlo_execution_options *exec_options);
-
-/**
- * @brief MATLAB FFI mirror of nlolib_propagate_with_storage().
- *
- * See `nlolib.h` for full parameter and return-value semantics.
- */
-nlolib_status nlolib_propagate_with_storage(
-    const sim_config *config,
-    size_t num_time_samples,
-    const nlo_complex *input_field,
-    size_t num_recorded_samples,
-    nlo_complex *output_records,
-    const nlo_execution_options *exec_options,
-    const nlo_storage_options *storage_options,
-    nlo_storage_result *storage_result);
 
 /**
  * @brief Return whether SQLite snapshot storage is available in this build.

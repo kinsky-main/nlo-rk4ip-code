@@ -116,7 +116,35 @@ classdef NLolib < handle
                     error('nlolib:invalidPropagateCall', ...
                           'high-level propagate accepts at most 3 trailing arguments');
                 end
-                result = obj.propagate_high_level(primary, linearOperator, nonlinearOperator, options);
+                [cfg, inputField, numRecordedSamples, execOptions, zAxis, meta] = ...
+                    nlolib.NLolib.build_simulation_request(primary, linearOperator, nonlinearOperator, options);
+
+                storageOptions = struct();
+                if isfield(options, 'storage') && ~isempty(options.storage)
+                    if ~isstruct(options.storage)
+                        error('nlolib:invalidStorageOptions', ...
+                              'options.storage must be a struct');
+                    end
+                    storageOptions = options.storage;
+                end
+
+                [records, storageResult, storageEnabled] = obj.execute_propagate_request( ...
+                    cfg, inputField, numRecordedSamples, execOptions, storageOptions);
+                meta.storage_enabled = logical(storageEnabled);
+                if storageEnabled
+                    meta.storage_result = storageResult;
+                end
+                meta.records_returned = size(records, 1) > 0;
+
+                result = struct();
+                result.records = records;
+                result.z_axis = zAxis;
+                if size(records, 1) > 0
+                    result.final = records(end, :);
+                else
+                    result.final = [];
+                end
+                result.meta = meta;
                 return;
             end
 
@@ -151,15 +179,8 @@ classdef NLolib < handle
             end
 
             distance = nlolib.NLolib.resolve_propagation_distance(config);
-            if ~isempty(fieldnames(storageOptions))
-                [records, storageResult] = obj.propagate_low_level_with_storage( ...
-                    config, inputField, numRecordedSamples, storageOptions, execOptions);
-                storageEnabled = true;
-            else
-                records = obj.propagate_low_level_records(config, inputField, numRecordedSamples, execOptions);
-                storageResult = struct();
-                storageEnabled = false;
-            end
+            [records, storageResult, storageEnabled] = obj.execute_propagate_request( ...
+                config, inputField, numRecordedSamples, execOptions, storageOptions);
 
             result = struct();
             result.records = records;
@@ -188,35 +209,53 @@ classdef NLolib < handle
             end
         end
 
-        function records = propagate_low_level_records(obj, config, inputField, ...
-                                                       numRecordedSamples, execOptions)
-            %PROPAGATE_LOW_LEVEL_RECORDS Low-level propagation that returns records matrix.
-            if nargin < 5
+        function [records, storageResult, storageEnabled] = execute_propagate_request( ...
+                obj, config, inputField, numRecordedSamples, execOptions, storageOptions)
+            %EXECUTE_PROPAGATE_REQUEST Internal call path for all propagate forms.
+            if nargin < 5 || isempty(execOptions)
                 execOptions = struct();
+            end
+            if nargin < 6 || isempty(storageOptions)
+                storageOptions = struct();
+            end
+            if ~isstruct(storageOptions)
+                error('nlolib:invalidStorageOptions', 'storageOptions must be a struct');
+            end
+
+            storageEnabled = ~isempty(fieldnames(storageOptions));
+            if storageEnabled
+                if ~isfield(storageOptions, 'sqlite_path') || ...
+                        strlength(string(storageOptions.sqlite_path)) == 0
+                    error('nlolib:invalidStorageOptions', ...
+                          'storageOptions.sqlite_path is required');
+                end
+                if ~obj.storage_is_available()
+                    error('nlolib:storageUnavailable', ...
+                          'SQLite storage is not available in this nlolib build.');
+                end
+            end
+
+            returnRecords = true;
+            if storageEnabled && isfield(storageOptions, 'return_records') && ...
+                    ~isempty(storageOptions.return_records)
+                returnRecords = logical(storageOptions.return_records);
             end
 
             numTimeSamples = numel(inputField);
             numRecordedSamples = uint64(numRecordedSamples);
 
-            % Pack sim_config and collect keepalive handles.
-            [cfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>
+            % Pack split configs and collect keepalive handles.
+            [simCfgPtr, physicsCfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<NASGU>
+            inPtr = nlolib.pack_complex_array(inputField);
 
-            useInterleaved = nlolib.NLolib.has_library_function(obj.LIBNAME, ...
-                                                                 'nlolib_propagate_interleaved');
-            if useInterleaved
-                inPtr = nlolib.pack_complex_interleaved_array(inputField);
+            if returnRecords
+                outLen = uint64(numTimeSamples) * numRecordedSamples;
+                outBuffer = repmat(struct('re', 0.0, 'im', 0.0), 1, double(outLen));
+                totalComplex = double(outLen);
             else
-                inPtr = nlolib.pack_complex_array(inputField);
+                outBuffer = struct('re', {}, 'im', {});
+                totalComplex = 0.0;
             end
-
-            % Allocate output buffer.
-            outLen = uint64(numTimeSamples) * numRecordedSamples;
-            if useInterleaved
-                outPtr = nlolib.pack_complex_interleaved_array(zeros(1, double(outLen)));
-            else
-                outPtr = nlolib.pack_complex_array(zeros(1, double(outLen)));
-            end
-            totalComplex = double(outLen);
 
             matlabDebug = false;
             if isstruct(execOptions) && isfield(execOptions, 'matlab_debug')
@@ -225,17 +264,13 @@ classdef NLolib < handle
             end
             preProbe = struct();
             postProbe = struct();
-            if matlabDebug
-                preProbe = nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
-                                                          "pre-call", true);
-            end
 
-            % Build execution options with explicit typed defaults.
             if isempty(fieldnames(execOptions))
-                execOptsPtr = nlolib.NLolib.make_exec_options(struct());
+                execOptsStruct = nlolib.NLolib.make_exec_options(struct());
             else
-                execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
+                execOptsStruct = nlolib.NLolib.make_exec_options(execOptions);
             end
+            execOptsPtr = libpointer('nlo_execution_optionsPtr', execOptsStruct);
 
             streamLogs = false;
             streamLogBufferBytes = uint64(262144);
@@ -253,27 +288,47 @@ classdef NLolib < handle
                 obj.clear_log_buffer();
             end
 
-            if useInterleaved
-                statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate_interleaved', ...
-                                    cfgPtr, ...
-                                    uint64(numTimeSamples), ...
-                                    inPtr, ...
-                                    numRecordedSamples, ...
-                                    outPtr, ...
-                                    execOptsPtr);
+            if storageEnabled
+                [storageOptsStruct, storageKeepalive] = ...
+                    nlolib.NLolib.make_storage_options(storageOptions); %#ok<NASGU>
+                storageOptsPtr = libpointer('nlo_storage_optionsPtr', storageOptsStruct);
+                storageResultRaw = libstruct('nlo_storage_result');
+                storageResultPtr = libpointer('nlo_storage_resultPtr', storageResultRaw);
             else
-                statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate', ...
-                                    cfgPtr, ...
-                                    uint64(numTimeSamples), ...
-                                    inPtr, ...
-                                    numRecordedSamples, ...
-                                    outPtr, ...
-                                    execOptsPtr);
+                storageOptsPtr = libpointer('nlo_storage_optionsPtr');
+                storageResultPtr = libpointer('nlo_storage_resultPtr');
             end
-            if matlabDebug
-                postProbe = nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
-                                                           "post-call", true);
+
+            propagateOptions = libstruct('nlo_propagate_options');
+            propagateOptions.num_recorded_samples = numRecordedSamples;
+            if numRecordedSamples == uint64(1)
+                propagateOptions.output_mode = int32(1);
+            else
+                propagateOptions.output_mode = int32(0);
             end
+            propagateOptions.return_records = int32(logical(returnRecords));
+            propagateOptions.exec_options = execOptsPtr;
+            propagateOptions.storage_options = storageOptsPtr;
+
+            recordsWrittenPtr = libpointer('uint64Ptr', uint64(0));
+            propagateOutput = libstruct('nlo_propagate_output');
+            if returnRecords
+                propagateOutput.output_records = outBuffer;
+                propagateOutput.output_record_capacity = numRecordedSamples;
+            else
+                propagateOutput.output_records = outBuffer;
+                propagateOutput.output_record_capacity = uint64(0);
+            end
+            propagateOutput.records_written = recordsWrittenPtr;
+            propagateOutput.storage_result = storageResultPtr;
+
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate', ...
+                                simCfgPtr, ...
+                                physicsCfgPtr, ...
+                                uint64(numTimeSamples), ...
+                                inPtr, ...
+                                propagateOptions, ...
+                                propagateOutput);
 
             streamedLogs = "";
             if streamLogs && nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_read_log_buffer')
@@ -285,7 +340,7 @@ classdef NLolib < handle
                 if streamLogs && strlength(streamedLogs) > 0
                     statusDetail = statusDetail + newline + "runtime logs:" + newline + streamedLogs;
                 end
-                if matlabDebug
+                if matlabDebug && returnRecords
                     if isstruct(postProbe) && isfield(postProbe, 'value_size')
                         sizeText = join(string(double(postProbe.value_size(:).')), "x");
                     else
@@ -318,14 +373,25 @@ classdef NLolib < handle
                 end
             end
 
-            debugContext = struct('enabled', matlabDebug, ...
-                                  'expected_count', totalComplex, ...
-                                  'pre_probe', preProbe, ...
-                                  'post_probe', postProbe);
-            records = nlolib.unpack_records(outPtr, ...
-                                            double(numRecordedSamples), ...
-                                            numTimeSamples, ...
-                                            debugContext);
+            recordsWritten = double(recordsWrittenPtr.Value);
+            if returnRecords
+                debugContext = struct('enabled', matlabDebug, ...
+                                      'expected_count', totalComplex, ...
+                                      'pre_probe', preProbe, ...
+                                      'post_probe', postProbe);
+                records = nlolib.unpack_records(outBuffer, ...
+                                                recordsWritten, ...
+                                                numTimeSamples, ...
+                                                debugContext);
+            else
+                records = zeros(0, numTimeSamples);
+            end
+
+            if storageEnabled
+                storageResult = nlolib.NLolib.to_storage_result_struct(storageResultPtr.Value);
+            else
+                storageResult = struct();
+            end
         end
 
         function tf = storage_is_available(obj)
@@ -534,161 +600,6 @@ classdef NLolib < handle
             end
         end
 
-        function [records, storageResult] = propagate_low_level_with_storage( ...
-                obj, config, inputField, numRecordedSamples, storageOptions, execOptions)
-            %PROPAGATE_LOW_LEVEL_WITH_STORAGE Low-level propagation with SQLite storage.
-            if nargin < 6
-                execOptions = struct();
-            end
-            if nargin < 5 || isempty(storageOptions) || ~isstruct(storageOptions)
-                error('nlolib:invalidStorageOptions', 'storageOptions must be a struct');
-            end
-            if ~isfield(storageOptions, 'sqlite_path') || strlength(string(storageOptions.sqlite_path)) == 0
-                error('nlolib:invalidStorageOptions', ...
-                      'storageOptions.sqlite_path is required');
-            end
-            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_propagate_with_storage')
-                error('nlolib:storageUnavailable', ...
-                      'nlolib_propagate_with_storage is unavailable in this library build.');
-            end
-            if ~obj.storage_is_available()
-                error('nlolib:storageUnavailable', ...
-                      'SQLite storage is not available in this nlolib build.');
-            end
-
-            returnRecords = true;
-            if isfield(storageOptions, 'return_records') && ~isempty(storageOptions.return_records)
-                returnRecords = logical(storageOptions.return_records);
-            end
-
-            numTimeSamples = numel(inputField);
-            numRecordedSamples = uint64(numRecordedSamples);
-
-            [cfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>
-            inPtr = nlolib.pack_complex_array(inputField);
-
-            if returnRecords
-                outLen = uint64(numTimeSamples) * numRecordedSamples;
-                outPtr = nlolib.pack_complex_array(zeros(1, double(outLen)));
-            else
-                outPtr = libpointer('nlo_complexPtr');
-            end
-
-            if isempty(fieldnames(execOptions))
-                execOptsPtr = nlolib.NLolib.make_exec_options(struct());
-            else
-                execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
-            end
-
-            streamLogs = false;
-            streamLogBufferBytes = uint64(262144);
-            if isstruct(execOptions) && isfield(execOptions, 'matlab_stream_logs')
-                streamLogs = logical(execOptions.matlab_stream_logs);
-                streamLogs = any(streamLogs(:));
-            end
-            if isstruct(execOptions) && isfield(execOptions, 'matlab_log_buffer_bytes')
-                streamLogBufferBytes = uint64(execOptions.matlab_log_buffer_bytes);
-            end
-            if streamLogs && ...
-                    nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_log_buffer') && ...
-                    nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_clear_log_buffer')
-                obj.set_log_buffer(streamLogBufferBytes);
-                obj.clear_log_buffer();
-            end
-
-            [storageOptsPtr, storageKeepalive] = ...
-                nlolib.NLolib.make_storage_options(storageOptions); %#ok<ASGLU>
-            storageResultRaw = libstruct('nlo_storage_result');
-
-            statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate_with_storage', ...
-                                cfgPtr, ...
-                                uint64(numTimeSamples), ...
-                                inPtr, ...
-                                numRecordedSamples, ...
-                                outPtr, ...
-                                execOptsPtr, ...
-                                storageOptsPtr, ...
-                                storageResultRaw);
-
-            streamedLogs = "";
-            if streamLogs && nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_read_log_buffer')
-                streamedLogs = obj.tail_logs(true, streamLogBufferBytes);
-            end
-            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
-            if statusCode ~= 0
-                if streamLogs && strlength(streamedLogs) > 0
-                    statusDetail = statusDetail + newline + "runtime logs:" + newline + streamedLogs;
-                end
-                if strlength(statusDetail) > 0
-                    error('nlolib:propagateWithStorageFailed', ...
-                          'nlolib_propagate_with_storage failed with status=%d (%s). %s', ...
-                          statusCode, statusName, statusDetail);
-                else
-                    error('nlolib:propagateWithStorageFailed', ...
-                          'nlolib_propagate_with_storage failed with status=%d (%s)', ...
-                          statusCode, statusName);
-                end
-            end
-
-            if returnRecords
-                records = nlolib.unpack_records(outPtr, ...
-                                                double(numRecordedSamples), ...
-                                                numTimeSamples);
-            else
-                records = zeros(0, numTimeSamples);
-            end
-            storageResult = nlolib.NLolib.to_storage_result_struct(storageResultRaw);
-        end
-
-        function result = propagate_high_level(obj, pulse, linearOperator, nonlinearOperator, options)
-            %PROPAGATE_HIGH_LEVEL High-level pulse/operator facade with balanced defaults.
-            %   result = obj.propagate_high_level(pulse, linearOperator, nonlinearOperator, options)
-            %
-            %   pulse.samples    : complex input field (required)
-            %   pulse.delta_time : temporal spacing (required)
-            %   options.propagation_distance : propagation distance (required)
-            %
-            %   result.records : dense record-major output matrix
-            %   result.z_axis  : z locations of returned records
-            %   result.final   : final output field (last row of records)
-            %   result.meta    : request metadata
-            if nargin < 5
-                options = struct();
-            end
-
-            [cfg, inputField, numRecords, execOptions, zAxis, meta] = ...
-                nlolib.NLolib.build_simulation_request(pulse, linearOperator, nonlinearOperator, options);
-            storageOptions = struct();
-            if isfield(options, 'storage') && ~isempty(options.storage)
-                if ~isstruct(options.storage)
-                    error('nlolib:invalidStorageOptions', ...
-                          'options.storage must be a struct');
-                end
-                storageOptions = options.storage;
-            end
-
-            if ~isempty(fieldnames(storageOptions))
-                [records, storageResult] = obj.propagate_low_level_with_storage( ...
-                    cfg, inputField, numRecords, storageOptions, execOptions);
-                meta.storage_enabled = true;
-                meta.storage_result = storageResult;
-            else
-                records = obj.propagate_low_level_records(cfg, inputField, numRecords, execOptions);
-                meta.storage_enabled = false;
-            end
-            meta.records_returned = size(records, 1) > 0;
-
-            result = struct();
-            result.records = records;
-            result.z_axis = zAxis;
-            if size(records, 1) > 0
-                result.final = records(end, :);
-            else
-                result.final = [];
-            end
-            result.meta = meta;
-        end
-
         function limits = query_runtime_limits(obj, config, execOptions)
             %QUERY_RUNTIME_LIMITS Query runtime-derived solver limits.
             if nargin < 2
@@ -711,11 +622,11 @@ classdef NLolib < handle
                       'nlolib_query_runtime_limits is not available in this library build.');
             end
 
-            [cfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>
+            [simCfgPtr, physicsCfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>
             execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
             out = libstruct('nlo_runtime_limits');
             statusRaw = calllib(obj.LIBNAME, 'nlolib_query_runtime_limits', ...
-                                cfgPtr, execOptsPtr, out);
+                                simCfgPtr, physicsCfgPtr, execOptsPtr, out);
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
             if statusCode ~= 0
                 if strlength(statusDetail) > 0
@@ -868,6 +779,20 @@ classdef NLolib < handle
                 error('nlolib:simConfigTypeUnavailable', ...
                       ['MATLAB failed to construct runtime_operator_params with char fields.\n' ...
                        'This points to a header parse mismatch for const char* fields.\n' ...
+                       'Run:\n' ...
+                       '  nlolib.NLolib.unload();\n' ...
+                       '  clear classes;\n' ...
+                       'Then recreate nlolib.NLolib().\n\n' ...
+                       'Original error: %s'], ME.message);
+            end
+
+            try
+                popts = libstruct('nlo_propagate_options'); %#ok<NASGU>
+                pout = libstruct('nlo_propagate_output'); %#ok<NASGU>
+            catch ME
+                error('nlolib:simConfigTypeUnavailable', ...
+                      ['MATLAB failed to construct nlo_propagate_options/output types.\n' ...
+                       'This points to a header parse mismatch for unified propagate ABI fields.\n' ...
                        'Run:\n' ...
                        '  nlolib.NLolib.unload();\n' ...
                        '  clear classes;\n' ...

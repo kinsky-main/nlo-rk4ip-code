@@ -67,44 +67,51 @@ int main(void)
     const double beta2 = 0.05;
     static const char* k_runtime_dispersion_factor_expr = "i*c0*w*w";
 
-    static sim_config cfg;
+    static nlo_simulation_config sim_cfg;
+    static nlo_physics_config physics_cfg;
     static nlo_execution_options exec_options;
+    static nlo_propagate_options propagate_options;
+    static nlo_propagate_output propagate_output;
+    size_t records_written = 0u;
     static nlo_complex input_field[DEMO_NUM_TIME_SAMPLES];
     static nlo_complex frequency_grid[DEMO_NUM_TIME_SAMPLES];
     static nlo_complex output_records[DEMO_NUM_TIME_SAMPLES * DEMO_NUM_RECORDED_SAMPLES];
 
-    memset(&cfg, 0, sizeof(cfg));
+    memset(&sim_cfg, 0, sizeof(sim_cfg));
+    memset(&physics_cfg, 0, sizeof(physics_cfg));
     memset(&exec_options, 0, sizeof(exec_options));
+    memset(&propagate_options, 0, sizeof(propagate_options));
+    memset(&propagate_output, 0, sizeof(propagate_output));
     memset(output_records, 0, sizeof(output_records));
 
     fill_input_field(delta_time, input_field);
     fill_frequency_grid(delta_time, frequency_grid);
 
-    cfg.propagation.propagation_distance = 0.25;
-    cfg.propagation.starting_step_size = 1e-3;
-    cfg.propagation.max_step_size = 5e-3;
-    cfg.propagation.min_step_size = 1e-5;
-    cfg.propagation.error_tolerance = 1e-7;
+    sim_cfg.propagation.propagation_distance = 0.25;
+    sim_cfg.propagation.starting_step_size = 1e-3;
+    sim_cfg.propagation.max_step_size = 5e-3;
+    sim_cfg.propagation.min_step_size = 1e-5;
+    sim_cfg.propagation.error_tolerance = 1e-7;
 
-    cfg.time.pulse_period = (double)DEMO_NUM_TIME_SAMPLES * delta_time;
-    cfg.time.delta_time = delta_time;
+    sim_cfg.time.pulse_period = (double)DEMO_NUM_TIME_SAMPLES * delta_time;
+    sim_cfg.time.delta_time = delta_time;
 
-    cfg.frequency.frequency_grid = frequency_grid;
+    sim_cfg.frequency.frequency_grid = frequency_grid;
 
-    cfg.spatial.nx = DEMO_NUM_TIME_SAMPLES;
-    cfg.spatial.ny = 1u;
-    cfg.spatial.delta_x = 1.0;
-    cfg.spatial.delta_y = 1.0;
-    cfg.spatial.spatial_frequency_grid = NULL;
-    cfg.spatial.potential_grid = NULL;
+    sim_cfg.spatial.nx = DEMO_NUM_TIME_SAMPLES;
+    sim_cfg.spatial.ny = 1u;
+    sim_cfg.spatial.delta_x = 1.0;
+    sim_cfg.spatial.delta_y = 1.0;
+    sim_cfg.spatial.spatial_frequency_grid = NULL;
+    sim_cfg.spatial.potential_grid = NULL;
 
-    cfg.runtime.dispersion_factor_expr = k_runtime_dispersion_factor_expr;
-    cfg.runtime.dispersion_expr = NULL;
-    cfg.runtime.nonlinear_expr = NULL;
-    cfg.runtime.num_constants = 3u;
-    cfg.runtime.constants[0] = 0.5 * beta2;
-    cfg.runtime.constants[1] = 0.0;
-    cfg.runtime.constants[2] = 0.01;
+    physics_cfg.dispersion_factor_expr = k_runtime_dispersion_factor_expr;
+    physics_cfg.dispersion_expr = NULL;
+    physics_cfg.nonlinear_expr = NULL;
+    physics_cfg.num_constants = 3u;
+    physics_cfg.constants[0] = 0.5 * beta2;
+    physics_cfg.constants[1] = 0.0;
+    physics_cfg.constants[2] = 0.01;
 
     exec_options.backend_type = NLO_VECTOR_BACKEND_CPU;
     exec_options.fft_backend = NLO_FFT_BACKEND_FFTW;
@@ -112,12 +119,21 @@ int main(void)
     exec_options.record_ring_target = 0u;
     exec_options.forced_device_budget_bytes = 0u;
 
-    const nlolib_status status = nlolib_propagate(&cfg,
+    propagate_options = nlolib_propagate_options_default();
+    propagate_options.exec_options = &exec_options;
+    propagate_options.num_recorded_samples = DEMO_NUM_RECORDED_SAMPLES;
+
+    propagate_output = nlolib_propagate_output_default();
+    propagate_output.output_records = output_records;
+    propagate_output.output_record_capacity = DEMO_NUM_RECORDED_SAMPLES;
+    propagate_output.records_written = &records_written;
+
+    const nlolib_status status = nlolib_propagate(&sim_cfg,
+                                                  &physics_cfg,
                                                   DEMO_NUM_TIME_SAMPLES,
                                                   input_field,
-                                                  DEMO_NUM_RECORDED_SAMPLES,
-                                                  output_records,
-                                                  &exec_options);
+                                                  &propagate_options,
+                                                  &propagate_output);
     if (status != NLOLIB_STATUS_OK) {
         fprintf(stderr,
                 "runtime_temporal_demo_c: nlolib_propagate failed with status=%d (%s)\n",
@@ -133,6 +149,7 @@ int main(void)
 
     printf("runtime_temporal_demo_c: propagated %zu samples.\n",
            (size_t)DEMO_NUM_TIME_SAMPLES);
+    printf("records_written=%zu\n", records_written);
     printf("initial power=%.6e final power=%.6e\n", initial_power, final_power);
     return 0;
 }

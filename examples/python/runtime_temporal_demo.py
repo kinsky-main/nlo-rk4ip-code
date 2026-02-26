@@ -49,7 +49,7 @@ def main() -> None:
         params={"gamma": 0.01},
     )
 
-    opts = default_execution_options(
+    exec_options = default_execution_options(
         backend_type=NLO_VECTOR_BACKEND_AUTO,
         fft_backend=NLO_FFT_BACKEND_VKFFT,
     )
@@ -65,7 +65,7 @@ def main() -> None:
         output="dense",
         preset="accuracy",
         records=2,
-        exec_options=opts,
+        exec_options=exec_options,
     )
     records = np.asarray(result.records, dtype=np.complex128)
 

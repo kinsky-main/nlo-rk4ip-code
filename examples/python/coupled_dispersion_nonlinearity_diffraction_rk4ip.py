@@ -99,7 +99,7 @@ def _run_case(
     temporal_width: float,
     spatial_width: float,
     chirp: float,
-    exec_opts: SimulationOptions,
+    exec_options: SimulationOptions,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     nlo = runner.nlo
     api = runner.api
@@ -143,7 +143,7 @@ def _run_case(
         params={"gamma": gamma},
     )
 
-    opts = exec_opts.to_ctypes(nlo)
+    exec_options_ctypes = exec_options.to_ctypes(nlo)
     result = api.propagate(
         pulse,
         linear_operator,
@@ -153,7 +153,7 @@ def _run_case(
         output="dense",
         preset="accuracy",
         records=num_records,
-        exec_options=opts,
+        exec_options=exec_options_ctypes,
     )
     records = np.asarray(result.records, dtype=np.complex128).reshape(num_records, nt, ny, nx)
     z_records = np.asarray(result.z_axis, dtype=np.float64)
@@ -162,7 +162,7 @@ def _run_case(
 
 def main() -> None:
     runner = NloExampleRunner()
-    exec_opts = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
+    exec_options = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
 
     nt = 256
     nx = 64
@@ -182,7 +182,7 @@ def main() -> None:
     chirp = 8.0
 
     total_samples = nt * nx * ny
-    runtime_limits = runner.api.query_runtime_limits(exec_options=exec_opts.to_ctypes(runner.nlo))
+    runtime_limits = runner.api.query_runtime_limits(exec_options=exec_options.to_ctypes(runner.nlo))
     if total_samples > int(runtime_limits.max_num_time_samples_runtime):
         raise ValueError(
             "Requested nt*nx*ny="
@@ -208,7 +208,7 @@ def main() -> None:
         temporal_width=temporal_width,
         spatial_width=spatial_width,
         chirp=chirp,
-        exec_opts=exec_opts,
+        exec_options=exec_options,
     )
     _, _, _, _, _, linear_records = _run_case(
         runner,
@@ -227,7 +227,7 @@ def main() -> None:
         temporal_width=temporal_width,
         spatial_width=spatial_width,
         chirp=chirp,
-        exec_opts=exec_opts,
+        exec_options=exec_options,
     )
 
     full_intensity = np.abs(full_records) ** 2

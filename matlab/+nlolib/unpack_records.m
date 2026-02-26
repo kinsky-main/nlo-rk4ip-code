@@ -14,15 +14,19 @@ numRecords     = double(numRecords);
 numTimeSamples = double(numTimeSamples);
 totalComplex   = numRecords * numTimeSamples;
 
-try
-    raw = outPtr.Value;
-catch
-    detail = format_probe_report(nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
-                                                                "unpack-value", false), ...
-                                 debugContext);
-    error('nlolib:invalidComplexBuffer', ...
-          'Failed to access outPtr.Value for output buffer. %s', ...
-          detail);
+if isstruct(outPtr) && all(isfield(outPtr, {'re', 'im'}))
+    raw = outPtr;
+else
+    try
+        raw = outPtr.Value;
+    catch
+        detail = format_probe_report(nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
+                                                                    "unpack-value", false), ...
+                                     debugContext);
+        error('nlolib:invalidComplexBuffer', ...
+              'Failed to access outPtr.Value for output buffer. %s', ...
+              detail);
+    end
 end
 
 if isnumeric(raw)
@@ -42,6 +46,19 @@ if isnumeric(raw)
 elseif isstruct(raw) && all(isfield(raw, {'re', 'im'}))
     re = [raw.re];
     im = [raw.im];
+    if (numel(re) ~= totalComplex || numel(im) ~= totalComplex)
+        % Some loadlibrary call paths collapse pointer shape metadata to scalar.
+        % Rebind expected element count and retry before failing.
+        try
+            setdatatype(outPtr, 'nlo_complexPtr', 1, totalComplex);
+            raw = outPtr.Value;
+            if isstruct(raw) && all(isfield(raw, {'re', 'im'}))
+                re = [raw.re];
+                im = [raw.im];
+            end
+        catch
+        end
+    end
     if numel(re) ~= totalComplex || numel(im) ~= totalComplex
         detail = format_probe_report(nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
                                                                     "unpack-struct-length", false), ...

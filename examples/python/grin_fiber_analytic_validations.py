@@ -45,7 +45,7 @@ def _save_summary_plot(
 
 def main() -> None:
     runner = NloExampleRunner()
-    exec_opts = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
+    exec_options = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
     output_root = Path(__file__).resolve().parent / "output" / "grin_fiber_analytic_sweep"
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -69,7 +69,7 @@ def main() -> None:
             y_offset=0.0,
             propagation_distance=0.25,
             num_records=8,
-            exec_opts=exec_opts,
+            exec_options=exec_options,
             output_root=output_root,
         )
         final_errors.append(final_error)

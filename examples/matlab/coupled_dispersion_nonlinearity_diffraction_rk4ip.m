@@ -209,13 +209,13 @@ nonlinearOperator.expr = "i*gamma*I + i*V";
 nonlinearOperator.params = struct('gamma', gamma);
 
 execOptions = backend.make_exec_options(simOptions, numRecords);
-simulateOptions = struct();
-simulateOptions.propagation_distance = zFinal;
-simulateOptions.records = numRecords;
-simulateOptions.preset = "accuracy";
-simulateOptions.exec_options = execOptions;
-simulateOptions.transverse_operator = transverseOperator;
-result = api.propagate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+propagateOptions = struct();
+propagateOptions.propagation_distance = zFinal;
+propagateOptions.records = numRecords;
+propagateOptions.preset = "accuracy";
+propagateOptions.exec_options = execOptions;
+propagateOptions.transverse_operator = transverseOperator;
+result = api.propagate(pulse, linearOperator, nonlinearOperator, propagateOptions);
 
 recordsFlat = result.records;
 records = unflatten_tyx_records(recordsFlat, numRecords, nt, ny, nx);

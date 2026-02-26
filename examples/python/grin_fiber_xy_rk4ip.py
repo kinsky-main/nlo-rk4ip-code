@@ -49,7 +49,7 @@ def run_phase_validation(
     y_offset: float,
     propagation_distance: float,
     num_records: int,
-    exec_opts: SimulationOptions,
+    exec_options: SimulationOptions,
     output_root: Path,
 ) -> tuple[list[Path], float, float]:
     nxy = nx * ny
@@ -76,7 +76,7 @@ def run_phase_validation(
         potential_grid=phase_unit.astype(np.complex128).reshape(-1),
         gamma=0.0,
         alpha=0.0,
-        exec_options=exec_opts,
+        exec_options=exec_options,
     )
 
     analytical_records = np.empty_like(records, dtype=np.complex128)
@@ -192,7 +192,7 @@ def run_phase_validation(
 
 def main() -> None:
     runner = NloExampleRunner()
-    exec_opts = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
+    exec_options = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
     output_root = Path(__file__).resolve().parent / "output" / "grin_fiber_xy"
 
     scenarios = [
@@ -230,7 +230,7 @@ def main() -> None:
     for scenario in scenarios:
         saved_paths, _, _ = run_phase_validation(
             runner,
-            exec_opts=exec_opts,
+            exec_options=exec_options,
             output_root=output_root,
             **scenario,
         )

@@ -1,6 +1,6 @@
-function [cfgPtr, keepalive] = prepare_sim_config(cfg)
+function [simCfgPtr, physicsCfgPtr, keepalive] = prepare_sim_config(cfg)
 %PREPARE_SIM_CONFIG Build a sim_config libstruct from a MATLAB struct.
-%   [cfgPtr, keepalive] = nlolib.prepare_sim_config(cfg)
+%   [simCfgPtr, physicsCfgPtr, keepalive] = nlolib.prepare_sim_config(cfg)
 %
 %   cfg is a flat MATLAB struct with fields matching the nlolib C API.
 %   Returns a libstruct('sim_config', ...) and a keepalive cell array for
@@ -100,22 +100,22 @@ end
 runtimeMl.num_constants = uint64(numConstants);
 runtimeMl.constants = constantsFixed;
 
-cfgMl = struct();
-cfgMl.propagation = struct( ...
+simMl = struct();
+simMl.propagation = struct( ...
     'starting_step_size', double(cfg.starting_step_size), ...
     'max_step_size', double(cfg.max_step_size), ...
     'min_step_size', double(cfg.min_step_size), ...
     'error_tolerance', double(cfg.error_tolerance), ...
     'propagation_distance', double(cfg.propagation_distance));
-cfgMl.time = struct( ...
+simMl.time = struct( ...
     'nt', uint64(get_optional(cfg, "time_nt", 0)), ...
     'pulse_period', double(cfg.pulse_period), ...
     'delta_time', double(cfg.delta_time));
-cfgMl.frequency = struct('frequency_grid', freqPtr);
-cfgMl.spatial = spatialMl;
-cfgMl.runtime = runtimeMl;
+simMl.frequency = struct('frequency_grid', freqPtr);
+simMl.spatial = spatialMl;
 
-cfgPtr = libstruct('sim_config', cfgMl);
+simCfgPtr = libstruct('nlo_simulation_config', simMl);
+physicsCfgPtr = libstruct('runtime_operator_params', runtimeMl);
 end
 
 % ========================================================================

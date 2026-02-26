@@ -90,8 +90,28 @@ static int nlo_storage_log_final_output_enabled(const nlo_storage_options* stora
     return (storage_options != NULL && storage_options->log_final_output_field_to_db != 0);
 }
 
+static sim_config nlo_merge_simulation_and_physics(
+    const nlo_simulation_config* simulation_config,
+    const nlo_physics_config* physics_config
+)
+{
+    sim_config merged;
+    memset(&merged, 0, sizeof(merged));
+    if (simulation_config != NULL) {
+        merged.propagation = simulation_config->propagation;
+        merged.time = simulation_config->time;
+        merged.frequency = simulation_config->frequency;
+        merged.spatial = simulation_config->spatial;
+    }
+    if (physics_config != NULL) {
+        merged.runtime = *physics_config;
+    }
+    return merged;
+}
+
 NLOLIB_API nlolib_status nlolib_query_runtime_limits(
-    const sim_config* config,
+    const nlo_simulation_config* simulation_config,
+    const nlo_physics_config* physics_config,
     const nlo_execution_options* exec_options,
     nlo_runtime_limits* out_limits
 )
@@ -100,7 +120,8 @@ NLOLIB_API nlolib_status nlolib_query_runtime_limits(
         return nlo_propagate_fail("validate.runtime_limits.null_out", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
 
-    if (nlo_query_runtime_limits_internal(config, exec_options, out_limits) != 0) {
+    const sim_config merged = nlo_merge_simulation_and_physics(simulation_config, physics_config);
+    if (nlo_query_runtime_limits_internal(&merged, exec_options, out_limits) != 0) {
         return nlo_propagate_fail("query_runtime_limits_internal", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
 
@@ -271,51 +292,76 @@ static void nlo_log_nlse_propagate_call(
     }
 }
 
-NLOLIB_API nlolib_status nlolib_propagate(
-    const sim_config* config,
-    size_t num_time_samples,
-    const nlo_complex* input_field,
-    size_t num_recorded_samples,
-    nlo_complex* output_records,
-    const nlo_execution_options* exec_options
-)
+NLOLIB_API nlo_propagate_options nlolib_propagate_options_default(void)
 {
-    return nlolib_propagate_with_storage(config,
-                                         num_time_samples,
-                                         input_field,
-                                         num_recorded_samples,
-                                         output_records,
-                                         exec_options,
-                                         NULL,
-                                         NULL);
+    nlo_propagate_options options;
+    options.num_recorded_samples = 2u;
+    options.output_mode = NLO_PROPAGATE_OUTPUT_DENSE;
+    options.return_records = 1;
+    options.exec_options = NULL;
+    options.storage_options = NULL;
+    return options;
 }
 
-static nlolib_status nlo_propagate_impl(
-    const sim_config* config,
+NLOLIB_API nlo_propagate_output nlolib_propagate_output_default(void)
+{
+    nlo_propagate_output output;
+    output.output_records = NULL;
+    output.output_record_capacity = 0u;
+    output.records_written = NULL;
+    output.storage_result = NULL;
+    return output;
+}
+
+NLOLIB_API nlolib_status nlolib_propagate(
+    const nlo_simulation_config* simulation_config,
+    const nlo_physics_config* physics_config,
     size_t num_time_samples,
     const nlo_complex* input_field,
-    size_t num_recorded_samples,
-    nlo_complex* output_records,
-    const nlo_execution_options* exec_options,
-    const nlo_storage_options* storage_options,
-    nlo_storage_result* storage_result
+    const nlo_propagate_options* options,
+    nlo_propagate_output* output
 )
 {
+    const sim_config merged = nlo_merge_simulation_and_physics(simulation_config, physics_config);
+    const sim_config* config = &merged;
+    const nlo_propagate_options local_options =
+        (options != NULL) ? *options : nlolib_propagate_options_default();
+    nlo_propagate_output local_output = (output != NULL) ? *output : nlolib_propagate_output_default();
+
+    size_t num_recorded_samples = local_options.num_recorded_samples;
+    if (local_options.output_mode == NLO_PROPAGATE_OUTPUT_FINAL_ONLY) {
+        num_recorded_samples = 1u;
+    }
+    if (num_recorded_samples == 0u) {
+        return nlo_propagate_fail("validate.num_recorded_samples", NLOLIB_STATUS_INVALID_ARGUMENT);
+    }
+
+    if (local_options.return_records == 0) {
+        local_output.output_records = NULL;
+        local_output.output_record_capacity = 0u;
+    }
+
+    if (local_output.records_written != NULL) {
+        *local_output.records_written = 0u;
+    }
+    if (local_output.storage_result != NULL) {
+        *local_output.storage_result = (nlo_storage_result){0};
+    }
+
     nlo_log_nlse_propagate_call(config,
                                 num_time_samples,
                                 input_field,
                                 num_recorded_samples,
-                                output_records,
-                                exec_options);
-
-    if (storage_result != NULL) {
-        *storage_result = (nlo_storage_result){0};
-    }
+                                local_output.output_records,
+                                local_options.exec_options);
 
     if (config == NULL || input_field == NULL) {
         return nlo_propagate_fail("validate.null_pointer", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
-    if (output_records == NULL && !nlo_storage_enabled(storage_options)) {
+    if (local_options.return_records == 0 && !nlo_storage_enabled(local_options.storage_options)) {
+        return nlo_propagate_fail("validate.output_or_storage", NLOLIB_STATUS_INVALID_ARGUMENT);
+    }
+    if (local_options.return_records != 0 && local_output.output_records == NULL) {
         return nlo_propagate_fail("validate.output_or_storage", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
 
@@ -329,11 +375,15 @@ static nlolib_status nlo_propagate_impl(
         nlo_runtime_limits_default().max_num_recorded_samples_with_storage) {
         return nlo_propagate_fail("validate.num_recorded_samples_precision", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
-    if (output_records != NULL &&
-        nlo_compute_record_bytes(num_recorded_samples, num_time_samples) == 0u) {
-        return nlo_propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
+    if (local_options.return_records != 0) {
+        if (local_output.output_record_capacity < num_recorded_samples) {
+            return nlo_propagate_fail("validate.output_record_capacity", NLOLIB_STATUS_INVALID_ARGUMENT);
+        }
+        if (nlo_compute_record_bytes(num_recorded_samples, num_time_samples) == 0u) {
+            return nlo_propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
+        }
     }
-    if (nlo_storage_enabled(storage_options) && !nlo_snapshot_store_is_available()) {
+    if (nlo_storage_enabled(local_options.storage_options) && !nlo_snapshot_store_is_available()) {
         return nlo_propagate_fail("validate.storage_unavailable", NLOLIB_STATUS_NOT_IMPLEMENTED);
     }
     {
@@ -352,17 +402,17 @@ static nlolib_status nlo_propagate_impl(
     }
 
     nlo_execution_options local_exec_options =
-        (exec_options != NULL)
-            ? *exec_options
+        (local_options.exec_options != NULL)
+            ? *local_options.exec_options
             : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
     simulation_state* state = NULL;
     const int init_status =
-        nlo_storage_enabled(storage_options)
+        nlo_storage_enabled(local_options.storage_options)
             ? nlo_init_simulation_state_with_storage(config,
                                                      num_time_samples,
                                                      num_recorded_samples,
                                                      &local_exec_options,
-                                                     storage_options,
+                                                     local_options.storage_options,
                                                      NULL,
                                                      &state)
             : nlo_init_simulation_state(config,
@@ -397,7 +447,7 @@ static nlolib_status nlo_propagate_impl(
     int final_downloaded = 0;
     const nlo_complex* final_output_field_cached = NULL;
     if (num_recorded_samples == 1u && state->snapshot_store != NULL) {
-        nlo_complex* final_record = output_records;
+        nlo_complex* final_record = local_output.output_records;
         if (final_record == NULL) {
             final_record = simulation_state_get_field_record(state, 0u);
             if (final_record == NULL) {
@@ -414,13 +464,13 @@ static nlolib_status nlo_propagate_impl(
             return nlo_propagate_fail("storage.download_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
         final_output_field_cached = final_record;
-        final_downloaded = (final_record == output_records) ? 1 : 0;
+        final_downloaded = (final_record == local_output.output_records) ? 1 : 0;
 
         const nlo_snapshot_store_status write_status =
             nlo_snapshot_store_write_record(state->snapshot_store,
-                                           0u,
-                                           final_record,
-                                           state->num_time_samples);
+                                            0u,
+                                            final_record,
+                                            state->num_time_samples);
         if (write_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
             free_simulation_state(state);
             return nlo_propagate_fail("storage.write_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
@@ -432,14 +482,16 @@ static nlolib_status nlo_propagate_impl(
         nlo_snapshot_store_get_result(state->snapshot_store, &state->snapshot_result);
     }
 
-    if (output_records != NULL && num_recorded_samples == 1u) {
+    if (local_options.return_records != 0 &&
+        local_output.output_records != NULL &&
+        num_recorded_samples == 1u) {
         if (!final_downloaded &&
-            simulation_state_download_current_field(state, output_records) != NLO_VEC_STATUS_OK) {
+            simulation_state_download_current_field(state, local_output.output_records) != NLO_VEC_STATUS_OK) {
             free_simulation_state(state);
             return nlo_propagate_fail("download_current_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
-        final_output_field_cached = output_records;
-    } else if (output_records != NULL) {
+        final_output_field_cached = local_output.output_records;
+    } else if (local_options.return_records != 0 && local_output.output_records != NULL) {
         if (state->num_host_records != num_recorded_samples || state->field_buffer == NULL) {
             free_simulation_state(state);
             return nlo_propagate_fail("validate.host_record_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
@@ -450,11 +502,13 @@ static nlolib_status nlo_propagate_impl(
             free_simulation_state(state);
             return nlo_propagate_fail("validate.output_record_bytes", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
-        memcpy(output_records, state->field_buffer, records_bytes);
-        final_output_field_cached = output_records + ((num_recorded_samples - 1u) * state->num_time_samples);
+        memcpy(local_output.output_records, state->field_buffer, records_bytes);
+        final_output_field_cached =
+            local_output.output_records + ((num_recorded_samples - 1u) * state->num_time_samples);
     }
 
-    if (state->snapshot_store != NULL && nlo_storage_log_final_output_enabled(storage_options)) {
+    if (state->snapshot_store != NULL &&
+        nlo_storage_log_final_output_enabled(local_options.storage_options)) {
         const nlo_complex* final_output_field = final_output_field_cached;
 
         nlo_complex* final_output_scratch = NULL;
@@ -483,63 +537,19 @@ static nlolib_status nlo_propagate_impl(
         }
     }
 
-    if (storage_result != NULL) {
+    if (local_output.storage_result != NULL) {
         if (state->snapshot_store != NULL) {
-            nlo_snapshot_store_get_result(state->snapshot_store, storage_result);
+            nlo_snapshot_store_get_result(state->snapshot_store, local_output.storage_result);
         } else {
-            *storage_result = (nlo_storage_result){0};
+            *local_output.storage_result = (nlo_storage_result){0};
         }
     }
 
     free_simulation_state(state);
+    if (local_output.records_written != NULL) {
+        *local_output.records_written = (local_options.return_records != 0) ? num_recorded_samples : 0u;
+    }
     return NLOLIB_STATUS_OK;
-}
-
-NLOLIB_API nlolib_status nlolib_propagate_with_storage(
-    const sim_config* config,
-    size_t num_time_samples,
-    const nlo_complex* input_field,
-    size_t num_recorded_samples,
-    nlo_complex* output_records,
-    const nlo_execution_options* exec_options,
-    const nlo_storage_options* storage_options,
-    nlo_storage_result* storage_result
-)
-{
-    return nlo_propagate_impl(config,
-                              num_time_samples,
-                              input_field,
-                              num_recorded_samples,
-                              output_records,
-                              exec_options,
-                              storage_options,
-                              storage_result);
-}
-
-NLOLIB_API nlolib_status nlolib_propagate_interleaved(
-    const sim_config* config,
-    size_t num_time_samples,
-    const double* input_field_interleaved,
-    size_t num_recorded_samples,
-    double* output_records_interleaved,
-    const nlo_execution_options* exec_options
-)
-{
-    if (sizeof(nlo_complex) != (2u * sizeof(double))) {
-        return nlo_propagate_fail("validate.nlo_complex_layout", NLOLIB_STATUS_INVALID_ARGUMENT);
-    }
-    if (input_field_interleaved == NULL || output_records_interleaved == NULL) {
-        return nlo_propagate_fail("validate.interleaved.null_pointer", NLOLIB_STATUS_INVALID_ARGUMENT);
-    }
-
-    return nlo_propagate_impl(config,
-                              num_time_samples,
-                              (const nlo_complex*)input_field_interleaved,
-                              num_recorded_samples,
-                              (nlo_complex*)output_records_interleaved,
-                              exec_options,
-                              NULL,
-                              NULL);
 }
 
 NLOLIB_API int nlolib_storage_is_available(void)

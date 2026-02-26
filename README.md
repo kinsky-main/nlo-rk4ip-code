@@ -22,7 +22,7 @@ Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-c
 - Python 3 (required if `BUILD_TESTING=ON` because Python tests are added)
 - Doxygen (for docs target)
 - Graphviz (recommended for Doxygen call/directory graphs)
-- SQLite3 dev package (or let CMake fetch SQLite amalgamation)
+- Network access for CMake to fetch the SQLite amalgamation archive
 
 ## Quick Start (Windows)
 
@@ -93,7 +93,7 @@ Current top-level CMake options and cache variables:
 | `NLO_ENABLE_VULKAN_BACKEND` | `ON` | Enables Vulkan backend and shader compilation path. |
 | `NLO_ENABLE_VKFFT` | `ON` | Enables VkFFT FFT path (auto-forced `OFF` when Vulkan backend is disabled). |
 | `NLO_BUMP_PATCH_ON_BUILD` | `ON` | Adds `nlo_patch_bump_on_build` target to patch-bump version on successful build. |
-| `NLO_SQLITE_USE_FETCHCONTENT` | `OFF` | If `ON`, always fetch SQLite amalgamation; otherwise try system SQLite first. |
+| `NLO_SQLITE_USE_FETCHCONTENT` | `ON` | Deprecated compatibility toggle; SQLite amalgamation is always used. |
 | `NLO_CPU_SIMD_LEVEL` | `AUTO` | CPU SIMD mode: `AUTO`, `AVX2`, `AVX`, `SCALAR`. |
 | `NLO_VULKAN_HEADERS_URL` | Khronos main zip | Vulkan-Headers fetch URL fallback when headers are not local. |
 | `NLO_SQLITE_AMALGAMATION_URL` | sqlite.org zip | SQLite amalgamation fetch URL fallback. |
@@ -118,7 +118,7 @@ Multi-config generators use `--config <type>` during build/test.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan loader must be present locally (`vulkan`/`vulkan-1` library).
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, `glslangValidator` is required to compile compute shaders to SPIR-V during build.
 - When `NLO_ENABLE_VKFFT=ON`, CMake target `Vulkan::glslang` must be resolvable for FFT backend linking.
-- SQLite is discovered from system/Conda hints unless `NLO_SQLITE_USE_FETCHCONTENT=ON`; fallback fetch is supported.
+- SQLite is linked from the fetched amalgamation as a static library (no external `sqlite3.dll` runtime dependency).
 
 ## Build Targets and Usage
 

@@ -30,14 +30,14 @@ simOptions = backend.default_simulation_options( ...
     "backend", "auto", ...
     "fft_backend", "vkfft");
 execOptions = backend.make_exec_options(simOptions, 2);
-simulateOptions = struct();
-simulateOptions.propagation_distance = 0.25;
-simulateOptions.records = 2;
-simulateOptions.preset = "accuracy";
-simulateOptions.exec_options = execOptions;
-simulateOptions.exec_options.matlab_stream_logs = true;
-simulateOptions.exec_options.matlab_log_buffer_bytes = uint64(256 * 1024);
-result = api.propagate(pulse, linearOperator, nonlinearOperator, simulateOptions);
+propagateOptions = struct();
+propagateOptions.propagation_distance = 0.25;
+propagateOptions.records = 2;
+propagateOptions.preset = "accuracy";
+propagateOptions.exec_options = execOptions;
+propagateOptions.exec_options.matlab_stream_logs = true;
+propagateOptions.exec_options.matlab_log_buffer_bytes = uint64(256 * 1024);
+result = api.propagate(pulse, linearOperator, nonlinearOperator, propagateOptions);
 records = result.records;
 finalField = records(end, :).';
 

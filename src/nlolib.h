@@ -65,100 +65,100 @@ typedef enum {
 /**
  * @brief Query runtime-derived limits for current backend/config selection.
  *
- * @param config Optional simulation configuration used to estimate
+ * @param simulation_config Optional simulation configuration used to estimate
  *        required working-set bytes and in-memory record capacity.
+ * @param physics_config Optional physics/operator configuration.
  * @param exec_options Optional runtime backend selection/options.
  * @param out_limits Destination limits descriptor.
  * @return nlolib_status status code.
  */
 NLOLIB_API nlolib_status nlolib_query_runtime_limits(
-    const sim_config* config,
+    const nlo_simulation_config* simulation_config,
+    const nlo_physics_config* physics_config,
     const nlo_execution_options* exec_options,
     nlo_runtime_limits* out_limits
 );
 
 // MARK: Function Declarations
 
+typedef enum {
+    /** Return all requested records. */
+    NLO_PROPAGATE_OUTPUT_DENSE = 0,
+    /** Return only the final output field record. */
+    NLO_PROPAGATE_OUTPUT_FINAL_ONLY = 1
+} nlo_propagate_output_mode;
+
 /**
- * @brief Propagate an input field and return recorded envelopes across z.
+ * @brief Unified propagation request options.
  *
- * @param config Simulation configuration parameters.
- * @param num_time_samples Number of samples in the flattened input/output arrays.
- *        For legacy 1D use this is the temporal sample count.
- *        If config->time.nt == 0 and spatial nx/ny are provided, this must
- *        equal config->spatial.nx * config->spatial.ny (legacy flattened mode).
- *        If config->time.nt > 0, this must equal
- *        config->time.nt * config->spatial.nx * config->spatial.ny.
- * @param input_field Pointer to input field buffer (length: num_time_samples),
- *        flattened in row-major order with x as the fastest index.
- * @param num_recorded_samples Number of envelope records to return.
- * @param output_records Pointer to output record buffer (length:
- *        num_recorded_samples * num_time_samples). The layout is record-major:
- *        output_records[record_index * num_time_samples + sample_index].
- *        For num_recorded_samples == 1, record 0 is the final field at z_end.
- *        For num_recorded_samples > 1, records are evenly distributed over [0, z_end].
- * @param exec_options Runtime backend selection/options
- *        (NULL uses AUTO hardware-detected defaults).
+ * @param num_recorded_samples Number of records to compute.
+ * @param output_mode Record output mode.
+ * @param return_records Nonzero to write records to output buffer.
+ * @param exec_options Optional runtime backend selection/options.
+ * @param storage_options Optional storage configuration.
+ */
+typedef struct {
+    size_t num_recorded_samples;
+    nlo_propagate_output_mode output_mode;
+    int return_records;
+    const nlo_execution_options* exec_options;
+    const nlo_storage_options* storage_options;
+} nlo_propagate_options;
+
+/**
+ * @brief Unified propagation output metadata and buffers.
+ *
+ * @param output_records Optional destination records buffer.
+ * @param output_record_capacity Maximum records available in output_records.
+ * @param records_written Number of records actually written.
+ * @param storage_result Optional storage summary output.
+ */
+typedef struct {
+    nlo_complex* output_records;
+    size_t output_record_capacity;
+    size_t* records_written;
+    nlo_storage_result* storage_result;
+} nlo_propagate_output;
+
+/**
+ * @brief Build default propagation options.
+ *
+ * Defaults:
+ * - dense output mode
+ * - 2 recorded samples
+ * - return records enabled
+ * - AUTO backend exec options
+ * - storage disabled
+ *
+ * @return nlo_propagate_options Initialized options.
+ */
+NLOLIB_API nlo_propagate_options nlolib_propagate_options_default(void);
+
+/**
+ * @brief Build default propagation output descriptor.
+ *
+ * @return nlo_propagate_output Initialized output descriptor.
+ */
+NLOLIB_API nlo_propagate_output nlolib_propagate_output_default(void);
+
+/**
+ * @brief Propagate an input field using split simulation/physics configs.
+ *
+ * @param simulation_config Simulation configuration parameters.
+ * @param physics_config Runtime physics/operator expression parameters.
+ * @param num_time_samples Number of samples in flattened input.
+ * @param input_field Pointer to input field buffer.
+ * @param options Optional propagation options.
+ * @param output Optional propagation output descriptor.
  * @return nlolib_status status code.
  */
 NLOLIB_API nlolib_status nlolib_propagate(
-    const sim_config* config,
+    const nlo_simulation_config* simulation_config,
+    const nlo_physics_config* physics_config,
     size_t num_time_samples,
     const nlo_complex* input_field,
-    size_t num_recorded_samples,
-    nlo_complex* output_records,
-    const nlo_execution_options* exec_options
-);
-
-/**
- * @brief MATLAB/FFI convenience API using interleaved complex doubles.
- *
- * @param config Simulation configuration parameters.
- * @param num_time_samples Number of complex samples in input/output records.
- * @param input_field_interleaved Pointer to interleaved complex input of
- *        length 2 * num_time_samples:
- *        [re0, im0, re1, im1, ...].
- * @param num_recorded_samples Number of envelope records to return.
- * @param output_records_interleaved Pointer to interleaved complex output of
- *        length 2 * num_recorded_samples * num_time_samples.
- * @param exec_options Runtime backend selection/options
- *        (NULL uses AUTO hardware-detected defaults).
- * @return nlolib_status status code.
- */
-NLOLIB_API nlolib_status nlolib_propagate_interleaved(
-    const sim_config* config,
-    size_t num_time_samples,
-    const double* input_field_interleaved,
-    size_t num_recorded_samples,
-    double* output_records_interleaved,
-    const nlo_execution_options* exec_options
-);
-
-/**
- * @brief Propagate while optionally spilling snapshot chunks into SQLite.
- *
- * @param config Simulation configuration parameters.
- * @param num_time_samples Number of complex samples in the flattened field.
- * @param input_field Pointer to input field buffer (length: num_time_samples).
- * @param num_recorded_samples Number of envelope records to capture.
- * @param output_records Optional host output buffer (same layout as
- *        nlolib_propagate). Pass NULL for storage-only capture.
- * @param exec_options Runtime backend selection/options.
- * @param storage_options Optional storage configuration (NULL disables storage).
- *        Set storage_options->log_final_output_field_to_db nonzero to persist
- *        the final output field at z_end in a dedicated DB row.
- * @param storage_result Optional output summary for persisted chunks/run state.
- * @return nlolib_status status code.
- */
-NLOLIB_API nlolib_status nlolib_propagate_with_storage(
-    const sim_config* config,
-    size_t num_time_samples,
-    const nlo_complex* input_field,
-    size_t num_recorded_samples,
-    nlo_complex* output_records,
-    const nlo_execution_options* exec_options,
-    const nlo_storage_options* storage_options,
-    nlo_storage_result* storage_result
+    const nlo_propagate_options* options,
+    nlo_propagate_output* output
 );
 
 /**

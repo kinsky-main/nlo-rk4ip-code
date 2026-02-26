@@ -52,6 +52,8 @@ NLOLIB_LOG_LEVEL_DEBUG = 3
 
 NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0
 NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
+NLO_PROPAGATE_OUTPUT_DENSE = 0
+NLO_PROPAGATE_OUTPUT_FINAL_ONLY = 1
 
 
 class NloComplex(ctypes.Structure):
@@ -121,14 +123,17 @@ class RuntimeOperatorParams(ctypes.Structure):
     ]
 
 
-class SimConfig(ctypes.Structure):
+class NloSimulationConfig(ctypes.Structure):
     _fields_ = [
         ("propagation", PropagationParams),
         ("time", TimeGrid),
         ("frequency", FrequencyGrid),
         ("spatial", SpatialGrid),
-        ("runtime", RuntimeOperatorParams),
     ]
+
+
+class NloPhysicsConfig(ctypes.Structure):
+    _fields_ = [("runtime", RuntimeOperatorParams)]
 
 
 class NloExecutionOptions(ctypes.Structure):
@@ -175,6 +180,25 @@ class NloStorageResult(ctypes.Structure):
     ]
 
 
+class NloPropagateOptions(ctypes.Structure):
+    _fields_ = [
+        ("num_recorded_samples", ctypes.c_size_t),
+        ("output_mode", ctypes.c_int),
+        ("return_records", ctypes.c_int),
+        ("exec_options", ctypes.POINTER(NloExecutionOptions)),
+        ("storage_options", ctypes.POINTER(NloStorageOptions)),
+    ]
+
+
+class NloPropagateOutput(ctypes.Structure):
+    _fields_ = [
+        ("output_records", ctypes.POINTER(NloComplex)),
+        ("output_record_capacity", ctypes.c_size_t),
+        ("records_written", ctypes.POINTER(ctypes.c_size_t)),
+        ("storage_result", ctypes.POINTER(NloStorageResult)),
+    ]
+
+
 def _candidate_library_paths() -> list[str]:
     candidates: list[str] = []
     env_path = os.environ.get("NLOLIB_LIBRARY")
@@ -187,12 +211,10 @@ def _candidate_library_paths() -> list[str]:
     if os.name == "nt":
         candidates.extend(
             [
-                str(package_dir / "nlolib.dll"),
-                str(here / "nlolib.dll"),
-                str(here / "Debug" / "nlolib.dll"),
                 str(here / "Release" / "nlolib.dll"),
                 str(here / "RelWithDebInfo" / "nlolib.dll"),
                 str(here / "MinSizeRel" / "nlolib.dll"),
+                str(here / "Debug" / "nlolib.dll"),
                 str(root / "build" / "src" / "Release" / "nlolib.dll"),
                 str(root / "build" / "src" / "Debug" / "nlolib.dll"),
                 str(root / "build" / "src" / "RelWithDebInfo" / "nlolib.dll"),
@@ -201,6 +223,10 @@ def _candidate_library_paths() -> list[str]:
                 str(root / "build" / "examples" / "Debug" / "nlolib.dll"),
                 str(root / "build" / "examples" / "RelWithDebInfo" / "nlolib.dll"),
                 str(root / "build" / "examples" / "MinSizeRel" / "nlolib.dll"),
+                # Prefer local build outputs before packaged fallback to avoid
+                # ABI mismatches while developing against in-tree ctypes structs.
+                str(here / "nlolib.dll"),
+                str(package_dir / "nlolib.dll"),
                 str(root / "nlolib.dll"),
             ]
         )
@@ -271,17 +297,18 @@ def load(path: str | None = None) -> ctypes.CDLL:
     print(f"Loaded NLOLib from '{lib_path}'")
 
     lib.nlolib_propagate.argtypes = [
-        ctypes.POINTER(SimConfig),
+        ctypes.POINTER(NloSimulationConfig),
+        ctypes.POINTER(NloPhysicsConfig),
         ctypes.c_size_t,
         ctypes.POINTER(NloComplex),
-        ctypes.c_size_t,
-        ctypes.POINTER(NloComplex),
-        ctypes.POINTER(NloExecutionOptions),
+        ctypes.POINTER(NloPropagateOptions),
+        ctypes.POINTER(NloPropagateOutput),
     ]
     lib.nlolib_propagate.restype = ctypes.c_int
     try:
         lib.nlolib_query_runtime_limits.argtypes = [
-            ctypes.POINTER(SimConfig),
+            ctypes.POINTER(NloSimulationConfig),
+            ctypes.POINTER(NloPhysicsConfig),
             ctypes.POINTER(NloExecutionOptions),
             ctypes.POINTER(NloRuntimeLimits),
         ]
@@ -291,20 +318,13 @@ def load(path: str | None = None) -> ctypes.CDLL:
         lib._has_query_runtime_limits = False
 
     try:
-        lib.nlolib_propagate_with_storage.argtypes = [
-            ctypes.POINTER(SimConfig),
-            ctypes.c_size_t,
-            ctypes.POINTER(NloComplex),
-            ctypes.c_size_t,
-            ctypes.POINTER(NloComplex),
-            ctypes.POINTER(NloExecutionOptions),
-            ctypes.POINTER(NloStorageOptions),
-            ctypes.POINTER(NloStorageResult),
-        ]
-        lib.nlolib_propagate_with_storage.restype = ctypes.c_int
-        lib._has_propagate_with_storage = True
+        lib.nlolib_propagate_options_default.argtypes = []
+        lib.nlolib_propagate_options_default.restype = NloPropagateOptions
+        lib.nlolib_propagate_output_default.argtypes = []
+        lib.nlolib_propagate_output_default.restype = NloPropagateOutput
+        lib._has_propagate_defaults = True
     except AttributeError:
-        lib._has_propagate_with_storage = False
+        lib._has_propagate_defaults = False
 
     try:
         lib.nlolib_storage_is_available.argtypes = []
@@ -491,6 +511,24 @@ class PropagationResult:
     z_axis: list[float]
     final: list[complex]
     meta: dict[str, Any]
+
+
+@dataclass
+class _NormalizedPropagateRequest:
+    sim_cfg: NloSimulationConfig
+    phys_cfg: NloPhysicsConfig
+    input_seq: list[complex]
+    num_records: int
+    exec_options: NloExecutionOptions | None
+    sqlite_path: str | None
+    run_id: str | None
+    sqlite_max_bytes: int
+    chunk_records: int
+    cap_policy: int
+    log_final_output_field_to_db: bool
+    return_records: bool
+    output_label: str
+    meta_overrides: dict[str, Any]
 
 
 _LINEAR_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
@@ -720,12 +758,17 @@ def _shift_constant_indices(expression: str, offset: int) -> str:
 
 @dataclass
 class PreparedSimConfig:
-    config: SimConfig
+    simulation_config: NloSimulationConfig
+    physics_config: NloPhysicsConfig
     keepalive: list[object]
 
     @property
-    def ptr(self) -> ctypes.POINTER(SimConfig):
-        return ctypes.pointer(self.config)
+    def sim_ptr(self) -> ctypes.POINTER(NloSimulationConfig):
+        return ctypes.pointer(self.simulation_config)
+
+    @property
+    def physics_ptr(self) -> ctypes.POINTER(NloPhysicsConfig):
+        return ctypes.pointer(self.physics_config)
 
 
 def prepare_sim_config(
@@ -762,36 +805,37 @@ def prepare_sim_config(
     elif len(frequency_grid) != num_time_samples:
         raise ValueError("frequency_grid length must match num_time_samples")
 
-    cfg = SimConfig()
+    sim_cfg = NloSimulationConfig()
+    physics_cfg = NloPhysicsConfig()
     keepalive: list[object] = []
 
-    cfg.propagation.propagation_distance = float(propagation_distance)
-    cfg.propagation.starting_step_size = float(starting_step_size)
-    cfg.propagation.max_step_size = float(max_step_size)
-    cfg.propagation.min_step_size = float(min_step_size)
-    cfg.propagation.error_tolerance = float(error_tolerance)
+    sim_cfg.propagation.propagation_distance = float(propagation_distance)
+    sim_cfg.propagation.starting_step_size = float(starting_step_size)
+    sim_cfg.propagation.max_step_size = float(max_step_size)
+    sim_cfg.propagation.min_step_size = float(min_step_size)
+    sim_cfg.propagation.error_tolerance = float(error_tolerance)
 
-    cfg.time.nt = int(time_nt) if time_nt is not None else 0
-    cfg.time.pulse_period = float(pulse_period)
-    cfg.time.delta_time = float(delta_time)
+    sim_cfg.time.nt = int(time_nt) if time_nt is not None else 0
+    sim_cfg.time.pulse_period = float(pulse_period)
+    sim_cfg.time.delta_time = float(delta_time)
 
     freq_arr = make_complex_array(frequency_grid)
     keepalive.append(freq_arr)
-    cfg.frequency.frequency_grid = ctypes.cast(freq_arr, ctypes.POINTER(NloComplex))
+    sim_cfg.frequency.frequency_grid = ctypes.cast(freq_arr, ctypes.POINTER(NloComplex))
 
-    nx = int(spatial_nx) if spatial_nx is not None else (1 if cfg.time.nt > 0 else int(num_time_samples))
+    nx = int(spatial_nx) if spatial_nx is not None else (1 if sim_cfg.time.nt > 0 else int(num_time_samples))
     ny = int(spatial_ny) if spatial_ny is not None else 1
-    if cfg.time.nt > 0:
+    if sim_cfg.time.nt > 0:
         if nx <= 0 or ny <= 0:
             raise ValueError("spatial_nx and spatial_ny must be positive when time_nt is set")
-        if (cfg.time.nt * nx * ny) != int(num_time_samples):
+        if (sim_cfg.time.nt * nx * ny) != int(num_time_samples):
             raise ValueError("time_nt * spatial_nx * spatial_ny must match num_time_samples")
-    cfg.spatial.nx = nx
-    cfg.spatial.ny = ny
-    cfg.spatial.delta_x = float(delta_x)
-    cfg.spatial.delta_y = float(delta_y)
+    sim_cfg.spatial.nx = nx
+    sim_cfg.spatial.ny = ny
+    sim_cfg.spatial.delta_x = float(delta_x)
+    sim_cfg.spatial.delta_y = float(delta_y)
 
-    if cfg.time.nt > 0:
+    if sim_cfg.time.nt > 0:
         xy_points = nx * ny
         if spatial_frequency_grid is not None and len(spatial_frequency_grid) not in {
             xy_points,
@@ -813,20 +857,20 @@ def prepare_sim_config(
     if spatial_frequency_grid is not None:
         spatial_arr = make_complex_array(spatial_frequency_grid)
         keepalive.append(spatial_arr)
-        cfg.spatial.spatial_frequency_grid = ctypes.cast(
+        sim_cfg.spatial.spatial_frequency_grid = ctypes.cast(
             spatial_arr, ctypes.POINTER(NloComplex)
         )
     else:
-        cfg.spatial.spatial_frequency_grid = None
+        sim_cfg.spatial.spatial_frequency_grid = None
 
     if potential_grid is not None:
         potential_arr = make_complex_array(potential_grid)
         keepalive.append(potential_arr)
-        cfg.spatial.potential_grid = ctypes.cast(
+        sim_cfg.spatial.potential_grid = ctypes.cast(
             potential_arr, ctypes.POINTER(NloComplex)
         )
     else:
-        cfg.spatial.potential_grid = None
+        sim_cfg.spatial.potential_grid = None
 
     if runtime is not None:
         constants = [float(value) for value in runtime.constants]
@@ -917,50 +961,52 @@ def prepare_sim_config(
         if dispersion_factor_expr:
             disp_factor_bytes = dispersion_factor_expr.encode("utf-8")
             keepalive.append(disp_factor_bytes)
-            cfg.runtime.dispersion_factor_expr = ctypes.c_char_p(disp_factor_bytes)
+            physics_cfg.runtime.dispersion_factor_expr = ctypes.c_char_p(disp_factor_bytes)
         else:
-            cfg.runtime.dispersion_factor_expr = None
+            physics_cfg.runtime.dispersion_factor_expr = None
 
         if dispersion_expr:
             disp_bytes = dispersion_expr.encode("utf-8")
             keepalive.append(disp_bytes)
-            cfg.runtime.dispersion_expr = ctypes.c_char_p(disp_bytes)
+            physics_cfg.runtime.dispersion_expr = ctypes.c_char_p(disp_bytes)
         else:
-            cfg.runtime.dispersion_expr = None
+            physics_cfg.runtime.dispersion_expr = None
 
         if transverse_factor_expr:
             trans_factor_bytes = transverse_factor_expr.encode("utf-8")
             keepalive.append(trans_factor_bytes)
-            cfg.runtime.transverse_factor_expr = ctypes.c_char_p(trans_factor_bytes)
+            physics_cfg.runtime.transverse_factor_expr = ctypes.c_char_p(trans_factor_bytes)
         else:
-            cfg.runtime.transverse_factor_expr = None
+            physics_cfg.runtime.transverse_factor_expr = None
 
         if transverse_expr:
             trans_bytes = transverse_expr.encode("utf-8")
             keepalive.append(trans_bytes)
-            cfg.runtime.transverse_expr = ctypes.c_char_p(trans_bytes)
+            physics_cfg.runtime.transverse_expr = ctypes.c_char_p(trans_bytes)
         else:
-            cfg.runtime.transverse_expr = None
+            physics_cfg.runtime.transverse_expr = None
 
         if nonlinear_expr:
             nonlin_bytes = nonlinear_expr.encode("utf-8")
             keepalive.append(nonlin_bytes)
-            cfg.runtime.nonlinear_expr = ctypes.c_char_p(nonlin_bytes)
+            physics_cfg.runtime.nonlinear_expr = ctypes.c_char_p(nonlin_bytes)
         else:
-            cfg.runtime.nonlinear_expr = None
+            physics_cfg.runtime.nonlinear_expr = None
 
-        cfg.runtime.num_constants = len(constants)
+        physics_cfg.runtime.num_constants = len(constants)
         for i, constant in enumerate(constants):
-            cfg.runtime.constants[i] = float(constant)
+            physics_cfg.runtime.constants[i] = float(constant)
     else:
-        cfg.runtime.dispersion_factor_expr = None
-        cfg.runtime.dispersion_expr = None
-        cfg.runtime.transverse_factor_expr = None
-        cfg.runtime.transverse_expr = None
-        cfg.runtime.nonlinear_expr = None
-        cfg.runtime.num_constants = 0
+        physics_cfg.runtime.dispersion_factor_expr = None
+        physics_cfg.runtime.dispersion_expr = None
+        physics_cfg.runtime.transverse_factor_expr = None
+        physics_cfg.runtime.transverse_expr = None
+        physics_cfg.runtime.nonlinear_expr = None
+        physics_cfg.runtime.num_constants = 0
 
-    return PreparedSimConfig(config=cfg, keepalive=keepalive)
+    return PreparedSimConfig(simulation_config=sim_cfg,
+                             physics_config=physics_cfg,
+                             keepalive=keepalive)
 
 
 class NLolib:
@@ -1066,8 +1112,9 @@ class NLolib:
 
     def query_runtime_limits(
         self,
-        config: PreparedSimConfig | SimConfig | None = None,
+        config: PreparedSimConfig | NloSimulationConfig | None = None,
         exec_options: NloExecutionOptions | None = None,
+        physics_config: NloPhysicsConfig | None = None,
     ) -> NloRuntimeLimits:
         """
         Query runtime-derived solver limits for current backend/options.
@@ -1084,46 +1131,35 @@ class NLolib:
             out.storage_available = 1 if self.storage_is_available() else 0
             return out
 
-        cfg = None
+        sim_cfg = None
+        phys_cfg = None
         if config is not None:
-            cfg = config.config if isinstance(config, PreparedSimConfig) else config
-        cfg_ptr = ctypes.pointer(cfg) if cfg is not None else None
+            if isinstance(config, PreparedSimConfig):
+                sim_cfg = config.simulation_config
+                phys_cfg = config.physics_config
+            else:
+                sim_cfg = config
+        if physics_config is not None:
+            phys_cfg = physics_config
+
+        sim_ptr = ctypes.pointer(sim_cfg) if sim_cfg is not None else None
+        phys_ptr = ctypes.pointer(phys_cfg) if phys_cfg is not None else None
         opts_ptr = ctypes.pointer(exec_options) if exec_options is not None else None
         out = NloRuntimeLimits()
-        status = int(self.lib.nlolib_query_runtime_limits(cfg_ptr, opts_ptr, ctypes.pointer(out)))
+        status = int(self.lib.nlolib_query_runtime_limits(sim_ptr, phys_ptr, opts_ptr, ctypes.pointer(out)))
         if status != NLOLIB_STATUS_OK:
             raise RuntimeError(f"nlolib_query_runtime_limits failed with status={status}")
         return out
 
-    def propagate(self, primary: Any, *args: Any, **kwargs: Any) -> PropagationResult:
-        """
-        Unified propagation entrypoint.
-
-        Low-level form:
-            propagate(config, input_field, num_recorded_samples, exec_options=None, **storage_kwargs)
-
-        High-level form:
-            propagate(
-                pulse,
-                linear_operator="gvd",
-                nonlinear_operator="kerr",
-                *,
-                propagation_distance=...,
-                ...
-            )
-        """
-        if isinstance(primary, (PreparedSimConfig, SimConfig)):
-            return self._propagate_low_level(primary, *args, **kwargs)
-        return self._propagate_high_level(primary, *args, **kwargs)
-
-    def _propagate_low_level(
+    def _normalize_propagate_request_from_config(
         self,
-        config: PreparedSimConfig | SimConfig,
+        config: PreparedSimConfig | NloSimulationConfig,
         *args: Any,
         **kwargs: Any,
-    ) -> PropagationResult:
+    ) -> _NormalizedPropagateRequest:
         input_field = kwargs.pop("input_field", None)
         num_recorded_samples = kwargs.pop("num_recorded_samples", None)
+        physics_config = kwargs.pop("physics_config", None)
         exec_options = kwargs.pop("exec_options", None)
 
         if len(args) > 3:
@@ -1152,7 +1188,7 @@ class NLolib:
         log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
         return_records = bool(kwargs.pop("return_records", True))
         if kwargs:
-            raise TypeError(f"unexpected low-level propagate kwargs: {sorted(kwargs.keys())}")
+            raise TypeError(f"unexpected propagate kwargs: {sorted(kwargs.keys())}")
 
         num_records = int(num_recorded_samples)
         if num_records <= 0:
@@ -1163,88 +1199,38 @@ class NLolib:
         if n == 0:
             raise ValueError("input_field must be non-empty")
 
-        cfg = config.config if isinstance(config, PreparedSimConfig) else config
-        cfg_ptr = ctypes.pointer(cfg)
-        opts_ptr = ctypes.pointer(exec_options) if exec_options is not None else None
-        in_arr = make_complex_array(input_seq)
-        out_records: list[list[complex]]
-        storage_result_meta: dict[str, object] | None = None
-
-        if sqlite_path is None:
-            out_arr = make_complex_array(n * num_records)
-            status = int(
-                self.lib.nlolib_propagate(
-                    cfg_ptr,
-                    n,
-                    ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
-                    num_records,
-                    ctypes.cast(out_arr, ctypes.POINTER(NloComplex)),
-                    opts_ptr,
-                )
-            )
-            if status != NLOLIB_STATUS_OK:
-                raise RuntimeError(f"nlolib_propagate failed with status={status}")
-            out_records = self._records_from_complex_array(out_arr, n, num_records)
+        if isinstance(config, PreparedSimConfig):
+            sim_cfg = config.simulation_config
+            phys_cfg = config.physics_config
         else:
-            if not bool(getattr(self.lib, "_has_propagate_with_storage", False)):
-                raise RuntimeError(
-                    "nlolib_propagate_with_storage is unavailable in the loaded nlolib build"
-                )
-            if not self.storage_is_available():
-                raise RuntimeError("SQLite storage is not available in this nlolib build")
+            sim_cfg = config
+            phys_cfg = NloPhysicsConfig()
+        if physics_config is not None:
+            phys_cfg = physics_config
 
-            out_arr = make_complex_array(n * num_records) if return_records else None
-            storage_opts, storage_keepalive = default_storage_options(
-                sqlite_path=str(sqlite_path),
-                run_id=run_id,
-                sqlite_max_bytes=sqlite_max_bytes,
-                chunk_records=chunk_records,
-                cap_policy=cap_policy,
-                log_final_output_field_to_db=log_final_output_field_to_db,
-            )
-            storage_result = NloStorageResult()
-            _ = storage_keepalive
-            status = int(
-                self.lib.nlolib_propagate_with_storage(
-                    cfg_ptr,
-                    n,
-                    ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
-                    num_records,
-                    ctypes.cast(out_arr, ctypes.POINTER(NloComplex)) if out_arr is not None else None,
-                    opts_ptr,
-                    ctypes.pointer(storage_opts),
-                    ctypes.pointer(storage_result),
-                )
-            )
-            if status != NLOLIB_STATUS_OK:
-                raise RuntimeError(f"nlolib_propagate_with_storage failed with status={status}")
-            storage_result_meta = _storage_result_to_meta(storage_result)
-            if out_arr is None:
-                out_records = []
-            else:
-                out_records = self._records_from_complex_array(out_arr, n, num_records)
+        return _NormalizedPropagateRequest(
+            sim_cfg=sim_cfg,
+            phys_cfg=phys_cfg,
+            input_seq=input_seq,
+            num_records=num_records,
+            exec_options=exec_options,
+            sqlite_path=(str(sqlite_path) if sqlite_path is not None else None),
+            run_id=(None if run_id is None else str(run_id)),
+            sqlite_max_bytes=sqlite_max_bytes,
+            chunk_records=chunk_records,
+            cap_policy=cap_policy,
+            log_final_output_field_to_db=log_final_output_field_to_db,
+            return_records=return_records,
+            output_label=("final" if num_records == 1 else "dense"),
+            meta_overrides={},
+        )
 
-        distance = float(cfg.propagation.propagation_distance)
-        z_axis = self._build_z_axis(distance, num_records)
-        final = list(out_records[-1]) if out_records else []
-        meta: dict[str, Any] = {
-            "output": "final" if num_records == 1 else "dense",
-            "records": num_records,
-            "storage_enabled": bool(sqlite_path is not None),
-            "records_returned": bool(len(out_records) > 0),
-            "backend_requested": (
-                int(exec_options.backend_type)
-                if exec_options is not None
-                else int(NLO_VECTOR_BACKEND_AUTO)
-            ),
-            "coupled": bool(int(cfg.spatial.nx) > 1 or int(cfg.spatial.ny) > 1),
-        }
-        if storage_result_meta is not None:
-            meta["storage_result"] = storage_result_meta
-
-        return PropagationResult(records=out_records, z_axis=z_axis, final=final, meta=meta)
-
-    def _propagate_high_level(self, pulse: Any, *args: Any, **kwargs: Any) -> PropagationResult:
+    def _normalize_propagate_request_from_pulse(
+        self,
+        pulse: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _NormalizedPropagateRequest:
         if len(args) > 2:
             raise TypeError("high-level propagate accepts at most two positional operator args")
 
@@ -1364,24 +1350,161 @@ class NLolib:
             potential_grid=pulse_spec.potential_grid,
             runtime=runtime,
         )
-
-        result = self._propagate_low_level(
-            config,
-            pulse_spec.samples,
-            num_records,
+        sim_cfg = config.simulation_config
+        phys_cfg = config.physics_config
+        return _NormalizedPropagateRequest(
+            sim_cfg=sim_cfg,
+            phys_cfg=phys_cfg,
+            input_seq=list(pulse_spec.samples),
+            num_records=num_records,
             exec_options=exec_options,
-            sqlite_path=sqlite_path,
-            run_id=run_id,
+            sqlite_path=(str(sqlite_path) if sqlite_path is not None else None),
+            run_id=(None if run_id is None else str(run_id)),
             sqlite_max_bytes=sqlite_max_bytes,
             chunk_records=chunk_records,
             cap_policy=cap_policy,
             log_final_output_field_to_db=log_final_output_field_to_db,
             return_records=return_records,
+            output_label=output,
+            meta_overrides={
+                "preset": preset,
+                "output": output,
+                "coupled": bool(transverse_requested),
+            },
         )
-        result.meta["preset"] = preset
-        result.meta["output"] = output
-        result.meta["coupled"] = bool(transverse_requested)
-        return result
+
+    def _execute_propagate_request(
+        self,
+        request: _NormalizedPropagateRequest,
+    ) -> PropagationResult:
+        if request.sqlite_path is not None and not self.storage_is_available():
+            raise RuntimeError("SQLite storage is not available in this nlolib build")
+
+        sim_ptr = ctypes.pointer(request.sim_cfg)
+        phys_ptr = ctypes.pointer(request.phys_cfg)
+        in_arr = make_complex_array(request.input_seq)
+        n = len(request.input_seq)
+        out_arr = make_complex_array(n * request.num_records) if request.return_records else None
+
+        storage_opts = None
+        storage_keepalive: list[bytes] = []
+        if request.sqlite_path is not None:
+            storage_opts, storage_keepalive = default_storage_options(
+                sqlite_path=request.sqlite_path,
+                run_id=request.run_id,
+                sqlite_max_bytes=request.sqlite_max_bytes,
+                chunk_records=request.chunk_records,
+                cap_policy=request.cap_policy,
+                log_final_output_field_to_db=request.log_final_output_field_to_db,
+            )
+        _ = storage_keepalive
+
+        propagate_options = (
+            self.lib.nlolib_propagate_options_default()
+            if bool(getattr(self.lib, "_has_propagate_defaults", False))
+            else NloPropagateOptions()
+        )
+        propagate_options.num_recorded_samples = request.num_records
+        propagate_options.output_mode = (
+            NLO_PROPAGATE_OUTPUT_FINAL_ONLY
+            if request.num_records == 1
+            else NLO_PROPAGATE_OUTPUT_DENSE
+        )
+        propagate_options.return_records = int(bool(request.return_records))
+        propagate_options.exec_options = (
+            ctypes.pointer(request.exec_options)
+            if request.exec_options is not None
+            else None
+        )
+        propagate_options.storage_options = (
+            ctypes.pointer(storage_opts)
+            if storage_opts is not None
+            else None
+        )
+
+        storage_result = NloStorageResult()
+        records_written = ctypes.c_size_t(0)
+        propagate_output = (
+            self.lib.nlolib_propagate_output_default()
+            if bool(getattr(self.lib, "_has_propagate_defaults", False))
+            else NloPropagateOutput()
+        )
+        propagate_output.output_records = (
+            ctypes.cast(out_arr, ctypes.POINTER(NloComplex))
+            if out_arr is not None
+            else None
+        )
+        propagate_output.output_record_capacity = request.num_records if out_arr is not None else 0
+        propagate_output.records_written = ctypes.pointer(records_written)
+        propagate_output.storage_result = ctypes.pointer(storage_result)
+
+        status = int(
+            self.lib.nlolib_propagate(
+                sim_ptr,
+                phys_ptr,
+                n,
+                ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
+                ctypes.pointer(propagate_options),
+                ctypes.pointer(propagate_output),
+            )
+        )
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_propagate failed with status={status}")
+
+        if out_arr is None:
+            out_records: list[list[complex]] = []
+        else:
+            out_records = self._records_from_complex_array(out_arr, n, int(records_written.value))
+        storage_result_meta = (
+            _storage_result_to_meta(storage_result)
+            if request.sqlite_path is not None
+            else None
+        )
+
+        distance = float(request.sim_cfg.propagation.propagation_distance)
+        z_axis = self._build_z_axis(distance, request.num_records)
+        final = list(out_records[-1]) if out_records else []
+        meta: dict[str, Any] = {
+            "output": request.output_label,
+            "records": request.num_records,
+            "storage_enabled": bool(request.sqlite_path is not None),
+            "records_returned": bool(len(out_records) > 0),
+            "backend_requested": (
+                int(request.exec_options.backend_type)
+                if request.exec_options is not None
+                else int(NLO_VECTOR_BACKEND_AUTO)
+            ),
+            "coupled": bool(
+                int(request.sim_cfg.spatial.nx) > 1 or int(request.sim_cfg.spatial.ny) > 1
+            ),
+        }
+        if storage_result_meta is not None:
+            meta["storage_result"] = storage_result_meta
+        meta.update(request.meta_overrides)
+        return PropagationResult(records=out_records, z_axis=z_axis, final=final, meta=meta)
+
+    def propagate(self, primary: Any, *args: Any, **kwargs: Any) -> PropagationResult:
+        """
+        Unified propagation entrypoint.
+
+        Low-level form:
+            propagate(config, input_field, num_recorded_samples, exec_options=None, **storage_kwargs)
+
+        High-level form:
+            propagate(
+                pulse,
+                linear_operator="gvd",
+                nonlinear_operator="kerr",
+                *,
+                propagation_distance=...,
+                ...
+            )
+        """
+        if isinstance(primary, (PreparedSimConfig, NloSimulationConfig)):
+            request = self._normalize_propagate_request_from_config(primary, *args, **kwargs)
+        else:
+            request = self._normalize_propagate_request_from_pulse(primary, *args, **kwargs)
+        return self._execute_propagate_request(request)
 
     @staticmethod
     def _records_from_complex_array(
@@ -1426,9 +1549,15 @@ __all__ = [
     "NLOLIB_LOG_LEVEL_DEBUG",
     "NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES",
     "NLO_STORAGE_DB_CAP_POLICY_FAIL",
+    "NLO_PROPAGATE_OUTPUT_DENSE",
+    "NLO_PROPAGATE_OUTPUT_FINAL_ONLY",
     "NloComplex",
+    "NloSimulationConfig",
+    "NloPhysicsConfig",
     "NloExecutionOptions",
     "NloRuntimeLimits",
+    "NloPropagateOptions",
+    "NloPropagateOutput",
     "NloStorageOptions",
     "NloStorageResult",
     "NloVkBackendConfig",

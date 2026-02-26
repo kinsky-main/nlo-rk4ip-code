@@ -71,10 +71,10 @@ def main() -> float:
         omega=None,
         error_tolerance=1e-7,
     )
-    exec_opts = SimulationOptions(backend="auto", fft_backend="auto")
+    exec_options = SimulationOptions(backend="auto", fft_backend="auto")
 
     runner = NloExampleRunner()
-    z_records, records = runner.propagate_temporal_records(field0, sim_cfg, num_records, exec_opts)
+    z_records, records = runner.propagate_temporal_records(field0, sim_cfg, num_records, exec_options)
     record_norms = np.asarray([float(np.linalg.norm(record)) for record in records], dtype=np.float64)
 
     centroid = centroid_curve(t, records)
