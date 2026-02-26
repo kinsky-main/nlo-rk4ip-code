@@ -21,7 +21,10 @@
 - [ ] Remove bloat in nlolib.c which results in 3 pointless function wrappers for the same operations.
 - [ ] Remove bloat in wrappers which mirrors public API functions in nlolib.c bloat.
 - [ ] Fix soliton example, actually find original reference for analytical solution and ensure it is correct.
-- [ ] Check linear drift solution to see why error is bouncing around 0.6 z units, there is some characteristic in the error which should not be there.
+- [ ] Change linear drift error to show total error rather than centroid difference.
+- [ ] Plot pulse evolution in the soliton example against the step size to show convergence of the solver.
+- [ ] Create benchmark to run multiple fixed step sizes to evaluate convergence of the solver and show that it is consistent with the expected order of the RK4 method.
+- [ ] Remap (3+1)D problems to use full size tensors rather than flattening to 1D arrays, this will also require implementation of dedicated GPU kernels for (3+1)D problems.
 
 ## Potentially Required Tasks
 
@@ -31,7 +34,6 @@
 - [ ] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
 - [ ] Loading bar with estimated time remaining for long-running simulations.
 - [ ] Refactor state.c into respective init files.
-- [ ] Remap (3+1)D problems to use full size tensors rather than flattening to 1D arrays, this will also require implementation of dedicated GPU kernels for (3+1)D problems.
 - [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.
 
 ## Extensions
@@ -39,3 +41,4 @@
 - [ ] Add Massively Parallel Algorithm solver mode for coupled mode problems.
 - [ ] OpenMP backend for multi-core CPU parallelism.
 - [ ] Add example problem documentation on the physics of the problems (Do this in the report first ;)).
+- [ ] Review directory and module sturcture for better organisation. Currnetly there are some looped dependencies between modules which are not ideal, e.g. core -> physics -> core.

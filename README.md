@@ -2,6 +2,8 @@
 
 `nlolib` is a C99 nonlinear optics library with CPU SIMD and Vulkan compute backends, plus Python and MATLAB bindings.
 
+Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-code/.
+
 ## Prerequisites
 
 ### Required for core build
