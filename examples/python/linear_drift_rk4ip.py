@@ -38,13 +38,49 @@ def centroid_curve(t: np.ndarray, records: np.ndarray) -> np.ndarray:
     return weighted / safe_norm
 
 
-def centroid_model_error_curve(
-    measured_shift: np.ndarray,
-    theory_shift: np.ndarray,
-    scale: float,
+def linear_reference_records(
+    field0: np.ndarray,
+    z_records: np.ndarray,
+    beta2: float,
+    dt: float,
 ) -> np.ndarray:
-    safe_scale = scale if scale > 0.0 else 1.0
-    return np.abs(np.asarray(measured_shift) - np.asarray(theory_shift)) / safe_scale
+    field = np.asarray(field0, dtype=np.complex128).reshape(-1)
+    z = np.asarray(z_records, dtype=np.float64).reshape(-1)
+    n = int(field.size)
+    if n == 0:
+        raise ValueError("field0 must be non-empty.")
+
+    omega = 2.0 * np.pi * np.fft.fftfreq(n, d=float(dt))
+    phase_coeff = 0.5 * float(beta2) * (omega**2)
+    spectrum0 = np.fft.fft(field)
+
+    references = np.empty((z.size, n), dtype=np.complex128)
+    phase_arg = np.empty(n, dtype=np.float64)
+    phase = np.empty(n, dtype=np.complex128)
+    spectrum_z = np.empty(n, dtype=np.complex128)
+    for i, z_i in enumerate(z):
+        np.multiply(phase_coeff, z_i, out=phase_arg)
+        np.multiply(phase_arg, 1.0j, out=phase)
+        np.exp(phase, out=phase)
+        np.multiply(spectrum0, phase, out=spectrum_z)
+        references[i] = np.fft.ifft(spectrum_z)
+    return references
+
+
+def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
+    if records.shape != reference_records.shape:
+        raise ValueError("records and reference_records must have the same shape.")
+
+    ref_norms = np.linalg.norm(np.asarray(reference_records, dtype=np.complex128), axis=1)
+    norm_floor = max(float(np.max(ref_norms)) * 1e-12, 1e-15)
+    out = np.empty(records.shape[0], dtype=np.float64)
+    for i in range(records.shape[0]):
+        ref = np.asarray(reference_records[i], dtype=np.complex128)
+        num = np.asarray(records[i], dtype=np.complex128)
+        ref_norm = float(np.linalg.norm(ref))
+        safe_ref_norm = max(ref_norm, norm_floor)
+        out[i] = float(np.linalg.norm(num - ref) / safe_ref_norm)
+    return out
 
 
 def main() -> float:
@@ -83,8 +119,8 @@ def main() -> float:
     predicted_slope = beta2 * chirp
     theory_shift = predicted_slope * z_records
     slope_rel_error = abs(measured_slope - predicted_slope) / max(abs(predicted_slope), 1e-12)
-    end_shift_scale = abs(predicted_slope * z_final)
-    error_curve = centroid_model_error_curve(centroid_shift, theory_shift, end_shift_scale)
+    reference_records = linear_reference_records(field0, z_records, beta2, dt)
+    error_curve = relative_l2_error_curve(records, reference_records)
 
     output_dir = Path(__file__).resolve().parent / "output" / "linear_drift"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -133,8 +169,8 @@ def main() -> float:
         z_records,
         error_curve,
         output_dir / "total_error_over_propagation.png",
-        title="Linear Drift: Centroid Model Error Over Propagation",
-        y_label="Normalized |measured - theory|",
+        title="Linear Drift: Full-Window Relative L2 Error Over Propagation",
+        y_label="Relative L2 error (numerical vs analytical)",
     )
     if saved is not None:
         saved_paths.append(saved)

@@ -18,9 +18,9 @@
 - [ ] Fix MATLAB output for installed packages where progress is not printed.
 - [ ] Improve printout for progress of solver, showing estimated time of completion.
 - [ ] Remove redundant wrappers and functions from MATLAB and Python bindings, duplications of factor expressions and dispersion expressions.
-- [ ] Remove bloat in nlolib.c which results in 3 pointless function wrappers for the same operations.
-- [ ] Remove bloat in wrappers which mirrors public API functions in nlolib.c bloat.
-- [ ] Fix soliton example, actually find original reference for analytical solution and ensure it is correct.
+- [x] Remove bloat in nlolib.c which results in 3 pointless function wrappers for the same operations.
+- [x] Remove bloat in wrappers which mirrors public API functions in nlolib.c bloat.
+- [x] Fix soliton example, actually find original reference for analytical solution and ensure it is correct.
 - [ ] Change linear drift error to show total error rather than centroid difference.
 - [ ] Plot pulse evolution in the soliton example against the step size to show convergence of the solver.
 - [ ] Create benchmark to run multiple fixed step sizes to evaluate convergence of the solver and show that it is consistent with the expected order of the RK4 method.

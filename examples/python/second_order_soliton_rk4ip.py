@@ -10,14 +10,15 @@ using t = T / T0 and A(z, t) = sqrt(P0) * exp(-alpha * z / 2) * U(z, t).
 from __future__ import annotations
 
 import math
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
-    plot_intensity_colormap_vs_propagation,
     plot_total_error_over_propagation,
 )
 from backend.runner import (
@@ -34,6 +35,23 @@ if str(PYTHON_API_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_API_DIR))
 
 C_NM_PER_PS = 299792.458
+
+
+@dataclass(frozen=True)
+class StepTelemetry:
+    adjustment_z: np.ndarray
+    adjustment_sizes: np.ndarray
+    rejected_z: np.ndarray
+    rejected_attempted_sizes: np.ndarray
+
+    @staticmethod
+    def empty() -> "StepTelemetry":
+        return StepTelemetry(
+            adjustment_z=np.empty(0, dtype=np.float64),
+            adjustment_sizes=np.empty(0, dtype=np.float64),
+            rejected_z=np.empty(0, dtype=np.float64),
+            rejected_attempted_sizes=np.empty(0, dtype=np.float64),
+        )
 
 
 def sech(x: np.ndarray) -> np.ndarray:
@@ -105,6 +123,7 @@ def compute_wavelength_spectral_map_from_records(
     z_samples: np.ndarray,
     dt: float,
     lambda0_nm: float,
+    fft_size_visual: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     if A_records.ndim != 2:
         raise ValueError("A_records must be a 2D array [record, time].")
@@ -112,7 +131,8 @@ def compute_wavelength_spectral_map_from_records(
         raise ValueError("A_records row count must match z_samples length.")
 
     n = int(A_records.shape[1])
-    freq_shifted = np.fft.fftshift(np.fft.fftfreq(n, d=dt))
+    n_fft = int(n if fft_size_visual is None else max(int(fft_size_visual), n))
+    freq_shifted = np.fft.fftshift(np.fft.fftfreq(n_fft, d=dt))
 
     nu0 = C_NM_PER_PS / lambda0_nm
     nu = nu0 + freq_shifted
@@ -120,7 +140,7 @@ def compute_wavelength_spectral_map_from_records(
     lambda_nm = C_NM_PER_PS / nu[valid]
 
     field_records = np.asarray(A_records, dtype=np.complex128)
-    spectra = np.fft.fftshift(np.fft.fft(field_records, axis=1), axes=1)
+    spectra = np.fft.fftshift(np.fft.fft(field_records, n=n_fft, axis=1), axes=1)
     spec_map = np.abs(spectra[:, valid]) ** 2
 
     order = np.argsort(lambda_nm)
@@ -140,10 +160,17 @@ def compute_wavelength_spectral_map_from_records(
         support_threshold = max(float(np.max(spectral_profile)) * 1e-3, 1e-12)
         support_idx = np.flatnonzero(spectral_profile >= support_threshold)
         if support_idx.size >= 8:
-            left = max(int(support_idx[0]) - 2, 0)
-            right = min(int(support_idx[-1]) + 3, lambda_nm.size)
-            lambda_nm = lambda_nm[left:right]
-            spec_map = spec_map[:, left:right]
+            support_min = float(lambda_nm[int(support_idx[0])])
+            support_max = float(lambda_nm[int(support_idx[-1])])
+            half_span = max(abs(support_min - float(lambda0_nm)), abs(support_max - float(lambda0_nm)))
+            if half_span > 0.0:
+                half_span *= 1.02
+                lower = float(lambda0_nm) - half_span
+                upper = float(lambda0_nm) + half_span
+                band = (lambda_nm >= lower) & (lambda_nm <= upper)
+                if int(np.count_nonzero(band)) >= 8:
+                    lambda_nm = lambda_nm[band]
+                    spec_map = spec_map[:, band]
 
     return z_samples, lambda_nm, spec_map
 
@@ -164,6 +191,172 @@ def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) 
     return out
 
 
+def _load_plt():
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return None
+    return plt
+
+
+def _parse_log_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    cleaned = value.strip().replace(",", "")
+    if cleaned.endswith("%"):
+        cleaned = cleaned[:-1]
+    if not cleaned:
+        return None
+    try:
+        out = float(cleaned)
+    except ValueError:
+        return None
+    return out if np.isfinite(out) else None
+
+
+def parse_step_telemetry(runtime_logs: str) -> StepTelemetry:
+    if not runtime_logs:
+        return StepTelemetry.empty()
+
+    adjustment_z: list[float] = []
+    adjustment_sizes: list[float] = []
+    rejected_z: list[float] = []
+    rejected_attempted_sizes: list[float] = []
+
+    lines = runtime_logs.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line not in {"[nlolib] step_adjustment:", "[nlolib] step_rejected:"}:
+            i += 1
+            continue
+
+        values: dict[str, str] = {}
+        i += 1
+        while i < len(lines):
+            item = lines[i].strip()
+            if item.startswith("[nlolib]"):
+                break
+            if item.startswith("- "):
+                match = re.match(r"^-\s*([^:]+):\s*(.*)$", item)
+                if match is not None:
+                    values[match.group(1).strip()] = match.group(2).strip()
+            i += 1
+
+        if line == "[nlolib] step_adjustment:":
+            z_current = _parse_log_float(values.get("z_current"))
+            step_size = _parse_log_float(values.get("step_size"))
+            if z_current is not None and step_size is not None:
+                adjustment_z.append(z_current)
+                adjustment_sizes.append(step_size)
+        else:
+            z_current = _parse_log_float(values.get("z_current"))
+            attempted_step = _parse_log_float(values.get("attempted_step"))
+            if z_current is not None and attempted_step is not None:
+                rejected_z.append(z_current)
+                rejected_attempted_sizes.append(attempted_step)
+
+    return StepTelemetry(
+        adjustment_z=np.asarray(adjustment_z, dtype=np.float64),
+        adjustment_sizes=np.asarray(adjustment_sizes, dtype=np.float64),
+        rejected_z=np.asarray(rejected_z, dtype=np.float64),
+        rejected_attempted_sizes=np.asarray(rejected_attempted_sizes, dtype=np.float64),
+    )
+
+
+def plot_wavelength_step_history(
+    z_samples: np.ndarray,
+    lambda_nm: np.ndarray,
+    spectral_map: np.ndarray,
+    telemetry: StepTelemetry,
+    output_path: Path,
+) -> Path | None:
+    plt = _load_plt()
+    if plt is None:
+        print("matplotlib not available; skipping wavelength + step-size plot.")
+        return None
+
+    z_axis = np.asarray(z_samples, dtype=np.float64)
+    lambda_axis = np.asarray(lambda_nm, dtype=np.float64)
+    data = np.asarray(spectral_map, dtype=np.float64)
+    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+    data = np.clip(data, 0.0, None)
+    if data.shape != (z_axis.size, lambda_axis.size):
+        raise ValueError("spectral_map shape must be [record, wavelength].")
+
+    peak = float(np.max(data))
+    if peak > 0.0:
+        data = data / peak
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig = plt.figure(figsize=(9.8, 10.2))
+    grid = fig.add_gridspec(2, 1, height_ratios=[4.6, 1.4], hspace=0.24)
+
+    ax_map = fig.add_subplot(grid[0, 0])
+    mesh = ax_map.pcolormesh(z_axis, lambda_axis, data.T, shading="auto", cmap="magma")
+    ax_map.set_xlabel("Propagation distance z (m)")
+    ax_map.set_ylabel("Wavelength (nm)")
+    ax_map.set_title("Spectral Intensity Envelope vs Propagation Distance")
+    ax_map.set_box_aspect(1.0)
+    cbar = fig.colorbar(mesh, ax=ax_map, pad=0.02)
+    cbar.set_label("Normalized spectral intensity")
+
+    ax_step = fig.add_subplot(grid[1, 0])
+    has_series = False
+    if telemetry.adjustment_z.size > 0:
+        order = np.argsort(telemetry.adjustment_z)
+        ax_step.plot(
+            telemetry.adjustment_z[order],
+            telemetry.adjustment_sizes[order],
+            lw=1.2,
+            color="tab:blue",
+            label="Adjusted accepted step",
+        )
+        has_series = True
+    if telemetry.rejected_z.size > 0:
+        order = np.argsort(telemetry.rejected_z)
+        ax_step.scatter(
+            telemetry.rejected_z[order],
+            telemetry.rejected_attempted_sizes[order],
+            s=14.0,
+            color="tab:orange",
+            alpha=0.7,
+            label="Rejected attempted step",
+        )
+        has_series = True
+
+    if has_series:
+        ax_step.set_xlabel("Propagation distance z (m)")
+        ax_step.set_ylabel("Step size (m)")
+        ax_step.set_title("Adaptive RK4IP Step Sizes")
+        ax_step.grid(True, alpha=0.3)
+        ax_step.legend()
+    else:
+        ax_step.text(
+            0.5,
+            0.5,
+            "No adaptive step-adjustment events captured",
+            transform=ax_step.transAxes,
+            ha="center",
+            va="center",
+        )
+        ax_step.set_xticks([])
+        ax_step.set_yticks([])
+        ax_step.set_title("Adaptive RK4IP Step Sizes")
+
+    # Keep both panels at identical drawable width after colorbar shrinkage.
+    map_pos = ax_map.get_position()
+    step_pos = ax_step.get_position()
+    ax_step.set_position([map_pos.x0, step_pos.y0, map_pos.width, step_pos.height])
+
+    fig.savefig(output_path, dpi=260, bbox_inches="tight")
+    plt.close(fig)
+    return output_path
+
+
 def save_plots(
     t: np.ndarray,
     U_num: np.ndarray,
@@ -173,21 +366,18 @@ def save_plots(
     z_samples: np.ndarray,
     lambda_nm: np.ndarray,
     spectral_map: np.ndarray,
+    telemetry: StepTelemetry,
     output_dir: Path,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
-    p1 = plot_intensity_colormap_vs_propagation(
-        lambda_nm,
+    p1 = plot_wavelength_step_history(
         z_samples,
+        lambda_nm,
         spectral_map,
+        telemetry,
         output_dir / "wavelength_intensity_colormap.png",
-        x_label="Wavelength (nm)",
-        y_label="Propagation distance z (m)",
-        title="Spectral Intensity Envelope vs Propagation Distance",
-        colorbar_label="Normalized spectral intensity",
-        cmap="magma",
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -289,16 +479,35 @@ def main() -> float:
         pulse_period=n * dt,
         omega=omega,
         error_tolerance=5e-6,
+        max_step_size=0.1,
     )
     exec_options = SimulationOptions(backend="auto", fft_backend="auto")
 
     runner = NloExampleRunner()
+    telemetry = StepTelemetry.empty()
+    progress_logging_enabled = False
+    try:
+        runner.api.set_log_buffer(1024 * 1024)
+        runner.api.set_log_level(2)
+        runner.api.set_progress_options(enabled=True, milestone_percent=100, emit_on_step_adjust=True)
+        runner.api.clear_log_buffer()
+        progress_logging_enabled = True
+    except RuntimeError as exc:
+        print(f"warning: step telemetry logging unavailable; continuing without step subplot data ({exc})")
+
     z_records, A_records = runner.propagate_temporal_records(
         np.asarray(A0, dtype=np.complex128),
         sim_cfg,
         num_recorded_samples,
         exec_options,
     )
+    if progress_logging_enabled:
+        try:
+            runtime_logs = runner.api.read_log_buffer(consume=True, max_bytes=1024 * 1024)
+            telemetry = parse_step_telemetry(runtime_logs)
+        except RuntimeError as exc:
+            print(f"warning: failed to read runtime step telemetry; continuing without it ({exc})")
+
     ensure_finite_records_or_raise(A_records, z_records)
     U_num_records = np.empty_like(A_records, dtype=np.complex128)
     U_true_records = np.empty_like(A_records, dtype=np.complex128)
@@ -320,6 +529,7 @@ def main() -> float:
         z_records,
         dt,
         lambda0_nm,
+        fft_size_visual=4 * n,
     )
     if not np.all(np.isfinite(spectral_map)):
         raise RuntimeError("spectral map contains non-finite values; refusing to render blank output.")
@@ -334,6 +544,7 @@ def main() -> float:
         z_map,
         lambda_nm,
         spectral_map,
+        telemetry,
         output_dir,
     )
 
@@ -345,6 +556,11 @@ def main() -> float:
     )
     print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
     print(f"epsilon = {epsilon:.6e}")
+    print(
+        "step telemetry events: "
+        f"adjustments={telemetry.adjustment_z.size}, "
+        f"rejected={telemetry.rejected_z.size}"
+    )
     if saved_paths:
         print("saved plots:")
         for path in saved_paths:

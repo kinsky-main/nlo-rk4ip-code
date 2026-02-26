@@ -41,6 +41,20 @@ simOptions = backend.default_simulation_options( ...
     "backend", "auto", ...
     "fft_backend", "auto");
 execOptions = backend.make_exec_options(simOptions, numRecords);
+stepTelemetry = empty_step_telemetry();
+logBufferBytes = uint64(1024 * 1024);
+progressTelemetryEnabled = false;
+try
+    api.set_log_buffer(logBufferBytes);
+    api.set_log_level(int32(2));
+    api.set_progress_options(true, int32(100), true);
+    api.clear_log_buffer();
+    progressTelemetryEnabled = true;
+catch err
+    fprintf("warning: step telemetry logging unavailable; continuing without step subplot data (%s)\n", ...
+            err.message);
+end
+
 propagateOptions = struct();
 propagateOptions.propagation_distance = zFinal;
 propagateOptions.records = numRecords;
@@ -49,6 +63,15 @@ propagateOptions.exec_options = execOptions;
 result = api.propagate(pulse, linearOperator, nonlinearOperator, propagateOptions);
 aRecords = result.records;
 zRecords = result.z_axis;
+if progressTelemetryEnabled
+    try
+        runtimeLogs = api.read_log_buffer(true, logBufferBytes);
+        stepTelemetry = parse_step_telemetry(runtimeLogs);
+    catch err
+        fprintf("warning: failed to read runtime step telemetry; continuing without it (%s)\n", ...
+                err.message);
+    end
+end
 
 ensure_finite_records_or_error(aRecords, zRecords);
 
@@ -71,8 +94,9 @@ errorCurve = relative_l2_error_curve(uNumRecords, uTrueRecords);
 z0AnalyticError = analytical_initial_condition_error(t, beta2, t0);
 
 lambda0Nm = 1550.0;
+nFftVisual = 4 * n;
 [zMap, lambdaNm, spectralMap] = compute_wavelength_spectral_map_from_records( ...
-    aRecords, zRecords, dt, lambda0Nm);
+    aRecords, zRecords, dt, lambda0Nm, nFftVisual);
 if any(~isfinite(spectralMap), "all")
     error("spectral map contains non-finite values.");
 end
@@ -83,14 +107,9 @@ if ~isfolder(outputDir)
 end
 
 savedPaths = strings(0, 1);
-savedPaths(end + 1, 1) = string(backend.plot_intensity_colormap_vs_propagation( ...
-    lambdaNm, zMap, spectralMap, ...
-    fullfile(outputDir, "wavelength_intensity_colormap.png"), ...
-    "x_label", "Wavelength (nm)", ...
-    "y_label", "Propagation distance z (m)", ...
-    "title", "Spectral Intensity Envelope vs Propagation Distance", ...
-    "colorbar_label", "Normalized spectral intensity", ...
-    "cmap", "magma")); %#ok<AGROW>
+savedPaths(end + 1, 1) = string(plot_wavelength_step_history( ...
+    zMap, lambdaNm, spectralMap, stepTelemetry, ...
+    fullfile(outputDir, "wavelength_intensity_colormap.png"))); %#ok<AGROW>
 
 savedPaths(end + 1, 1) = string(backend.plot_final_re_im_comparison( ...
     t, uTrue, uNum, ...
@@ -119,6 +138,8 @@ fprintf("normalized NLSE coefficients: sgn(beta2)=%+d, 1/(2*LD)=%.6e 1/m, exp(-a
         int32(sgnBeta2), 0.5 / ld, exp(-alpha * zFinal) / lnl);
 fprintf("analytical z=0 envelope max error = %.6e\n", z0AnalyticError);
 fprintf("epsilon = %.6e\n", epsilon);
+fprintf("step telemetry events: adjustments=%d, rejected=%d\n", ...
+        numel(stepTelemetry.adjustment_z), numel(stepTelemetry.rejected_z));
 for idx = 1:numel(savedPaths)
     fprintf("saved plot: %s\n", savedPaths(idx));
 end
@@ -180,16 +201,17 @@ out = max(abs(uRef - uAnalytic));
 end
 
 function [zMap, lambdaNm, specMap] = compute_wavelength_spectral_map_from_records( ...
-    aRecords, zSamples, dt, lambda0Nm)
+    aRecords, zSamples, dt, lambda0Nm, nFftVisual)
 
 n = size(aRecords, 2);
-freqShifted = fftshift(fftfreq_matlab(n, dt));
+nFft = max(n, round(nFftVisual));
+freqShifted = fftshift(fftfreq_matlab(nFft, dt));
 nu0 = 299792.458 / lambda0Nm;
 nu = nu0 + freqShifted;
 valid = nu > 0.0;
 lambdaNm = 299792.458 ./ nu(valid);
 
-spectra = fftshift(fft(aRecords, [], 2), 2);
+spectra = fftshift(fft(aRecords, nFft, 2), 2);
 specMap = abs(spectra(:, valid)).^2;
 
 [lambdaNm, order] = sort(lambdaNm, "ascend");
@@ -208,13 +230,181 @@ if ~isempty(specMap)
     supportThreshold = max(max(spectralProfile) * 1e-3, 1e-12);
     supportIdx = find(spectralProfile >= supportThreshold);
     if numel(supportIdx) >= 8
-        left = max(supportIdx(1) - 2, 1);
-        right = min(supportIdx(end) + 2, numel(lambdaNm));
-        lambdaNm = lambdaNm(left:right);
-        specMap = specMap(:, left:right);
+        supportMin = lambdaNm(supportIdx(1));
+        supportMax = lambdaNm(supportIdx(end));
+        halfSpan = max(abs(supportMin - lambda0Nm), abs(supportMax - lambda0Nm));
+        if halfSpan > 0.0
+            halfSpan = halfSpan * 1.02;
+            lower = lambda0Nm - halfSpan;
+            upper = lambda0Nm + halfSpan;
+            bandMask = (lambdaNm >= lower) & (lambdaNm <= upper);
+            if nnz(bandMask) >= 8
+                lambdaNm = lambdaNm(bandMask);
+                specMap = specMap(:, bandMask);
+            end
+        end
     end
 end
 zMap = zSamples;
+end
+
+function outPath = plot_wavelength_step_history(zAxis, lambdaNm, spectralMap, telemetry, outputPath)
+fig = figure('Visible', 'off', 'Position', [80, 80, 980, 1040]);
+tiledlayout(fig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+axMap = nexttile(1);
+imagesc(axMap, zAxis, lambdaNm, spectralMap.');
+axis(axMap, 'xy');
+try
+    colormap(axMap, "magma");
+catch
+    colormap(axMap, "parula");
+end
+axMap.Box = 'on';
+xlabel(axMap, "Propagation distance z (m)");
+ylabel(axMap, "Wavelength (nm)");
+title(axMap, "Spectral Intensity Envelope vs Propagation Distance");
+pbaspect(axMap, [1, 1, 1]);
+cbar = colorbar(axMap);
+cbar.Label.String = "Normalized spectral intensity";
+
+axStep = nexttile(2);
+hasSeries = false;
+if ~isempty(telemetry.adjustment_z)
+    [zSorted, order] = sort(telemetry.adjustment_z, "ascend");
+    plot(axStep, zSorted, telemetry.adjustment_sizes(order), ...
+         '-', 'LineWidth', 1.2, 'Color', [0.00, 0.45, 0.74], ...
+         'DisplayName', 'Adjusted accepted step');
+    hold(axStep, 'on');
+    hasSeries = true;
+end
+if ~isempty(telemetry.rejected_z)
+    [zRejectedSorted, order] = sort(telemetry.rejected_z, "ascend");
+    scatter(axStep, zRejectedSorted, telemetry.rejected_attempted_sizes(order), ...
+            14, [0.85, 0.33, 0.10], 'filled', ...
+            'DisplayName', 'Rejected attempted step', ...
+            'MarkerFaceAlpha', 0.7, ...
+            'MarkerEdgeAlpha', 0.7);
+    hasSeries = true;
+end
+
+if hasSeries
+    xlabel(axStep, "Propagation distance z (m)");
+    ylabel(axStep, "Step size (m)");
+    title(axStep, "Adaptive RK4IP Step Sizes");
+    grid(axStep, 'on');
+    legend(axStep, 'Location', 'best');
+else
+    title(axStep, "Adaptive RK4IP Step Sizes");
+    text(axStep, 0.5, 0.5, "No adaptive step-adjustment events captured", ...
+         'Units', 'normalized', ...
+         'HorizontalAlignment', 'center', ...
+         'VerticalAlignment', 'middle');
+    set(axStep, 'XTick', [], 'YTick', []);
+end
+
+% Keep bottom panel width exactly aligned to the top map panel width.
+mapPos = axMap.Position;
+stepPos = axStep.Position;
+stepPos(1) = mapPos(1);
+stepPos(3) = mapPos(3);
+axStep.Position = stepPos;
+
+outPath = outputPath;
+exportgraphics(fig, outPath, 'Resolution', 280);
+close(fig);
+end
+
+function telemetry = empty_step_telemetry()
+telemetry = struct();
+telemetry.adjustment_z = zeros(0, 1);
+telemetry.adjustment_sizes = zeros(0, 1);
+telemetry.rejected_z = zeros(0, 1);
+telemetry.rejected_attempted_sizes = zeros(0, 1);
+end
+
+function telemetry = parse_step_telemetry(logText)
+telemetry = empty_step_telemetry();
+if isempty(logText)
+    return;
+end
+
+lines = splitlines(string(logText));
+numLines = numel(lines);
+i = 1;
+while i <= numLines
+    line = strtrim(lines(i));
+    if line ~= "[nlolib] step_adjustment:" && line ~= "[nlolib] step_rejected:"
+        i = i + 1;
+        continue;
+    end
+
+isAdjustment = (line == "[nlolib] step_adjustment:");
+zCurrent = NaN;
+stepSize = NaN;
+attemptedStep = NaN;
+    i = i + 1;
+    while i <= numLines
+        current = strtrim(lines(i));
+        if startsWith(current, "[nlolib]")
+            break;
+        end
+        if startsWith(current, "- ")
+            [key, value, hasPair] = parse_log_key_value(extractAfter(current, 2));
+            if hasPair
+                switch key
+                    case "z_current"
+                        zCurrent = parse_log_number(value);
+                    case "step_size"
+                        stepSize = parse_log_number(value);
+                    case "attempted_step"
+                        attemptedStep = parse_log_number(value);
+                end
+            end
+        end
+        i = i + 1;
+    end
+
+    if isAdjustment
+        if isfinite(zCurrent) && isfinite(stepSize)
+            telemetry.adjustment_z(end + 1, 1) = zCurrent; %#ok<AGROW>
+            telemetry.adjustment_sizes(end + 1, 1) = stepSize; %#ok<AGROW>
+        end
+    else
+        if isfinite(zCurrent) && isfinite(attemptedStep)
+            telemetry.rejected_z(end + 1, 1) = zCurrent; %#ok<AGROW>
+            telemetry.rejected_attempted_sizes(end + 1, 1) = attemptedStep; %#ok<AGROW>
+        end
+    end
+end
+end
+
+function [key, value, hasPair] = parse_log_key_value(textLine)
+lineText = string(textLine);
+delimiterIndex = strfind(char(lineText), ':');
+if isempty(delimiterIndex)
+    key = "";
+    value = "";
+    hasPair = false;
+    return;
+end
+firstColon = delimiterIndex(1);
+key = strtrim(extractBefore(lineText, firstColon));
+value = strtrim(extractAfter(lineText, firstColon));
+hasPair = strlength(key) > 0;
+end
+
+function out = parse_log_number(textValue)
+if strlength(textValue) == 0
+    out = NaN;
+    return;
+end
+cleaned = replace(string(textValue), ",", "");
+cleaned = erase(cleaned, "%");
+out = str2double(cleaned);
+if ~isfinite(out)
+    out = NaN;
+end
 end
 
 function out = relative_l2_error_curve(records, referenceRecords)

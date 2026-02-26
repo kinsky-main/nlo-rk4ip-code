@@ -51,8 +51,8 @@ measuredSlope = measuredSlope(1);
 predictedSlope = beta2 * chirp;
 theoryShift = predictedSlope * zRecords;
 slopeRelError = abs(measuredSlope - predictedSlope) / max(abs(predictedSlope), 1e-12);
-endShiftScale = abs(predictedSlope * zFinal);
-errorCurve = centroid_model_error_curve(centroidShift, theoryShift, endShiftScale);
+referenceRecords = linear_reference_records(field0, zRecords, beta2, dt);
+errorCurve = relative_l2_error_curve(records, referenceRecords);
 
 outputDir = fullfile(repoRoot, "examples", "matlab", "output", "linear_drift");
 if ~isfolder(outputDir)
@@ -87,8 +87,8 @@ savedPaths(end + 1, 1) = string(backend.plot_final_intensity_comparison( ...
 savedPaths(end + 1, 1) = string(backend.plot_total_error_over_propagation( ...
     zRecords, errorCurve, ...
     fullfile(outputDir, "total_error_over_propagation.png"), ...
-    "title", "Linear Drift: Centroid Model Error Over Propagation", ...
-    "y_label", "Normalized |measured - theory|")); %#ok<AGROW>
+    "title", "Linear Drift: Full-Window Relative L2 Error Over Propagation", ...
+    "y_label", "Relative L2 error (numerical vs analytical)")); %#ok<AGROW>
 
 fprintf("linear drift example completed.\n");
 fprintf("record norms: first=%.6e, last=%.6e, min=%.6e\n", ...
@@ -116,10 +116,36 @@ out = weighted ./ safeNorms;
 out = out(:).';
 end
 
-function out = centroid_model_error_curve(measuredShift, theoryShift, scale)
-safeScale = scale;
-if safeScale <= 0.0
-    safeScale = 1.0;
+function referenceRecords = linear_reference_records(field0, zRecords, beta2, dt)
+n = numel(field0);
+omega = backend.angular_frequency_grid(n, dt);
+phaseCoeff = 0.5 * beta2 * (omega .^ 2);
+spectrum0 = fft(field0);
+numZ = numel(zRecords);
+referenceRecords = complex(zeros(numZ, n), zeros(numZ, n));
+phase = complex(zeros(1, n), zeros(1, n));
+spectrumZ = complex(zeros(1, n), zeros(1, n));
+for idx = 1:numZ
+    z = zRecords(idx);
+    phase(:) = exp(1.0i * (phaseCoeff * z));
+    spectrumZ(:) = spectrum0 .* phase;
+    referenceRecords(idx, :) = ifft(spectrumZ);
 end
-out = abs(measuredShift - theoryShift) / safeScale;
+end
+
+function out = relative_l2_error_curve(records, referenceRecords)
+if any(size(records) ~= size(referenceRecords))
+    error("records and referenceRecords must have the same shape.");
+end
+refNorms = vecnorm(referenceRecords, 2, 2);
+normFloor = max(max(refNorms) * 1e-12, 1e-15);
+out = zeros(size(records, 1), 1);
+for idx = 1:size(records, 1)
+    ref = referenceRecords(idx, :);
+    num = records(idx, :);
+    refNorm = norm(ref, 2);
+    safeNorm = max(refNorm, normFloor);
+    out(idx) = norm(num - ref, 2) / safeNorm;
+end
+out = out(:).';
 end
