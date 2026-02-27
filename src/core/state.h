@@ -21,7 +21,7 @@
  * @brief Number of persistent work vectors reserved by the solver state.
  */
 #ifndef NLO_WORK_VECTOR_COUNT
-#define NLO_WORK_VECTOR_COUNT 14u
+#define NLO_WORK_VECTOR_COUNT 13u
 #endif
 
 /**
@@ -218,7 +218,6 @@ typedef struct {
     nlo_vec_buffer* k_4_vec;
     nlo_vec_buffer* dispersion_factor_vec;
     nlo_vec_buffer* dispersion_operator_vec;
-    nlo_vec_buffer* nonlinear_multiplier_vec;
     nlo_vec_buffer* potential_vec;
     nlo_vec_buffer* previous_field_vec;
 } simulation_working_vectors;

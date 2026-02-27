@@ -143,7 +143,7 @@ def _run_case(
         params={"beta_t": diffraction_coeff},
     )
     nonlinear_operator = nlo.OperatorSpec(
-        expr="i*gamma*I + i*V",
+        expr="i*A*(gamma*I + V)",
         params={"gamma": gamma},
     )
 

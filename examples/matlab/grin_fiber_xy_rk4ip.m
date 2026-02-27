@@ -69,7 +69,7 @@ linearOperator.expr = "i*beta2*w*w-loss";
 linearOperator.params = struct('beta2', 0.0, 'loss', 0.0);
 
 nonlinearOperator = struct();
-nonlinearOperator.expr = "i*gamma*I + i*V";
+nonlinearOperator.expr = "i*A*(gamma*I + V)";
 nonlinearOperator.params = struct('gamma', 0.0);
 
 execOptions = backend.make_exec_options(simOptions, numRecords);

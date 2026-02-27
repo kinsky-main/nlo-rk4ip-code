@@ -21,12 +21,12 @@ _plt = _load_plt()
 if _plt is not None:
     _plt.rcParams.update({
         "font.family": "Times New Roman",
-        "font.size": 11,
-        "axes.labelsize": 11,
-        "axes.titlesize": 12,
+        "font.size": 10,
+        "axes.labelsize": 10,
+        "axes.titlesize": 10,
         "legend.fontsize": 10,
-        "figure.dpi": 200,
-        "figure.figsize": (4.0, 4.0),
+        "figure.dpi": 300,
+        "figure.figsize": (4.0, 0.66*4.0),
     })
 
 
@@ -159,7 +159,7 @@ def plot_total_error_over_propagation(
     ax.set_ylabel(y_label)
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
     return output_path
 

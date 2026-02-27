@@ -560,7 +560,7 @@ _TRANSVERSE_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
 
 _NONLINEAR_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
     "none": {"expr": "0", "params": {}},
-    "kerr": {"expr": "i*gamma*I", "params": {"gamma": 1.0}},
+    "kerr": {"expr": "i*gamma*A*I", "params": {"gamma": 1.0}},
 }
 
 

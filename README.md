@@ -120,6 +120,17 @@ Multi-config generators use `--config <type>` during build/test.
 - When `NLO_ENABLE_VKFFT=ON`, CMake target `Vulkan::glslang` must be resolvable for FFT backend linking.
 - SQLite is linked from the fetched amalgamation as a static library (no external `sqlite3.dll` runtime dependency).
 
+## Runtime Operator Semantics
+
+- Runtime operators use symbols: `A` (field), `w` (frequency/spatial-frequency), `I` (`|A|^2`), `D` (dispersion factor), `V` (potential), `h` (half-step exponent).
+- `nonlinear_expr` is interpreted as the full nonlinear RHS `N(A)` and is written directly by the solver.
+- Legacy multiplier-form nonlinear expressions must be migrated to include `A`.
+
+Common migration examples:
+
+- `i*gamma*I` -> `i*gamma*A*I`
+- `i*gamma*I + i*V` -> `i*A*(gamma*I + V)`
+
 ## Build Targets and Usage
 
 Build the shared library:

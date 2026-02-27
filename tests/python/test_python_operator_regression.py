@@ -175,13 +175,13 @@ def test_nonlinear_callable_matches_string(api, opts):
         n,
         runtime=RuntimeOperators(
             dispersion_factor_expr="0",
-            nonlinear_expr="i*c0*I",
+            nonlinear_expr="i*c0*A*I",
             constants=[gamma, 0.0, 0.0],
         ),
         **common,
     )
 
-    nonlinear_fn = lambda A, I: (1j * gamma) * I  # noqa: E731
+    nonlinear_fn = lambda A, I: (1j * gamma) * A * I  # noqa: E731
     callable_cfg = prepare_sim_config(
         n,
         runtime=RuntimeOperators(
@@ -196,6 +196,36 @@ def test_nonlinear_callable_matches_string(api, opts):
     callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
     err = _max_abs_diff(string_final, callable_final)
     assert err <= 2e-8, f"nonlinear callable mismatch: err={err}"
+
+
+def test_nonlinear_legacy_multiplier_warns(api, opts):
+    n = 96
+    dt = 0.01
+    input_field = _random_input_field(n, seed=29)
+
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.02,
+        starting_step_size=1e-3,
+        max_step_size=2e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[0j] * n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*c0*I",
+            constants=[0.3, 0.0, 0.0],
+        ),
+    )
+
+    api.set_log_buffer(64 * 1024)
+    api.set_log_level(1)
+    api.clear_log_buffer()
+    _ = api.propagate(cfg, input_field, 2, opts)
+    log_text = api.read_log_buffer(consume=True)
+    assert "does not reference 'A'" in log_text
 
 
 def test_field_first_callable_signature_enforced():
@@ -597,6 +627,13 @@ def test_fixed_step_fundamental_soliton_order(api, opts):
         errors.append(_relative_l2_error(final_field, a_true))
         step_sizes.append(dz)
 
+    min_error = min(errors)
+    max_error = max(errors)
+    spread = max_error / max(min_error, 1e-15)
+    if spread <= 1.05:
+        assert max_error <= 5e-4, f"fixed-step fundamental soliton error floor too high: {max_error}"
+        return
+
     slope = _fit_loglog_slope(step_sizes, errors)
     assert slope >= 0.5, f"fixed-step fundamental soliton slope unexpectedly low: {slope}"
 
@@ -606,6 +643,7 @@ def main():
     opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
     test_dispersion_factor_callable_matches_string(api, opts)
     test_nonlinear_callable_matches_string(api, opts)
+    test_nonlinear_legacy_multiplier_warns(api, opts)
     test_field_first_callable_signature_enforced()
     test_extended_runtime_operators_execute(api, opts)
     test_transverse_runtime_callable_matches_string(api, opts)

@@ -142,22 +142,13 @@ def _save_convergence_plot(
     ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
     ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="tab:green", label="Fitted power law")
     ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^4)$")
-    ax.loglog(
-        step_sizes_plot[fit_mask_plot],
-        errors_plot[fit_mask_plot],
-        "o",
-        ms=8.0,
-        markerfacecolor="none",
-        markeredgewidth=1.2,
-        label="Fit window",
-    )
     ax.set_xlabel("Step size Delta z (m)")
     ax.set_ylabel("Total relative L2 error")
     ax.set_title(f"Fixed-Step Soliton Convergence (fitted order p = {fitted_order:.3f})")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
 
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
+    fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
     return output_path
 

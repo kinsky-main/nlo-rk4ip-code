@@ -411,7 +411,7 @@ def save_plots(
     p4 = plot_total_error_over_propagation(
         z_samples,
         error_curve,
-        output_dir / "total_error_over_propagation.png",
+        output_dir / "total_error_over_propagation_soliton.png",
         title="Second-Order Soliton: Total Error Over Propagation",
         y_label="Relative L2 error (numerical vs analytical)",
     )
@@ -500,7 +500,7 @@ def main() -> float:
         U0 = 2.0 * sech(t)
         A0 = to_physical_envelope(U0, 0.0, p0, alpha)
 
-        num_recorded_samples = 100
+        num_recorded_samples = 160
         sim_cfg = TemporalSimulationConfig(
             gamma=gamma,
             beta2=beta2,

@@ -19,7 +19,7 @@ linearOperator = struct();
 linearOperator.fn = @(A, w) 1i * (beta2 / 2.0) * (w .* w);
 
 nonlinearOperator = struct();
-nonlinearOperator.expr = "i*gamma*I + i*V";
+nonlinearOperator.expr = "i*A*(gamma*I + V)";
 nonlinearOperator.params = struct('gamma', 0.01);
 
 api = nlolib.NLolib();

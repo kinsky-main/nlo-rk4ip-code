@@ -6,6 +6,7 @@
 #include "core/state.h"
 #include "core/sim_dimensions_internal.h"
 #include "fft/fft.h"
+#include "io/log_sink.h"
 #include "io/snapshot_store.h"
 #include "physics/operators.h"
 #include "utility/state_debug.h"
@@ -99,7 +100,7 @@ static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t r
 #endif
 
 #ifndef NLO_DEFAULT_NONLINEAR_EXPR
-#define NLO_DEFAULT_NONLINEAR_EXPR "i*c2*I + i*V"
+#define NLO_DEFAULT_NONLINEAR_EXPR "i*A*(c2*I + V)"
 #endif
 
 #ifndef NLO_DEFAULT_TRANSVERSE_FACTOR_EXPR
@@ -139,6 +140,47 @@ static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer**
 static nlo_vec_status nlo_create_complex_vec(nlo_vector_backend* backend, size_t length, nlo_vec_buffer** out_vec)
 {
     return nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, length, out_vec);
+}
+
+static int nlo_operator_program_uses_opcode(
+    const nlo_operator_program* program,
+    nlo_operator_opcode opcode
+)
+{
+    if (program == NULL || !program->active) {
+        return 0;
+    }
+
+    for (size_t i = 0u; i < program->instruction_count; ++i) {
+        if (program->instructions[i].opcode == opcode) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void nlo_warn_legacy_nonlinear_expression(
+    const char* nonlinear_expr,
+    const nlo_operator_program* nonlinear_program
+)
+{
+    if (nonlinear_expr == NULL || nonlinear_expr[0] == '\0' || nonlinear_program == NULL) {
+        return;
+    }
+
+    if (nlo_operator_program_uses_opcode(nonlinear_program, NLO_OPERATOR_OP_PUSH_SYMBOL_A)) {
+        return;
+    }
+    if (!nlo_operator_program_uses_opcode(nonlinear_program, NLO_OPERATOR_OP_PUSH_SYMBOL_I) &&
+        !nlo_operator_program_uses_opcode(nonlinear_program, NLO_OPERATOR_OP_PUSH_SYMBOL_V)) {
+        return;
+    }
+
+    nlo_log_emit(NLO_LOG_LEVEL_WARN,
+                 "[nlolib] nonlinear expression does not reference 'A'. "
+                 "Nonlinear expressions now represent full RHS N(A), so legacy multiplier forms "
+                 "must include A (for example: i*gamma*A*I). expression='%s'",
+                 nonlinear_expr);
 }
 
 static double nlo_expected_omega_unshifted(size_t index, size_t num_time_samples, double omega_step)
@@ -818,7 +860,6 @@ simulation_state* create_simulation_state_with_storage(
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_4_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.dispersion_factor_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.dispersion_operator_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.nonlinear_multiplier_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.potential_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.previous_field_vec) != NLO_VEC_STATUS_OK) {
         nlo_state_debug_log_failure("allocate_device_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
@@ -1110,6 +1151,7 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    nlo_warn_legacy_nonlinear_expression(nonlinear_expr, &state->nonlinear_operator_program);
 
     size_t required_stack_slots = state->dispersion_factor_operator_program.required_stack_slots;
     if (state->dispersion_operator_program.required_stack_slots > required_stack_slots) {
@@ -1284,7 +1326,6 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_4_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_factor_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_operator_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.nonlinear_multiplier_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.potential_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.previous_field_vec);
         nlo_destroy_vec_if_set(state->backend, &state->spatial_frequency_grid_vec);

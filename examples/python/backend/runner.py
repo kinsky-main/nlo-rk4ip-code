@@ -236,7 +236,7 @@ class NloExampleRunner:
             if runtime_cfg is None:
                 runtime_cfg = self.nlo.RuntimeOperators(
                     dispersion_factor_expr="i*c0*w*w-c1",
-                    nonlinear_expr="i*c2*I + i*V",
+                    nonlinear_expr="i*A*(c2*I + V)",
                     constants=[
                         0.5 * float(sim_cfg.beta2),
                         0.5 * float(sim_cfg.alpha),
@@ -297,7 +297,7 @@ class NloExampleRunner:
             },
         )
         nonlinear_operator = self.nlo.OperatorSpec(
-            expr="i*gamma*I + i*V",
+            expr="i*A*(gamma*I + V)",
             params={"gamma": float(sim_cfg.gamma)},
         )
         result = self.api.propagate(
@@ -378,7 +378,7 @@ class NloExampleRunner:
         if runtime_cfg is None:
             runtime_cfg = self.nlo.RuntimeOperators(
                 dispersion_factor_expr="i*c0*w*w-c1",
-                nonlinear_expr="i*c2*I + i*V",
+                nonlinear_expr="i*A*(c2*I + V)",
                 constants=[
                     0.0,
                     0.5 * float(alpha),

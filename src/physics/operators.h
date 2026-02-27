@@ -21,9 +21,12 @@ nlo_vec_status nlo_apply_dispersion_operator_stage(
 /**
  * @brief Apply configured nonlinear operator to an input field.
  *
+ * The compiled nonlinear expression is interpreted as the full nonlinear RHS
+ * term N(A) and is written directly into @p out_field.
+ *
  * @param state Mutable simulation state containing operator programs and buffers.
  * @param field Input field vector.
- * @param out_field Output field vector.
+ * @param out_field Output nonlinear RHS vector.
  * @return nlo_vec_status operation status.
  */
 nlo_vec_status nlo_apply_nonlinear_operator_stage(

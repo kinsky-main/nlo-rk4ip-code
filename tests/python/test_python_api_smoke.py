@@ -195,7 +195,7 @@ def main():
     explicit_result = api.propagate(
         pulse,
         OperatorSpec(expr="i*beta2*w*w", params={"beta2": -0.5}),
-        OperatorSpec(expr="i*gamma*I", params={"gamma": 1.0}),
+        OperatorSpec(expr="i*gamma*A*I", params={"gamma": 1.0}),
         propagation_distance=0.02,
         records=16,
         exec_options=cpu_opts,
@@ -222,7 +222,7 @@ def main():
     coupled_result = api.propagate(
         pulse_coupled,
         OperatorSpec(expr="i*beta2*w*w-loss", params={"beta2": 0.0, "loss": 0.0}),
-        OperatorSpec(expr="i*gamma*I + i*V", params={"gamma": 0.0}),
+        OperatorSpec(expr="i*A*(gamma*I + V)", params={"gamma": 0.0}),
         transverse_operator=OperatorSpec(expr="i*beta_t*w", params={"beta_t": 0.0}),
         propagation_distance=0.01,
         records=2,

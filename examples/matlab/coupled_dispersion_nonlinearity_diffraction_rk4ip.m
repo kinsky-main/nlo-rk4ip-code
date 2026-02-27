@@ -205,7 +205,7 @@ transverseOperator.expr = "i*beta_t*w";
 transverseOperator.params = struct('beta_t', diffractionCoeff);
 
 nonlinearOperator = struct();
-nonlinearOperator.expr = "i*gamma*I + i*V";
+nonlinearOperator.expr = "i*A*(gamma*I + V)";
 nonlinearOperator.params = struct('gamma', gamma);
 
 execOptions = backend.make_exec_options(simOptions, numRecords);

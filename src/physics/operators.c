@@ -90,19 +90,7 @@ nlo_vec_status nlo_apply_nonlinear_operator_stage(
                                                          &eval_ctx,
                                                          state->runtime_operator_stack_vec,
                                                          state->runtime_operator_stack_slots,
-                                                         state->working_vectors.nonlinear_multiplier_vec);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
-
-    status = nlo_vec_complex_copy(state->backend, out_field, field);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
-
-    status = nlo_vec_complex_mul_inplace(state->backend,
-                                         out_field,
-                                         state->working_vectors.nonlinear_multiplier_vec);
+                                                         out_field);
     const double end_ms = nlo_perf_profile_now_ms();
     if (status == NLO_VEC_STATUS_OK) {
         nlo_perf_profile_add_nonlinear_time(end_ms - start_ms);

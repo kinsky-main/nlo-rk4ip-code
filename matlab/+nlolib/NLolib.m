@@ -1510,7 +1510,7 @@ classdef NLolib < handle
                 case 'nonlinear'
                     switch key
                         case {'kerr', 'default'}
-                            expr = "i*gamma*I";
+                            expr = "i*gamma*A*I";
                             params = struct('gamma', 1.0);
                         case 'none'
                             expr = "0";

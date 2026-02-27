@@ -33,7 +33,7 @@ linearOperator.expr = "i*beta2*w*w-loss";
 linearOperator.params = struct('beta2', 0.5 * beta2, 'loss', 0.5 * alpha);
 
 nonlinearOperator = struct();
-nonlinearOperator.expr = "i*gamma*I + i*V";
+nonlinearOperator.expr = "i*A*(gamma*I + V)";
 nonlinearOperator.params = struct('gamma', gamma);
 
 api = nlolib.NLolib();
