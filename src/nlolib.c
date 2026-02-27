@@ -310,6 +310,10 @@ NLOLIB_API nlo_propagate_output nlolib_propagate_output_default(void)
     output.output_record_capacity = 0u;
     output.records_written = NULL;
     output.storage_result = NULL;
+    output.output_step_events = NULL;
+    output.output_step_event_capacity = 0u;
+    output.step_events_written = NULL;
+    output.step_events_dropped = NULL;
     return output;
 }
 
@@ -340,12 +344,21 @@ NLOLIB_API nlolib_status nlolib_propagate(
         local_output.output_records = NULL;
         local_output.output_record_capacity = 0u;
     }
+    if (local_output.output_step_events == NULL) {
+        local_output.output_step_event_capacity = 0u;
+    }
 
     if (local_output.records_written != NULL) {
         *local_output.records_written = 0u;
     }
     if (local_output.storage_result != NULL) {
         *local_output.storage_result = (nlo_storage_result){0};
+    }
+    if (local_output.step_events_written != NULL) {
+        *local_output.step_events_written = 0u;
+    }
+    if (local_output.step_events_dropped != NULL) {
+        *local_output.step_events_dropped = 0u;
     }
 
     nlo_log_nlse_propagate_call(config,
@@ -363,6 +376,9 @@ NLOLIB_API nlolib_status nlolib_propagate(
     }
     if (local_options.return_records != 0 && local_output.output_records == NULL) {
         return nlo_propagate_fail("validate.output_or_storage", NLOLIB_STATUS_INVALID_ARGUMENT);
+    }
+    if (local_output.output_step_events == NULL && local_output.output_step_event_capacity > 0u) {
+        return nlo_propagate_fail("validate.output_step_event_capacity", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
 
     if (num_time_samples == 0u) {
@@ -436,6 +452,11 @@ NLOLIB_API nlolib_status nlolib_propagate(
         free_simulation_state(state);
         return nlo_propagate_fail("upload_initial_field", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
+
+    state->step_event_buffer = local_output.output_step_events;
+    state->step_event_capacity = local_output.output_step_event_capacity;
+    state->step_events_written = 0u;
+    state->step_events_dropped = 0u;
 
     solve_rk4(state);
 
@@ -545,9 +566,17 @@ NLOLIB_API nlolib_status nlolib_propagate(
         }
     }
 
+    const size_t step_events_written = state->step_events_written;
+    const size_t step_events_dropped = state->step_events_dropped;
     free_simulation_state(state);
     if (local_output.records_written != NULL) {
         *local_output.records_written = (local_options.return_records != 0) ? num_recorded_samples : 0u;
+    }
+    if (local_output.step_events_written != NULL) {
+        *local_output.step_events_written = step_events_written;
+    }
+    if (local_output.step_events_dropped != NULL) {
+        *local_output.step_events_dropped = step_events_dropped;
     }
     return NLOLIB_STATUS_OK;
 }

@@ -112,12 +112,20 @@ typedef struct {
  * @param output_record_capacity Maximum records available in output_records.
  * @param records_written Number of records actually written.
  * @param storage_result Optional storage summary output.
+ * @param output_step_events Optional destination step-event buffer.
+ * @param output_step_event_capacity Maximum events available in output_step_events.
+ * @param step_events_written Number of step events actually written.
+ * @param step_events_dropped Number of events dropped due to capacity limits.
  */
 typedef struct {
     nlo_complex* output_records;
     size_t output_record_capacity;
     size_t* records_written;
     nlo_storage_result* storage_result;
+    nlo_step_event* output_step_events;
+    size_t output_step_event_capacity;
+    size_t* step_events_written;
+    size_t* step_events_dropped;
 } nlo_propagate_output;
 
 /**

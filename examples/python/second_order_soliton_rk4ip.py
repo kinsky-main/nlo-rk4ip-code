@@ -10,7 +10,6 @@ using t = T / T0 and A(z, t) = sqrt(P0) * exp(-alpha * z / 2) * U(z, t).
 from __future__ import annotations
 
 import math
-import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,18 +38,20 @@ C_NM_PER_PS = 299792.458
 
 @dataclass(frozen=True)
 class StepTelemetry:
-    adjustment_z: np.ndarray
-    adjustment_sizes: np.ndarray
-    rejected_z: np.ndarray
-    rejected_attempted_sizes: np.ndarray
+    accepted_z: np.ndarray
+    accepted_step_sizes: np.ndarray
+    next_z: np.ndarray
+    next_step_sizes: np.ndarray
+    dropped: int
 
     @staticmethod
     def empty() -> "StepTelemetry":
         return StepTelemetry(
-            adjustment_z=np.empty(0, dtype=np.float64),
-            adjustment_sizes=np.empty(0, dtype=np.float64),
-            rejected_z=np.empty(0, dtype=np.float64),
-            rejected_attempted_sizes=np.empty(0, dtype=np.float64),
+            accepted_z=np.empty(0, dtype=np.float64),
+            accepted_step_sizes=np.empty(0, dtype=np.float64),
+            next_z=np.empty(0, dtype=np.float64),
+            next_step_sizes=np.empty(0, dtype=np.float64),
+            dropped=0,
         )
 
 
@@ -202,69 +203,75 @@ def _load_plt():
     return plt
 
 
-def _parse_log_float(value: str | None) -> float | None:
-    if value is None:
-        return None
-    cleaned = value.strip().replace(",", "")
-    if cleaned.endswith("%"):
-        cleaned = cleaned[:-1]
-    if not cleaned:
-        return None
-    try:
-        out = float(cleaned)
-    except ValueError:
-        return None
-    return out if np.isfinite(out) else None
-
-
-def parse_step_telemetry(runtime_logs: str) -> StepTelemetry:
-    if not runtime_logs:
+def step_telemetry_from_meta(meta: dict[str, object] | None) -> StepTelemetry:
+    if not meta:
+        return StepTelemetry.empty()
+    raw = meta.get("step_history")
+    if not isinstance(raw, dict):
         return StepTelemetry.empty()
 
-    adjustment_z: list[float] = []
-    adjustment_sizes: list[float] = []
-    rejected_z: list[float] = []
-    rejected_attempted_sizes: list[float] = []
-
-    lines = runtime_logs.splitlines()
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        if line not in {"[nlolib] step_adjustment:", "[nlolib] step_rejected:"}:
-            i += 1
-            continue
-
-        values: dict[str, str] = {}
-        i += 1
-        while i < len(lines):
-            item = lines[i].strip()
-            if item.startswith("[nlolib]"):
-                break
-            if item.startswith("- "):
-                match = re.match(r"^-\s*([^:]+):\s*(.*)$", item)
-                if match is not None:
-                    values[match.group(1).strip()] = match.group(2).strip()
-            i += 1
-
-        if line == "[nlolib] step_adjustment:":
-            z_current = _parse_log_float(values.get("z_current"))
-            step_size = _parse_log_float(values.get("step_size"))
-            if z_current is not None and step_size is not None:
-                adjustment_z.append(z_current)
-                adjustment_sizes.append(step_size)
-        else:
-            z_current = _parse_log_float(values.get("z_current"))
-            attempted_step = _parse_log_float(values.get("attempted_step"))
-            if z_current is not None and attempted_step is not None:
-                rejected_z.append(z_current)
-                rejected_attempted_sizes.append(attempted_step)
-
+    z = np.asarray(raw.get("z", []), dtype=np.float64).reshape(-1)
+    accepted = np.asarray(raw.get("step_size", []), dtype=np.float64).reshape(-1)
+    next_sizes = np.asarray(raw.get("next_step_size", []), dtype=np.float64).reshape(-1)
+    n = min(z.size, accepted.size, next_sizes.size)
+    if n <= 0:
+        dropped = int(raw.get("dropped", 0))
+        return StepTelemetry.empty() if dropped <= 0 else StepTelemetry(
+            accepted_z=np.empty(0, dtype=np.float64),
+            accepted_step_sizes=np.empty(0, dtype=np.float64),
+            next_z=np.empty(0, dtype=np.float64),
+            next_step_sizes=np.empty(0, dtype=np.float64),
+            dropped=dropped,
+        )
     return StepTelemetry(
-        adjustment_z=np.asarray(adjustment_z, dtype=np.float64),
-        adjustment_sizes=np.asarray(adjustment_sizes, dtype=np.float64),
-        rejected_z=np.asarray(rejected_z, dtype=np.float64),
-        rejected_attempted_sizes=np.asarray(rejected_attempted_sizes, dtype=np.float64),
+        accepted_z=z[:n],
+        accepted_step_sizes=accepted[:n],
+        next_z=z[:n],
+        next_step_sizes=next_sizes[:n],
+        dropped=int(raw.get("dropped", 0)),
     )
+
+
+def filter_record_clipped_steps(
+    telemetry: StepTelemetry,
+    z_samples: np.ndarray,
+) -> tuple[StepTelemetry, int]:
+    z_axis = np.asarray(z_samples, dtype=np.float64).reshape(-1)
+    n = int(telemetry.accepted_z.size)
+    if n <= 0 or z_axis.size <= 1:
+        return telemetry, 0
+
+    z = np.asarray(telemetry.accepted_z, dtype=np.float64)
+    accepted = np.asarray(telemetry.accepted_step_sizes, dtype=np.float64)
+    proposed = np.asarray(telemetry.next_step_sizes, dtype=np.float64)
+    if z.size != accepted.size or z.size != proposed.size:
+        return telemetry, 0
+
+    spacing = float((z_axis[-1] - z_axis[0]) / float(z_axis.size - 1))
+    if not np.isfinite(spacing) or spacing <= 0.0:
+        return telemetry, 0
+
+    z_end = float(z_axis[-1])
+    expected_boundaries = np.asarray(z_axis[1:-1], dtype=np.float64)
+    if expected_boundaries.size <= 0:
+        return telemetry, 0
+
+    proximity_eps = max(64.0 * np.finfo(np.float64).eps * max(1.0, abs(z_end)), spacing * 0.25)
+    distance_to_expected = np.min(np.abs(z[:, None] - expected_boundaries[None, :]), axis=1)
+    clipped = distance_to_expected <= proximity_eps
+
+    if not np.any(clipped):
+        return telemetry, 0
+
+    keep = ~clipped
+    filtered = StepTelemetry(
+        accepted_z=z[keep],
+        accepted_step_sizes=accepted[keep],
+        next_z=np.asarray(telemetry.next_z, dtype=np.float64)[keep],
+        next_step_sizes=proposed[keep],
+        dropped=telemetry.dropped,
+    )
+    return filtered, int(np.count_nonzero(clipped))
 
 
 def plot_wavelength_step_history(
@@ -305,26 +312,16 @@ def plot_wavelength_step_history(
     cbar.set_label("Normalized spectral intensity")
 
     ax_step = fig.add_subplot(grid[1, 0])
+    telemetry_plot, _ = filter_record_clipped_steps(telemetry, z_axis)
     has_series = False
-    if telemetry.adjustment_z.size > 0:
-        order = np.argsort(telemetry.adjustment_z)
+    if telemetry_plot.accepted_z.size > 0:
+        order = np.argsort(telemetry_plot.accepted_z)
         ax_step.plot(
-            telemetry.adjustment_z[order],
-            telemetry.adjustment_sizes[order],
+            telemetry_plot.accepted_z[order],
+            telemetry_plot.accepted_step_sizes[order],
             lw=1.2,
             color="tab:blue",
-            label="Adjusted accepted step",
-        )
-        has_series = True
-    if telemetry.rejected_z.size > 0:
-        order = np.argsort(telemetry.rejected_z)
-        ax_step.scatter(
-            telemetry.rejected_z[order],
-            telemetry.rejected_attempted_sizes[order],
-            s=14.0,
-            color="tab:orange",
-            alpha=0.7,
-            label="Rejected attempted step",
+            label="Accepted step_size",
         )
         has_series = True
 
@@ -478,35 +475,24 @@ def main() -> float:
         num_time_samples=n,
         pulse_period=n * dt,
         omega=omega,
+        starting_step_size=z_final / 2500.0,
+        max_step_size=z_final / 1000.0,
+        min_step_size=z_final / 20000.0,
         error_tolerance=5e-6,
-        max_step_size=0.1,
+        honor_solver_controls=True,
     )
     exec_options = SimulationOptions(backend="auto", fft_backend="auto")
 
     runner = NloExampleRunner()
-    telemetry = StepTelemetry.empty()
-    progress_logging_enabled = False
-    try:
-        runner.api.set_log_buffer(1024 * 1024)
-        runner.api.set_log_level(2)
-        runner.api.set_progress_options(enabled=True, milestone_percent=100, emit_on_step_adjust=True)
-        runner.api.clear_log_buffer()
-        progress_logging_enabled = True
-    except RuntimeError as exc:
-        print(f"warning: step telemetry logging unavailable; continuing without step subplot data ({exc})")
-
     z_records, A_records = runner.propagate_temporal_records(
         np.asarray(A0, dtype=np.complex128),
         sim_cfg,
         num_recorded_samples,
         exec_options,
+        capture_step_history=True,
+        step_history_capacity=200000,
     )
-    if progress_logging_enabled:
-        try:
-            runtime_logs = runner.api.read_log_buffer(consume=True, max_bytes=1024 * 1024)
-            telemetry = parse_step_telemetry(runtime_logs)
-        except RuntimeError as exc:
-            print(f"warning: failed to read runtime step telemetry; continuing without it ({exc})")
+    telemetry = step_telemetry_from_meta(runner.last_meta)
 
     ensure_finite_records_or_raise(A_records, z_records)
     U_num_records = np.empty_like(A_records, dtype=np.complex128)
@@ -558,8 +544,9 @@ def main() -> float:
     print(f"epsilon = {epsilon:.6e}")
     print(
         "step telemetry events: "
-        f"adjustments={telemetry.adjustment_z.size}, "
-        f"rejected={telemetry.rejected_z.size}"
+        f"accepted={telemetry.accepted_z.size}, "
+        f"next={telemetry.next_z.size}, "
+        f"dropped={telemetry.dropped}"
     )
     if saved_paths:
         print("saved plots:")

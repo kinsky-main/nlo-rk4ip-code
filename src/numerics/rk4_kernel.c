@@ -97,6 +97,33 @@ static double nlo_record_capture_tolerance(double z_end)
     return 64.0 * DBL_EPSILON * scale;
 }
 
+static void nlo_rk4_emit_step_event(
+    simulation_state* state,
+    size_t step_index,
+    double z_current,
+    double step_size,
+    double next_step_size,
+    double error
+)
+{
+    if (state == NULL || state->step_event_capacity == 0u || state->step_event_buffer == NULL) {
+        return;
+    }
+
+    if (state->step_events_written < state->step_event_capacity) {
+        nlo_step_event* event = &state->step_event_buffer[state->step_events_written];
+        event->step_index = step_index;
+        event->z_current = z_current;
+        event->step_size = step_size;
+        event->next_step_size = next_step_size;
+        event->error = error;
+        state->step_events_written += 1u;
+        return;
+    }
+
+    state->step_events_dropped += 1u;
+}
+
 static void nlo_rk4_debug_log_solver_config(const simulation_state* state, double tol)
 {
     if (!nlo_rk4_debug_enabled_runtime() || state == NULL || state->config == NULL) {
@@ -411,6 +438,12 @@ void solve_rk4(simulation_state *state)
             if (error <= 1.0 || step <= (min_step * (1.0 + 1e-12))) {
                 state->current_z += step;
                 state->current_step_size = nlo_clamp_step(step * scale, min_step, max_step);
+                nlo_rk4_emit_step_event(state,
+                                        rk4_step_index,
+                                        state->current_z,
+                                        step,
+                                        state->current_step_size,
+                                        error);
                 nlo_log_progress_step_accepted(rk4_step_index,
                                                state->current_z,
                                                z_end,

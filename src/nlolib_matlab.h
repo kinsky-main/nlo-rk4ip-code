@@ -303,6 +303,18 @@ typedef struct
 } nlo_storage_result;
 
 /**
+ * @brief Per-step adaptive solver telemetry for accepted RK4 steps.
+ */
+typedef struct
+{
+    size_t step_index;
+    double z_current;
+    double step_size;
+    double next_step_size;
+    double error;
+} nlo_step_event;
+
+/**
  * @brief Propagation record output mode.
  */
 typedef enum
@@ -332,6 +344,10 @@ typedef struct
     size_t output_record_capacity;
     size_t *records_written;
     nlo_storage_result *storage_result;
+    nlo_step_event *output_step_events;
+    size_t output_step_event_capacity;
+    size_t *step_events_written;
+    size_t *step_events_dropped;
 } nlo_propagate_output;
 
 /* -------------------------------------------------------------------

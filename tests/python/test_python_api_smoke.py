@@ -85,6 +85,24 @@ def main():
     assert rel_drift <= 1e-6, f"AUTO identity propagation drift too large: {rel_drift}"
     print("test_python_api_smoke: AUTO identity propagation preserved field norm.")
 
+    step_history_result = api.propagate(
+        identity_cfg,
+        gaussian,
+        3,
+        auto_opts,
+        capture_step_history=True,
+        step_history_capacity=20000,
+    )
+    step_history = step_history_result.meta.get("step_history")
+    assert isinstance(step_history, dict)
+    assert isinstance(step_history.get("z"), list)
+    assert isinstance(step_history.get("step_size"), list)
+    assert isinstance(step_history.get("next_step_size"), list)
+    assert isinstance(step_history.get("dropped"), int)
+    assert len(step_history["z"]) > 0
+    assert step_history["dropped"] >= 0
+    print("test_python_api_smoke: optional step history capture returned structured telemetry.")
+
     nx = 16
     ny = 8
     nxy = nx * ny

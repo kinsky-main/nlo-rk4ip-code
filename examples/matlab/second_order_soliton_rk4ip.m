@@ -41,19 +41,9 @@ simOptions = backend.default_simulation_options( ...
     "backend", "auto", ...
     "fft_backend", "auto");
 execOptions = backend.make_exec_options(simOptions, numRecords);
+execOptions.capture_step_history = true;
+execOptions.step_history_capacity = uint64(200000);
 stepTelemetry = empty_step_telemetry();
-logBufferBytes = uint64(1024 * 1024);
-progressTelemetryEnabled = false;
-try
-    api.set_log_buffer(logBufferBytes);
-    api.set_log_level(int32(2));
-    api.set_progress_options(true, int32(100), true);
-    api.clear_log_buffer();
-    progressTelemetryEnabled = true;
-catch err
-    fprintf("warning: step telemetry logging unavailable; continuing without step subplot data (%s)\n", ...
-            err.message);
-end
 
 propagateOptions = struct();
 propagateOptions.propagation_distance = zFinal;
@@ -63,15 +53,7 @@ propagateOptions.exec_options = execOptions;
 result = api.propagate(pulse, linearOperator, nonlinearOperator, propagateOptions);
 aRecords = result.records;
 zRecords = result.z_axis;
-if progressTelemetryEnabled
-    try
-        runtimeLogs = api.read_log_buffer(true, logBufferBytes);
-        stepTelemetry = parse_step_telemetry(runtimeLogs);
-    catch err
-        fprintf("warning: failed to read runtime step telemetry; continuing without it (%s)\n", ...
-                err.message);
-    end
-end
+stepTelemetry = step_telemetry_from_result(result);
 
 ensure_finite_records_or_error(aRecords, zRecords);
 
@@ -138,8 +120,8 @@ fprintf("normalized NLSE coefficients: sgn(beta2)=%+d, 1/(2*LD)=%.6e 1/m, exp(-a
         int32(sgnBeta2), 0.5 / ld, exp(-alpha * zFinal) / lnl);
 fprintf("analytical z=0 envelope max error = %.6e\n", z0AnalyticError);
 fprintf("epsilon = %.6e\n", epsilon);
-fprintf("step telemetry events: adjustments=%d, rejected=%d\n", ...
-        numel(stepTelemetry.adjustment_z), numel(stepTelemetry.rejected_z));
+fprintf("step telemetry events: accepted=%d, next=%d, dropped=%d\n", ...
+        numel(stepTelemetry.accepted_z), numel(stepTelemetry.next_z), int64(stepTelemetry.dropped));
 for idx = 1:numel(savedPaths)
     fprintf("saved plot: %s\n", savedPaths(idx));
 end
@@ -269,22 +251,14 @@ cbar = colorbar(axMap);
 cbar.Label.String = "Normalized spectral intensity";
 
 axStep = nexttile(2);
+telemetryPlot = filter_record_clipped_steps(telemetry, zAxis);
 hasSeries = false;
-if ~isempty(telemetry.adjustment_z)
-    [zSorted, order] = sort(telemetry.adjustment_z, "ascend");
-    plot(axStep, zSorted, telemetry.adjustment_sizes(order), ...
+if ~isempty(telemetryPlot.accepted_z)
+    [zSorted, order] = sort(telemetryPlot.accepted_z, "ascend");
+    plot(axStep, zSorted, telemetryPlot.accepted_step_sizes(order), ...
          '-', 'LineWidth', 1.2, 'Color', [0.00, 0.45, 0.74], ...
-         'DisplayName', 'Adjusted accepted step');
+         'DisplayName', 'Accepted step\_size');
     hold(axStep, 'on');
-    hasSeries = true;
-end
-if ~isempty(telemetry.rejected_z)
-    [zRejectedSorted, order] = sort(telemetry.rejected_z, "ascend");
-    scatter(axStep, zRejectedSorted, telemetry.rejected_attempted_sizes(order), ...
-            14, [0.85, 0.33, 0.10], 'filled', ...
-            'DisplayName', 'Rejected attempted step', ...
-            'MarkerFaceAlpha', 0.7, ...
-            'MarkerEdgeAlpha', 0.7);
     hasSeries = true;
 end
 
@@ -317,94 +291,84 @@ end
 
 function telemetry = empty_step_telemetry()
 telemetry = struct();
-telemetry.adjustment_z = zeros(0, 1);
-telemetry.adjustment_sizes = zeros(0, 1);
-telemetry.rejected_z = zeros(0, 1);
-telemetry.rejected_attempted_sizes = zeros(0, 1);
+telemetry.accepted_z = zeros(0, 1);
+telemetry.accepted_step_sizes = zeros(0, 1);
+telemetry.next_z = zeros(0, 1);
+telemetry.next_step_sizes = zeros(0, 1);
+telemetry.dropped = 0.0;
 end
 
-function telemetry = parse_step_telemetry(logText)
+function telemetry = step_telemetry_from_result(result)
 telemetry = empty_step_telemetry();
-if isempty(logText)
+if ~isstruct(result) || ~isfield(result, 'step_history') || ~isstruct(result.step_history)
+    return;
+end
+h = result.step_history;
+if ~isfield(h, 'z') || ~isfield(h, 'step_size') || ~isfield(h, 'next_step_size')
+    return;
+end
+z = double(h.z(:));
+accepted = double(h.step_size(:));
+nextSizes = double(h.next_step_size(:));
+n = min([numel(z), numel(accepted), numel(nextSizes)]);
+if n <= 0
+    if isfield(h, 'dropped')
+        telemetry.dropped = double(h.dropped);
+    end
+    return;
+end
+telemetry.accepted_z = z(1:n);
+telemetry.accepted_step_sizes = accepted(1:n);
+telemetry.next_z = z(1:n);
+telemetry.next_step_sizes = nextSizes(1:n);
+if isfield(h, 'dropped')
+    telemetry.dropped = double(h.dropped);
+end
+end
+
+function outTelemetry = filter_record_clipped_steps(telemetry, zAxis)
+outTelemetry = telemetry;
+if ~isstruct(telemetry) || isempty(telemetry.accepted_z) || numel(zAxis) <= 1
+    return;
+end
+zAxis = double(zAxis(:));
+spacing = (zAxis(end) - zAxis(1)) / double(numel(zAxis) - 1);
+if ~isfinite(spacing) || spacing <= 0.0
     return;
 end
 
-lines = splitlines(string(logText));
-numLines = numel(lines);
-i = 1;
-while i <= numLines
-    line = strtrim(lines(i));
-    if line ~= "[nlolib] step_adjustment:" && line ~= "[nlolib] step_rejected:"
-        i = i + 1;
-        continue;
-    end
-
-isAdjustment = (line == "[nlolib] step_adjustment:");
-zCurrent = NaN;
-stepSize = NaN;
-attemptedStep = NaN;
-    i = i + 1;
-    while i <= numLines
-        current = strtrim(lines(i));
-        if startsWith(current, "[nlolib]")
-            break;
-        end
-        if startsWith(current, "- ")
-            [key, value, hasPair] = parse_log_key_value(extractAfter(current, 2));
-            if hasPair
-                switch key
-                    case "z_current"
-                        zCurrent = parse_log_number(value);
-                    case "step_size"
-                        stepSize = parse_log_number(value);
-                    case "attempted_step"
-                        attemptedStep = parse_log_number(value);
-                end
-            end
-        end
-        i = i + 1;
-    end
-
-    if isAdjustment
-        if isfinite(zCurrent) && isfinite(stepSize)
-            telemetry.adjustment_z(end + 1, 1) = zCurrent; %#ok<AGROW>
-            telemetry.adjustment_sizes(end + 1, 1) = stepSize; %#ok<AGROW>
-        end
-    else
-        if isfinite(zCurrent) && isfinite(attemptedStep)
-            telemetry.rejected_z(end + 1, 1) = zCurrent; %#ok<AGROW>
-            telemetry.rejected_attempted_sizes(end + 1, 1) = attemptedStep; %#ok<AGROW>
-        end
-    end
-end
-end
-
-function [key, value, hasPair] = parse_log_key_value(textLine)
-lineText = string(textLine);
-delimiterIndex = strfind(char(lineText), ':');
-if isempty(delimiterIndex)
-    key = "";
-    value = "";
-    hasPair = false;
+z = double(telemetry.accepted_z(:));
+accepted = double(telemetry.accepted_step_sizes(:));
+proposed = double(telemetry.next_step_sizes(:));
+n = min([numel(z), numel(accepted), numel(proposed)]);
+if n <= 0
     return;
 end
-firstColon = delimiterIndex(1);
-key = strtrim(extractBefore(lineText, firstColon));
-value = strtrim(extractAfter(lineText, firstColon));
-hasPair = strlength(key) > 0;
-end
+z = z(1:n);
+accepted = accepted(1:n);
+proposed = proposed(1:n);
 
-function out = parse_log_number(textValue)
-if strlength(textValue) == 0
-    out = NaN;
+z0 = double(zAxis(1));
+zEnd = double(zAxis(end));
+expectedBoundaries = zAxis(2:end-1);
+if isempty(expectedBoundaries)
     return;
 end
-cleaned = replace(string(textValue), ",", "");
-cleaned = erase(cleaned, "%");
-out = str2double(cleaned);
-if ~isfinite(out)
-    out = NaN;
+
+proximityEps = max(64.0 * eps(max(1.0, abs(zEnd))), spacing * 0.012);
+clippedMask = false(size(z));
+for idx = 1:numel(expectedBoundaries)
+    clippedMask = clippedMask | (abs(z - expectedBoundaries(idx)) <= proximityEps);
 end
+if ~any(clippedMask)
+    return;
+end
+
+keepMask = ~clippedMask;
+outTelemetry.accepted_z = z(keepMask);
+outTelemetry.accepted_step_sizes = accepted(keepMask);
+outTelemetry.next_z = z(keepMask);
+outTelemetry.next_step_sizes = proposed(keepMask);
 end
 
 function out = relative_l2_error_curve(records, referenceRecords)

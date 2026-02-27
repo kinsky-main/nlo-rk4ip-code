@@ -180,6 +180,16 @@ class NloStorageResult(ctypes.Structure):
     ]
 
 
+class NloStepEvent(ctypes.Structure):
+    _fields_ = [
+        ("step_index", ctypes.c_size_t),
+        ("z_current", ctypes.c_double),
+        ("step_size", ctypes.c_double),
+        ("next_step_size", ctypes.c_double),
+        ("error", ctypes.c_double),
+    ]
+
+
 class NloPropagateOptions(ctypes.Structure):
     _fields_ = [
         ("num_recorded_samples", ctypes.c_size_t),
@@ -196,6 +206,10 @@ class NloPropagateOutput(ctypes.Structure):
         ("output_record_capacity", ctypes.c_size_t),
         ("records_written", ctypes.POINTER(ctypes.c_size_t)),
         ("storage_result", ctypes.POINTER(NloStorageResult)),
+        ("output_step_events", ctypes.POINTER(NloStepEvent)),
+        ("output_step_event_capacity", ctypes.c_size_t),
+        ("step_events_written", ctypes.POINTER(ctypes.c_size_t)),
+        ("step_events_dropped", ctypes.POINTER(ctypes.c_size_t)),
     ]
 
 
@@ -527,6 +541,8 @@ class _NormalizedPropagateRequest:
     cap_policy: int
     log_final_output_field_to_db: bool
     return_records: bool
+    capture_step_history: bool
+    step_history_capacity: int
     output_label: str
     meta_overrides: dict[str, Any]
 
@@ -743,6 +759,29 @@ def _storage_result_to_meta(storage_result: NloStorageResult) -> dict[str, objec
         "chunks_written": int(storage_result.chunks_written),
         "db_size_bytes": int(storage_result.db_size_bytes),
         "truncated": bool(storage_result.truncated),
+    }
+
+
+def _step_events_to_meta(step_events: ctypes.Array, count: int) -> dict[str, object]:
+    n = max(0, int(count))
+    step_index: list[int] = [0] * n
+    z: list[float] = [0.0] * n
+    step_size: list[float] = [0.0] * n
+    next_step_size: list[float] = [0.0] * n
+    error: list[float] = [0.0] * n
+    for i in range(n):
+        event = step_events[i]
+        step_index[i] = int(event.step_index)
+        z[i] = float(event.z_current)
+        step_size[i] = float(event.step_size)
+        next_step_size[i] = float(event.next_step_size)
+        error[i] = float(event.error)
+    return {
+        "step_index": step_index,
+        "z": z,
+        "step_size": step_size,
+        "next_step_size": next_step_size,
+        "error": error,
     }
 
 
@@ -1187,6 +1226,8 @@ class NLolib:
         cap_policy = int(kwargs.pop("cap_policy", NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES))
         log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
         return_records = bool(kwargs.pop("return_records", True))
+        capture_step_history = bool(kwargs.pop("capture_step_history", False))
+        step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
         if kwargs:
             raise TypeError(f"unexpected propagate kwargs: {sorted(kwargs.keys())}")
 
@@ -1198,6 +1239,10 @@ class NLolib:
         n = len(input_seq)
         if n == 0:
             raise ValueError("input_field must be non-empty")
+        if step_history_capacity < 0:
+            raise ValueError("step_history_capacity must be >= 0")
+        if capture_step_history and step_history_capacity <= 0:
+            raise ValueError("step_history_capacity must be > 0 when capture_step_history=True")
 
         if isinstance(config, PreparedSimConfig):
             sim_cfg = config.simulation_config
@@ -1221,6 +1266,8 @@ class NLolib:
             cap_policy=cap_policy,
             log_final_output_field_to_db=log_final_output_field_to_db,
             return_records=return_records,
+            capture_step_history=capture_step_history,
+            step_history_capacity=step_history_capacity,
             output_label=("final" if num_records == 1 else "dense"),
             meta_overrides={},
         )
@@ -1254,10 +1301,16 @@ class NLolib:
         cap_policy = int(kwargs.pop("cap_policy", NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES))
         log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
         return_records = bool(kwargs.pop("return_records", True))
+        capture_step_history = bool(kwargs.pop("capture_step_history", False))
+        step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
         if kwargs:
             raise TypeError(f"unexpected high-level propagate kwargs: {sorted(kwargs.keys())}")
         if propagation_distance is None:
             raise TypeError("high-level propagate requires propagation_distance")
+        if step_history_capacity < 0:
+            raise ValueError("step_history_capacity must be >= 0")
+        if capture_step_history and step_history_capacity <= 0:
+            raise ValueError("step_history_capacity must be > 0 when capture_step_history=True")
 
         pulse_spec = _normalize_pulse_spec(pulse)
         profile = _solver_profile_defaults(preset, float(propagation_distance))
@@ -1365,6 +1418,8 @@ class NLolib:
             cap_policy=cap_policy,
             log_final_output_field_to_db=log_final_output_field_to_db,
             return_records=return_records,
+            capture_step_history=capture_step_history,
+            step_history_capacity=step_history_capacity,
             output_label=output,
             meta_overrides={
                 "preset": preset,
@@ -1424,6 +1479,13 @@ class NLolib:
 
         storage_result = NloStorageResult()
         records_written = ctypes.c_size_t(0)
+        step_events_out = (
+            (NloStepEvent * int(request.step_history_capacity))()
+            if request.capture_step_history and request.step_history_capacity > 0
+            else None
+        )
+        step_events_written = ctypes.c_size_t(0)
+        step_events_dropped = ctypes.c_size_t(0)
         propagate_output = (
             self.lib.nlolib_propagate_output_default()
             if bool(getattr(self.lib, "_has_propagate_defaults", False))
@@ -1437,6 +1499,18 @@ class NLolib:
         propagate_output.output_record_capacity = request.num_records if out_arr is not None else 0
         propagate_output.records_written = ctypes.pointer(records_written)
         propagate_output.storage_result = ctypes.pointer(storage_result)
+        propagate_output.output_step_events = (
+            ctypes.cast(step_events_out, ctypes.POINTER(NloStepEvent))
+            if step_events_out is not None
+            else None
+        )
+        propagate_output.output_step_event_capacity = (
+            int(request.step_history_capacity)
+            if step_events_out is not None
+            else 0
+        )
+        propagate_output.step_events_written = ctypes.pointer(step_events_written)
+        propagate_output.step_events_dropped = ctypes.pointer(step_events_dropped)
 
         status = int(
             self.lib.nlolib_propagate(
@@ -1480,6 +1554,11 @@ class NLolib:
         }
         if storage_result_meta is not None:
             meta["storage_result"] = storage_result_meta
+        if step_events_out is not None:
+            step_history = _step_events_to_meta(step_events_out, int(step_events_written.value))
+            step_history["dropped"] = int(step_events_dropped.value)
+            step_history["capacity"] = int(request.step_history_capacity)
+            meta["step_history"] = step_history
         meta.update(request.meta_overrides)
         return PropagationResult(records=out_records, z_axis=z_axis, final=final, meta=meta)
 
@@ -1558,6 +1637,7 @@ __all__ = [
     "NloRuntimeLimits",
     "NloPropagateOptions",
     "NloPropagateOutput",
+    "NloStepEvent",
     "NloStorageOptions",
     "NloStorageResult",
     "NloVkBackendConfig",

@@ -128,13 +128,14 @@ classdef NLolib < handle
                     storageOptions = options.storage;
                 end
 
-                [records, storageResult, storageEnabled] = obj.execute_propagate_request( ...
+                [records, storageResult, storageEnabled, stepHistory] = obj.execute_propagate_request( ...
                     cfg, inputField, numRecordedSamples, execOptions, storageOptions);
                 meta.storage_enabled = logical(storageEnabled);
                 if storageEnabled
                     meta.storage_result = storageResult;
                 end
                 meta.records_returned = size(records, 1) > 0;
+                meta.step_history_dropped = double(stepHistory.dropped);
 
                 result = struct();
                 result.records = records;
@@ -144,6 +145,7 @@ classdef NLolib < handle
                 else
                     result.final = [];
                 end
+                result.step_history = stepHistory;
                 result.meta = meta;
                 return;
             end
@@ -179,7 +181,7 @@ classdef NLolib < handle
             end
 
             distance = nlolib.NLolib.resolve_propagation_distance(config);
-            [records, storageResult, storageEnabled] = obj.execute_propagate_request( ...
+            [records, storageResult, storageEnabled, stepHistory] = obj.execute_propagate_request( ...
                 config, inputField, numRecordedSamples, execOptions, storageOptions);
 
             result = struct();
@@ -190,6 +192,7 @@ classdef NLolib < handle
                 result.final = [];
             end
             result.z_axis = nlolib.NLolib.make_z_axis(distance, double(numRecordedSamples));
+            result.step_history = stepHistory;
             result.meta = struct();
             result.meta.output = char("dense");
             if double(numRecordedSamples) == 1
@@ -204,12 +207,13 @@ classdef NLolib < handle
                 result.meta.backend_requested = 2;
             end
             result.meta.coupled = nlolib.NLolib.is_coupled_config(config);
+            result.meta.step_history_dropped = double(stepHistory.dropped);
             if storageEnabled
                 result.meta.storage_result = storageResult;
             end
         end
 
-        function [records, storageResult, storageEnabled] = execute_propagate_request( ...
+        function [records, storageResult, storageEnabled, stepHistory] = execute_propagate_request( ...
                 obj, config, inputField, numRecordedSamples, execOptions, storageOptions)
             %EXECUTE_PROPAGATE_REQUEST Internal call path for all propagate forms.
             if nargin < 5 || isempty(execOptions)
@@ -240,6 +244,7 @@ classdef NLolib < handle
                     ~isempty(storageOptions.return_records)
                 returnRecords = logical(storageOptions.return_records);
             end
+            stepHistory = nlolib.NLolib.empty_step_history();
 
             numTimeSamples = numel(inputField);
             numRecordedSamples = uint64(numRecordedSamples);
@@ -288,6 +293,25 @@ classdef NLolib < handle
                 obj.clear_log_buffer();
             end
 
+            captureStepHistory = false;
+            stepHistoryCapacity = uint64(0);
+            if isstruct(execOptions) && isfield(execOptions, 'capture_step_history') && ...
+                    ~isempty(execOptions.capture_step_history)
+                captureStepHistory = any(logical(execOptions.capture_step_history(:)));
+            end
+            if captureStepHistory
+                if isstruct(execOptions) && isfield(execOptions, 'step_history_capacity') && ...
+                        ~isempty(execOptions.step_history_capacity)
+                    stepHistoryCapacity = uint64(execOptions.step_history_capacity);
+                else
+                    stepHistoryCapacity = uint64(200000);
+                end
+                if stepHistoryCapacity == uint64(0)
+                    error('nlolib:invalidStepHistoryCapacity', ...
+                          'step_history_capacity must be > 0 when capture_step_history is enabled.');
+                end
+            end
+
             if storageEnabled
                 [storageOptsStruct, storageKeepalive] = ...
                     nlolib.NLolib.make_storage_options(storageOptions); %#ok<NASGU>
@@ -321,6 +345,24 @@ classdef NLolib < handle
             end
             propagateOutput.records_written = recordsWrittenPtr;
             propagateOutput.storage_result = storageResultPtr;
+            if captureStepHistory
+                stepEventsLen = double(stepHistoryCapacity);
+                stepEventsBuffer = repmat(libstruct('nlo_step_event'), 1, stepEventsLen);
+                propagateOutput.output_step_events = stepEventsBuffer;
+                propagateOutput.output_step_event_capacity = stepHistoryCapacity;
+            else
+                stepEventsBuffer = struct('step_index', {}, ...
+                                          'z_current', {}, ...
+                                          'step_size', {}, ...
+                                          'next_step_size', {}, ...
+                                          'error', {});
+                propagateOutput.output_step_events = stepEventsBuffer;
+                propagateOutput.output_step_event_capacity = uint64(0);
+            end
+            stepEventsWrittenPtr = libpointer('uint64Ptr', uint64(0));
+            stepEventsDroppedPtr = libpointer('uint64Ptr', uint64(0));
+            propagateOutput.step_events_written = stepEventsWrittenPtr;
+            propagateOutput.step_events_dropped = stepEventsDroppedPtr;
 
             statusRaw = calllib(obj.LIBNAME, 'nlolib_propagate', ...
                                 simCfgPtr, ...
@@ -385,6 +427,13 @@ classdef NLolib < handle
                                                 debugContext);
             else
                 records = zeros(0, numTimeSamples);
+            end
+            if captureStepHistory
+                stepHistory = nlolib.NLolib.unpack_step_history( ...
+                    stepEventsBuffer, ...
+                    double(stepEventsWrittenPtr.Value), ...
+                    double(stepEventsDroppedPtr.Value), ...
+                    double(stepHistoryCapacity));
             end
 
             if storageEnabled
@@ -1037,6 +1086,39 @@ classdef NLolib < handle
             out.chunks_written = double(storageResultRaw.chunks_written);
             out.db_size_bytes = double(storageResultRaw.db_size_bytes);
             out.truncated = logical(storageResultRaw.truncated);
+        end
+
+        function out = empty_step_history()
+            out = struct();
+            out.step_index = zeros(0, 1);
+            out.z = zeros(0, 1);
+            out.step_size = zeros(0, 1);
+            out.next_step_size = zeros(0, 1);
+            out.error = zeros(0, 1);
+            out.dropped = 0.0;
+            out.capacity = 0.0;
+        end
+
+        function out = unpack_step_history(stepEventsRaw, eventsWritten, eventsDropped, capacity)
+            out = nlolib.NLolib.empty_step_history();
+            count = max(0, floor(double(eventsWritten)));
+            if count > 0
+                out.step_index = zeros(count, 1);
+                out.z = zeros(count, 1);
+                out.step_size = zeros(count, 1);
+                out.next_step_size = zeros(count, 1);
+                out.error = zeros(count, 1);
+                for idx = 1:count
+                    event = stepEventsRaw(idx);
+                    out.step_index(idx, 1) = double(event.step_index);
+                    out.z(idx, 1) = double(event.z_current);
+                    out.step_size(idx, 1) = double(event.step_size);
+                    out.next_step_size(idx, 1) = double(event.next_step_size);
+                    out.error(idx, 1) = double(event.error);
+                end
+            end
+            out.dropped = double(eventsDropped);
+            out.capacity = double(capacity);
         end
 
         function [cfg, inputField, numRecords, execOptions, zAxis, meta] = ...

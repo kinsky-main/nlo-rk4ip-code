@@ -188,6 +188,17 @@ typedef struct {
 } nlo_storage_result;
 
 /**
+ * @brief Per-step adaptive solver telemetry for accepted RK4 steps.
+ */
+typedef struct {
+    size_t step_index;
+    double z_current;
+    double step_size;
+    double next_step_size;
+    double error;
+} nlo_step_event;
+
+/**
  * @brief Opaque snapshot store handle.
  */
 typedef struct nlo_snapshot_store nlo_snapshot_store;
@@ -236,6 +247,10 @@ typedef struct {
     nlo_snapshot_store* snapshot_store;
     nlo_storage_result snapshot_result;
     nlo_vec_status snapshot_status;
+    nlo_step_event* step_event_buffer;
+    size_t step_event_capacity;
+    size_t step_events_written;
+    size_t step_events_dropped;
 
     nlo_vec_buffer* current_field_vec;
     nlo_vec_buffer* frequency_grid_vec;
