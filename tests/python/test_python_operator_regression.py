@@ -38,6 +38,43 @@ def _max_abs_diff(a, b):
     return max(abs(x - y) for x, y in zip(a, b))
 
 
+def _l2_norm(values):
+    acc = 0.0
+    for value in values:
+        acc += (value.real * value.real) + (value.imag * value.imag)
+    return math.sqrt(acc)
+
+
+def _relative_l2_error(a, b):
+    diff = [x - y for x, y in zip(a, b)]
+    denom = max(_l2_norm(b), 1e-15)
+    return _l2_norm(diff) / denom
+
+
+def _fit_loglog_slope(x_values, y_values):
+    if len(x_values) != len(y_values):
+        raise ValueError("x_values and y_values must have the same length.")
+    if len(x_values) < 2:
+        raise ValueError("at least two samples are required to fit a slope.")
+
+    lx = [math.log(x) for x in x_values]
+    ly = [math.log(y) for y in y_values]
+    mean_x = sum(lx) / float(len(lx))
+    mean_y = sum(ly) / float(len(ly))
+
+    var_x = 0.0
+    cov_xy = 0.0
+    for vx, vy in zip(lx, ly):
+        dx = vx - mean_x
+        dy = vy - mean_y
+        var_x += dx * dx
+        cov_xy += dx * dy
+
+    if var_x <= 0.0:
+        raise ValueError("cannot fit slope with zero variance in x_values.")
+    return cov_xy / var_x
+
+
 def _gaussian_with_phase(t, sigma, d):
     out = [0j] * len(t)
     for i, ti in enumerate(t):
@@ -515,6 +552,55 @@ def test_second_order_soliton_intensity_error(api, opts):
     assert epsilon <= 1e-2, f"second-order soliton intensity error too high: {epsilon}"
 
 
+def test_fixed_step_fundamental_soliton_order(api, opts):
+    beta2 = -0.01
+    gamma = 0.01
+    tfwhm = 100e-3
+    t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
+    p0 = abs(beta2) / (gamma * t0 * t0)
+    ld = (t0 * t0) / abs(beta2)
+    z_final = 0.5 * ld
+
+    n = 512
+    dt = (16.0 * t0) / float(n)
+    t = _centered_time_grid(n, dt)
+    tau = [ti / t0 for ti in t]
+    omega = _omega_grid_unshifted(n, dt)
+    a0 = [complex(math.sqrt(p0) / math.cosh(xi), 0.0) for xi in tau]
+
+    step_counts = [4, 8, 16, 32, 64]
+    step_sizes = []
+    errors = []
+    for step_count in step_counts:
+        dz = z_final / float(step_count)
+        cfg = prepare_sim_config(
+            n,
+            propagation_distance=z_final,
+            starting_step_size=dz,
+            max_step_size=dz,
+            min_step_size=dz,
+            error_tolerance=1e-6,
+            pulse_period=float(n) * dt,
+            delta_time=dt,
+            frequency_grid=[complex(om, 0.0) for om in omega],
+            runtime=RuntimeOperators(constants=[0.5 * beta2, 0.0, gamma]),
+        )
+        records = api.propagate(cfg, a0, 2, opts).records
+        final_field = records[1]
+        assert all(math.isfinite(v.real) and math.isfinite(v.imag) for v in final_field)
+
+        a_true = [
+            complex((math.sqrt(p0) / math.cosh(xi)) * math.cos(0.5 * (z_final / ld)),
+                    (math.sqrt(p0) / math.cosh(xi)) * math.sin(0.5 * (z_final / ld)))
+            for xi in tau
+        ]
+        errors.append(_relative_l2_error(final_field, a_true))
+        step_sizes.append(dz)
+
+    slope = _fit_loglog_slope(step_sizes, errors)
+    assert slope >= 0.5, f"fixed-step fundamental soliton slope unexpectedly low: {slope}"
+
+
 def main():
     api = NLolib()
     opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
@@ -528,6 +614,7 @@ def main():
     test_raman_like_nonlinear_callable_matches_string(api, opts)
     test_linear_drift_signed_prediction(api, opts)
     test_second_order_soliton_intensity_error(api, opts)
+    test_fixed_step_fundamental_soliton_order(api, opts)
     print("test_python_operator_regression: runtime-operator propagation regressions validated.")
 
 
