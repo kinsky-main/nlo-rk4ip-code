@@ -8,9 +8,11 @@ pulse propagates along z.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
+from backend.cli import build_example_parser
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
@@ -23,6 +25,7 @@ from backend.runner import (
     TemporalSimulationConfig,
     centered_time_grid,
 )
+from backend.storage import ExampleRunDB
 
 
 def gaussian_with_phase_ramp(t: np.ndarray, sigma: float, d: float) -> np.ndarray:
@@ -84,6 +87,15 @@ def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) 
 
 
 def main() -> float:
+    parser = build_example_parser(
+        example_slug="linear_drift",
+        description="Linear dispersive drift with DB-backed run/replot.",
+    )
+    args = parser.parse_args()
+    db = ExampleRunDB(args.db_path)
+    example_name = "linear_drift_rk4ip"
+    case_key = "default"
+
     num_samples = 1024
     dt = 0.01
     sigma = 0.20
@@ -92,25 +104,63 @@ def main() -> float:
     chirp = 12.0
     z_final = 1.0
     num_records = 180
-
     t = centered_time_grid(num_samples, dt)
-    field0 = gaussian_with_phase_ramp(t, sigma, chirp).astype(np.complex128)
 
-    sim_cfg = TemporalSimulationConfig(
-        gamma=gamma,
-        beta2=beta2,
-        alpha=0.0,
-        dt=dt,
-        z_final=z_final,
-        num_time_samples=num_samples,
-        pulse_period=float(num_samples) * dt,
-        omega=None,
-        error_tolerance=1e-7,
-    )
     exec_options = SimulationOptions(backend="auto", fft_backend="auto")
-
     runner = NloExampleRunner()
-    z_records, records = runner.propagate_temporal_records(field0, sim_cfg, num_records, exec_options)
+    if args.replot:
+        run_group = db.resolve_replot_group(example_name, args.run_group)
+        loaded = db.load_case(example_name=example_name, run_group=run_group, case_key=case_key)
+        meta = loaded.meta
+        num_samples = int(meta["num_samples"])
+        dt = float(meta["dt"])
+        sigma = float(meta["sigma"])
+        beta2 = float(meta["beta2"])
+        chirp = float(meta["chirp"])
+        t = centered_time_grid(num_samples, dt)
+        z_records = np.asarray(loaded.z_axis, dtype=np.float64)
+        records = np.asarray(loaded.records, dtype=np.complex128)
+    else:
+        run_group = db.begin_group(example_name, args.run_group)
+        field0 = gaussian_with_phase_ramp(t, sigma, chirp).astype(np.complex128)
+        sim_cfg = TemporalSimulationConfig(
+            gamma=gamma,
+            beta2=beta2,
+            alpha=0.0,
+            dt=dt,
+            z_final=z_final,
+            num_time_samples=num_samples,
+            pulse_period=float(num_samples) * dt,
+            omega=None,
+            error_tolerance=1e-7,
+        )
+        storage_kwargs = db.storage_kwargs(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            chunk_records=8,
+        )
+        z_records, records = runner.propagate_temporal_records(
+            field0,
+            sim_cfg,
+            num_records,
+            exec_options,
+            **storage_kwargs,
+        )
+        db.save_case_from_solver_meta(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            solver_meta=runner.last_meta,
+            meta={
+                "num_samples": int(num_samples),
+                "dt": float(dt),
+                "sigma": float(sigma),
+                "beta2": float(beta2),
+                "chirp": float(chirp),
+            },
+        )
+
     record_norms = np.asarray([float(np.linalg.norm(record)) for record in records], dtype=np.float64)
 
     centroid = centroid_curve(t, records)
@@ -175,7 +225,7 @@ def main() -> float:
     if saved is not None:
         saved_paths.append(saved)
 
-    print("linear drift example completed.")
+    print(f"linear drift example completed (run_group={run_group}).")
     print(f"record norms: first={record_norms[0]:.6e}, last={record_norms[-1]:.6e}, min={np.min(record_norms):.6e}")
     print(f"centroid shift: z0={centroid_shift[0]:.6e}, z_end={centroid_shift[-1]:.6e}")
     print(f"slope (signed): measured={measured_slope:.6e}, predicted={predicted_slope:.6e}")

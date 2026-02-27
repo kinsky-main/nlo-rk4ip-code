@@ -7,11 +7,14 @@ compares numerical mode exchange against the closed-form cosine/sine solution.
 
 from __future__ import annotations
 
+import argparse
 import math
 import sys
 from pathlib import Path
 
 import numpy as np
+from backend.cli import build_example_parser
+from backend.storage import ExampleRunDB
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -99,39 +102,78 @@ def main() -> float:
     api = nlo.NLolib()
     _configure_runtime_logging(api)
 
-    kappa = 2.0
-    z_final = 1.0
-    num_records = 200
-
-    sim_cfg = nlo.prepare_sim_config(
-        2,
-        propagation_distance=z_final,
-        starting_step_size=1e-3,
-        max_step_size=1e-3,
-        min_step_size=1e-3,
-        error_tolerance=1e-6,
-        pulse_period=2.0,
-        delta_time=1.0,
-        time_nt=2,
-        frequency_grid=[complex(1.0, 0.0), complex(-1.0, 0.0)],
-        spatial_nx=1,
-        spatial_ny=1,
-        delta_x=1.0,
-        delta_y=1.0,
-        runtime=nlo.RuntimeOperators(
-            dispersion_factor_expr="i*c0*w",
-            nonlinear_expr="0",
-            constants=[kappa],
-        ),
+    parser = build_example_parser(
+        example_slug="two_mode_linear_beating",
+        description="Two-mode linear beating with DB-backed run/replot.",
     )
-    exec_options = nlo.default_execution_options(
-        backend_type=nlo.NLO_VECTOR_BACKEND_AUTO,
-        fft_backend=nlo.NLO_FFT_BACKEND_AUTO,
-    )
+    args = parser.parse_args()
+    db = ExampleRunDB(args.db_path)
+    example_name = "two_mode_linear_beating_rk4ip"
+    case_key = "default"
 
-    result = api.propagate(sim_cfg, [complex(1.0, 0.0), complex(0.0, 0.0)], num_records, exec_options)
-    records = np.asarray(result.records, dtype=np.complex128).reshape(num_records, 2)
-    z_axis = np.asarray(result.z_axis, dtype=np.float64)
+    if args.replot:
+        run_group = db.resolve_replot_group(example_name, args.run_group)
+        loaded = db.load_case(example_name=example_name, run_group=run_group, case_key=case_key)
+        meta = loaded.meta
+        kappa = float(meta["kappa"])
+        records = np.asarray(loaded.records, dtype=np.complex128).reshape(-1, 2)
+        z_axis = np.asarray(loaded.z_axis, dtype=np.float64)
+    else:
+        run_group = db.begin_group(example_name, args.run_group)
+        kappa = 2.0
+        z_final = 1.0
+        num_records = 200
+        sim_cfg = nlo.prepare_sim_config(
+            2,
+            propagation_distance=z_final,
+            starting_step_size=1e-3,
+            max_step_size=1e-3,
+            min_step_size=1e-3,
+            error_tolerance=1e-6,
+            pulse_period=2.0,
+            delta_time=1.0,
+            time_nt=2,
+            frequency_grid=[complex(1.0, 0.0), complex(-1.0, 0.0)],
+            spatial_nx=1,
+            spatial_ny=1,
+            delta_x=1.0,
+            delta_y=1.0,
+            runtime=nlo.RuntimeOperators(
+                dispersion_factor_expr="i*c0*w",
+                nonlinear_expr="0",
+                constants=[kappa],
+            ),
+        )
+        exec_options = nlo.default_execution_options(
+            backend_type=nlo.NLO_VECTOR_BACKEND_AUTO,
+            fft_backend=nlo.NLO_FFT_BACKEND_AUTO,
+        )
+        storage_kwargs = db.storage_kwargs(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            chunk_records=32,
+        )
+        result = api.propagate(
+            sim_cfg,
+            [complex(1.0, 0.0), complex(0.0, 0.0)],
+            num_records,
+            exec_options,
+            sqlite_path=storage_kwargs["sqlite_path"],
+            run_id=storage_kwargs["run_id"],
+            chunk_records=storage_kwargs["chunk_records"],
+            sqlite_max_bytes=storage_kwargs["sqlite_max_bytes"],
+            log_final_output_field_to_db=storage_kwargs["log_final_output_field_to_db"],
+        )
+        records = np.asarray(result.records, dtype=np.complex128).reshape(num_records, 2)
+        z_axis = np.asarray(result.z_axis, dtype=np.float64)
+        db.save_case(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            run_id=str(result.meta["storage_result"]["run_id"]),
+            meta={"kappa": float(kappa)},
+        )
 
     a_ref = np.empty_like(records)
     for i, z in enumerate(z_axis):
@@ -177,7 +219,7 @@ def main() -> float:
     if p2 is not None:
         saved.append(p2)
 
-    print("two-mode linear beating summary:")
+    print(f"two-mode linear beating summary (run_group={run_group}):")
     print(f"  max complex-field abs error  = {max_complex_error:.6e}")
     print(f"  max power-exchange abs error = {max_power_exchange_error:.6e}")
     print(f"  relative total-power drift   = {power_drift:.6e}")

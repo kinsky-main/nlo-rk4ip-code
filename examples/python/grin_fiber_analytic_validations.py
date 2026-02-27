@@ -7,9 +7,12 @@ summarizes analytical-vs-numerical error trends.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
+from backend.cli import build_example_parser
 from backend.runner import NloExampleRunner, SimulationOptions
+from backend.storage import ExampleRunDB
 from grin_fiber_xy_rk4ip import run_phase_validation
 
 
@@ -44,36 +47,69 @@ def _save_summary_plot(
 
 
 def main() -> None:
+    parser = build_example_parser(
+        example_slug="grin_fiber_analytic_sweep",
+        description="Analytical GRIN sweep with DB-backed run/replot.",
+    )
+    args = parser.parse_args()
+    db = ExampleRunDB(args.db_path)
+    example_name = "grin_fiber_analytic_validations"
+
     runner = NloExampleRunner()
     exec_options = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
     output_root = Path(__file__).resolve().parent / "output" / "grin_fiber_analytic_sweep"
     output_root.mkdir(parents=True, exist_ok=True)
 
-    grin_strengths = [0.5e-4, 1.0e-4, 2.0e-4, 3.0e-4]
     final_errors: list[float] = []
     power_drifts: list[float] = []
+    grin_strengths: list[float] = []
 
-    for g in grin_strengths:
-        scenario_name = f"grin_phase_strength_{g:.1e}".replace("+", "")
-        _, final_error, power_drift = run_phase_validation(
-            runner,
-            scenario_name=scenario_name,
-            nx=256,
-            ny=256,
-            dx=0.7,
-            dy=0.7,
-            w0=8.0,
-            grin_gx=g,
-            grin_gy=g,
-            x_offset=0.0,
-            y_offset=0.0,
-            propagation_distance=0.25,
-            num_records=8,
-            exec_options=exec_options,
-            output_root=output_root,
-        )
-        final_errors.append(final_error)
-        power_drifts.append(power_drift)
+    if args.replot:
+        run_group = db.resolve_replot_group(example_name, args.run_group)
+        cases = db.list_cases(example_name=example_name, run_group=run_group)
+        if not cases:
+            raise RuntimeError(f"no stored cases found in run_group '{run_group}'.")
+        for case in cases:
+            g = float(case.meta.get("grin_gx", 0.0))
+            final_error = float(case.meta.get("final_error", float("nan")))
+            power_drift = float(case.meta.get("power_drift", float("nan")))
+            if not (g > 0.0):
+                continue
+            grin_strengths.append(g)
+            final_errors.append(final_error)
+            power_drifts.append(power_drift)
+    else:
+        run_group = db.begin_group(example_name, args.run_group)
+        grin_strengths = [0.5e-4, 1.0e-4, 2.0e-4, 3.0e-4]
+        for g in grin_strengths:
+            scenario_name = f"grin_phase_strength_{g:.1e}".replace("+", "")
+            _, final_error, power_drift = run_phase_validation(
+                runner,
+                scenario_name=scenario_name,
+                nx=256,
+                ny=256,
+                dx=0.7,
+                dy=0.7,
+                w0=8.0,
+                grin_gx=g,
+                grin_gy=g,
+                x_offset=0.0,
+                y_offset=0.0,
+                propagation_distance=0.25,
+                num_records=8,
+                exec_options=exec_options,
+                output_root=output_root,
+                storage_db=db,
+                storage_example_name=example_name,
+                run_group=run_group,
+            )
+            final_errors.append(final_error)
+            power_drifts.append(power_drift)
+
+    order = sorted(range(len(grin_strengths)), key=lambda i: grin_strengths[i])
+    grin_strengths = [grin_strengths[i] for i in order]
+    final_errors = [final_errors[i] for i in order]
+    power_drifts = [power_drifts[i] for i in order]
 
     p1 = _save_summary_plot(
         output_root / "summary_final_error_vs_grin_strength.png",
@@ -92,7 +128,7 @@ def main() -> None:
         title="GRIN phase-only analytical validation: power drift vs GRIN strength",
     )
 
-    print("analytical GRIN sweep completed.")
+    print(f"analytical GRIN sweep completed (run_group={run_group}).")
     for g, err, drift in zip(grin_strengths, final_errors, power_drifts):
         print(f"  g={g:.3e}: final_error={err:.6e}, power_drift={drift:.6e}")
     if p1 is not None:

@@ -10,9 +10,11 @@ Plots include static 3D propagation views and diagnostic cross-sections.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
+from backend.cli import build_example_parser
 from backend.plotting import (
     plot_3d_intensity_scatter_propagation,
     plot_final_intensity_comparison,
@@ -21,6 +23,7 @@ from backend.plotting import (
     plot_total_error_over_propagation,
 )
 from backend.runner import NloExampleRunner, SimulationOptions
+from backend.storage import ExampleRunDB
 
 
 def _relative_l2_error_curve(records_a: np.ndarray, records_b: np.ndarray) -> np.ndarray:
@@ -100,7 +103,8 @@ def _run_case(
     spatial_width: float,
     chirp: float,
     exec_options: SimulationOptions,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    storage_kwargs: dict[str, object] | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, object]]:
     nlo = runner.nlo
     api = runner.api
 
@@ -144,6 +148,15 @@ def _run_case(
     )
 
     exec_options_ctypes = exec_options.to_ctypes(nlo)
+    propagate_kwargs: dict[str, object] = {}
+    if storage_kwargs is not None:
+        propagate_kwargs = {
+            "sqlite_path": storage_kwargs["sqlite_path"],
+            "run_id": storage_kwargs["run_id"],
+            "chunk_records": storage_kwargs["chunk_records"],
+            "sqlite_max_bytes": storage_kwargs["sqlite_max_bytes"],
+            "log_final_output_field_to_db": storage_kwargs["log_final_output_field_to_db"],
+        }
     result = api.propagate(
         pulse,
         linear_operator,
@@ -154,13 +167,24 @@ def _run_case(
         preset="accuracy",
         records=num_records,
         exec_options=exec_options_ctypes,
+        **propagate_kwargs,
     )
     records = np.asarray(result.records, dtype=np.complex128).reshape(num_records, nt, ny, nx)
     z_records = np.asarray(result.z_axis, dtype=np.float64)
-    return t, x, y, z_records, field0, records
+    return t, x, y, z_records, field0, records, dict(result.meta)
 
 
 def main() -> None:
+    parser = build_example_parser(
+        example_slug="coupled_dispersion_nonlinearity_diffraction",
+        description="Coupled dispersion/nonlinearity/diffraction with DB-backed run/replot.",
+    )
+    args = parser.parse_args()
+    db = ExampleRunDB(args.db_path)
+    example_name = "coupled_dispersion_nonlinearity_diffraction_rk4ip"
+    full_case_key = "full"
+    linear_case_key = "linear"
+
     runner = NloExampleRunner()
     exec_options = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
 
@@ -191,44 +215,105 @@ def main() -> None:
             "Reduce nt/nx/ny or select a backend with a higher runtime limit."
         )
 
-    t, x, y, z_records, _, full_records = _run_case(
-        runner,
-        gamma=gamma_full,
-        nt=nt,
-        nx=nx,
-        ny=ny,
-        dt=dt,
-        dx=dx,
-        dy=dy,
-        z_final=z_final,
-        num_records=num_records,
-        beta2=beta2,
-        diffraction_coeff=diffraction_coeff,
-        grin_strength=grin_strength,
-        temporal_width=temporal_width,
-        spatial_width=spatial_width,
-        chirp=chirp,
-        exec_options=exec_options,
-    )
-    _, _, _, _, _, linear_records = _run_case(
-        runner,
-        gamma=0.0,
-        nt=nt,
-        nx=nx,
-        ny=ny,
-        dt=dt,
-        dx=dx,
-        dy=dy,
-        z_final=z_final,
-        num_records=num_records,
-        beta2=beta2,
-        diffraction_coeff=diffraction_coeff,
-        grin_strength=grin_strength,
-        temporal_width=temporal_width,
-        spatial_width=spatial_width,
-        chirp=chirp,
-        exec_options=exec_options,
-    )
+    if args.replot:
+        run_group = db.resolve_replot_group(example_name, args.run_group)
+        loaded_full = db.load_case(example_name=example_name, run_group=run_group, case_key=full_case_key)
+        loaded_linear = db.load_case(example_name=example_name, run_group=run_group, case_key=linear_case_key)
+        meta = loaded_full.meta
+        nt = int(meta["nt"])
+        nx = int(meta["nx"])
+        ny = int(meta["ny"])
+        dt = float(meta["dt"])
+        dx = float(meta["dx"])
+        dy = float(meta["dy"])
+        t = (np.arange(nt, dtype=np.float64) - 0.5 * (nt - 1)) * dt
+        x = (np.arange(nx, dtype=np.float64) - 0.5 * (nx - 1)) * dx
+        y = (np.arange(ny, dtype=np.float64) - 0.5 * (ny - 1)) * dy
+        z_records = np.asarray(loaded_full.z_axis, dtype=np.float64)
+        full_records = np.asarray(loaded_full.records, dtype=np.complex128).reshape(-1, nt, ny, nx)
+        linear_records = np.asarray(loaded_linear.records, dtype=np.complex128).reshape(-1, nt, ny, nx)
+    else:
+        run_group = db.begin_group(example_name, args.run_group)
+        full_storage_kwargs = db.storage_kwargs(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=full_case_key,
+            chunk_records=2,
+        )
+        linear_storage_kwargs = db.storage_kwargs(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=linear_case_key,
+            chunk_records=2,
+        )
+        t, x, y, z_records, _, full_records, full_meta = _run_case(
+            runner,
+            gamma=gamma_full,
+            nt=nt,
+            nx=nx,
+            ny=ny,
+            dt=dt,
+            dx=dx,
+            dy=dy,
+            z_final=z_final,
+            num_records=num_records,
+            beta2=beta2,
+            diffraction_coeff=diffraction_coeff,
+            grin_strength=grin_strength,
+            temporal_width=temporal_width,
+            spatial_width=spatial_width,
+            chirp=chirp,
+            exec_options=exec_options,
+            storage_kwargs=full_storage_kwargs,
+        )
+        _, _, _, _, _, linear_records, linear_meta = _run_case(
+            runner,
+            gamma=0.0,
+            nt=nt,
+            nx=nx,
+            ny=ny,
+            dt=dt,
+            dx=dx,
+            dy=dy,
+            z_final=z_final,
+            num_records=num_records,
+            beta2=beta2,
+            diffraction_coeff=diffraction_coeff,
+            grin_strength=grin_strength,
+            temporal_width=temporal_width,
+            spatial_width=spatial_width,
+            chirp=chirp,
+            exec_options=exec_options,
+            storage_kwargs=linear_storage_kwargs,
+        )
+        common_meta = {
+            "nt": int(nt),
+            "nx": int(nx),
+            "ny": int(ny),
+            "dt": float(dt),
+            "dx": float(dx),
+            "dy": float(dy),
+        }
+        db.save_case(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=full_case_key,
+            run_id=str(full_meta["storage_result"]["run_id"]),
+            meta={
+                **common_meta,
+                "gamma": float(gamma_full),
+            },
+        )
+        db.save_case(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=linear_case_key,
+            run_id=str(linear_meta["storage_result"]["run_id"]),
+            meta={
+                **common_meta,
+                "gamma": 0.0,
+            },
+        )
 
     full_intensity = np.abs(full_records) ** 2
     linear_intensity = np.abs(linear_records) ** 2
@@ -247,6 +332,7 @@ def main() -> None:
         f"grid=(t={nt}, y={ny}, x={nx}), records={num_records}, "
         f"final_full_vs_linear_error={error_curve[-1]:.6e}"
     )
+    print(f"run_group={run_group}")
     print(
         "power drift: "
         f"full={power_drift_full:.6e}, linear={power_drift_linear:.6e}"

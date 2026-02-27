@@ -7,9 +7,11 @@ against the closed-form SPM phase evolution.
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
+from backend.cli import build_example_parser
 from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
     plot_total_error_over_propagation,
@@ -20,6 +22,7 @@ from backend.runner import (
     TemporalSimulationConfig,
     centered_time_grid,
 )
+from backend.storage import ExampleRunDB
 
 
 def _load_plt():
@@ -79,44 +82,87 @@ def _save_phase_plot(
 
 
 def main() -> float:
+    parser = build_example_parser(
+        example_slug="spm",
+        description="Self-phase modulation validation with DB-backed run/replot.",
+    )
+    args = parser.parse_args()
+    db = ExampleRunDB(args.db_path)
+    example_name = "spm_rk4ip"
+    case_key = "default"
+
     n = 2**10
     dt = 0.01
-    t = centered_time_grid(n, dt)
     gamma = 1.7
     z_final = 0.5
-
+    pulse_width = 0.2
+    t = centered_time_grid(n, dt)
     # Purely temporal Gaussian pulse.
-    a0 = np.exp(-((t / 0.2) ** 2)).astype(np.complex128)
+    a0 = np.exp(-((t / pulse_width) ** 2)).astype(np.complex128)
     omega = np.zeros(n, dtype=np.float64)
 
     runner = NloExampleRunner()
     _configure_runtime_logging(runner)
     exec_options = SimulationOptions(backend="auto", fft_backend="auto")
 
-    sim_cfg = TemporalSimulationConfig(
-        gamma=gamma,
-        beta2=0.0,
-        alpha=0.0,
-        dt=dt,
-        z_final=z_final,
-        num_time_samples=n,
-        pulse_period=n * dt,
-        omega=omega,
-        starting_step_size=1e-3,
-        max_step_size=1e-3,
-        min_step_size=1e-3,
-        error_tolerance=1e-6,
-        honor_solver_controls=True,
-    )
-    z_records, a_records = runner.propagate_temporal_records(
-        a0,
-        sim_cfg,
-        num_records=100,
-        exec_options=exec_options,
-    )
-
-    records = np.asarray(a_records, dtype=np.complex128)
-    z_axis = np.asarray(z_records, dtype=np.float64)
+    if args.replot:
+        run_group = db.resolve_replot_group(example_name, args.run_group)
+        loaded = db.load_case(example_name=example_name, run_group=run_group, case_key=case_key)
+        meta = loaded.meta
+        n = int(meta["n"])
+        dt = float(meta["dt"])
+        gamma = float(meta["gamma"])
+        z_final = float(meta["z_final"])
+        pulse_width = float(meta["pulse_width"])
+        t = centered_time_grid(n, dt)
+        a0 = np.exp(-((t / pulse_width) ** 2)).astype(np.complex128)
+        records = np.asarray(loaded.records, dtype=np.complex128)
+        z_axis = np.asarray(loaded.z_axis, dtype=np.float64)
+    else:
+        run_group = db.begin_group(example_name, args.run_group)
+        sim_cfg = TemporalSimulationConfig(
+            gamma=gamma,
+            beta2=0.0,
+            alpha=0.0,
+            dt=dt,
+            z_final=z_final,
+            num_time_samples=n,
+            pulse_period=n * dt,
+            omega=omega,
+            starting_step_size=1e-3,
+            max_step_size=1e-3,
+            min_step_size=1e-3,
+            error_tolerance=1e-6,
+            honor_solver_controls=True,
+        )
+        storage_kwargs = db.storage_kwargs(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            chunk_records=8,
+        )
+        z_records, a_records = runner.propagate_temporal_records(
+            a0,
+            sim_cfg,
+            num_records=100,
+            exec_options=exec_options,
+            **storage_kwargs,
+        )
+        records = np.asarray(a_records, dtype=np.complex128)
+        z_axis = np.asarray(z_records, dtype=np.float64)
+        db.save_case_from_solver_meta(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            solver_meta=runner.last_meta,
+            meta={
+                "n": int(n),
+                "dt": float(dt),
+                "gamma": float(gamma),
+                "z_final": float(z_final),
+                "pulse_width": float(pulse_width),
+            },
+        )
 
     error_curve = np.empty(z_axis.size, dtype=np.float64)
     for i, z in enumerate(z_axis):
@@ -193,7 +239,7 @@ def main() -> float:
     if p4 is not None:
         saved.append(p4)
 
-    print("SPM analytical validation summary:")
+    print(f"SPM analytical validation summary (run_group={run_group}):")
     print(f"  final relative L2 error = {final_error:.6e}")
     print(f"  relative power drift    = {power_drift:.6e}")
     print(f"  max wrapped phase error (all samples)     = {max_wrapped_phase_error:.6e}")

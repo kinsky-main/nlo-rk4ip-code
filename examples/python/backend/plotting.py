@@ -10,12 +10,24 @@ import numpy as np
 def _load_plt():
     try:
         import matplotlib
-
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        return plt
     except ImportError:
         return None
-    return plt
+
+
+_plt = _load_plt()
+if _plt is not None:
+    _plt.rcParams.update({
+        "font.family": "Times New Roman",
+        "font.size": 11,
+        "axes.labelsize": 11,
+        "axes.titlesize": 12,
+        "legend.fontsize": 10,
+        "figure.dpi": 200,
+        "figure.figsize": (4.0, 4.0),
+    })
 
 
 def plot_intensity_colormap_vs_propagation(
@@ -43,7 +55,7 @@ def plot_intensity_colormap_vs_propagation(
         data = data / peak
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9.0, 5.2))
+    fig, ax = plt.subplots()
     mesh = ax.pcolormesh(x_axis, z_axis, data, shading="auto", cmap=cmap)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
@@ -75,7 +87,7 @@ def plot_final_re_im_comparison(
     out = np.asarray(final_field, dtype=np.complex128)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9.0, 5.0))
+    fig, ax = plt.subplots()
     ax.plot(x_axis, np.real(ref), lw=1.8, color="tab:blue", label=f"{reference_label} Re")
     ax.plot(x_axis, np.imag(ref), lw=1.8, color="tab:orange", label=f"{reference_label} Im")
     ax.plot(x_axis, np.real(out), lw=1.6, color="tab:blue", ls="--", label=f"{final_label} Re")
@@ -110,7 +122,7 @@ def plot_final_intensity_comparison(
     out_intensity = np.abs(np.asarray(final_field, dtype=np.complex128)) ** 2
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9.0, 5.0))
+    fig, ax = plt.subplots()
     ax.plot(x_axis, ref_intensity, lw=2.0, color="tab:blue", label=f"{reference_label} |A|^2")
     ax.plot(x_axis, out_intensity, lw=1.8, ls="--", color="tab:orange", label=f"{final_label} |A|^2")
     ax.set_xlabel(x_label)
@@ -141,7 +153,7 @@ def plot_total_error_over_propagation(
     errors = np.clip(errors, 0.0, None)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9.0, 4.8))
+    fig, ax = plt.subplots()
     ax.plot(z_axis, errors, lw=1.8, color="tab:red")
     ax.set_xlabel("Propagation distance z")
     ax.set_ylabel(y_label)
@@ -215,7 +227,7 @@ def plot_3d_intensity_scatter_propagation(
         return None
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure(figsize=(10.0, 7.0))
+    fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
     scatter = ax.scatter(
         np.asarray(x_points),

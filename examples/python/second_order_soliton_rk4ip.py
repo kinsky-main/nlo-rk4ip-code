@@ -9,12 +9,14 @@ using t = T / T0 and A(z, t) = sqrt(P0) * exp(-alpha * z / 2) * U(z, t).
 
 from __future__ import annotations
 
+import argparse
 import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from backend.cli import build_example_parser
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
@@ -26,6 +28,7 @@ from backend.runner import (
     TemporalSimulationConfig,
     centered_time_grid,
 )
+from backend.storage import ExampleRunDB
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -447,53 +450,109 @@ def ensure_finite_records_or_raise(
 
 
 def main() -> float:
-    beta2 = -0.01
-    gamma = 0.01
-    alpha = 0.0
-    tfwhm = 100e-3
-    t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
-    p0 = (2**2) * abs(beta2) / (gamma * t0 * t0)
+    parser = build_example_parser(
+        example_slug="second_order_soliton",
+        description="Second-order soliton validation with DB-backed run/replot.",
+    )
+    args = parser.parse_args()
+    db = ExampleRunDB(args.db_path)
+    example_name = "second_order_soliton_rk4ip"
+    case_key = "default"
+
+    if args.replot:
+        run_group = db.resolve_replot_group(example_name, args.run_group)
+        loaded = db.load_case(example_name=example_name, run_group=run_group, case_key=case_key)
+        meta = loaded.meta
+        beta2 = float(meta["beta2"])
+        gamma = float(meta["gamma"])
+        alpha = float(meta["alpha"])
+        t0 = float(meta["t0"])
+        p0 = float(meta["p0"])
+        n = int(meta["n"])
+        dt = float(meta["dt"])
+        z_final = float(meta["z_final"])
+        T = centered_time_grid(n, dt)
+        t = to_dimensionless_time(T, t0)
+        z_records = np.asarray(loaded.z_axis, dtype=np.float64)
+        A_records = np.asarray(loaded.records, dtype=np.complex128)
+        step_history = db.load_step_history(run_id=loaded.run_id)
+        if step_history is None:
+            raise RuntimeError(
+                "stored run is missing step telemetry; rerun without --replot to capture full-fidelity data."
+            )
+        telemetry = step_telemetry_from_meta({"step_history": step_history})
+    else:
+        run_group = db.begin_group(example_name, args.run_group)
+        beta2 = -0.01
+        gamma = 0.01
+        alpha = 0.0
+        tfwhm = 100e-3
+        t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
+        p0 = (2**2) * abs(beta2) / (gamma * t0 * t0)
+        ld_tmp = (t0 * t0) / abs(beta2)
+        z_final = 0.5 * math.pi * ld_tmp
+
+        n = 2**10
+        dt = (16.0 * t0) / n
+        T = centered_time_grid(n, dt)
+        t = to_dimensionless_time(T, t0)
+        omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
+        U0 = 2.0 * sech(t)
+        A0 = to_physical_envelope(U0, 0.0, p0, alpha)
+
+        num_recorded_samples = 100
+        sim_cfg = TemporalSimulationConfig(
+            gamma=gamma,
+            beta2=beta2,
+            alpha=alpha,
+            dt=dt,
+            z_final=z_final,
+            num_time_samples=n,
+            pulse_period=n * dt,
+            omega=omega,
+            starting_step_size=z_final / 500.0,
+            max_step_size=z_final / 25.0,
+            min_step_size=z_final / 1000.0,
+            error_tolerance=5e-6,
+            honor_solver_controls=True,
+        )
+        exec_options = SimulationOptions(backend="auto", fft_backend="auto")
+        runner = NloExampleRunner()
+        storage_kwargs = db.storage_kwargs(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            chunk_records=8,
+        )
+        z_records, A_records = runner.propagate_temporal_records(
+            np.asarray(A0, dtype=np.complex128),
+            sim_cfg,
+            num_recorded_samples,
+            exec_options,
+            capture_step_history=True,
+            step_history_capacity=200000,
+            **storage_kwargs,
+        )
+        telemetry = step_telemetry_from_meta(runner.last_meta)
+        db.save_case_from_solver_meta(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            solver_meta=runner.last_meta,
+            meta={
+                "beta2": float(beta2),
+                "gamma": float(gamma),
+                "alpha": float(alpha),
+                "t0": float(t0),
+                "p0": float(p0),
+                "n": int(n),
+                "dt": float(dt),
+                "z_final": float(z_final),
+            },
+            save_step_history=True,
+        )
+
     sgn_beta2, ld, lnl = normalized_nlse_coefficients(beta2, gamma, t0, p0)
-    z_final = 0.5 * math.pi * ld
-
-    n = 2**10
-    dt = (16.0 * t0) / n
-    T = centered_time_grid(n, dt)
-    t = to_dimensionless_time(T, t0)
-    omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
-
-    U0 = 2.0 * sech(t)
-    A0 = to_physical_envelope(U0, 0.0, p0, alpha)
-
-    num_recorded_samples = 160
-    sim_cfg = TemporalSimulationConfig(
-        gamma=gamma,
-        beta2=beta2,
-        alpha=alpha,
-        dt=dt,
-        z_final=z_final,
-        num_time_samples=n,
-        pulse_period=n * dt,
-        omega=omega,
-        starting_step_size=z_final / 2500.0,
-        max_step_size=z_final / 1000.0,
-        min_step_size=z_final / 20000.0,
-        error_tolerance=5e-6,
-        honor_solver_controls=True,
-    )
-    exec_options = SimulationOptions(backend="auto", fft_backend="auto")
-
-    runner = NloExampleRunner()
-    z_records, A_records = runner.propagate_temporal_records(
-        np.asarray(A0, dtype=np.complex128),
-        sim_cfg,
-        num_recorded_samples,
-        exec_options,
-        capture_step_history=True,
-        step_history_capacity=200000,
-    )
-    telemetry = step_telemetry_from_meta(runner.last_meta)
-
     ensure_finite_records_or_raise(A_records, z_records)
     U_num_records = np.empty_like(A_records, dtype=np.complex128)
     U_true_records = np.empty_like(A_records, dtype=np.complex128)
@@ -534,6 +593,7 @@ def main() -> float:
         output_dir,
     )
 
+    print(f"second-order soliton summary (run_group={run_group})")
     print(
         "normalized NLSE coefficients: "
         f"sgn(beta2)={int(sgn_beta2):+d}, "

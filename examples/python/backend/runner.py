@@ -207,6 +207,11 @@ class NloExampleRunner:
         *,
         capture_step_history: bool = False,
         step_history_capacity: int = 0,
+        sqlite_path: str | None = None,
+        run_id: str | None = None,
+        sqlite_max_bytes: int = 0,
+        chunk_records: int = 0,
+        log_final_output_field_to_db: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         if num_records <= 0:
             raise ValueError("num_records must be positive.")
@@ -261,6 +266,11 @@ class NloExampleRunner:
                 opts,
                 capture_step_history=bool(capture_step_history),
                 step_history_capacity=int(step_history_capacity),
+                sqlite_path=sqlite_path,
+                run_id=run_id,
+                sqlite_max_bytes=int(sqlite_max_bytes),
+                chunk_records=int(chunk_records),
+                log_final_output_field_to_db=bool(log_final_output_field_to_db),
             )
             self.last_meta = dict(low_result.meta)
             records = np.asarray(
@@ -301,6 +311,11 @@ class NloExampleRunner:
             exec_options=opts,
             capture_step_history=bool(capture_step_history),
             step_history_capacity=int(step_history_capacity),
+            sqlite_path=sqlite_path,
+            run_id=run_id,
+            sqlite_max_bytes=int(sqlite_max_bytes),
+            chunk_records=int(chunk_records),
+            log_final_output_field_to_db=bool(log_final_output_field_to_db),
         )
         self.last_meta = dict(result.meta)
         z_records = np.asarray(result.z_axis, dtype=np.float64)
@@ -327,6 +342,11 @@ class NloExampleRunner:
         potential_grid: np.ndarray | None = None,
         runtime: Any | None = None,
         exec_options: SimulationOptions | None = None,
+        sqlite_path: str | None = None,
+        run_id: str | None = None,
+        sqlite_max_bytes: int = 0,
+        chunk_records: int = 0,
+        log_final_output_field_to_db: bool = False,
     ) -> tuple[np.ndarray, np.ndarray]:
         if num_records <= 0:
             raise ValueError("num_records must be positive.")
@@ -388,7 +408,17 @@ class NloExampleRunner:
             potential_grid=(None if potential_values is None else potential_values.tolist()),
             runtime=runtime_cfg,
         )
-        low_result = self.api.propagate(prepared, field.tolist(), int(num_records), opts)
+        low_result = self.api.propagate(
+            prepared,
+            field.tolist(),
+            int(num_records),
+            opts,
+            sqlite_path=sqlite_path,
+            run_id=run_id,
+            sqlite_max_bytes=int(sqlite_max_bytes),
+            chunk_records=int(chunk_records),
+            log_final_output_field_to_db=bool(log_final_output_field_to_db),
+        )
         self.last_meta = dict(low_result.meta)
         records = np.asarray(
             low_result.records,
