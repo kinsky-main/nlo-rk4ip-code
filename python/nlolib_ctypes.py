@@ -55,6 +55,9 @@ NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
 NLO_PROPAGATE_OUTPUT_DENSE = 0
 NLO_PROPAGATE_OUTPUT_FINAL_ONLY = 1
 
+NLO_NONLINEAR_MODEL_EXPR = 0
+NLO_NONLINEAR_MODEL_KERR_RAMAN = 1
+
 
 class NloComplex(ctypes.Structure):
     _fields_ = [("re", ctypes.c_double), ("im", ctypes.c_double)]
@@ -118,6 +121,14 @@ class RuntimeOperatorParams(ctypes.Structure):
         ("transverse_factor_expr", ctypes.c_char_p),
         ("transverse_expr", ctypes.c_char_p),
         ("nonlinear_expr", ctypes.c_char_p),
+        ("nonlinear_model", ctypes.c_int),
+        ("nonlinear_gamma", ctypes.c_double),
+        ("raman_fraction", ctypes.c_double),
+        ("raman_tau1", ctypes.c_double),
+        ("raman_tau2", ctypes.c_double),
+        ("shock_omega0", ctypes.c_double),
+        ("raman_response_time", ctypes.POINTER(NloComplex)),
+        ("raman_response_len", ctypes.c_size_t),
         ("num_constants", ctypes.c_size_t),
         ("constants", ctypes.c_double * NLO_RUNTIME_OPERATOR_CONSTANTS_MAX),
     ]
@@ -492,6 +503,13 @@ class RuntimeOperators:
     transverse_factor_fn: Callable[..., object] | None = None
     transverse_fn: Callable[..., object] | None = None
     nonlinear_fn: Callable[..., object] | None = None
+    nonlinear_model: int = NLO_NONLINEAR_MODEL_EXPR
+    nonlinear_gamma: float = 0.0
+    raman_fraction: float = 0.0
+    raman_tau1: float = 0.0122
+    raman_tau2: float = 0.0320
+    shock_omega0: float = 0.0
+    raman_response_time: Sequence[complex] | None = None
     constants: Sequence[float] = ()
     constant_bindings: Mapping[str, float] | None = None
     auto_capture_constants: bool = True
@@ -915,6 +933,22 @@ def prepare_sim_config(
         constants = [float(value) for value in runtime.constants]
         constant_bindings = runtime.constant_bindings
         auto_capture = bool(runtime.auto_capture_constants)
+        physics_cfg.runtime.nonlinear_model = int(runtime.nonlinear_model)
+        physics_cfg.runtime.nonlinear_gamma = float(runtime.nonlinear_gamma)
+        physics_cfg.runtime.raman_fraction = float(runtime.raman_fraction)
+        physics_cfg.runtime.raman_tau1 = float(runtime.raman_tau1)
+        physics_cfg.runtime.raman_tau2 = float(runtime.raman_tau2)
+        physics_cfg.runtime.shock_omega0 = float(runtime.shock_omega0)
+        if runtime.raman_response_time is not None:
+            raman_response_arr = make_complex_array(runtime.raman_response_time)
+            keepalive.append(raman_response_arr)
+            physics_cfg.runtime.raman_response_time = ctypes.cast(
+                raman_response_arr, ctypes.POINTER(NloComplex)
+            )
+            physics_cfg.runtime.raman_response_len = len(runtime.raman_response_time)
+        else:
+            physics_cfg.runtime.raman_response_time = None
+            physics_cfg.runtime.raman_response_len = 0
 
         if runtime.dispersion_factor_expr and runtime.dispersion_factor_fn is not None:
             raise ValueError(
@@ -1041,6 +1075,14 @@ def prepare_sim_config(
         physics_cfg.runtime.transverse_factor_expr = None
         physics_cfg.runtime.transverse_expr = None
         physics_cfg.runtime.nonlinear_expr = None
+        physics_cfg.runtime.nonlinear_model = int(NLO_NONLINEAR_MODEL_EXPR)
+        physics_cfg.runtime.nonlinear_gamma = 0.0
+        physics_cfg.runtime.raman_fraction = 0.0
+        physics_cfg.runtime.raman_tau1 = 0.0
+        physics_cfg.runtime.raman_tau2 = 0.0
+        physics_cfg.runtime.shock_omega0 = 0.0
+        physics_cfg.runtime.raman_response_time = None
+        physics_cfg.runtime.raman_response_len = 0
         physics_cfg.runtime.num_constants = 0
 
     return PreparedSimConfig(simulation_config=sim_cfg,
@@ -1630,6 +1672,8 @@ __all__ = [
     "NLO_STORAGE_DB_CAP_POLICY_FAIL",
     "NLO_PROPAGATE_OUTPUT_DENSE",
     "NLO_PROPAGATE_OUTPUT_FINAL_ONLY",
+    "NLO_NONLINEAR_MODEL_EXPR",
+    "NLO_NONLINEAR_MODEL_KERR_RAMAN",
     "NloComplex",
     "NloSimulationConfig",
     "NloPhysicsConfig",

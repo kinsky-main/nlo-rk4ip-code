@@ -97,6 +97,24 @@ if strlength(nonlinearExpr) > 0
     runtimeMl.nonlinear_expr = nonlinearPtr;
     keepalive{end + 1} = nonlinearPtr; %#ok<AGROW>
 end
+runtimeCfg = struct();
+if isfield(cfg, "runtime") && ~isempty(cfg.runtime)
+    runtimeCfg = cfg.runtime;
+end
+runtimeMl.nonlinear_model = int32(get_optional(runtimeCfg, "nonlinear_model", 0));
+runtimeMl.nonlinear_gamma = double(get_optional(runtimeCfg, "nonlinear_gamma", 0.0));
+runtimeMl.raman_fraction = double(get_optional(runtimeCfg, "raman_fraction", 0.0));
+runtimeMl.raman_tau1 = double(get_optional(runtimeCfg, "raman_tau1", 0.0122));
+runtimeMl.raman_tau2 = double(get_optional(runtimeCfg, "raman_tau2", 0.0320));
+runtimeMl.shock_omega0 = double(get_optional(runtimeCfg, "shock_omega0", 0.0));
+if isfield(runtimeCfg, "raman_response_time") && ~isempty(runtimeCfg.raman_response_time)
+    ramanPtr = nlolib.pack_complex_array(runtimeCfg.raman_response_time);
+    runtimeMl.raman_response_time = ramanPtr;
+    runtimeMl.raman_response_len = uint64(numel(runtimeCfg.raman_response_time));
+    keepalive{end + 1} = ramanPtr; %#ok<AGROW>
+else
+    runtimeMl.raman_response_len = uint64(0);
+end
 runtimeMl.num_constants = uint64(numConstants);
 runtimeMl.constants = constantsFixed;
 

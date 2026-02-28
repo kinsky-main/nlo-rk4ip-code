@@ -21,7 +21,7 @@
  * @brief Number of persistent work vectors reserved by the solver state.
  */
 #ifndef NLO_WORK_VECTOR_COUNT
-#define NLO_WORK_VECTOR_COUNT 13u
+#define NLO_WORK_VECTOR_COUNT 21u
 #endif
 
 /**
@@ -87,6 +87,16 @@ typedef struct {
 } spatial_grid;
 
 /**
+ * @brief Nonlinear operator execution model selector.
+ */
+typedef enum {
+    /** Evaluate compiled runtime expression `nonlinear_expr`. */
+    NLO_NONLINEAR_MODEL_EXPR = 0,
+    /** Use built-in Kerr + delayed Raman (+ optional shock) model. */
+    NLO_NONLINEAR_MODEL_KERR_RAMAN = 1
+} nlo_nonlinear_model;
+
+/**
  * @brief Runtime expression settings for dispersion/nonlinearity operators.
  *
  * String expressions are compiled at runtime into operator programs.
@@ -97,6 +107,14 @@ typedef struct {
     const char* transverse_factor_expr;
     const char* transverse_expr;
     const char* nonlinear_expr;
+    int nonlinear_model;
+    double nonlinear_gamma;
+    double raman_fraction;
+    double raman_tau1;
+    double raman_tau2;
+    double shock_omega0;
+    nlo_complex* raman_response_time;
+    size_t raman_response_len;
     size_t num_constants;
     double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
 } runtime_operator_params;
@@ -220,6 +238,14 @@ typedef struct {
     nlo_vec_buffer* dispersion_operator_vec;
     nlo_vec_buffer* potential_vec;
     nlo_vec_buffer* previous_field_vec;
+    nlo_vec_buffer* raman_intensity_vec;
+    nlo_vec_buffer* raman_delayed_vec;
+    nlo_vec_buffer* raman_spectrum_vec;
+    nlo_vec_buffer* raman_mix_vec;
+    nlo_vec_buffer* raman_polarization_vec;
+    nlo_vec_buffer* raman_derivative_vec;
+    nlo_vec_buffer* raman_response_fft_vec;
+    nlo_vec_buffer* raman_derivative_factor_vec;
 } simulation_working_vectors;
 
 typedef struct nlo_fft_plan nlo_fft_plan;
@@ -274,6 +300,12 @@ typedef struct {
     nlo_operator_program transverse_operator_program;
     nlo_operator_program nonlinear_operator_program;
     int transverse_active;
+    nlo_nonlinear_model nonlinear_model;
+    int nonlinear_raman_active;
+    int nonlinear_shock_active;
+    double nonlinear_gamma;
+    double raman_fraction;
+    double shock_omega0;
     nlo_vec_buffer* spatial_frequency_grid_vec;
     nlo_vec_buffer* transverse_factor_vec;
     nlo_vec_buffer* transverse_operator_vec;

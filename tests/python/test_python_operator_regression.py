@@ -3,6 +3,8 @@ import math
 import random
 
 from nlolib_ctypes import (
+    NLO_NONLINEAR_MODEL_EXPR,
+    NLO_NONLINEAR_MODEL_KERR_RAMAN,
     NLO_VECTOR_BACKEND_CPU,
     NLolib,
     RuntimeOperators,
@@ -109,6 +111,22 @@ def _second_order_soliton_analytic(t_value, z, beta2, t0):
     ) * cmath.exp(0.5j * xi)
     denominator = math.cosh(4.0 * t_value) + 4.0 * math.cosh(2.0 * t_value) + 3.0 * math.cos(4.0 * xi)
     return numerator / denominator
+
+
+def _default_raman_response(n, dt, tau1, tau2):
+    coef = (tau1 * tau1 + tau2 * tau2) / (tau1 * tau2 * tau2)
+    values = [0.0] * n
+    area = 0.0
+    for i in range(n):
+        t = float(i) * dt
+        v = coef * math.exp(-t / tau2) * math.sin(t / tau1)
+        values[i] = v
+        area += v
+    area *= dt
+    if not (area > 0.0):
+        raise ValueError("invalid Raman response normalization area")
+    inv_area = 1.0 / area
+    return [complex(v * inv_area, 0.0) for v in values]
 
 
 def test_dispersion_factor_callable_matches_string(api, opts):
@@ -489,6 +507,160 @@ def test_raman_like_nonlinear_callable_matches_string(api, opts):
     assert err <= 2e-8, f"Raman-like callable mismatch: err={err}"
 
 
+def test_kerr_raman_model_reduces_to_kerr_when_fraction_zero(api, opts):
+    n = 256
+    dt = 0.01
+    beta2 = 0.02
+    gamma = 0.7
+    omega = _omega_grid_unshifted(n, dt)
+    t = _centered_time_grid(n, dt)
+    input_field = _gaussian_with_phase(t, sigma=0.24, d=6.0)
+
+    common = dict(
+        propagation_distance=0.06,
+        starting_step_size=1e-3,
+        max_step_size=3e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(w, 0.0) for w in omega],
+    )
+
+    kerr_expr_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="i*c0*w*w",
+            nonlinear_expr="i*c1*A*I",
+            constants=[0.5 * beta2, gamma, 0.0, 0.0],
+            nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
+        ),
+        **common,
+    )
+    kerr_raman_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="i*c0*w*w",
+            nonlinear_expr="0",
+            constants=[0.5 * beta2, 0.0, 0.0, 0.0],
+            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_gamma=gamma,
+            raman_fraction=0.0,
+            shock_omega0=0.0,
+        ),
+        **common,
+    )
+
+    expr_final = api.propagate(kerr_expr_cfg, input_field, 2, opts).records[1]
+    raman_final = api.propagate(kerr_raman_cfg, input_field, 2, opts).records[1]
+    rel = _relative_l2_error(raman_final, expr_final)
+    assert rel <= 2e-7, f"kerr_raman(f_r=0) mismatch vs Kerr expression: rel={rel}"
+
+
+def test_kerr_raman_custom_response_matches_generated_default(api, opts):
+    n = 256
+    dt = 0.004
+    beta2 = -0.015
+    gamma = 1.1
+    f_r = 0.18
+    tau1 = 0.0122
+    tau2 = 0.0320
+    omega = _omega_grid_unshifted(n, dt)
+    t = _centered_time_grid(n, dt)
+    input_field = _gaussian_with_phase(t, sigma=0.14, d=3.0)
+    response = _default_raman_response(n, dt, tau1, tau2)
+
+    common = dict(
+        propagation_distance=0.05,
+        starting_step_size=8e-4,
+        max_step_size=2e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(w, 0.0) for w in omega],
+    )
+
+    generated_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="i*c0*w*w",
+            nonlinear_expr="0",
+            constants=[0.5 * beta2, 0.0, 0.0, 0.0],
+            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_gamma=gamma,
+            raman_fraction=f_r,
+            raman_tau1=tau1,
+            raman_tau2=tau2,
+            shock_omega0=0.0,
+        ),
+        **common,
+    )
+    custom_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="i*c0*w*w",
+            nonlinear_expr="0",
+            constants=[0.5 * beta2, 0.0, 0.0, 0.0],
+            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_gamma=gamma,
+            raman_fraction=f_r,
+            raman_tau1=tau1,
+            raman_tau2=tau2,
+            shock_omega0=0.0,
+            raman_response_time=response,
+        ),
+        **common,
+    )
+
+    generated_final = api.propagate(generated_cfg, input_field, 2, opts).records[1]
+    custom_final = api.propagate(custom_cfg, input_field, 2, opts).records[1]
+    rel = _relative_l2_error(custom_final, generated_final)
+    assert rel <= 2e-7, f"custom Raman response mismatch vs generated default: rel={rel}"
+
+
+def test_kerr_raman_rejects_coupled_mode(api, opts):
+    nt = 8
+    nx = 4
+    ny = 2
+    n = nt * nx * ny
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.02,
+        starting_step_size=1e-3,
+        max_step_size=2e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(nt) * 0.02,
+        delta_time=0.02,
+        time_nt=nt,
+        frequency_grid=[0j] * nt,
+        spatial_nx=nx,
+        spatial_ny=ny,
+        spatial_frequency_grid=[0j] * (nx * ny),
+        potential_grid=[0j] * (nx * ny),
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="0",
+            constants=[0.0, 0.0, 0.0, 0.0],
+            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_gamma=0.8,
+            raman_fraction=0.18,
+            raman_tau1=0.0122,
+            raman_tau2=0.0320,
+            shock_omega0=0.0,
+        ),
+    )
+
+    field = _random_input_field(n, seed=211)
+    try:
+        api.propagate(cfg, field, 2, opts)
+        raise AssertionError("expected coupled kerr_raman propagation to fail")
+    except RuntimeError as exc:
+        msg = str(exc)
+        assert ("status=1" in msg) or ("status=2" in msg)
+
+
 def test_linear_drift_signed_prediction(api, opts):
     n = 384
     dt = 0.01
@@ -650,6 +822,9 @@ def main():
     test_beta_sum_callable_matches_string(api, opts)
     test_diffraction_callable_matches_string(api, opts)
     test_raman_like_nonlinear_callable_matches_string(api, opts)
+    test_kerr_raman_model_reduces_to_kerr_when_fraction_zero(api, opts)
+    test_kerr_raman_custom_response_matches_generated_default(api, opts)
+    test_kerr_raman_rejects_coupled_mode(api, opts)
     test_linear_drift_signed_prediction(api, opts)
     test_second_order_soliton_intensity_error(api, opts)
     test_fixed_step_fundamental_soliton_order(api, opts)

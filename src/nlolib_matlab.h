@@ -123,6 +123,15 @@ typedef struct
 } spatial_grid;
 
 /**
+ * @brief Nonlinear operator execution model selector.
+ */
+typedef enum
+{
+    NLO_NONLINEAR_MODEL_EXPR = 0,
+    NLO_NONLINEAR_MODEL_KERR_RAMAN = 1
+} nlo_nonlinear_model;
+
+/**
  * @brief Runtime expression settings for dispersion/nonlinearity operators.
  */
 typedef struct
@@ -132,6 +141,14 @@ typedef struct
     const char *transverse_factor_expr;
     const char *transverse_expr;
     const char *nonlinear_expr;
+    int nonlinear_model;
+    double nonlinear_gamma;
+    double raman_fraction;
+    double raman_tau1;
+    double raman_tau2;
+    double shock_omega0;
+    nlo_complex *raman_response_time;
+    size_t raman_response_len;
     size_t num_constants;
     double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
 } runtime_operator_params;

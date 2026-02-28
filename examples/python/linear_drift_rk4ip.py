@@ -105,6 +105,7 @@ def main() -> float:
     z_final = 1.0
     num_records = 180
     t = centered_time_grid(num_samples, dt)
+    field0 = gaussian_with_phase_ramp(t, sigma, chirp).astype(np.complex128)
 
     exec_options = SimulationOptions(backend="auto", fft_backend="auto")
     runner = NloExampleRunner()
@@ -118,6 +119,7 @@ def main() -> float:
         beta2 = float(meta["beta2"])
         chirp = float(meta["chirp"])
         t = centered_time_grid(num_samples, dt)
+        field0 = gaussian_with_phase_ramp(t, sigma, chirp).astype(np.complex128)
         z_records = np.asarray(loaded.z_axis, dtype=np.float64)
         records = np.asarray(loaded.records, dtype=np.complex128)
     else:
@@ -160,7 +162,6 @@ def main() -> float:
             },
         )
 
-    field0 = gaussian_with_phase_ramp(t, sigma, chirp).astype(np.complex128)
     record_norms = np.asarray([float(np.linalg.norm(record)) for record in records], dtype=np.float64)
 
     centroid = centroid_curve(t, records)

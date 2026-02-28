@@ -125,6 +125,16 @@ Multi-config generators use `--config <type>` during build/test.
 - Runtime operators use symbols: `A` (field), `w` (frequency/spatial-frequency), `I` (`|A|^2`), `D` (dispersion factor), `V` (potential), `h` (half-step exponent).
 - `nonlinear_expr` is interpreted as the full nonlinear RHS `N(A)` and is written directly by the solver.
 - Legacy multiplier-form nonlinear expressions must be migrated to include `A`.
+- `runtime.nonlinear_model` selects nonlinear execution mode:
+  - `0` (`NLO_NONLINEAR_MODEL_EXPR`): evaluate `nonlinear_expr` (default).
+  - `1` (`NLO_NONLINEAR_MODEL_KERR_RAMAN`): built-in Kerr + delayed Raman model with optional self-steepening.
+- `NLO_NONLINEAR_MODEL_KERR_RAMAN` parameters (Python `RuntimeOperators`, MATLAB `cfg.runtime`):
+  - `nonlinear_gamma` Kerr coefficient `gamma`.
+  - `raman_fraction` delayed Raman fraction `f_R` in `[0, 1]`.
+  - `raman_tau1`, `raman_tau2` default Raman kernel shape constants (`0.0122`, `0.0320`).
+  - `raman_response_time` optional custom time-domain Raman response (`num_time_samples` complex values); when omitted, the normalized default response is generated from `tau1/tau2`.
+  - `shock_omega0` enables self-steepening when `> 0` (set `0` to disable).
+- Current limitation: `NLO_NONLINEAR_MODEL_KERR_RAMAN` is supported for temporal-only runs (not coupled transverse `time_nt*nx*ny` grids).
 
 Common migration examples:
 

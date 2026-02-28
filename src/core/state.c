@@ -90,6 +90,7 @@ static int nlo_frequency_grid_matches_expected_unshifted(
     double delta_time
 );
 static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t record_index, const nlo_complex* record);
+static nlo_vec_status nlo_prepare_raman_state(simulation_state* state);
 
 #ifndef NLO_DEFAULT_DISPERSION_FACTOR_EXPR
 #define NLO_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
@@ -125,6 +126,14 @@ static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t r
 
 #ifndef NLO_DEFAULT_C3
 #define NLO_DEFAULT_C3 0.0
+#endif
+
+#ifndef NLO_DEFAULT_RAMAN_TAU1
+#define NLO_DEFAULT_RAMAN_TAU1 0.0122
+#endif
+
+#ifndef NLO_DEFAULT_RAMAN_TAU2
+#define NLO_DEFAULT_RAMAN_TAU2 0.0320
 #endif
 
 static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer** vec)
@@ -366,6 +375,126 @@ static size_t nlo_resolve_runtime_constants(const runtime_operator_params* runti
     }
 
     return count;
+}
+
+static nlo_vec_status nlo_prepare_raman_response_host(
+    const simulation_state* state,
+    nlo_complex* out_response
+)
+{
+    if (state == NULL || state->config == NULL || out_response == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    const runtime_operator_params* runtime = &state->config->runtime;
+    const size_t n = state->num_time_samples;
+    if (n == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (runtime->raman_response_time != NULL && runtime->raman_response_len > 0u) {
+        if (runtime->raman_response_len != n) {
+            nlo_log_emit(
+                NLO_LOG_LEVEL_ERROR,
+                "[nlolib] Raman response length mismatch: expected=%zu got=%zu",
+                n,
+                runtime->raman_response_len
+            );
+            return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        }
+        memcpy(out_response, runtime->raman_response_time, n * sizeof(nlo_complex));
+        return NLO_VEC_STATUS_OK;
+    }
+
+    const double dt = nlo_resolve_delta_time(state->config, state->nt);
+    if (!(dt > 0.0)) {
+        nlo_log_emit(NLO_LOG_LEVEL_ERROR, "[nlolib] Raman model requires positive delta_time.");
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    const double tau1 = (runtime->raman_tau1 > 0.0) ? runtime->raman_tau1 : NLO_DEFAULT_RAMAN_TAU1;
+    const double tau2 = (runtime->raman_tau2 > 0.0) ? runtime->raman_tau2 : NLO_DEFAULT_RAMAN_TAU2;
+    if (!(tau1 > 0.0) || !(tau2 > 0.0)) {
+        nlo_log_emit(NLO_LOG_LEVEL_ERROR, "[nlolib] Raman tau parameters must be > 0.");
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    const double coef = (tau1 * tau1 + tau2 * tau2) / (tau1 * tau2 * tau2);
+    double area = 0.0;
+    for (size_t i = 0u; i < n; ++i) {
+        const double t = (double)i * dt;
+        const double val = coef * exp(-t / tau2) * sin(t / tau1);
+        out_response[i] = nlo_make(val, 0.0);
+        area += val;
+    }
+    area *= dt;
+    if (!(area > 0.0) || !isfinite(area)) {
+        nlo_log_emit(NLO_LOG_LEVEL_ERROR, "[nlolib] Raman response normalization failed (area=%g).", area);
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    const double inv_area = 1.0 / area;
+    for (size_t i = 0u; i < n; ++i) {
+        out_response[i].re *= inv_area;
+        out_response[i].im = 0.0;
+    }
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_prepare_raman_state(simulation_state* state)
+{
+    if (state == NULL || state->backend == NULL || state->fft_plan == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (!state->nonlinear_raman_active) {
+        return NLO_VEC_STATUS_OK;
+    }
+
+    nlo_complex* response_host = (nlo_complex*)malloc(state->num_time_samples * sizeof(nlo_complex));
+    if (response_host == NULL) {
+        return NLO_VEC_STATUS_ALLOCATION_FAILED;
+    }
+
+    nlo_vec_status status = nlo_prepare_raman_response_host(state, response_host);
+    if (status == NLO_VEC_STATUS_OK) {
+        status = nlo_vec_upload(
+            state->backend,
+            state->working_vectors.raman_mix_vec,
+            response_host,
+            state->num_time_samples * sizeof(nlo_complex)
+        );
+    }
+    free(response_host);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_fft_forward_vec(
+        state->fft_plan,
+        state->working_vectors.raman_mix_vec,
+        state->working_vectors.raman_response_fft_vec
+    );
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_copy(
+        state->backend,
+        state->working_vectors.raman_derivative_factor_vec,
+        state->frequency_grid_vec
+    );
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_complex_scalar_mul_inplace(
+        state->backend,
+        state->working_vectors.raman_derivative_factor_vec,
+        nlo_make(0.0, 1.0)
+    );
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    return NLO_VEC_STATUS_OK;
 }
 
 static size_t nlo_compute_device_ring_capacity(const simulation_state* state, size_t requested_records)
@@ -684,6 +813,14 @@ sim_config* create_sim_config(size_t num_time_samples)
     config->runtime.transverse_factor_expr = NULL;
     config->runtime.transverse_expr = NULL;
     config->runtime.nonlinear_expr = NULL;
+    config->runtime.nonlinear_model = NLO_NONLINEAR_MODEL_EXPR;
+    config->runtime.nonlinear_gamma = 0.0;
+    config->runtime.raman_fraction = 0.0;
+    config->runtime.raman_tau1 = NLO_DEFAULT_RAMAN_TAU1;
+    config->runtime.raman_tau2 = NLO_DEFAULT_RAMAN_TAU2;
+    config->runtime.shock_omega0 = 0.0;
+    config->runtime.raman_response_time = NULL;
+    config->runtime.raman_response_len = 0u;
     config->runtime.num_constants = 0u;
     config->frequency.frequency_grid = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
     if (config->frequency.frequency_grid == NULL) {
@@ -760,6 +897,7 @@ simulation_state* create_simulation_state_with_storage(
     state->num_time_samples = num_time_samples;
     state->num_points_xy = spatial_nx * spatial_ny;
     state->num_recorded_samples = num_recorded_samples;
+    const int enable_transverse = (explicit_nd != 0) && (spatial_nx > 1u || spatial_ny > 1u);
     state->num_host_records = compute_host_record_capacity(num_time_samples, num_recorded_samples);
     const int storage_enabled = nlo_storage_options_enabled(storage_options);
     if (state->num_host_records == 0u && !storage_enabled) {
@@ -779,6 +917,44 @@ simulation_state* create_simulation_state_with_storage(
     state->dispersion_valid = 0;
     state->runtime_operator_stack_slots = 0u;
     state->snapshot_status = NLO_VEC_STATUS_OK;
+    state->nonlinear_model = NLO_NONLINEAR_MODEL_EXPR;
+    state->nonlinear_raman_active = 0;
+    state->nonlinear_shock_active = 0;
+    state->nonlinear_gamma = 0.0;
+    state->raman_fraction = 0.0;
+    state->shock_omega0 = 0.0;
+
+    if (config->runtime.nonlinear_model == NLO_NONLINEAR_MODEL_KERR_RAMAN) {
+        if (enable_transverse) {
+            nlo_log_emit(
+                NLO_LOG_LEVEL_ERROR,
+                "[nlolib] nonlinear_model=kerr_raman is currently supported for temporal-only runs."
+            );
+            free_simulation_state(state);
+            return NULL;
+        }
+        if (!isfinite(config->runtime.nonlinear_gamma)) {
+            nlo_state_debug_log_failure("validate_raman_gamma", NLO_VEC_STATUS_INVALID_ARGUMENT);
+            free_simulation_state(state);
+            return NULL;
+        }
+        if (!(config->runtime.raman_fraction >= 0.0) || !(config->runtime.raman_fraction <= 1.0)) {
+            nlo_state_debug_log_failure("validate_raman_fraction", NLO_VEC_STATUS_INVALID_ARGUMENT);
+            free_simulation_state(state);
+            return NULL;
+        }
+        if (config->runtime.shock_omega0 < 0.0 || !isfinite(config->runtime.shock_omega0)) {
+            nlo_state_debug_log_failure("validate_shock_omega0", NLO_VEC_STATUS_INVALID_ARGUMENT);
+            free_simulation_state(state);
+            return NULL;
+        }
+        state->nonlinear_model = NLO_NONLINEAR_MODEL_KERR_RAMAN;
+        state->nonlinear_raman_active = 1;
+        state->nonlinear_gamma = config->runtime.nonlinear_gamma;
+        state->raman_fraction = config->runtime.raman_fraction;
+        state->shock_omega0 = config->runtime.shock_omega0;
+        state->nonlinear_shock_active = (config->runtime.shock_omega0 > 0.0) ? 1 : 0;
+    }
 
     if (storage_enabled) {
         if (!nlo_snapshot_store_is_available()) {
@@ -866,8 +1042,21 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    if (state->nonlinear_raman_active) {
+        if (nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_intensity_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_delayed_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_spectrum_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_mix_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_polarization_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_derivative_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_response_fft_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_derivative_factor_vec) != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("allocate_raman_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
+            free_simulation_state(state);
+            return NULL;
+        }
+    }
 
-    const int enable_transverse = (explicit_nd != 0) && (spatial_nx > 1u || spatial_ny > 1u);
     state->transverse_active = 0;
     if (enable_transverse) {
         if (nlo_create_complex_vec(state->backend, num_time_samples, &state->spatial_frequency_grid_vec) != NLO_VEC_STATUS_OK ||
@@ -1279,6 +1468,15 @@ simulation_state* create_simulation_state_with_storage(
         return NULL;
     }
 
+    if (state->nonlinear_raman_active) {
+        status = nlo_prepare_raman_state(state);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("prepare_raman_state", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+    }
+
     state->record_ring_capacity = nlo_compute_device_ring_capacity(state, state->num_recorded_samples);
     if (state->record_ring_capacity > 0u) {
         state->record_ring_vec = (nlo_vec_buffer**)calloc(state->record_ring_capacity, sizeof(nlo_vec_buffer*));
@@ -1328,6 +1526,14 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_operator_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.potential_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.previous_field_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_intensity_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_delayed_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_spectrum_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_mix_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_polarization_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_derivative_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_response_fft_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_derivative_factor_vec);
         nlo_destroy_vec_if_set(state->backend, &state->spatial_frequency_grid_vec);
         nlo_destroy_vec_if_set(state->backend, &state->transverse_factor_vec);
         nlo_destroy_vec_if_set(state->backend, &state->transverse_operator_vec);
