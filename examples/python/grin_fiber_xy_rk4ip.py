@@ -133,7 +133,6 @@ def run_phase_validation(
         y_label="Propagation distance z",
         title=f"{scenario_name}: center-line intensity vs propagation",
         colorbar_label="Normalized center-line intensity",
-        cmap="viridis",
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -335,7 +334,6 @@ def main() -> None:
                 y_label="Propagation distance z",
                 title=f"{scenario_name}: center-line intensity vs propagation",
                 colorbar_label="Normalized center-line intensity",
-                cmap="viridis",
             )
             if p1 is not None:
                 saved_paths.append(p1)

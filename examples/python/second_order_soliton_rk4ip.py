@@ -21,6 +21,7 @@ from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
     plot_total_error_over_propagation,
+    plot_wavelength_step_history,
 )
 from backend.runner import (
     NloExampleRunner,
@@ -195,17 +196,6 @@ def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) 
     return out
 
 
-def _load_plt():
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-    return plt
-
-
 def step_telemetry_from_meta(meta: dict[str, object] | None) -> StepTelemetry:
     if not meta:
         return StepTelemetry.empty()
@@ -277,86 +267,6 @@ def filter_record_clipped_steps(
     return filtered, int(np.count_nonzero(clipped))
 
 
-def plot_wavelength_step_history(
-    z_samples: np.ndarray,
-    lambda_nm: np.ndarray,
-    spectral_map: np.ndarray,
-    telemetry: StepTelemetry,
-    output_path: Path,
-) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping wavelength + step-size plot.")
-        return None
-
-    z_axis = np.asarray(z_samples, dtype=np.float64)
-    lambda_axis = np.asarray(lambda_nm, dtype=np.float64)
-    data = np.asarray(spectral_map, dtype=np.float64)
-    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-    data = np.clip(data, 0.0, None)
-    if data.shape != (z_axis.size, lambda_axis.size):
-        raise ValueError("spectral_map shape must be [record, wavelength].")
-
-    peak = float(np.max(data))
-    if peak > 0.0:
-        data = data / peak
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure(figsize=(9.8, 10.2))
-    grid = fig.add_gridspec(2, 1, height_ratios=[4.6, 1.4], hspace=0.24)
-
-    ax_map = fig.add_subplot(grid[0, 0])
-    mesh = ax_map.pcolormesh(z_axis, lambda_axis, data.T, shading="auto", cmap="magma")
-    ax_map.set_xlabel("Propagation distance z (m)")
-    ax_map.set_ylabel("Wavelength (nm)")
-    ax_map.set_title("Spectral Intensity Envelope vs Propagation Distance")
-    ax_map.set_box_aspect(1.0)
-    cbar = fig.colorbar(mesh, ax=ax_map, pad=0.02)
-    cbar.set_label("Normalized spectral intensity")
-
-    ax_step = fig.add_subplot(grid[1, 0])
-    telemetry_plot, _ = filter_record_clipped_steps(telemetry, z_axis)
-    has_series = False
-    if telemetry_plot.accepted_z.size > 0:
-        order = np.argsort(telemetry_plot.accepted_z)
-        ax_step.plot(
-            telemetry_plot.accepted_z[order],
-            telemetry_plot.accepted_step_sizes[order],
-            lw=1.2,
-            color="tab:blue",
-            label="Accepted step_size",
-        )
-        has_series = True
-
-    if has_series:
-        ax_step.set_xlabel("Propagation distance z (m)")
-        ax_step.set_ylabel("Step size (m)")
-        ax_step.set_title("Adaptive RK4IP Step Sizes")
-        ax_step.grid(True, alpha=0.3)
-        ax_step.legend()
-    else:
-        ax_step.text(
-            0.5,
-            0.5,
-            "No adaptive step-adjustment events captured",
-            transform=ax_step.transAxes,
-            ha="center",
-            va="center",
-        )
-        ax_step.set_xticks([])
-        ax_step.set_yticks([])
-        ax_step.set_title("Adaptive RK4IP Step Sizes")
-
-    # Keep both panels at identical drawable width after colorbar shrinkage.
-    map_pos = ax_map.get_position()
-    step_pos = ax_step.get_position()
-    ax_step.set_position([map_pos.x0, step_pos.y0, map_pos.width, step_pos.height])
-
-    fig.savefig(output_path, dpi=260, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
-
-
 def save_plots(
     t: np.ndarray,
     U_num: np.ndarray,
@@ -372,12 +282,14 @@ def save_plots(
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
+    telemetry_plot, _ = filter_record_clipped_steps(telemetry, z_samples)
     p1 = plot_wavelength_step_history(
         z_samples,
         lambda_nm,
         spectral_map,
-        telemetry,
         output_dir / "wavelength_intensity_colormap.png",
+        accepted_z=telemetry_plot.accepted_z,
+        accepted_step_sizes=telemetry_plot.accepted_step_sizes,
     )
     if p1 is not None:
         saved_paths.append(p1)

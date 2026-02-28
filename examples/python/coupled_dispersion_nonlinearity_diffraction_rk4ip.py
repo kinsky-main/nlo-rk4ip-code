@@ -21,6 +21,7 @@ from backend.plotting import (
     plot_final_re_im_comparison,
     plot_intensity_colormap_vs_propagation,
     plot_total_error_over_propagation,
+    plot_two_curve_comparison,
 )
 from backend.runner import NloExampleRunner, SimulationOptions
 from backend.storage import ExampleRunDB
@@ -48,40 +49,6 @@ def _k2_grid(nx: int, ny: int, dx: float, dy: float) -> np.ndarray:
 
 def _omega_grid(nt: int, dt: float) -> np.ndarray:
     return (2.0 * np.pi * np.fft.fftfreq(nt, d=dt)).astype(np.float64)
-
-
-def _save_two_curve_plot(
-    output_path: Path,
-    z_axis: np.ndarray,
-    curve_a: np.ndarray,
-    curve_b: np.ndarray,
-    *,
-    label_a: str,
-    label_b: str,
-    y_label: str,
-    title: str,
-) -> Path | None:
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("matplotlib not available; skipping two-curve summary plot.")
-        return None
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8.8, 4.8))
-    ax.plot(z_axis, curve_a, lw=1.9, label=label_a)
-    ax.plot(z_axis, curve_b, lw=1.8, ls="--", label=label_b)
-    ax.set_xlabel("Propagation distance z")
-    ax.set_ylabel(y_label)
-    ax.set_title(title)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
 
 
 def _run_case(
@@ -381,7 +348,6 @@ def main() -> None:
         y_label="Propagation distance z",
         title="Full coupled case: center-point temporal intensity vs z",
         colorbar_label="Normalized intensity",
-        cmap="magma",
     )
     if p3 is not None:
         saved_paths.append(p3)
@@ -395,7 +361,6 @@ def main() -> None:
         y_label="Propagation distance z",
         title="Full coupled case: transverse center-line intensity vs z",
         colorbar_label="Normalized intensity",
-        cmap="viridis",
     )
     if p4 is not None:
         saved_paths.append(p4)
@@ -436,11 +401,11 @@ def main() -> None:
     if p7 is not None:
         saved_paths.append(p7)
 
-    p8 = _save_two_curve_plot(
-        output_dir / "power_over_propagation_full_vs_linear.png",
+    p8 = plot_two_curve_comparison(
         z_records,
         power_full,
         power_linear,
+        output_dir / "power_over_propagation_full_vs_linear.png",
         label_a="Full coupled",
         label_b="Linear baseline",
         y_label="Total power sum(|A|^2)",

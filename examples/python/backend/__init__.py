@@ -3,10 +3,17 @@
 from .cli import build_example_parser
 from .plotting import (
     plot_3d_intensity_scatter_propagation,
+    plot_convergence_loglog,
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
     plot_intensity_colormap_vs_propagation,
+    plot_mode_power_exchange,
+    plot_phase_shift_comparison,
+    plot_summary_curve,
+    plot_three_curve_drift,
     plot_total_error_over_propagation,
+    plot_two_curve_comparison,
+    plot_wavelength_step_history,
 )
 from .runner import (
     NloExampleRunner,
@@ -26,8 +33,15 @@ __all__ = [
     "CaseListing",
     "LoadedCase",
     "plot_3d_intensity_scatter_propagation",
+    "plot_convergence_loglog",
     "plot_intensity_colormap_vs_propagation",
     "plot_final_re_im_comparison",
     "plot_final_intensity_comparison",
+    "plot_mode_power_exchange",
+    "plot_phase_shift_comparison",
+    "plot_summary_curve",
+    "plot_three_curve_drift",
     "plot_total_error_over_propagation",
+    "plot_two_curve_comparison",
+    "plot_wavelength_step_history",
 ]

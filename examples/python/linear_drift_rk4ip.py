@@ -122,7 +122,6 @@ def main() -> float:
         records = np.asarray(loaded.records, dtype=np.complex128)
     else:
         run_group = db.begin_group(example_name, args.run_group)
-        field0 = gaussian_with_phase_ramp(t, sigma, chirp).astype(np.complex128)
         sim_cfg = TemporalSimulationConfig(
             gamma=gamma,
             beta2=beta2,
@@ -132,7 +131,7 @@ def main() -> float:
             num_time_samples=num_samples,
             pulse_period=float(num_samples) * dt,
             omega=None,
-            error_tolerance=1e-7,
+            error_tolerance=1e-5,
         )
         storage_kwargs = db.storage_kwargs(
             example_name=example_name,
@@ -161,6 +160,7 @@ def main() -> float:
             },
         )
 
+    field0 = gaussian_with_phase_ramp(t, sigma, chirp).astype(np.complex128)
     record_norms = np.asarray([float(np.linalg.norm(record)) for record in records], dtype=np.float64)
 
     centroid = centroid_curve(t, records)
@@ -184,7 +184,6 @@ def main() -> float:
         x_label="Time t",
         title="Linear Drift: Temporal Intensity Propagation",
         colorbar_label="Normalized intensity",
-        cmap="viridis",
     )
     if saved is not None:
         saved_paths.append(saved)

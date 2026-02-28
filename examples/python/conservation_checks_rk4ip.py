@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 from backend.cli import build_example_parser
+from backend.plotting import plot_three_curve_drift
 from backend.runner import (
     NloExampleRunner,
     SimulationOptions,
@@ -17,17 +18,6 @@ from backend.runner import (
     centered_time_grid,
 )
 from backend.storage import ExampleRunDB
-
-
-def _load_plt():
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-    return plt
 
 
 def _configure_runtime_logging(runner: NloExampleRunner) -> None:
@@ -60,34 +50,6 @@ def _compute_invariants(
         (0.5 * beta2 * np.sum(np.abs(da_dt) ** 2) - 0.5 * gamma * np.sum(np.abs(a_t) ** 4)) * dt
     )
     return energy, momentum, hamiltonian
-
-
-def _save_drift_plot(
-    output_path: Path,
-    z_axis: np.ndarray,
-    drift_energy: np.ndarray,
-    drift_momentum: np.ndarray,
-    drift_hamiltonian: np.ndarray,
-) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping conservation drift plot.")
-        return None
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9.2, 5.0))
-    ax.plot(z_axis, drift_energy, lw=1.8, label="Energy drift")
-    ax.plot(z_axis, drift_momentum, lw=1.8, label="Momentum drift")
-    ax.plot(z_axis, drift_hamiltonian, lw=1.8, label="Hamiltonian drift")
-    ax.set_xlabel("Propagation distance z")
-    ax.set_ylabel("Relative drift")
-    ax.set_title("Conservation Checks: Relative Drift Over Propagation")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
-
 
 def main() -> tuple[float, float, float]:
     beta2 = -0.01
@@ -194,12 +156,15 @@ def main() -> tuple[float, float, float]:
     max_hamiltonian_drift = float(np.max(np.abs(hamiltonian_drift)))
 
     output_dir = Path(__file__).resolve().parent / "output" / "conservation_checks"
-    saved = _save_drift_plot(
-        output_dir / "relative_invariant_drift.png",
+    saved = plot_three_curve_drift(
         z_axis,
         energy_drift,
         momentum_drift,
         hamiltonian_drift,
+        output_dir / "relative_invariant_drift.png",
+        label_a="Energy drift",
+        label_b="Momentum drift",
+        label_c="Hamiltonian drift",
     )
 
     print(f"conservation-check summary (run_group={run_group}):")

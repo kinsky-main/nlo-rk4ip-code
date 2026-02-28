@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 from backend.cli import build_example_parser
+from backend.plotting import plot_mode_power_exchange, plot_total_error_over_propagation
 from backend.storage import ExampleRunDB
 
 
@@ -25,17 +26,6 @@ if str(PYTHON_API_DIR) not in sys.path:
 import nlolib_ctypes as nlo
 
 
-def _load_plt():
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-    return plt
-
-
 def _configure_runtime_logging(api: nlo.NLolib) -> None:
     try:
         api.set_log_level(nlo.NLOLIB_LOG_LEVEL_ERROR)
@@ -45,58 +35,6 @@ def _configure_runtime_logging(api: nlo.NLolib) -> None:
         api.set_progress_options(enabled=False, milestone_percent=5, emit_on_step_adjust=False)
     except Exception:
         pass
-
-
-def _save_mode_power_plot(
-    output_path: Path,
-    z_axis: np.ndarray,
-    mode1_num: np.ndarray,
-    mode2_num: np.ndarray,
-    mode1_ref: np.ndarray,
-    mode2_ref: np.ndarray,
-) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping two-mode power plot.")
-        return None
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9.0, 5.0))
-    ax.plot(z_axis, mode1_ref, lw=2.0, color="tab:blue", label="|A1|^2 analytical")
-    ax.plot(z_axis, mode2_ref, lw=2.0, color="tab:orange", label="|A2|^2 analytical")
-    ax.plot(z_axis, mode1_num, "--", lw=1.7, color="tab:blue", label="|A1|^2 numerical")
-    ax.plot(z_axis, mode2_num, "--", lw=1.7, color="tab:orange", label="|A2|^2 numerical")
-    ax.set_xlabel("Propagation distance z")
-    ax.set_ylabel("Mode power")
-    ax.set_title("Two-Mode Linear Beating: Power Exchange")
-    ax.grid(True, alpha=0.3)
-    ax.legend(ncol=2)
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
-
-
-def _save_error_plot(
-    output_path: Path,
-    z_axis: np.ndarray,
-    error_curve: np.ndarray,
-) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping two-mode error plot.")
-        return None
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9.0, 4.8))
-    ax.plot(z_axis, error_curve, lw=1.8, color="tab:red")
-    ax.set_xlabel("Propagation distance z")
-    ax.set_ylabel("Relative L2 error")
-    ax.set_title("Two-Mode Linear Beating: Error Over Propagation")
-    ax.grid(True, alpha=0.3)
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
-
 
 def main() -> float:
     api = nlo.NLolib()
@@ -204,18 +142,24 @@ def main() -> float:
     output_dir.mkdir(parents=True, exist_ok=True)
     saved = []
 
-    p1 = _save_mode_power_plot(
-        output_dir / "mode_power_exchange.png",
+    p1 = plot_mode_power_exchange(
         z_axis,
         mode1_num,
         mode2_num,
         mode1_ref,
         mode2_ref,
+        output_dir / "mode_power_exchange.png",
     )
     if p1 is not None:
         saved.append(p1)
 
-    p2 = _save_error_plot(output_dir / "error_over_propagation.png", z_axis, error_curve)
+    p2 = plot_total_error_over_propagation(
+        z_axis,
+        error_curve,
+        output_dir / "error_over_propagation.png",
+        title="Two-Mode Linear Beating: Error Over Propagation",
+        y_label="Relative L2 error",
+    )
     if p2 is not None:
         saved.append(p2)
 

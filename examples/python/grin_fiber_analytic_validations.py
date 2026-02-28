@@ -11,39 +11,10 @@ import argparse
 from pathlib import Path
 
 from backend.cli import build_example_parser
+from backend.plotting import plot_summary_curve
 from backend.runner import NloExampleRunner, SimulationOptions
 from backend.storage import ExampleRunDB
 from grin_fiber_xy_rk4ip import run_phase_validation
-
-
-def _save_summary_plot(
-    output_path: Path,
-    x_values: list[float],
-    y_values: list[float],
-    *,
-    x_label: str,
-    y_label: str,
-    title: str,
-) -> Path | None:
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        print("matplotlib not available; skipping sweep summary plot.")
-        return None
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(8.8, 4.8))
-    ax.plot(x_values, y_values, marker="o", lw=1.8)
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    ax.set_title(title)
-    ax.grid(True, alpha=0.3)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
 
 
 def main() -> None:
@@ -111,18 +82,18 @@ def main() -> None:
     final_errors = [final_errors[i] for i in order]
     power_drifts = [power_drifts[i] for i in order]
 
-    p1 = _save_summary_plot(
-        output_root / "summary_final_error_vs_grin_strength.png",
+    p1 = plot_summary_curve(
         grin_strengths,
         final_errors,
+        output_root / "summary_final_error_vs_grin_strength.png",
         x_label="GRIN coefficient g",
         y_label="Final relative L2 error",
         title="GRIN phase-only analytical validation: error vs GRIN strength",
     )
-    p2 = _save_summary_plot(
-        output_root / "summary_power_drift_vs_grin_strength.png",
+    p2 = plot_summary_curve(
         grin_strengths,
         power_drifts,
+        output_root / "summary_power_drift_vs_grin_strength.png",
         x_label="GRIN coefficient g",
         y_label="Relative power drift",
         title="GRIN phase-only analytical validation: power drift vs GRIN strength",

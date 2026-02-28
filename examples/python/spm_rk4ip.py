@@ -14,6 +14,7 @@ import numpy as np
 from backend.cli import build_example_parser
 from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
+    plot_phase_shift_comparison,
     plot_total_error_over_propagation,
 )
 from backend.runner import (
@@ -23,17 +24,6 @@ from backend.runner import (
     centered_time_grid,
 )
 from backend.storage import ExampleRunDB
-
-
-def _load_plt():
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-    return plt
 
 
 def _configure_runtime_logging(runner: NloExampleRunner) -> None:
@@ -51,35 +41,6 @@ def _relative_l2_error(num: np.ndarray, ref: np.ndarray) -> float:
     ref_norm = float(np.linalg.norm(ref))
     denom = max(ref_norm, 1e-15)
     return float(np.linalg.norm(num - ref) / denom)
-
-
-def _save_phase_plot(
-    output_path: Path,
-    t_axis: np.ndarray,
-    phase_num: np.ndarray,
-    phase_ref: np.ndarray,
-    phase_mask: np.ndarray,
-) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping SPM phase plot.")
-        return None
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(9.0, 4.9))
-    phase_num_plot = np.where(phase_mask, phase_num, np.nan)
-    phase_ref_plot = np.where(phase_mask, phase_ref, np.nan)
-    ax.plot(t_axis, phase_ref_plot, lw=2.0, label="Analytical phase shift")
-    ax.plot(t_axis, phase_num_plot, "--", lw=1.8, label="Numerical phase shift")
-    ax.set_xlabel("Time t")
-    ax.set_ylabel("Phase shift (rad)")
-    ax.set_title("SPM Final Phase Shift (Masked by Pulse Support)")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
-
 
 def main() -> float:
     parser = build_example_parser(
@@ -196,12 +157,12 @@ def main() -> float:
     freq_axis = np.fft.fftshift(np.fft.fftfreq(n, d=dt))
 
     saved = []
-    p1 = _save_phase_plot(
-        output_dir / "final_phase_shift_comparison.png",
+    p1 = plot_phase_shift_comparison(
         t,
         phase_num,
         phase_ref,
         support_mask,
+        output_dir / "final_phase_shift_comparison.png",
     )
     if p1 is not None:
         saved.append(p1)
@@ -213,7 +174,6 @@ def main() -> float:
         x_label="Time t",
         title="SPM: Temporal Intensity Propagation",
         colorbar_label="Normalized intensity",
-        cmap="magma",
     )
     if p2 is not None:
         saved.append(p2)
@@ -225,7 +185,6 @@ def main() -> float:
         x_label="Frequency detuning (1/time)",
         title="SPM: Spectral Intensity Propagation",
         colorbar_label="Normalized spectral intensity",
-        cmap="viridis",
     )
     if p3 is not None:
         saved.append(p3)

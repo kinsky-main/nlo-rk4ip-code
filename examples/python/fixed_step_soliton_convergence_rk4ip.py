@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from backend.cli import build_example_parser
+from backend.plotting import plot_convergence_loglog
 from backend.runner import (
     NloExampleRunner,
     SimulationOptions,
@@ -20,17 +21,6 @@ from backend.runner import (
     centered_time_grid,
 )
 from backend.storage import ExampleRunDB
-
-
-def _load_plt():
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return None
-    return plt
 
 
 def _configure_runtime_logging(runner: NloExampleRunner) -> None:
@@ -112,46 +102,6 @@ def _fit_loglog_slope(
     slope = float(np.dot(dx, dy) / var_x)
     intercept = mean_y - (slope * mean_x)
     return slope, intercept, valid_mask
-
-
-def _save_convergence_plot(
-    output_path: Path,
-    step_sizes: np.ndarray,
-    errors: np.ndarray,
-    fit_mask: np.ndarray,
-    fitted_order: float,
-    fitted_intercept: float,
-) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping convergence plot.")
-        return None
-
-    order = np.argsort(step_sizes)
-    step_sizes_plot = step_sizes[order]
-    errors_plot = errors[order]
-    fit_mask_plot = fit_mask[order]
-
-    fit_indices = np.flatnonzero(fit_mask_plot)
-    anchor = int(fit_indices[0]) if fit_indices.size > 0 else 0
-    ref = errors_plot[anchor] * (step_sizes_plot / step_sizes_plot[anchor]) ** 4
-    fit_line = np.exp(fitted_intercept) * (step_sizes_plot**fitted_order)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots()
-    ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
-    ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="tab:green", label="Fitted power law")
-    ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^4)$")
-    ax.set_xlabel("Step size Delta z (m)")
-    ax.set_ylabel("Total relative L2 error")
-    ax.set_title(f"Fixed-Step Soliton Convergence (fitted order p = {fitted_order:.3f})")
-    ax.grid(True, which="both", alpha=0.3)
-    ax.legend()
-
-    fig.savefig(output_path, bbox_inches="tight")
-    plt.close(fig)
-    return output_path
-
 
 def main() -> float:
     beta2 = -0.01
@@ -280,13 +230,13 @@ def main() -> float:
     fitted_order, fitted_intercept, fit_mask_valid = _fit_loglog_slope(step_sizes, errors, fit_mask)
 
     output_dir = Path(__file__).resolve().parent / "output" / "fixed_step_soliton_convergence"
-    plot_path = _save_convergence_plot(
-        output_dir / "error_vs_step_size.png",
+    plot_path = plot_convergence_loglog(
         step_sizes,
         errors,
         fit_mask_valid,
         fitted_order,
         fitted_intercept,
+        output_dir / "error_vs_step_size.png",
     )
 
     print(f"fixed-step soliton convergence summary (run_group={run_group}):")
