@@ -44,8 +44,9 @@ def _default_colormap(plt):
         _DEFAULT_CMAP_NAME,
         [
             (0.00, "#ffffff"),
-            (0.18, "#4ebbc3"),
-            (0.45, "#234e8e"),
+            (0.05, "#7ee3ed"),
+            (0.20, "#4e8ec3"),
+            (0.45, "#002b56"),
             (0.70, "#4d2d99"),
             (1.00, "#fd5ddd"),
         ],
