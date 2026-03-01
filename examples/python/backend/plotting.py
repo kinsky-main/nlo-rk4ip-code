@@ -8,32 +8,15 @@ import numpy as np
 
 _DEFAULT_CMAP_NAME = "nlolib_white_cyan_yellow_hdr"
 _DEFAULT_CMAP = None
+_STYLE_CMAP_NAME = "nlolib_hdr"
 
 
-def _load_plt():
-    try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        return plt
-    except ImportError:
-        return None
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
-_plt = _load_plt()
-if _plt is not None:
-    _plt.rcParams.update({
-        "font.family": "Times New Roman",
-        "font.size": 10,
-        "axes.labelsize": 10,
-        "axes.titlesize": 10,
-        "legend.fontsize": 10,
-        "figure.dpi": 300,
-        "figure.figsize": (4.0, 0.66*4.0),
-    })
-
-
-def _default_colormap(plt):
+def _default_colormap():
     global _DEFAULT_CMAP
     if _DEFAULT_CMAP is not None:
         return _DEFAULT_CMAP
@@ -45,20 +28,31 @@ def _default_colormap(plt):
         [
             (0.00, "#ffffff"),
             (0.05, "#7ee3ed"),
-            (0.20, "#4e8ec3"),
-            (0.45, "#002b56"),
-            (0.70, "#4d2d99"),
-            (1.00, "#fd5ddd"),
+            (0.25, "#4e8ec3"),
+            (0.50, "#002b56"),
+            (0.75, "#4d2d99"),
+            (0.95, "#fd5ddd"),
+            (1.00, "#ff207d"),
         ],
     )
     return _DEFAULT_CMAP
 
 
-def _resolve_cmap(plt, cmap):
-    if cmap is None or cmap == "nlolib_hdr":
-        return _default_colormap(plt)
-    return cmap
+def _ensure_default_colormap_registered():
+    if _STYLE_CMAP_NAME not in matplotlib.colormaps:
+        matplotlib.colormaps.register(_default_colormap(), name=_STYLE_CMAP_NAME)
 
+
+_ensure_default_colormap_registered()
+_STYLE_PATH = Path(__file__).with_name("figures.mplstyle")
+if _STYLE_PATH.is_file():
+    plt.style.use(_STYLE_PATH)
+
+
+def _resolve_cmap(plt, cmap):
+    if cmap is None or cmap == _STYLE_CMAP_NAME:
+        return _default_colormap()
+    return cmap
 
 def plot_intensity_colormap_vs_propagation(
     x_axis: np.ndarray,
@@ -72,10 +66,7 @@ def plot_intensity_colormap_vs_propagation(
     colorbar_label: str = "Normalized intensity",
     cmap="nlolib_hdr",
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping intensity colormap plot.")
-        return None
+
 
     data = np.asarray(intensity_map, dtype=np.float64)
     data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
@@ -108,20 +99,17 @@ def plot_final_re_im_comparison(
     reference_label: str = "Reference",
     final_label: str = "Final",
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping Re/Im comparison plot.")
-        return None
+
 
     ref = np.asarray(reference_field, dtype=np.complex128)
     out = np.asarray(final_field, dtype=np.complex128)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
-    ax.plot(x_axis, np.real(ref), lw=1.8, color="tab:blue", label=f"{reference_label} Re")
-    ax.plot(x_axis, np.imag(ref), lw=1.8, color="tab:orange", label=f"{reference_label} Im")
-    ax.plot(x_axis, np.real(out), lw=1.6, color="tab:blue", ls="--", label=f"{final_label} Re")
-    ax.plot(x_axis, np.imag(out), lw=1.6, color="tab:orange", ls="--", label=f"{final_label} Im")
+    ax.plot(x_axis, np.real(ref), lw=2.0, color="C0", label=f"{reference_label} Re")
+    ax.plot(x_axis, np.imag(ref), lw=2.0, color="C1", label=f"{reference_label} Im")
+    ax.plot(x_axis, np.real(out), lw=1.5, color="C0", ls="--", label=f"{final_label} Re")
+    ax.plot(x_axis, np.imag(out), lw=1.5, color="C1", ls="--", label=f"{final_label} Im")
     ax.set_xlabel(x_label)
     ax.set_ylabel("Field amplitude")
     ax.set_title(title)
@@ -144,15 +132,12 @@ def plot_two_curve_comparison(
     y_label: str,
     title: str,
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping two-curve plot.")
-        return None
+
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
-    ax.plot(x_axis, curve_a, lw=1.9, label=label_a)
-    ax.plot(x_axis, curve_b, lw=1.8, ls="--", label=label_b)
+    ax.plot(x_axis, curve_a, lw=2.0, label=label_a)
+    ax.plot(x_axis, curve_b, lw=1.5, ls="--", label=label_b)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_title(title)
@@ -177,10 +162,7 @@ def plot_three_curve_drift(
     y_label: str = "Relative drift",
     title: str = "Conservation Checks: Relative Drift Over Propagation",
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping three-curve drift plot.")
-        return None
+
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
@@ -205,17 +187,14 @@ def plot_mode_power_exchange(
     mode2_ref: np.ndarray,
     output_path: Path,
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping two-mode power plot.")
-        return None
+
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
-    ax.plot(z_axis, mode1_ref, lw=2.0, color="tab:blue", label="|A1|^2 analytical")
-    ax.plot(z_axis, mode2_ref, lw=2.0, color="tab:orange", label="|A2|^2 analytical")
-    ax.plot(z_axis, mode1_num, "--", lw=1.7, color="tab:blue", label="|A1|^2 numerical")
-    ax.plot(z_axis, mode2_num, "--", lw=1.7, color="tab:orange", label="|A2|^2 numerical")
+    ax.plot(z_axis, mode1_ref, lw=2.0, color="C0", label="|A1|^2 analytical")
+    ax.plot(z_axis, mode2_ref, lw=2.0, color="C1", label="|A2|^2 analytical")
+    ax.plot(z_axis, mode1_num, "--", lw=1.5, color="C0", label="|A1|^2 numerical")
+    ax.plot(z_axis, mode2_num, "--", lw=1.5, color="C1", label="|A2|^2 numerical")
     ax.set_xlabel("Propagation distance z")
     ax.set_ylabel("Mode power")
     ax.set_title("Two-Mode Linear Beating: Power Exchange")
@@ -235,10 +214,7 @@ def plot_phase_shift_comparison(
     *,
     title: str = "SPM Final Phase Shift (Masked by Pulse Support)",
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping phase plot.")
-        return None
+
 
     phase_num_plot = np.where(phase_mask, phase_num, np.nan)
     phase_ref_plot = np.where(phase_mask, phase_ref, np.nan)
@@ -246,7 +222,7 @@ def plot_phase_shift_comparison(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(t_axis, phase_ref_plot, lw=2.0, label="Analytical phase shift")
-    ax.plot(t_axis, phase_num_plot, "--", lw=1.8, label="Numerical phase shift")
+    ax.plot(t_axis, phase_num_plot, "--", lw=1.5, label="Numerical phase shift")
     ax.set_xlabel("Time t")
     ax.set_ylabel("Phase shift (rad)")
     ax.set_title(title)
@@ -265,10 +241,7 @@ def plot_convergence_loglog(
     fitted_intercept: float,
     output_path: Path,
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping convergence plot.")
-        return None
+
 
     order = np.argsort(step_sizes)
     step_sizes_plot = step_sizes[order]
@@ -283,7 +256,7 @@ def plot_convergence_loglog(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
-    ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="tab:green", label="Fitted power law")
+    ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="C4", label="Fitted power law")
     ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^4)$")
     ax.set_xlabel("Step size Delta z (m)")
     ax.set_ylabel("Total relative L2 error")
@@ -304,10 +277,7 @@ def plot_summary_curve(
     y_label: str,
     title: str,
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping summary plot.")
-        return None
+
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
@@ -330,10 +300,6 @@ def plot_wavelength_step_history(
     accepted_z: np.ndarray | None = None,
     accepted_step_sizes: np.ndarray | None = None,
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping wavelength + step-size plot.")
-        return None
 
     z_axis = np.asarray(z_samples, dtype=np.float64)
     lambda_axis = np.asarray(lambda_nm, dtype=np.float64)
@@ -372,7 +338,7 @@ def plot_wavelength_step_history(
                 z_plot[:n][order],
                 step_plot[:n][order],
                 lw=1.2,
-                color="tab:blue",
+                color="C1",
                 label="Accepted step_size",
             )
             has_series = True
@@ -416,18 +382,15 @@ def plot_final_intensity_comparison(
     reference_label: str = "Reference",
     final_label: str = "Final",
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping intensity comparison plot.")
-        return None
+
 
     ref_intensity = np.abs(np.asarray(reference_field, dtype=np.complex128)) ** 2
     out_intensity = np.abs(np.asarray(final_field, dtype=np.complex128)) ** 2
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
-    ax.plot(x_axis, ref_intensity, lw=2.0, color="tab:blue", label=f"{reference_label} |A|^2")
-    ax.plot(x_axis, out_intensity, lw=1.8, ls="--", color="tab:orange", label=f"{final_label} |A|^2")
+    ax.plot(x_axis, ref_intensity, lw=2.0, color="C0", label=f"{reference_label} |A|^2")
+    ax.plot(x_axis, out_intensity, lw=1.5, ls="--", color="C1", label=f"{final_label} |A|^2")
     ax.set_xlabel(x_label)
     ax.set_ylabel("Intensity |A|^2")
     ax.set_title(title)
@@ -446,10 +409,7 @@ def plot_total_error_over_propagation(
     title: str = "Total Error Over Propagation",
     y_label: str = "Relative L2 error",
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping propagation error plot.")
-        return None
+
 
     errors = np.asarray(error_curve, dtype=np.float64)
     errors = np.nan_to_num(errors, nan=0.0, posinf=0.0, neginf=0.0)
@@ -457,7 +417,7 @@ def plot_total_error_over_propagation(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
-    ax.plot(z_axis, errors, lw=1.8, color="tab:red")
+    ax.plot(z_axis, errors, lw=1.8, color="C3")
     ax.set_xlabel("Propagation distance z")
     ax.set_ylabel(y_label)
     ax.set_title(title)
@@ -480,10 +440,7 @@ def plot_3d_intensity_scatter_propagation(
     max_marker_size: float = 36.0,
     title: str = "3D Propagation Intensity Scatter",
 ) -> Path | None:
-    plt = _load_plt()
-    if plt is None:
-        print("matplotlib not available; skipping 3D propagation scatter plot.")
-        return None
+
 
     records = np.asarray(field_records, dtype=np.complex128)
     if records.ndim != 3:
