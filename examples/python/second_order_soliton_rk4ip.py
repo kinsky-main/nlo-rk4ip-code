@@ -267,6 +267,38 @@ def filter_record_clipped_steps(
     return filtered, int(np.count_nonzero(clipped))
 
 
+def select_step_telemetry_for_plot(
+    telemetry: StepTelemetry,
+    z_samples: np.ndarray,
+) -> StepTelemetry:
+    filtered, clipped_count = filter_record_clipped_steps(telemetry, z_samples)
+    if clipped_count <= 0:
+        return filtered
+
+    total = int(telemetry.accepted_z.size)
+    kept = int(filtered.accepted_z.size)
+    if total <= 0 or kept <= 0:
+        return telemetry
+
+    # If boundary-step filtering removes most points, keep the raw telemetry so
+    # the step-size trace still spans the full propagation range.
+    min_keep = max(16, int(math.ceil(0.35 * float(total))))
+    if kept < min_keep:
+        return telemetry
+
+    z_all = np.asarray(telemetry.accepted_z, dtype=np.float64)
+    z_all_span = float(z_all[-1] - z_all[0]) if z_all.size > 1 else 0.0
+    z_filtered_span = (
+        float(filtered.accepted_z[-1] - filtered.accepted_z[0])
+        if filtered.accepted_z.size > 1
+        else 0.0
+    )
+    if z_all_span > 0.0 and z_filtered_span < (0.80 * z_all_span):
+        return telemetry
+
+    return filtered
+
+
 def save_plots(
     t: np.ndarray,
     U_num: np.ndarray,
@@ -282,14 +314,15 @@ def save_plots(
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
-    telemetry_plot, _ = filter_record_clipped_steps(telemetry, z_samples)
+    telemetry_plot = select_step_telemetry_for_plot(telemetry, z_samples)
     p1 = plot_wavelength_step_history(
         z_samples,
         lambda_nm,
         spectral_map,
-        output_dir / "wavelength_intensity_colormap.png",
+        output_dir / "soliton_wavelength_intensity_colormap.png",
         accepted_z=telemetry_plot.accepted_z,
         accepted_step_sizes=telemetry_plot.accepted_step_sizes,
+        proposed_step_sizes=telemetry_plot.next_step_sizes,
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -298,7 +331,7 @@ def save_plots(
         t,
         U_true,
         U_num,
-        output_dir / "final_re_im_comparison.png",
+        output_dir / "soliton_final_re_im_comparison.png",
         x_label="Dimensionless time t = T/T0",
         title=f"Second-Order Soliton at z = {z_final:.3f} m: Re/Im Comparison",
         reference_label="Analytical",
@@ -311,7 +344,7 @@ def save_plots(
         t,
         U_true,
         U_num,
-        output_dir / "final_intensity_comparison.png",
+        output_dir / "soliton_final_intensity_comparison.png",
         x_label="Dimensionless time t = T/T0",
         title=f"Second-Order Soliton at z = {z_final:.3f} m: Intensity Comparison",
         reference_label="Analytical",
@@ -323,7 +356,7 @@ def save_plots(
     p4 = plot_total_error_over_propagation(
         z_samples,
         error_curve,
-        output_dir / "total_error_over_propagation_soliton.png",
+        output_dir / "soliton_total_error_over_propagation.png",
         title="Second-Order Soliton: Total Error Over Propagation",
         y_label="Relative L2 error (numerical vs analytical)",
     )
@@ -331,6 +364,16 @@ def save_plots(
         saved_paths.append(p4)
 
     return saved_paths
+
+
+def _finite_range(values: np.ndarray) -> tuple[float, float] | None:
+    arr = np.asarray(values, dtype=np.float64).reshape(-1)
+    if arr.size <= 0:
+        return None
+    finite = arr[np.isfinite(arr)]
+    if finite.size <= 0:
+        return None
+    return float(np.min(finite)), float(np.max(finite))
 
 
 def diagnose_first_nonfinite_record(
@@ -370,6 +413,10 @@ def main() -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "second_order_soliton_rk4ip"
     case_key = "default"
+    configured_start_step: float | None = None
+    configured_max_step: float | None = None
+    configured_min_step: float | None = None
+    configured_error_tolerance: float | None = None
 
     if args.replot:
         run_group = db.resolve_replot_group(example_name, args.run_group)
@@ -387,6 +434,14 @@ def main() -> float:
         t = to_dimensionless_time(T, t0)
         z_records = np.asarray(loaded.z_axis, dtype=np.float64)
         A_records = np.asarray(loaded.records, dtype=np.complex128)
+        configured_start_step = (
+            float(meta["starting_step_size"]) if "starting_step_size" in meta else None
+        )
+        configured_max_step = float(meta["max_step_size"]) if "max_step_size" in meta else None
+        configured_min_step = float(meta["min_step_size"]) if "min_step_size" in meta else None
+        configured_error_tolerance = (
+            float(meta["error_tolerance"]) if "error_tolerance" in meta else None
+        )
         step_history = db.load_step_history(run_id=loaded.run_id)
         if step_history is None:
             raise RuntimeError(
@@ -412,7 +467,7 @@ def main() -> float:
         U0 = 2.0 * sech(t)
         A0 = to_physical_envelope(U0, 0.0, p0, alpha)
 
-        num_recorded_samples = 160
+        num_recorded_samples = 100
         sim_cfg = TemporalSimulationConfig(
             gamma=gamma,
             beta2=beta2,
@@ -422,12 +477,16 @@ def main() -> float:
             num_time_samples=n,
             pulse_period=n * dt,
             omega=omega,
-            starting_step_size=z_final / 500.0,
-            max_step_size=z_final / 25.0,
-            min_step_size=z_final / 1000.0,
-            error_tolerance=5e-6,
+            starting_step_size=0.001,
+            max_step_size=0.001,
+            min_step_size=0.001,
+            error_tolerance=5e-3,
             honor_solver_controls=True,
         )
+        configured_start_step = float(sim_cfg.starting_step_size)
+        configured_max_step = float(sim_cfg.max_step_size)
+        configured_min_step = float(sim_cfg.min_step_size)
+        configured_error_tolerance = float(sim_cfg.error_tolerance)
         exec_options = SimulationOptions(backend="auto", fft_backend="auto")
         runner = NloExampleRunner()
         storage_kwargs = db.storage_kwargs(
@@ -460,6 +519,10 @@ def main() -> float:
                 "n": int(n),
                 "dt": float(dt),
                 "z_final": float(z_final),
+                "starting_step_size": float(sim_cfg.starting_step_size),
+                "max_step_size": float(sim_cfg.max_step_size),
+                "min_step_size": float(sim_cfg.min_step_size),
+                "error_tolerance": float(sim_cfg.error_tolerance),
             },
             save_step_history=True,
         )
@@ -491,7 +554,7 @@ def main() -> float:
     if not np.all(np.isfinite(spectral_map)):
         raise RuntimeError("spectral map contains non-finite values; refusing to render blank output.")
 
-    output_dir = Path(__file__).resolve().parent / "output" / "second_order_soliton"
+    output_dir = args.output_dir
     saved_paths = save_plots(
         t,
         U_num,
@@ -514,12 +577,52 @@ def main() -> float:
     )
     print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
     print(f"epsilon = {epsilon:.6e}")
+    if configured_start_step is not None:
+        print(
+            "configured solver controls: "
+            f"h_start={configured_start_step:.6e} m, "
+            f"h_max={configured_max_step:.6e} m, "
+            f"h_min={configured_min_step:.6e} m, "
+            f"tol={configured_error_tolerance:.6e}"
+        )
     print(
         "step telemetry events: "
         f"accepted={telemetry.accepted_z.size}, "
         f"next={telemetry.next_z.size}, "
         f"dropped={telemetry.dropped}"
     )
+    accepted_range = _finite_range(telemetry.accepted_step_sizes)
+    proposed_range = _finite_range(telemetry.next_step_sizes)
+    if accepted_range is not None:
+        print(
+            "accepted step_size range (applied): "
+            f"[{accepted_range[0]:.6e}, {accepted_range[1]:.6e}] m"
+        )
+    if proposed_range is not None:
+        print(
+            "next step_size range (solver proposal): "
+            f"[{proposed_range[0]:.6e}, {proposed_range[1]:.6e}] m"
+        )
+    if telemetry.accepted_step_sizes.size > 0 and z_records.size > 1:
+        record_spacing = float((z_records[-1] - z_records[0]) / float(z_records.size - 1))
+        if record_spacing > 0.0 and np.isfinite(record_spacing):
+            accepted = np.asarray(telemetry.accepted_step_sizes, dtype=np.float64)
+            near_spacing = np.isclose(
+                accepted,
+                record_spacing,
+                rtol=1e-6,
+                atol=max(1e-15, abs(record_spacing) * 1e-12),
+            )
+            clipped_ratio = float(np.count_nonzero(near_spacing)) / float(accepted.size)
+            if clipped_ratio >= 0.50:
+                print(
+                    "note: accepted step sizes are frequently record-spacing limited "
+                    f"(record spacing ~ {record_spacing:.6e} m, near-spacing fraction={clipped_ratio:.3f})."
+                )
+                print(
+                    "      The dashed trace ('Next candidate step size') shows the solver's "
+                    "proposed step before this record-spacing cap."
+                )
     if saved_paths:
         print("saved plots:")
         for path in saved_paths:

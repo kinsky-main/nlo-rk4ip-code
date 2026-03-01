@@ -173,7 +173,7 @@ def main() -> float:
     reference_records = linear_reference_records(field0, z_records, beta2, dt)
     error_curve = relative_l2_error_curve(records, reference_records)
 
-    output_dir = Path(__file__).resolve().parent / "output" / "linear_drift"
+    output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
@@ -181,7 +181,7 @@ def main() -> float:
         t,
         z_records,
         np.abs(records) ** 2,
-        output_dir / "intensity_propagation_map.png",
+        output_dir / "linear_drift_intensity_propagation_map.png",
         x_label="Time t",
         title="Linear Drift: Temporal Intensity Propagation",
         colorbar_label="Normalized intensity",
@@ -193,7 +193,7 @@ def main() -> float:
         t,
         records[0],
         records[-1],
-        output_dir / "final_re_im_comparison.png",
+        output_dir / "linear_drift_final_re_im_comparison.png",
         x_label="Time t",
         title="Linear Drift: Final Re/Im Comparison",
         reference_label="Initial",
@@ -206,7 +206,7 @@ def main() -> float:
         t,
         records[0],
         records[-1],
-        output_dir / "final_intensity_comparison.png",
+        output_dir / "linear_drift_final_intensity_comparison.png",
         x_label="Time t",
         title="Linear Drift: Final Intensity Comparison",
         reference_label="Initial",
@@ -218,7 +218,7 @@ def main() -> float:
     saved = plot_total_error_over_propagation(
         z_records,
         error_curve,
-        output_dir / "total_error_over_propagation.png",
+        output_dir / "linear_drift_total_error_over_propagation.png",
         title="Linear Drift: Full-Window Relative L2 Error Over Propagation",
         y_label="Relative L2 error (numerical vs analytical)",
     )

@@ -54,7 +54,7 @@ def main() -> float:
 
     n = 2**10
     dt = 0.01
-    gamma = 1.7
+    gamma = 80.0
     z_final = 0.5
     pulse_width = 0.2
     t = centered_time_grid(n, dt)
@@ -148,7 +148,7 @@ def main() -> float:
     power1 = float(np.sum(np.abs(a_final) ** 2))
     power_drift = abs(power1 - power0) / max(power0, 1e-15)
 
-    output_dir = Path(__file__).resolve().parent / "output" / "spm"
+    output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     time_intensity_map = np.abs(records) ** 2
@@ -162,7 +162,7 @@ def main() -> float:
         phase_num,
         phase_ref,
         support_mask,
-        output_dir / "final_phase_shift_comparison.png",
+        output_dir / "spm_final_phase_shift_comparison.png",
     )
     if p1 is not None:
         saved.append(p1)
@@ -170,7 +170,7 @@ def main() -> float:
         t,
         z_axis,
         time_intensity_map,
-        output_dir / "time_intensity_propagation.png",
+        output_dir / "spm_time_intensity_propagation.png",
         x_label="Time t",
         title="SPM: Temporal Intensity Propagation",
         colorbar_label="Normalized intensity",
@@ -181,7 +181,7 @@ def main() -> float:
         freq_axis,
         z_axis,
         freq_intensity_map,
-        output_dir / "frequency_intensity_propagation.png",
+        output_dir / "spm_frequency_intensity_propagation.png",
         x_label="Frequency detuning (1/time)",
         title="SPM: Spectral Intensity Propagation",
         colorbar_label="Normalized spectral intensity",
@@ -191,7 +191,7 @@ def main() -> float:
     p4 = plot_total_error_over_propagation(
         z_axis,
         error_curve,
-        output_dir / "error_over_propagation.png",
+        output_dir / "spm_error_over_propagation.png",
         title="SPM: Relative Error Over Propagation",
         y_label="Relative L2 error",
     )

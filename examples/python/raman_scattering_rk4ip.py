@@ -388,7 +388,7 @@ def main() -> float:
     lambda_raman_shift = lambda_raman - lambda_raman[0]
     lambda_pred_shift = lambda_pred - lambda_pred[0]
 
-    output_dir = Path(__file__).resolve().parent / "output" / "raman_scattering"
+    output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
@@ -408,7 +408,7 @@ def main() -> float:
         z_axis,
         centered_num,
         centered_pred,
-        output_dir / "spectral_centroid_over_propagation_with_analytic.png",
+        output_dir / "raman_spectral_centroid_over_propagation_with_analytic.png",
         label_a="Numerical centroid shift",
         label_b="Analytical centroid shift",
         y_label="Delta spectral centroid (rad/time)",
@@ -421,7 +421,7 @@ def main() -> float:
         lambda_axis,
         z_axis,
         wavelength_map,
-        output_dir / "wavelength_intensity_propagation.png",
+        output_dir / "raman_wavelength_intensity_propagation.png",
         x_label="Wavelength (nm)",
         title="Raman: Wavelength Intensity Over Propagation (around lambda0)",
         colorbar_label="Normalized spectral intensity",
@@ -434,7 +434,7 @@ def main() -> float:
         lambda_kerr_shift,
         lambda_raman_shift,
         lambda_pred_shift,
-        output_dir / "wavelength_centroid_over_propagation_with_analytic.png",
+        output_dir / "raman_wavelength_centroid_over_propagation_with_analytic.png",
         label_a="Kerr-only",
         label_b="Kerr+Raman",
         label_c="Moment-theorem prediction",
@@ -448,7 +448,7 @@ def main() -> float:
         omega_axis,
         final_kerr,
         final_raman,
-        output_dir / "final_spectrum_comparison.png",
+        output_dir / "raman_final_spectrum_comparison.png",
         label_a="Kerr-only final",
         label_b="Kerr+Raman final",
         x_label="Angular-frequency detuning (rad/time)",
@@ -462,7 +462,7 @@ def main() -> float:
         z_axis,
         centroid_derivative_num,
         centroid_rhs,
-        output_dir / "spectral_centroid_derivative_validation.png",
+        output_dir / "raman_spectral_centroid_derivative_validation.png",
         label_a="Numerical d(centroid)/dz",
         label_b="Analytical moment RHS",
         y_label="Centroid derivative (rad/time/m)",
@@ -474,7 +474,7 @@ def main() -> float:
     p8 = plot_total_error_over_propagation(
         z_axis,
         centroid_pointwise_rel_error,
-        output_dir / "spectral_centroid_shift_relative_error.png",
+        output_dir / "raman_spectral_centroid_shift_relative_error.png",
         title="Raman Analytical Validation: Pointwise Relative Error",
         y_label="Relative error of centroid shift",
     )

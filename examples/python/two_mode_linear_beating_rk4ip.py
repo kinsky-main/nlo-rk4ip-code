@@ -138,7 +138,7 @@ def main() -> float:
     total_power = mode1_num + mode2_num
     power_drift = float(np.max(np.abs(total_power - total_power[0])) / max(abs(total_power[0]), 1e-15))
 
-    output_dir = Path(__file__).resolve().parent / "output" / "two_mode_linear_beating"
+    output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     saved = []
 

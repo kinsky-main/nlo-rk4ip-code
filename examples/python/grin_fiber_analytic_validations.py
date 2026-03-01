@@ -28,7 +28,7 @@ def main() -> None:
 
     runner = NloExampleRunner()
     exec_options = SimulationOptions(backend="auto", fft_backend="auto", device_heap_fraction=0.70)
-    output_root = Path(__file__).resolve().parent / "output" / "grin_fiber_analytic_sweep"
+    output_root = args.output_dir
     output_root.mkdir(parents=True, exist_ok=True)
 
     final_errors: list[float] = []
