@@ -1,38 +1,20 @@
 /**
- * @file state.c
- * @brief State management for backend-resident simulation buffers.
+ * @file init_state_builder.c
+ * @brief Simulation state construction and initialization internals.
  */
 
 #include "core/state.h"
+#include "core/init_internal.h"
 #include "core/sim_dimensions_internal.h"
 #include "fft/fft.h"
 #include "io/log_sink.h"
 #include "io/snapshot_store.h"
 #include "physics/operators.h"
 #include "utility/state_debug.h"
-#include <float.h>
-#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#if defined(_WIN32)
-#include <windows.h>
-#elif defined(__linux__)
-#include <sys/sysinfo.h>
-#include <unistd.h>
-#elif defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
-#include <unistd.h>
-#endif
-
-#ifndef NLO_MEMORY_HEADROOM_NUM
-#define NLO_MEMORY_HEADROOM_NUM 8u
-#endif
-
-#ifndef NLO_MEMORY_HEADROOM_DEN
-#define NLO_MEMORY_HEADROOM_DEN 10u
-#endif
 
 #ifndef NLO_MIN_DEVICE_RING_CAPACITY
 #define NLO_MIN_DEVICE_RING_CAPACITY 1u
@@ -53,44 +35,6 @@
 #ifndef NLO_FREQ_GRID_REL_TOL
 #define NLO_FREQ_GRID_REL_TOL 1e-9
 #endif
-
-static int checked_mul_size_t(size_t a, size_t b, size_t* out);
-static size_t query_available_system_memory_bytes(void);
-static size_t apply_memory_headroom(size_t available_bytes);
-static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records);
-static size_t nlo_estimate_active_vector_count(const sim_config* config);
-static size_t nlo_resolve_runtime_num_time_samples_from_config(const sim_config* config);
-static int nlo_storage_options_enabled(const nlo_storage_options* options);
-static double nlo_resolve_delta_time(const sim_config* config, size_t num_time_samples);
-static void nlo_fill_default_omega_grid(nlo_complex* out_grid, size_t num_time_samples, double delta_time);
-static void nlo_fill_default_k2_grid_xy(
-    nlo_complex* out_grid_xy,
-    size_t nx,
-    size_t ny,
-    double delta_x,
-    double delta_y
-);
-static int nlo_expand_temporal_grid_to_volume(
-    nlo_complex* out_volume,
-    const nlo_complex* temporal_grid,
-    size_t nt,
-    size_t nx,
-    size_t ny
-);
-static int nlo_expand_xy_grid_to_volume(
-    nlo_complex* out_volume,
-    const nlo_complex* xy_grid,
-    size_t nt,
-    size_t nx,
-    size_t ny
-);
-static int nlo_frequency_grid_matches_expected_unshifted(
-    const nlo_complex* grid,
-    size_t num_time_samples,
-    double delta_time
-);
-static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t record_index, const nlo_complex* record);
-static nlo_vec_status nlo_prepare_raman_state(simulation_state* state);
 
 #ifndef NLO_DEFAULT_DISPERSION_FACTOR_EXPR
 #define NLO_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
@@ -139,17 +83,6 @@ static nlo_vec_status nlo_prepare_raman_state(simulation_state* state);
 #ifndef NLO_DEFAULT_RAMAN_TAU2
 #define NLO_DEFAULT_RAMAN_TAU2 0.0320
 #endif
-
-static void nlo_destroy_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer** vec)
-{
-    if (backend == NULL || vec == NULL || *vec == NULL) {
-        return;
-    }
-
-    nlo_vec_destroy(backend, *vec);
-    *vec = NULL;
-}
-
 static nlo_vec_status nlo_create_complex_vec(nlo_vector_backend* backend, size_t length, nlo_vec_buffer** out_vec)
 {
     return nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, length, out_vec);
@@ -241,33 +174,6 @@ static void nlo_fill_default_omega_grid(nlo_complex* out_grid, size_t num_time_s
     }
 }
 
-static void nlo_fill_default_k2_grid_xy(
-    nlo_complex* out_grid_xy,
-    size_t nx,
-    size_t ny,
-    double delta_x,
-    double delta_y
-)
-{
-    if (out_grid_xy == NULL || nx == 0u || ny == 0u) {
-        return;
-    }
-
-    const double safe_dx = (delta_x > 0.0) ? delta_x : 1.0;
-    const double safe_dy = (delta_y > 0.0) ? delta_y : 1.0;
-    const double kx_step = NLO_TWO_PI / ((double)nx * safe_dx);
-    const double ky_step = NLO_TWO_PI / ((double)ny * safe_dy);
-
-    for (size_t y = 0u; y < ny; ++y) {
-        const double ky = nlo_expected_omega_unshifted(y, ny, ky_step);
-        for (size_t x = 0u; x < nx; ++x) {
-            const double kx = nlo_expected_omega_unshifted(x, nx, kx_step);
-            const double k2 = (kx * kx) + (ky * ky);
-            out_grid_xy[(y * nx) + x] = nlo_make(k2, 0.0);
-        }
-    }
-}
-
 static int nlo_expand_temporal_grid_to_volume(
     nlo_complex* out_volume,
     const nlo_complex* temporal_grid,
@@ -287,25 +193,6 @@ static int nlo_expand_temporal_grid_to_volume(
         for (size_t i = 0u; i < plane; ++i) {
             out_volume[base + i] = omega;
         }
-    }
-    return 0;
-}
-
-static int nlo_expand_xy_grid_to_volume(
-    nlo_complex* out_volume,
-    const nlo_complex* xy_grid,
-    size_t nt,
-    size_t nx,
-    size_t ny
-)
-{
-    if (out_volume == NULL || xy_grid == NULL || nt == 0u || nx == 0u || ny == 0u) {
-        return -1;
-    }
-
-    const size_t plane = nx * ny;
-    for (size_t t = 0u; t < nt; ++t) {
-        memcpy(out_volume + (t * plane), xy_grid, plane * sizeof(nlo_complex));
     }
     return 0;
 }
@@ -580,7 +467,7 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     active_vec_count += state->runtime_operator_stack_slots;
 
     size_t active_bytes = 0u;
-    if (checked_mul_size_t(active_vec_count, per_record_bytes, &active_bytes) != 0) {
+    if (nlo_checked_mul_size_t(active_vec_count, per_record_bytes, &active_bytes) != 0) {
         return NLO_MIN_DEVICE_RING_CAPACITY;
     }
 
@@ -616,291 +503,13 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     return ring_capacity;
 }
 
+
 static int nlo_storage_options_enabled(const nlo_storage_options* options)
 {
     return (options != NULL &&
             options->sqlite_path != NULL &&
             options->sqlite_path[0] != '\0');
 }
-
-nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type)
-{
-    nlo_execution_options options;
-    memset(&options, 0, sizeof(options));
-    options.backend_type = backend_type;
-    options.fft_backend = NLO_FFT_BACKEND_AUTO;
-    options.device_heap_fraction = NLO_DEFAULT_DEVICE_HEAP_FRACTION;
-    options.record_ring_target = 0u;
-    options.forced_device_budget_bytes = 0u;
-    return options;
-}
-
-nlo_storage_options nlo_storage_options_default(void)
-{
-    nlo_storage_options options;
-    memset(&options, 0, sizeof(options));
-    options.sqlite_path = NULL;
-    options.run_id = NULL;
-    options.sqlite_max_bytes = 0u;
-    options.chunk_records = 0u;
-    options.cap_policy = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES;
-    options.log_final_output_field_to_db = 0;
-    return options;
-}
-
-nlo_runtime_limits nlo_runtime_limits_default(void)
-{
-    nlo_runtime_limits limits;
-    memset(&limits, 0, sizeof(limits));
-    limits.max_num_time_samples_runtime = 0u;
-    limits.max_num_recorded_samples_in_memory = 0u;
-    limits.max_num_recorded_samples_with_storage =
-        (SIZE_MAX < (size_t)9007199254740991ull)
-            ? SIZE_MAX
-            : (size_t)9007199254740991ull;
-    limits.estimated_required_working_set_bytes = 0u;
-    limits.estimated_device_budget_bytes = 0u;
-    limits.storage_available = nlo_snapshot_store_is_available();
-    return limits;
-}
-
-static size_t nlo_estimate_active_vector_count(const sim_config* config)
-{
-    size_t active_vec_count = 2u + NLO_WORK_VECTOR_COUNT + NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS;
-    if (config != NULL) {
-        const size_t nt = (config->tensor.nt > 0u) ? config->tensor.nt : config->time.nt;
-        const size_t nx = (config->tensor.nx > 0u) ? config->tensor.nx : config->spatial.nx;
-        const size_t ny = (config->tensor.ny > 0u) ? config->tensor.ny : config->spatial.ny;
-        const int tensor_mode_active = (config->tensor.nt > 0u) ? 1 : 0;
-        const int explicit_nd = (nt > 0u) ? 1 : 0;
-        const int enable_transverse = (explicit_nd != 0) && (nx > 1u || ny > 1u);
-        if (enable_transverse && !tensor_mode_active) {
-            if (active_vec_count <= SIZE_MAX - 3u) {
-                active_vec_count += 3u;
-            } else {
-                return SIZE_MAX;
-            }
-        }
-        if (config->tensor.nt > 0u) {
-            if (active_vec_count <= SIZE_MAX - 12u) {
-                active_vec_count += 12u;
-            } else {
-                return SIZE_MAX;
-            }
-        }
-    }
-    return active_vec_count;
-}
-
-static size_t nlo_resolve_runtime_num_time_samples_from_config(const sim_config* config)
-{
-    if (config == NULL) {
-        return 0u;
-    }
-
-    if (config->tensor.nt > 0u) {
-        size_t ntx = 0u;
-        size_t total = 0u;
-        if (config->tensor.nx == 0u || config->tensor.ny == 0u) {
-            return 0u;
-        }
-        if (checked_mul_size_t(config->tensor.nt, config->tensor.nx, &ntx) != 0 ||
-            checked_mul_size_t(ntx, config->tensor.ny, &total) != 0) {
-            return 0u;
-        }
-        return total;
-    }
-
-    const size_t nt = config->time.nt;
-    const size_t nx = config->spatial.nx;
-    const size_t ny = config->spatial.ny;
-
-    if (nt > 0u) {
-        const size_t resolved_nx = (nx > 0u) ? nx : 1u;
-        const size_t resolved_ny = (ny > 0u) ? ny : 1u;
-        size_t ntx = 0u;
-        size_t total = 0u;
-        if (checked_mul_size_t(nt, resolved_nx, &ntx) != 0 ||
-            checked_mul_size_t(ntx, resolved_ny, &total) != 0) {
-            return 0u;
-        }
-        return total;
-    }
-
-    if (nx == 0u && ny == 0u) {
-        return 0u;
-    }
-    if (nx == 0u || ny == 0u) {
-        return 0u;
-    }
-
-    size_t total = 0u;
-    if (checked_mul_size_t(nx, ny, &total) != 0) {
-        return 0u;
-    }
-    return total;
-}
-
-int nlo_query_runtime_limits_internal(
-    const sim_config* config,
-    const nlo_execution_options* exec_options,
-    nlo_runtime_limits* out_limits
-)
-{
-    if (out_limits == NULL) {
-        return -1;
-    }
-
-    *out_limits = nlo_runtime_limits_default();
-    const nlo_execution_options options =
-        (exec_options != NULL)
-            ? *exec_options
-            : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
-
-    const size_t active_vec_count = nlo_estimate_active_vector_count(config);
-    const size_t requested_num_time_samples = nlo_resolve_runtime_num_time_samples_from_config(config);
-    const size_t max_samples_by_element_size = SIZE_MAX / sizeof(nlo_complex);
-    size_t bytes_per_sample = 0u;
-    if (active_vec_count == SIZE_MAX ||
-        checked_mul_size_t(active_vec_count, sizeof(nlo_complex), &bytes_per_sample) != 0 ||
-        bytes_per_sample == 0u) {
-        return -1;
-    }
-
-    if (requested_num_time_samples > 0u) {
-        (void)checked_mul_size_t(requested_num_time_samples,
-                                 bytes_per_sample,
-                                 &out_limits->estimated_required_working_set_bytes);
-        out_limits->max_num_recorded_samples_in_memory =
-            compute_host_record_capacity(requested_num_time_samples, SIZE_MAX);
-    }
-
-    size_t runtime_limit = max_samples_by_element_size;
-    const size_t host_available = apply_memory_headroom(query_available_system_memory_bytes());
-    if (host_available > 0u) {
-        const size_t host_limit = host_available / bytes_per_sample;
-        if (host_limit > 0u && host_limit < runtime_limit) {
-            runtime_limit = host_limit;
-        }
-    }
-
-    nlo_vector_backend* backend = NULL;
-    if (options.backend_type == NLO_VECTOR_BACKEND_CPU) {
-        backend = nlo_vector_backend_create_cpu();
-    } else if (options.backend_type == NLO_VECTOR_BACKEND_VULKAN) {
-        backend = nlo_vector_backend_create_vulkan(&options.vulkan);
-    } else {
-        backend = nlo_vector_backend_create_vulkan(NULL);
-        if (backend == NULL) {
-            backend = nlo_vector_backend_create_cpu();
-        }
-    }
-
-    if (backend != NULL) {
-        nlo_vec_backend_memory_info mem_info = {0};
-        if (nlo_vec_query_memory_info(backend, &mem_info) == NLO_VEC_STATUS_OK &&
-            nlo_vector_backend_get_type(backend) == NLO_VECTOR_BACKEND_VULKAN) {
-            const double frac = (options.device_heap_fraction > 0.0 &&
-                                 options.device_heap_fraction <= 1.0)
-                                    ? options.device_heap_fraction
-                                    : NLO_DEFAULT_DEVICE_HEAP_FRACTION;
-            size_t budget_bytes = options.forced_device_budget_bytes;
-            if (budget_bytes == 0u) {
-                budget_bytes = (size_t)((double)mem_info.device_local_available_bytes * frac);
-            }
-            budget_bytes =
-                (budget_bytes / NLO_DEVICE_RING_BUDGET_HEADROOM_DEN) *
-                NLO_DEVICE_RING_BUDGET_HEADROOM_NUM;
-            out_limits->estimated_device_budget_bytes = budget_bytes;
-
-            if (budget_bytes > 0u) {
-                const size_t device_budget_limit = budget_bytes / bytes_per_sample;
-                if (device_budget_limit > 0u && device_budget_limit < runtime_limit) {
-                    runtime_limit = device_budget_limit;
-                }
-            }
-            if (mem_info.max_storage_buffer_range > 0u) {
-                const size_t max_buffer_samples = mem_info.max_storage_buffer_range / sizeof(nlo_complex);
-                if (max_buffer_samples > 0u && max_buffer_samples < runtime_limit) {
-                    runtime_limit = max_buffer_samples;
-                }
-            }
-        } else if (nlo_vector_backend_get_type(backend) == NLO_VECTOR_BACKEND_CPU &&
-                   options.fft_backend == NLO_FFT_BACKEND_FFTW &&
-                   runtime_limit > (size_t)INT_MAX) {
-            runtime_limit = (size_t)INT_MAX;
-        }
-        nlo_vector_backend_destroy(backend);
-    }
-
-    if (runtime_limit > max_samples_by_element_size) {
-        runtime_limit = max_samples_by_element_size;
-    }
-
-    out_limits->max_num_time_samples_runtime = runtime_limit;
-    return 0;
-}
-
-sim_config* create_sim_config(size_t num_time_samples)
-{
-    if (num_time_samples == 0) {
-        return NULL;
-    }
-
-    sim_config* config = (sim_config*)calloc(1, sizeof(sim_config));
-    if (config == NULL) {
-        return NULL;
-    }
-
-    config->propagation.error_tolerance = 1e-6;
-    config->tensor.nt = 0u;
-    config->tensor.nx = 0u;
-    config->tensor.ny = 0u;
-    config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
-    config->time.nt = 0u;
-    config->time.wt_axis = NULL;
-    config->spatial.nx = num_time_samples;
-    config->spatial.ny = 1u;
-    config->spatial.delta_x = 1.0;
-    config->spatial.delta_y = 1.0;
-    config->spatial.spatial_frequency_grid = NULL;
-    config->spatial.kx_axis = NULL;
-    config->spatial.ky_axis = NULL;
-    config->spatial.potential_grid = NULL;
-    config->runtime.linear_factor_expr = NULL;
-    config->runtime.linear_expr = NULL;
-    config->runtime.potential_expr = NULL;
-    config->runtime.dispersion_factor_expr = NULL;
-    config->runtime.dispersion_expr = NULL;
-    config->runtime.nonlinear_expr = NULL;
-    config->runtime.nonlinear_model = NLO_NONLINEAR_MODEL_EXPR;
-    config->runtime.nonlinear_gamma = 0.0;
-    config->runtime.raman_fraction = 0.0;
-    config->runtime.raman_tau1 = NLO_DEFAULT_RAMAN_TAU1;
-    config->runtime.raman_tau2 = NLO_DEFAULT_RAMAN_TAU2;
-    config->runtime.shock_omega0 = 0.0;
-    config->runtime.raman_response_time = NULL;
-    config->runtime.raman_response_len = 0u;
-    config->runtime.num_constants = 0u;
-    config->frequency.frequency_grid = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
-    if (config->frequency.frequency_grid == NULL) {
-        free(config);
-        return NULL;
-    }
-
-    return config;
-}
-
-void free_sim_config(sim_config* config)
-{
-    if (config == NULL) {
-        return;
-    }
-
-    free(config->frequency.frequency_grid);
-    free(config);
-}
-
 simulation_state* create_simulation_state(
     const sim_config* config,
     size_t num_time_samples,
@@ -944,8 +553,8 @@ simulation_state* create_simulation_state_with_storage(
         }
         size_t ntx = 0u;
         size_t resolved_total = 0u;
-        if (checked_mul_size_t(config->tensor.nt, config->tensor.nx, &ntx) != 0 ||
-            checked_mul_size_t(ntx, config->tensor.ny, &resolved_total) != 0 ||
+        if (nlo_checked_mul_size_t(config->tensor.nt, config->tensor.nx, &ntx) != 0 ||
+            nlo_checked_mul_size_t(ntx, config->tensor.ny, &resolved_total) != 0 ||
             resolved_total != num_time_samples) {
             return NULL;
         }
@@ -987,7 +596,7 @@ simulation_state* create_simulation_state_with_storage(
     state->num_points_xy = spatial_nx * spatial_ny;
     state->num_recorded_samples = num_recorded_samples;
     const int coupled_mode = (spatial_nx > 1u || spatial_ny > 1u);
-    state->num_host_records = compute_host_record_capacity(num_time_samples, num_recorded_samples);
+    state->num_host_records = nlo_compute_host_record_capacity(num_time_samples, num_recorded_samples);
     const int storage_enabled = nlo_storage_options_enabled(storage_options);
     if (state->num_host_records == 0u && !storage_enabled) {
         nlo_state_debug_log_failure("host_record_capacity", NLO_VEC_STATUS_ALLOCATION_FAILED);
@@ -1070,7 +679,7 @@ simulation_state* create_simulation_state_with_storage(
 
     if (state->num_host_records > 0u) {
         size_t host_elements = 0u;
-        if (checked_mul_size_t(state->num_time_samples, state->num_host_records, &host_elements) != 0) {
+        if (nlo_checked_mul_size_t(state->num_time_samples, state->num_host_records, &host_elements) != 0) {
             nlo_state_debug_log_failure("host_elements_overflow", NLO_VEC_STATUS_INVALID_ARGUMENT);
             free_simulation_state(state);
             return NULL;
@@ -1727,438 +1336,4 @@ simulation_state* create_simulation_state_with_storage(
     }
 
     return state;
-}
-
-void free_simulation_state(simulation_state* state)
-{
-    if (state == NULL) {
-        return;
-    }
-
-    if (state->fft_plan != NULL) {
-        nlo_fft_plan_destroy(state->fft_plan);
-        state->fft_plan = NULL;
-    }
-
-    if (state->backend != NULL) {
-        nlo_destroy_vec_if_set(state->backend, &state->current_field_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->frequency_grid_vec);
-
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.ip_field_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_magnitude_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_working_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_freq_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.omega_power_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_1_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_2_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_3_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_4_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_factor_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_operator_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.potential_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.previous_field_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_intensity_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_delayed_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_spectrum_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_mix_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_polarization_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_derivative_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_response_fft_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_derivative_factor_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.wt_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.kx_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.ky_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.t_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.x_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.y_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.wt_mesh_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.kx_mesh_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.ky_mesh_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.t_mesh_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.x_mesh_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.y_mesh_vec);
-        for (size_t i = 0u; i < NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS; ++i) {
-            nlo_destroy_vec_if_set(state->backend, &state->runtime_operator_stack_vec[i]);
-        }
-
-        if (state->record_ring_vec != NULL) {
-            for (size_t i = 0; i < state->record_ring_capacity; ++i) {
-                nlo_destroy_vec_if_set(state->backend, &state->record_ring_vec[i]);
-            }
-        }
-
-        nlo_vector_backend_destroy(state->backend);
-        state->backend = NULL;
-    }
-
-    free(state->record_ring_vec);
-    nlo_snapshot_store_close(state->snapshot_store);
-    state->snapshot_store = NULL;
-    free(state->snapshot_scratch_record);
-    free(state->field_buffer);
-    free(state);
-}
-
-nlo_vec_status simulation_state_upload_initial_field(simulation_state* state, const nlo_complex* field)
-{
-    if (state == NULL || field == NULL || state->backend == NULL || state->current_field_vec == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    const size_t bytes = state->num_time_samples * sizeof(nlo_complex);
-    nlo_vec_status status = nlo_vec_upload(state->backend, state->current_field_vec, field, bytes);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
-
-    if (state->num_recorded_samples > 1u) {
-        status = nlo_snapshot_emit_record(state, 0u, field);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-    }
-
-    state->current_record_index = (state->num_recorded_samples > 1u) ? 1u : 0u;
-    state->record_ring_flushed_count = state->current_record_index;
-
-    return NLO_VEC_STATUS_OK;
-}
-
-nlo_vec_status simulation_state_download_current_field(const simulation_state* state, nlo_complex* out_field)
-{
-    if (state == NULL || out_field == NULL || state->backend == NULL || state->current_field_vec == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    return nlo_vec_download(state->backend,
-                            state->current_field_vec,
-                            out_field,
-                            state->num_time_samples * sizeof(nlo_complex));
-}
-
-static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t record_index, const nlo_complex* record)
-{
-    if (state == NULL || record == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    int recorded_anywhere = 0;
-    if (record_index < state->num_host_records) {
-        nlo_complex* host_record = simulation_state_get_field_record(state, record_index);
-        if (host_record == NULL) {
-            return NLO_VEC_STATUS_INVALID_ARGUMENT;
-        }
-        if (host_record != record) {
-            memcpy(host_record, record, state->num_time_samples * sizeof(nlo_complex));
-        }
-        recorded_anywhere = 1;
-    }
-
-    if (state->snapshot_store != NULL) {
-        const nlo_snapshot_store_status store_status =
-            nlo_snapshot_store_write_record(state->snapshot_store,
-                                           record_index,
-                                           record,
-                                           state->num_time_samples);
-        nlo_snapshot_store_get_result(state->snapshot_store, &state->snapshot_result);
-        if (store_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
-            state->snapshot_status = NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
-            return state->snapshot_status;
-        }
-        recorded_anywhere = 1;
-    }
-
-    if (!recorded_anywhere) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    return NLO_VEC_STATUS_OK;
-}
-
-static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state* state)
-{
-    if (state == NULL || state->record_ring_size == 0u || state->record_ring_capacity == 0u) {
-        return NLO_VEC_STATUS_OK;
-    }
-
-    if (state->record_ring_flushed_count >= state->num_recorded_samples) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    nlo_complex* host_record = simulation_state_get_field_record(state, state->record_ring_flushed_count);
-    nlo_complex* download_target = host_record;
-    if (download_target == NULL) {
-        download_target = state->snapshot_scratch_record;
-    }
-    if (download_target == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    const size_t slot = state->record_ring_head;
-    nlo_vec_buffer* src = state->record_ring_vec[slot];
-    if (src == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    const bool resume_simulation = nlo_vec_is_in_simulation(state->backend);
-    if (resume_simulation) {
-        nlo_vec_status status = nlo_vec_end_simulation(state->backend);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-    }
-
-    nlo_vec_status status = nlo_vec_download(state->backend,
-                                             src,
-                                             download_target,
-                                             state->num_time_samples * sizeof(nlo_complex));
-
-    if (resume_simulation) {
-        nlo_vec_status begin_status = nlo_vec_begin_simulation(state->backend);
-        if (status == NLO_VEC_STATUS_OK) {
-            status = begin_status;
-        }
-    }
-
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
-
-    status = nlo_snapshot_emit_record(state, state->record_ring_flushed_count, download_target);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
-
-    state->record_ring_head = (state->record_ring_head + 1u) % state->record_ring_capacity;
-    state->record_ring_size -= 1u;
-    state->record_ring_flushed_count += 1u;
-    return NLO_VEC_STATUS_OK;
-}
-
-nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
-{
-    if (state == NULL || state->backend == NULL || state->current_field_vec == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    if (state->current_record_index >= state->num_recorded_samples) {
-        return NLO_VEC_STATUS_OK;
-    }
-
-    if (nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_CPU) {
-        const void* host_src = NULL;
-        nlo_vec_status status = nlo_vec_get_const_host_ptr(state->backend,
-                                                           state->current_field_vec,
-                                                           &host_src);
-        if (status != NLO_VEC_STATUS_OK || host_src == NULL) {
-            return (status == NLO_VEC_STATUS_OK) ? NLO_VEC_STATUS_BACKEND_UNAVAILABLE : status;
-        }
-
-        status = nlo_snapshot_emit_record(state,
-                                          state->current_record_index,
-                                          (const nlo_complex*)host_src);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-
-        state->current_record_index += 1u;
-        return NLO_VEC_STATUS_OK;
-    }
-
-    if (state->record_ring_capacity == 0u) {
-        nlo_complex* host_record = simulation_state_get_field_record(state, state->current_record_index);
-        nlo_complex* download_target = host_record;
-        if (download_target == NULL) {
-            download_target = state->snapshot_scratch_record;
-        }
-        if (download_target == NULL) {
-            return NLO_VEC_STATUS_INVALID_ARGUMENT;
-        }
-
-        const bool resume_simulation = nlo_vec_is_in_simulation(state->backend);
-        if (resume_simulation) {
-            nlo_vec_status status = nlo_vec_end_simulation(state->backend);
-            if (status != NLO_VEC_STATUS_OK) {
-                return status;
-            }
-        }
-
-        nlo_vec_status status = nlo_vec_download(state->backend,
-                                                 state->current_field_vec,
-                                                 download_target,
-                                                 state->num_time_samples * sizeof(nlo_complex));
-
-        if (resume_simulation) {
-            nlo_vec_status begin_status = nlo_vec_begin_simulation(state->backend);
-            if (status == NLO_VEC_STATUS_OK) {
-                status = begin_status;
-            }
-        }
-
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-
-        status = nlo_snapshot_emit_record(state, state->current_record_index, download_target);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-
-        state->current_record_index += 1u;
-        state->record_ring_flushed_count += 1u;
-        return NLO_VEC_STATUS_OK;
-    }
-
-    if (state->record_ring_size == state->record_ring_capacity) {
-        nlo_vec_status flush_status = simulation_state_flush_oldest_ring_entry(state);
-        if (flush_status != NLO_VEC_STATUS_OK) {
-            return flush_status;
-        }
-    }
-
-    const size_t slot = (state->record_ring_head + state->record_ring_size) % state->record_ring_capacity;
-    nlo_vec_buffer* ring_dst = state->record_ring_vec[slot];
-    if (ring_dst == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    nlo_vec_status copy_status = nlo_vec_complex_copy(state->backend, ring_dst, state->current_field_vec);
-    if (copy_status != NLO_VEC_STATUS_OK) {
-        return copy_status;
-    }
-
-    state->record_ring_size += 1u;
-    state->current_record_index += 1u;
-    return NLO_VEC_STATUS_OK;
-}
-
-nlo_vec_status simulation_state_flush_snapshots(simulation_state* state)
-{
-    if (state == NULL || state->backend == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    while (state->record_ring_size > 0u) {
-        nlo_vec_status status = simulation_state_flush_oldest_ring_entry(state);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-    }
-
-    if (state->snapshot_store != NULL) {
-        const nlo_snapshot_store_status store_status = nlo_snapshot_store_flush(state->snapshot_store);
-        nlo_snapshot_store_get_result(state->snapshot_store, &state->snapshot_result);
-        if (store_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
-            state->snapshot_status = NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
-            return state->snapshot_status;
-        }
-    }
-
-    return NLO_VEC_STATUS_OK;
-}
-
-static int checked_mul_size_t(size_t a, size_t b, size_t* out)
-{
-    if (out == NULL) {
-        return -1;
-    }
-
-    if (a == 0 || b == 0) {
-        *out = 0;
-        return 0;
-    }
-
-    if (a > SIZE_MAX / b) {
-        return -1;
-    }
-
-    *out = a * b;
-    return 0;
-}
-
-static size_t query_available_system_memory_bytes(void)
-{
-#if defined(_WIN32)
-    MEMORYSTATUSEX mem_status;
-    mem_status.dwLength = sizeof(mem_status);
-    if (GlobalMemoryStatusEx(&mem_status) == 0) {
-        return 0;
-    }
-
-    if (mem_status.ullAvailPhys > (unsigned long long)SIZE_MAX) {
-        return SIZE_MAX;
-    }
-
-    return (size_t)mem_status.ullAvailPhys;
-#elif defined(__linux__)
-    struct sysinfo info;
-    if (sysinfo(&info) != 0) {
-        return 0;
-    }
-
-    unsigned long long bytes = (unsigned long long)info.freeram * (unsigned long long)info.mem_unit;
-    if (bytes > (unsigned long long)SIZE_MAX) {
-        return SIZE_MAX;
-    }
-
-    return (size_t)bytes;
-#elif defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
-    long pages = sysconf(_SC_AVPHYS_PAGES);
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (pages <= 0 || page_size <= 0) {
-        return 0;
-    }
-
-    unsigned long long bytes = (unsigned long long)pages * (unsigned long long)page_size;
-    if (bytes > (unsigned long long)SIZE_MAX) {
-        return SIZE_MAX;
-    }
-
-    return (size_t)bytes;
-#else
-    return 0;
-#endif
-}
-
-static size_t apply_memory_headroom(size_t available_bytes)
-{
-    if (available_bytes == 0u) {
-        return 0u;
-    }
-
-    return (available_bytes / NLO_MEMORY_HEADROOM_DEN) * NLO_MEMORY_HEADROOM_NUM;
-}
-
-static size_t compute_host_record_capacity(size_t num_time_samples, size_t requested_records)
-{
-    size_t available_bytes = query_available_system_memory_bytes();
-    if (available_bytes == 0u) {
-        return requested_records;
-    }
-
-    available_bytes = apply_memory_headroom(available_bytes);
-    if (available_bytes == 0u) {
-        return 0u;
-    }
-
-    size_t per_record_bytes = 0u;
-    if (checked_mul_size_t(num_time_samples, sizeof(nlo_complex), &per_record_bytes) != 0 || per_record_bytes == 0u) {
-        return 0u;
-    }
-
-    size_t working_bytes = 0u;
-    if (checked_mul_size_t(per_record_bytes, NLO_WORK_VECTOR_COUNT, &working_bytes) != 0) {
-        return 0u;
-    }
-
-    if (working_bytes >= available_bytes) {
-        return 0u;
-    }
-
-    size_t max_records = (available_bytes - working_bytes) / per_record_bytes;
-    if (max_records == 0u) {
-        return 0u;
-    }
-
-    return (max_records < requested_records) ? max_records : requested_records;
 }

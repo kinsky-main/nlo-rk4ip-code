@@ -1,29 +1,39 @@
 /**
  * @file init.c
- * @brief Initialization helpers for simulation state setup.
+ * @brief Initialization entry points that wrap simulation-state builders.
  */
 
 #include "core/init.h"
-#include <stdint.h>
-#include <string.h>
+#include "core/init_internal.h"
 
-static int checked_mul_size_t(size_t a, size_t b, size_t* out)
+static void nlo_fill_allocation_info(
+    size_t num_time_samples,
+    size_t requested_records,
+    const simulation_state* state,
+    const nlo_execution_options* exec_options,
+    nlo_allocation_info* allocation_info
+)
 {
-    if (out == NULL) {
-        return -1;
+    if (allocation_info == NULL || state == NULL || exec_options == NULL) {
+        return;
     }
 
-    if (a == 0 || b == 0) {
-        *out = 0;
-        return 0;
-    }
+    size_t per_record_bytes = 0u;
+    size_t host_snapshot_bytes = 0u;
+    size_t working_bytes = 0u;
 
-    if (a > SIZE_MAX / b) {
-        return -1;
-    }
+    (void)nlo_checked_mul_size_t(num_time_samples, sizeof(nlo_complex), &per_record_bytes);
+    (void)nlo_checked_mul_size_t(per_record_bytes, state->num_host_records, &host_snapshot_bytes);
+    (void)nlo_checked_mul_size_t(per_record_bytes, NLO_WORK_VECTOR_COUNT, &working_bytes);
 
-    *out = a * b;
-    return 0;
+    allocation_info->requested_records = requested_records;
+    allocation_info->allocated_records = state->num_host_records;
+    allocation_info->per_record_bytes = per_record_bytes;
+    allocation_info->host_snapshot_bytes = host_snapshot_bytes;
+    allocation_info->working_vector_bytes = working_bytes;
+    allocation_info->device_ring_capacity = state->record_ring_capacity;
+    allocation_info->device_budget_bytes = exec_options->forced_device_budget_bytes;
+    allocation_info->backend_type = exec_options->backend_type;
 }
 
 NLOLIB_API int nlo_init_simulation_state(
@@ -48,7 +58,7 @@ NLOLIB_API int nlo_init_simulation_state(
         return -1;
     }
 
-    nlo_execution_options local_options =
+    const nlo_execution_options local_options =
         (exec_options != NULL)
             ? *exec_options
             : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
@@ -61,24 +71,11 @@ NLOLIB_API int nlo_init_simulation_state(
         return -1;
     }
 
-    if (allocation_info != NULL) {
-        size_t per_record_bytes = 0u;
-        size_t host_snapshot_bytes = 0u;
-        size_t working_bytes = 0u;
-
-        (void)checked_mul_size_t(num_time_samples, sizeof(nlo_complex), &per_record_bytes);
-        (void)checked_mul_size_t(per_record_bytes, state->num_host_records, &host_snapshot_bytes);
-        (void)checked_mul_size_t(per_record_bytes, NLO_WORK_VECTOR_COUNT, &working_bytes);
-
-        allocation_info->requested_records = num_recorded_samples;
-        allocation_info->allocated_records = state->num_host_records;
-        allocation_info->per_record_bytes = per_record_bytes;
-        allocation_info->host_snapshot_bytes = host_snapshot_bytes;
-        allocation_info->working_vector_bytes = working_bytes;
-        allocation_info->device_ring_capacity = state->record_ring_capacity;
-        allocation_info->device_budget_bytes = local_options.forced_device_budget_bytes;
-        allocation_info->backend_type = local_options.backend_type;
-    }
+    nlo_fill_allocation_info(num_time_samples,
+                             num_recorded_samples,
+                             state,
+                             &local_options,
+                             allocation_info);
 
     *out_state = state;
     return 0;
@@ -107,7 +104,7 @@ NLOLIB_API int nlo_init_simulation_state_with_storage(
         return -1;
     }
 
-    nlo_execution_options local_options =
+    const nlo_execution_options local_options =
         (exec_options != NULL)
             ? *exec_options
             : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
@@ -121,24 +118,11 @@ NLOLIB_API int nlo_init_simulation_state_with_storage(
         return -1;
     }
 
-    if (allocation_info != NULL) {
-        size_t per_record_bytes = 0u;
-        size_t host_snapshot_bytes = 0u;
-        size_t working_bytes = 0u;
-
-        (void)checked_mul_size_t(num_time_samples, sizeof(nlo_complex), &per_record_bytes);
-        (void)checked_mul_size_t(per_record_bytes, state->num_host_records, &host_snapshot_bytes);
-        (void)checked_mul_size_t(per_record_bytes, NLO_WORK_VECTOR_COUNT, &working_bytes);
-
-        allocation_info->requested_records = num_recorded_samples;
-        allocation_info->allocated_records = state->num_host_records;
-        allocation_info->per_record_bytes = per_record_bytes;
-        allocation_info->host_snapshot_bytes = host_snapshot_bytes;
-        allocation_info->working_vector_bytes = working_bytes;
-        allocation_info->device_ring_capacity = state->record_ring_capacity;
-        allocation_info->device_budget_bytes = local_options.forced_device_budget_bytes;
-        allocation_info->backend_type = local_options.backend_type;
-    }
+    nlo_fill_allocation_info(num_time_samples,
+                             num_recorded_samples,
+                             state,
+                             &local_options,
+                             allocation_info);
 
     *out_state = state;
     return 0;

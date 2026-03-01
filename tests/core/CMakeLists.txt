@@ -1,14 +1,23 @@
 add_executable(test_core_state_alloc
   ${CMAKE_CURRENT_LIST_DIR}/test_state_alloc.c
-  ${CMAKE_SOURCE_DIR}/src/core/state.c
   ${CMAKE_SOURCE_DIR}/src/core/init.c
+  ${CMAKE_SOURCE_DIR}/src/core/init_defaults.c
+  ${CMAKE_SOURCE_DIR}/src/core/init_limits.c
+  ${CMAKE_SOURCE_DIR}/src/core/init_state_builder.c
+  ${CMAKE_SOURCE_DIR}/src/core/state_lifecycle.c
+  ${CMAKE_SOURCE_DIR}/src/core/state_snapshots.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vk_vector_ops.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_resources.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_phase.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_dispatch.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
   ${CMAKE_SOURCE_DIR}/src/numerics/math_ops.c
   ${CMAKE_SOURCE_DIR}/src/physics/operators.c
-  ${CMAKE_SOURCE_DIR}/src/physics/operator_program.c
+  ${CMAKE_SOURCE_DIR}/src/physics/operator_program_compile.c
+  ${CMAKE_SOURCE_DIR}/src/physics/operator_program_execute.c
   ${CMAKE_SOURCE_DIR}/src/numerics/rk4_kernel.c
   ${CMAKE_SOURCE_DIR}/src/io/log_format.c
   ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
