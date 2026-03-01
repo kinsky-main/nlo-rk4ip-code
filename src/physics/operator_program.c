@@ -53,6 +53,50 @@ static int nlo_context_allows_symbol_w(nlo_operator_program_context context)
             context == NLO_OPERATOR_CONTEXT_DISPERSION);
 }
 
+static int nlo_context_allows_symbol_wt(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_LINEAR_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR ||
+            context == NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_DISPERSION);
+}
+
+static int nlo_context_allows_symbol_kx(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_LINEAR_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR);
+}
+
+static int nlo_context_allows_symbol_ky(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_LINEAR_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR);
+}
+
+static int nlo_context_allows_symbol_t(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_LINEAR_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR ||
+            context == NLO_OPERATOR_CONTEXT_NONLINEAR ||
+            context == NLO_OPERATOR_CONTEXT_POTENTIAL);
+}
+
+static int nlo_context_allows_symbol_x(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_LINEAR_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR ||
+            context == NLO_OPERATOR_CONTEXT_NONLINEAR ||
+            context == NLO_OPERATOR_CONTEXT_POTENTIAL);
+}
+
+static int nlo_context_allows_symbol_y(nlo_operator_program_context context)
+{
+    return (context == NLO_OPERATOR_CONTEXT_LINEAR_FACTOR ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR ||
+            context == NLO_OPERATOR_CONTEXT_NONLINEAR ||
+            context == NLO_OPERATOR_CONTEXT_POTENTIAL);
+}
+
 static int nlo_context_allows_symbol_a(nlo_operator_program_context context)
 {
     (void)context;
@@ -66,18 +110,21 @@ static int nlo_context_allows_symbol_i(nlo_operator_program_context context)
 
 static int nlo_context_allows_symbol_d(nlo_operator_program_context context)
 {
-    return (context == NLO_OPERATOR_CONTEXT_DISPERSION);
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR);
 }
 
 static int nlo_context_allows_symbol_v(nlo_operator_program_context context)
 {
     return (context == NLO_OPERATOR_CONTEXT_DISPERSION ||
-            context == NLO_OPERATOR_CONTEXT_NONLINEAR);
+            context == NLO_OPERATOR_CONTEXT_NONLINEAR ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR);
 }
 
 static int nlo_context_allows_symbol_h(nlo_operator_program_context context)
 {
-    return (context == NLO_OPERATOR_CONTEXT_DISPERSION);
+    return (context == NLO_OPERATOR_CONTEXT_DISPERSION ||
+            context == NLO_OPERATOR_CONTEXT_LINEAR);
 }
 
 static int nlo_emit_instruction(
@@ -253,11 +300,91 @@ static int nlo_parse_primary(nlo_parser* parser)
         }
 
         if (strcmp(parser->current.ident, "w") == 0) {
-            if (!nlo_context_allows_symbol_w(parser->context)) {
+            if (nlo_context_allows_symbol_w(parser->context)) {
+                if (nlo_emit_instruction(parser->program,
+                                         NLO_OPERATOR_OP_PUSH_SYMBOL_W,
+                                         nlo_make(0.0, 0.0)) != 0) {
+                    return -1;
+                }
+                return nlo_parser_next_token(parser);
+            }
+            if (nlo_context_allows_symbol_wt(parser->context)) {
+                if (nlo_emit_instruction(parser->program,
+                                         NLO_OPERATOR_OP_PUSH_SYMBOL_WT,
+                                         nlo_make(0.0, 0.0)) != 0) {
+                    return -1;
+                }
+                return nlo_parser_next_token(parser);
+            }
+            return -1;
+        }
+
+        if (strcmp(parser->current.ident, "wt") == 0) {
+            if (!nlo_context_allows_symbol_wt(parser->context)) {
                 return -1;
             }
             if (nlo_emit_instruction(parser->program,
-                                     NLO_OPERATOR_OP_PUSH_SYMBOL_W,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_WT,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "kx") == 0) {
+            if (!nlo_context_allows_symbol_kx(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_KX,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "ky") == 0) {
+            if (!nlo_context_allows_symbol_ky(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_KY,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "t") == 0) {
+            if (!nlo_context_allows_symbol_t(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_T,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "x") == 0) {
+            if (!nlo_context_allows_symbol_x(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_X,
+                                     nlo_make(0.0, 0.0)) != 0) {
+                return -1;
+            }
+            return nlo_parser_next_token(parser);
+        }
+
+        if (strcmp(parser->current.ident, "y") == 0) {
+            if (!nlo_context_allows_symbol_y(parser->context)) {
+                return -1;
+            }
+            if (nlo_emit_instruction(parser->program,
+                                     NLO_OPERATOR_OP_PUSH_SYMBOL_Y,
                                      nlo_make(0.0, 0.0)) != 0) {
                 return -1;
             }
@@ -473,6 +600,12 @@ static int nlo_program_compute_stack_requirements(nlo_operator_program* program)
         const nlo_operator_opcode op = program->instructions[i].opcode;
         if (op == NLO_OPERATOR_OP_PUSH_LITERAL ||
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_W ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_WT ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_KX ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_KY ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_T ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_X ||
+            op == NLO_OPERATOR_OP_PUSH_SYMBOL_Y ||
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_A ||
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_I ||
             op == NLO_OPERATOR_OP_PUSH_SYMBOL_D ||
@@ -597,11 +730,97 @@ nlo_vec_status nlo_operator_program_execute(
         }
 
         if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_W) {
-            if (eval_ctx->frequency_grid == NULL) {
+            const nlo_vec_buffer* source =
+                (eval_ctx->frequency_grid != NULL)
+                    ? eval_ctx->frequency_grid
+                    : eval_ctx->wt_grid;
+            if (source == NULL) {
                 return NLO_VEC_STATUS_INVALID_ARGUMENT;
             }
             nlo_vec_buffer* dst = stack_vectors[stack_depth];
-            status = nlo_vec_complex_copy(backend, dst, eval_ctx->frequency_grid);
+            status = nlo_vec_complex_copy(backend, dst, source);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_WT) {
+            const nlo_vec_buffer* source =
+                (eval_ctx->wt_grid != NULL)
+                    ? eval_ctx->wt_grid
+                    : eval_ctx->frequency_grid;
+            if (source == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, source);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_KX) {
+            if (eval_ctx->kx_grid == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->kx_grid);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_KY) {
+            if (eval_ctx->ky_grid == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->ky_grid);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_T) {
+            if (eval_ctx->t_grid == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->t_grid);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_X) {
+            if (eval_ctx->x_grid == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->x_grid);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            ++stack_depth;
+            continue;
+        }
+
+        if (instruction.opcode == NLO_OPERATOR_OP_PUSH_SYMBOL_Y) {
+            if (eval_ctx->y_grid == NULL) {
+                return NLO_VEC_STATUS_INVALID_ARGUMENT;
+            }
+            nlo_vec_buffer* dst = stack_vectors[stack_depth];
+            status = nlo_vec_complex_copy(backend, dst, eval_ctx->y_grid);
             if (status != NLO_VEC_STATUS_OK) {
                 return status;
             }

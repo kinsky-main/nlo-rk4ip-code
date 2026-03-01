@@ -37,8 +37,8 @@ static inline int nlo_sim_dimensions_checked_mul(size_t a, size_t b, size_t* out
 /**
  * @brief Resolve flattened sample count into runtime (nt, nx, ny) dimensions.
  *
- * This keeps legacy flattened XY handling consistent across `nlolib.c`
- * and `state.c`.
+ * Tensor descriptors take precedence. Non-tensor runs are treated as
+ * temporal 1D unless explicitly configured as a valid degenerate shape.
  *
  * @param config Simulation configuration.
  * @param total_samples Flattened sample count.
@@ -64,6 +64,28 @@ static inline int nlo_resolve_sim_dimensions_internal(
         out_explicit_nd == NULL ||
         total_samples == 0u) {
         return -1;
+    }
+
+    if (config->tensor.nt > 0u) {
+        if (config->tensor.nx == 0u ||
+            config->tensor.ny == 0u ||
+            config->tensor.layout != NLO_TENSOR_LAYOUT_XYT_T_FAST) {
+            return -1;
+        }
+
+        size_t ntx = 0u;
+        size_t resolved_total = 0u;
+        if (nlo_sim_dimensions_checked_mul(config->tensor.nt, config->tensor.nx, &ntx) != 0 ||
+            nlo_sim_dimensions_checked_mul(ntx, config->tensor.ny, &resolved_total) != 0 ||
+            resolved_total != total_samples) {
+            return -1;
+        }
+
+        *out_nt = config->tensor.nt;
+        *out_nx = config->tensor.nx;
+        *out_ny = config->tensor.ny;
+        *out_explicit_nd = 1;
+        return 0;
     }
 
     const size_t configured_nt = config->time.nt;

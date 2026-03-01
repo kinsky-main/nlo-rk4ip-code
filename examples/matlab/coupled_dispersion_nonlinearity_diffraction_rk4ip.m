@@ -35,8 +35,10 @@ limitsCfg = struct('num_time_samples', totalSamples, ...
                    'error_tolerance', 1e-7, ...
                    'pulse_period', nt * dt, ...
                    'delta_time', dt, ...
-                   'time_nt', nt, ...
-                   'spatial_nx', nx, 'spatial_ny', ny, ...
+                   'tensor_nt', nt, ...
+                   'tensor_nx', nx, ...
+                   'tensor_ny', ny, ...
+                   'tensor_layout', 0, ...
                    'frequency_grid', complex(zeros(1, nt), zeros(1, nt)));
 runtimeLimits = api.query_runtime_limits(limitsCfg);
 if totalSamples > double(runtimeLimits.max_num_time_samples_runtime)
@@ -179,7 +181,6 @@ for tidx = 1:nt
 end
 
 omega = backend.angular_frequency_grid(nt, dt);
-k2 = k2_grid(nx, ny, dx, dy);
 potential = grinStrength * (xx .* xx + yy .* yy);
 
 field0Flat = flatten_tyx_row_major(field0);
@@ -187,22 +188,18 @@ pulse = struct();
 pulse.samples = field0Flat;
 pulse.delta_time = dt;
 pulse.pulse_period = nt * dt;
-pulse.time_nt = nt;
+pulse.tensor_nt = nt;
+pulse.tensor_nx = nx;
+pulse.tensor_ny = ny;
+pulse.tensor_layout = 0;
 pulse.frequency_grid = complex(omega, zeros(1, nt));
-pulse.spatial_nx = nx;
-pulse.spatial_ny = ny;
 pulse.delta_x = dx;
 pulse.delta_y = dy;
-pulse.spatial_frequency_grid = flatten_xy_row_major(k2);
-pulse.potential_grid = flatten_xy_row_major(complex(potential, zeros(size(potential))));
+pulse.potential_grid = repmat(flatten_xy_row_major(complex(potential, zeros(size(potential)))), 1, nt);
 
 linearOperator = struct();
-linearOperator.expr = "i*beta2*w*w-loss";
-linearOperator.params = struct('beta2', 0.5 * beta2, 'loss', 0.0);
-
-transverseOperator = struct();
-transverseOperator.expr = "i*beta_t*w";
-transverseOperator.params = struct('beta_t', diffractionCoeff);
+linearOperator.expr = "i*(beta2*wt*wt + beta_t*(kx*kx + ky*ky))";
+linearOperator.params = struct('beta2', 0.5 * beta2, 'beta_t', diffractionCoeff);
 
 nonlinearOperator = struct();
 nonlinearOperator.expr = "i*A*(gamma*I + V)";
@@ -214,19 +211,11 @@ propagateOptions.propagation_distance = zFinal;
 propagateOptions.records = numRecords;
 propagateOptions.preset = "accuracy";
 propagateOptions.exec_options = execOptions;
-propagateOptions.transverse_operator = transverseOperator;
 result = api.propagate(pulse, linearOperator, nonlinearOperator, propagateOptions);
 
 recordsFlat = result.records;
 records = unflatten_tyx_records(recordsFlat, numRecords, nt, ny, nx);
 zRecords = result.z_axis;
-end
-
-function k2 = k2_grid(nx, ny, dx, dy)
-kx = backend.angular_frequency_grid(nx, dx);
-ky = backend.angular_frequency_grid(ny, dy);
-[kkx, kky] = meshgrid(kx, ky);
-k2 = complex((kkx .* kkx) + (kky .* kky), zeros(ny, nx));
 end
 
 function flat = flatten_xy_row_major(matrixYX)

@@ -99,6 +99,7 @@ static sim_config nlo_merge_simulation_and_physics(
     memset(&merged, 0, sizeof(merged));
     if (simulation_config != NULL) {
         merged.propagation = simulation_config->propagation;
+        merged.tensor = simulation_config->tensor;
         merged.time = simulation_config->time;
         merged.frequency = simulation_config->frequency;
         merged.spatial = simulation_config->spatial;
@@ -234,10 +235,11 @@ static void nlo_log_nlse_propagate_call(
         "    - output_records: %p\n"
         "    - exec_options: %p\n"
         "  - runtime_expressions:\n"
+        "    - linear_factor_expr: %s\n"
+        "    - linear_expr: %s\n"
+        "    - potential_expr: %s\n"
         "    - dispersion_factor_expr: %s\n"
         "    - dispersion_expr: %s\n"
-        "    - transverse_factor_expr: %s\n"
-        "    - transverse_expr: %s\n"
         "    - nonlinear_expr: %s\n"
         "  - runtime_constants (%s):\n"
         "%s"
@@ -262,14 +264,15 @@ static void nlo_log_nlse_propagate_call(
         (const void*)input_field,
         (const void*)output_records,
         (const void*)exec_options,
+        (config != NULL && config->runtime.linear_factor_expr != NULL)
+            ? config->runtime.linear_factor_expr
+            : "(null)",
+        (config != NULL && config->runtime.linear_expr != NULL) ? config->runtime.linear_expr : "(null)",
+        (config != NULL && config->runtime.potential_expr != NULL) ? config->runtime.potential_expr : "(null)",
         (config != NULL && config->runtime.dispersion_factor_expr != NULL)
             ? config->runtime.dispersion_factor_expr
             : "(null)",
         (config != NULL && config->runtime.dispersion_expr != NULL) ? config->runtime.dispersion_expr : "(null)",
-        (config != NULL && config->runtime.transverse_factor_expr != NULL)
-            ? config->runtime.transverse_factor_expr
-            : "(null)",
-        (config != NULL && config->runtime.transverse_expr != NULL) ? config->runtime.transverse_expr : "(null)",
         (config != NULL && config->runtime.nonlinear_expr != NULL) ? config->runtime.nonlinear_expr : "(null)",
         runtime_constants_text,
         constants_lines,
@@ -513,17 +516,33 @@ NLOLIB_API nlolib_status nlolib_propagate(
         }
         final_output_field_cached = local_output.output_records;
     } else if (local_options.return_records != 0 && local_output.output_records != NULL) {
-        if (state->num_host_records != num_recorded_samples || state->field_buffer == NULL) {
+        if (state->num_host_records == num_recorded_samples && state->field_buffer != NULL) {
+            const size_t records_bytes = nlo_compute_record_bytes(num_recorded_samples, num_time_samples);
+            if (records_bytes == 0u) {
+                free_simulation_state(state);
+                return nlo_propagate_fail("validate.output_record_bytes", NLOLIB_STATUS_ALLOCATION_FAILED);
+            }
+            memcpy(local_output.output_records, state->field_buffer, records_bytes);
+        } else if (state->snapshot_store != NULL) {
+            const nlo_snapshot_store_status restore_status =
+                nlo_snapshot_store_read_all_records(state->snapshot_store,
+                                                   local_output.output_records,
+                                                   num_recorded_samples,
+                                                   state->num_time_samples);
+            if (restore_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
+                free_simulation_state(state);
+                return nlo_propagate_fail("restore_records_from_storage", NLOLIB_STATUS_ALLOCATION_FAILED);
+            }
+            if (restore_status == NLO_SNAPSHOT_STORE_STATUS_SOFT_LIMIT) {
+                free_simulation_state(state);
+                return nlo_propagate_fail("restore_records_from_storage.truncated",
+                                          NLOLIB_STATUS_ALLOCATION_FAILED);
+            }
+        } else {
             free_simulation_state(state);
             return nlo_propagate_fail("validate.host_record_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
 
-        const size_t records_bytes = nlo_compute_record_bytes(num_recorded_samples, num_time_samples);
-        if (records_bytes == 0u) {
-            free_simulation_state(state);
-            return nlo_propagate_fail("validate.output_record_bytes", NLOLIB_STATUS_ALLOCATION_FAILED);
-        }
-        memcpy(local_output.output_records, state->field_buffer, records_bytes);
         final_output_field_cached =
             local_output.output_records + ((num_recorded_samples - 1u) * state->num_time_samples);
     }

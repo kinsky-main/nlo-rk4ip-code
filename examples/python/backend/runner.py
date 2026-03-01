@@ -253,8 +253,6 @@ class NloExampleRunner:
                 pulse_period=float(sim_cfg.resolved_pulse_period()),
                 delta_time=float(sim_cfg.dt),
                 frequency_grid=[complex(float(om), 0.0) for om in omega],
-                spatial_nx=n,
-                spatial_ny=1,
                 delta_x=1.0,
                 delta_y=1.0,
                 runtime=runtime_cfg,
@@ -322,9 +320,10 @@ class NloExampleRunner:
         records = np.asarray(result.records, dtype=np.complex128).reshape(int(num_records), n)
         return z_records, records
 
-    def propagate_flattened_xy_records(
+    def propagate_tensor3d_records(
         self,
-        field0_flat: np.ndarray,
+        field0_tfast: np.ndarray,
+        nt: int,
         nx: int,
         ny: int,
         num_records: int,
@@ -335,10 +334,9 @@ class NloExampleRunner:
         error_tolerance: float,
         delta_x: float,
         delta_y: float,
-        gamma: float = 0.0,
-        alpha: float = 0.0,
+        delta_time: float = 1.0,
+        pulse_period: float | None = None,
         frequency_grid: np.ndarray | None = None,
-        spatial_frequency_grid: np.ndarray | None = None,
         potential_grid: np.ndarray | None = None,
         runtime: Any | None = None,
         exec_options: SimulationOptions | None = None,
@@ -351,62 +349,53 @@ class NloExampleRunner:
         if num_records <= 0:
             raise ValueError("num_records must be positive.")
 
-        nxy = int(nx) * int(ny)
-        field = np.asarray(field0_flat, dtype=np.complex128).reshape(-1)
-        if int(field.size) != nxy:
-            raise ValueError("field0_flat length must equal nx * ny.")
+        nt_resolved = int(nt)
+        nx_resolved = int(nx)
+        ny_resolved = int(ny)
+        if nt_resolved <= 0 or nx_resolved <= 0 or ny_resolved <= 0:
+            raise ValueError("nt, nx, and ny must be positive.")
 
-        freq_values = np.zeros(nxy, dtype=np.complex128)
+        n_total = nt_resolved * nx_resolved * ny_resolved
+        field = np.asarray(field0_tfast, dtype=np.complex128).reshape(-1)
+        if int(field.size) != n_total:
+            raise ValueError("field0_tfast length must equal nt * nx * ny.")
+
+        freq_values = np.zeros(nt_resolved, dtype=np.complex128)
         if frequency_grid is not None:
             freq_values = np.asarray(frequency_grid, dtype=np.complex128).reshape(-1)
-            if int(freq_values.size) != nxy:
-                raise ValueError("frequency_grid length must equal nx * ny.")
-
-        spatial_values = None
-        if spatial_frequency_grid is not None:
-            spatial_values = np.asarray(spatial_frequency_grid, dtype=np.complex128).reshape(-1)
-            if int(spatial_values.size) != nxy:
-                raise ValueError("spatial_frequency_grid length must equal nx * ny.")
+            if int(freq_values.size) != nt_resolved:
+                raise ValueError("frequency_grid length must equal nt.")
 
         potential_values = None
         if potential_grid is not None:
             potential_values = np.asarray(potential_grid, dtype=np.complex128).reshape(-1)
-            if int(potential_values.size) != nxy:
-                raise ValueError("potential_grid length must equal nx * ny.")
-
-        runtime_cfg = runtime
-        if runtime_cfg is None:
-            runtime_cfg = self.nlo.RuntimeOperators(
-                dispersion_factor_expr="i*c0*w*w-c1",
-                nonlinear_expr="i*A*(c2*I + V)",
-                constants=[
-                    0.0,
-                    0.5 * float(alpha),
-                    float(gamma),
-                ],
-            )
+            if int(potential_values.size) == (nx_resolved * ny_resolved):
+                potential_values = np.tile(potential_values, nt_resolved)
+            if int(potential_values.size) != n_total:
+                raise ValueError("potential_grid length must equal nt*nx*ny (or nx*ny for static XY broadcast).")
 
         options = exec_options if exec_options is not None else SimulationOptions()
         effective_options = self._effective_options(options, int(num_records))
         opts = effective_options.to_ctypes(self.nlo)
 
         prepared = self.nlo.prepare_sim_config(
-            nxy,
+            n_total,
             propagation_distance=float(propagation_distance),
             starting_step_size=float(starting_step_size),
             max_step_size=float(max_step_size),
             min_step_size=float(min_step_size),
             error_tolerance=float(error_tolerance),
-            pulse_period=float(nx),
-            delta_time=1.0,
+            pulse_period=float(pulse_period) if pulse_period is not None else float(nt_resolved) * float(delta_time),
+            delta_time=float(delta_time),
+            tensor_nt=nt_resolved,
+            tensor_nx=nx_resolved,
+            tensor_ny=ny_resolved,
+            tensor_layout=int(self.nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
             frequency_grid=freq_values.tolist(),
-            spatial_nx=int(nx),
-            spatial_ny=int(ny),
             delta_x=float(delta_x),
             delta_y=float(delta_y),
-            spatial_frequency_grid=(None if spatial_values is None else spatial_values.tolist()),
             potential_grid=(None if potential_values is None else potential_values.tolist()),
-            runtime=runtime_cfg,
+            runtime=runtime,
         )
         low_result = self.api.propagate(
             prepared,
@@ -423,7 +412,7 @@ class NloExampleRunner:
         records = np.asarray(
             low_result.records,
             dtype=np.complex128,
-        ).reshape(int(num_records), int(ny), int(nx))
+        ).reshape(int(num_records), n_total)
         if int(num_records) == 1:
             z_records = np.asarray([float(propagation_distance)], dtype=np.float64)
         else:

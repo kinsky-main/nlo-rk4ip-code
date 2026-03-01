@@ -705,8 +705,13 @@ classdef NLolib < handle
             if ~isstruct(config)
                 return;
             end
-            if isfield(config, 'spatial_nx') && isfield(config, 'spatial_ny')
-                tf = (double(config.spatial_nx) > 1) || (double(config.spatial_ny) > 1);
+            if isfield(config, 'tensor_nx') && isfield(config, 'tensor_ny')
+                tf = (double(config.tensor_nx) > 1) || (double(config.tensor_ny) > 1);
+                return;
+            end
+            if isfield(config, 'tensor') && isstruct(config.tensor) && ...
+                    isfield(config.tensor, 'nx') && isfield(config.tensor, 'ny')
+                tf = (double(config.tensor.nx) > 1) || (double(config.tensor.ny) > 1);
                 return;
             end
             if isfield(config, 'spatial') && isstruct(config.spatial) && ...
@@ -817,10 +822,11 @@ classdef NLolib < handle
             try
                 maxConstants = 16;   % NLO_RUNTIME_OPERATOR_CONSTANTS_MAX
                 rt = libstruct('runtime_operator_params', ...
-                               struct('dispersion_factor_expr', 'a', ...
+                               struct('linear_factor_expr', 'a', ...
+                                      'linear_expr', 'w', ...
+                                      'potential_expr', '0', ...
+                                      'dispersion_factor_expr', 'a', ...
                                       'dispersion_expr', 'w', ...
-                                      'transverse_factor_expr', 'w', ...
-                                      'transverse_expr', 'a', ...
                                       'nonlinear_expr', 'a', ...
                                       'nonlinear_model', int32(0), ...
                                       'nonlinear_gamma', 0.0, ...
@@ -1184,31 +1190,26 @@ classdef NLolib < handle
             inputField = pulseSpec.samples;
             numTimeSamples = numel(inputField);
 
-            transverseOperator = "none";
             if isfield(options, 'transverse_operator') && ~isempty(options.transverse_operator)
-                transverseOperator = options.transverse_operator;
-            elseif isfield(options, 'transverseOperator') && ~isempty(options.transverseOperator)
-                transverseOperator = options.transverseOperator;
+                error('nlolib:legacyApiRemoved', ...
+                      'options.transverse_operator has been removed; encode diffraction in linear_operator with tensor_nt/tensor_nx/tensor_ny.');
             end
-            transverseRequested = ~(ischar(transverseOperator) || isstring(transverseOperator)) || ...
-                                  ~strcmpi(strtrim(char(string(transverseOperator))), 'none');
-            if transverseRequested
+            if isfield(options, 'transverseOperator') && ~isempty(options.transverseOperator)
+                error('nlolib:legacyApiRemoved', ...
+                      'options.transverseOperator has been removed; encode diffraction in linear_operator with tensor_nt/tensor_nx/tensor_ny.');
+            end
+
+            tensorRequested = ~isempty(pulseSpec.tensor_nt) && ~isempty(pulseSpec.tensor_nx) && ...
+                              ~isempty(pulseSpec.tensor_ny);
+            if tensorRequested
                 nlolib.NLolib.validate_coupled_pulse_spec(pulseSpec);
             end
 
             [linearExpr, linearFn, linearConstants] = ...
                 nlolib.NLolib.resolve_operator_spec('linear', linearOperator, 0);
-            if transverseRequested
-                [transverseExpr, transverseFn, transverseConstants] = ...
-                    nlolib.NLolib.resolve_operator_spec('transverse', transverseOperator, numel(linearConstants));
-            else
-                transverseExpr = "";
-                transverseFn = [];
-                transverseConstants = [];
-            end
             [nonlinearExpr, nonlinearFn, nonlinearConstants] = ...
                 nlolib.NLolib.resolve_operator_spec('nonlinear', nonlinearOperator, ...
-                                                    numel(linearConstants) + numel(transverseConstants));
+                                                    numel(linearConstants));
 
             runtime = struct();
             if strlength(linearExpr) > 0
@@ -1217,21 +1218,13 @@ classdef NLolib < handle
             if ~isempty(linearFn)
                 runtime.dispersion_factor_fn = linearFn;
             end
-            if strlength(transverseExpr) > 0
-                runtime.transverse_factor_expr = char(transverseExpr);
-                runtime.transverse_expr = 'exp(h*D)';
-            end
-            if ~isempty(transverseFn)
-                runtime.transverse_factor_fn = transverseFn;
-                runtime.transverse_expr = 'exp(h*D)';
-            end
             if strlength(nonlinearExpr) > 0
                 runtime.nonlinear_expr = char(nonlinearExpr);
             end
             if ~isempty(nonlinearFn)
                 runtime.nonlinear_fn = nonlinearFn;
             end
-            runtime.constants = [linearConstants, transverseConstants, nonlinearConstants];
+            runtime.constants = [linearConstants, nonlinearConstants];
 
             cfg = struct();
             cfg.num_time_samples = numTimeSamples;
@@ -1243,14 +1236,11 @@ classdef NLolib < handle
             cfg.delta_time = pulseSpec.delta_time;
             cfg.pulse_period = pulseSpec.pulse_period;
             cfg.frequency_grid = pulseSpec.frequency_grid;
-            if ~isempty(pulseSpec.time_nt)
-                cfg.time_nt = pulseSpec.time_nt;
-            end
-            if ~isempty(pulseSpec.spatial_nx)
-                cfg.spatial_nx = pulseSpec.spatial_nx;
-            end
-            if ~isempty(pulseSpec.spatial_ny)
-                cfg.spatial_ny = pulseSpec.spatial_ny;
+            if ~isempty(pulseSpec.tensor_nt)
+                cfg.tensor_nt = pulseSpec.tensor_nt;
+                cfg.tensor_nx = pulseSpec.tensor_nx;
+                cfg.tensor_ny = pulseSpec.tensor_ny;
+                cfg.tensor_layout = pulseSpec.tensor_layout;
             end
             if ~isempty(pulseSpec.spatial_frequency_grid)
                 cfg.spatial_frequency_grid = pulseSpec.spatial_frequency_grid;
@@ -1272,7 +1262,8 @@ classdef NLolib < handle
             meta.preset = char(preset);
             meta.output = char(output);
             meta.records = double(numRecords);
-            meta.coupled = logical(transverseRequested);
+            meta.coupled = logical(tensorRequested && ...
+                                   ((double(pulseSpec.tensor_nx) > 1) || (double(pulseSpec.tensor_ny) > 1)));
         end
 
         function pulse = normalize_pulse_spec(pulseInput)
@@ -1295,14 +1286,49 @@ classdef NLolib < handle
             end
 
             n = numel(samples);
-            temporalSamples = n;
-            if isfield(pulseInput, 'time_nt') && ~isempty(pulseInput.time_nt)
-                temporalSamples = double(pulseInput.time_nt);
-                if temporalSamples <= 0 || floor(temporalSamples) ~= temporalSamples
-                    error('nlolib:invalidPulseSpec', ...
-                          'pulse.time_nt must be a positive integer');
+            legacyFields = {"time_nt", "spatial_nx", "spatial_ny"};
+            for idx = 1:numel(legacyFields)
+                key = legacyFields{idx};
+                if isfield(pulseInput, key) && ~isempty(pulseInput.(key))
+                    error('nlolib:legacyApiRemoved', ...
+                          'pulse.%s has been removed; use tensor_nt/tensor_nx/tensor_ny.', key);
                 end
             end
+
+            tensorNt = [];
+            tensorNx = [];
+            tensorNy = [];
+            tensorLayout = 0;
+            temporalSamples = n;
+            if isfield(pulseInput, 'tensor_nt') && ~isempty(pulseInput.tensor_nt)
+                tensorNt = double(pulseInput.tensor_nt);
+                if tensorNt <= 0 || floor(tensorNt) ~= tensorNt
+                    error('nlolib:invalidPulseSpec', ...
+                          'pulse.tensor_nt must be a positive integer');
+                end
+                if ~isfield(pulseInput, 'tensor_nx') || isempty(pulseInput.tensor_nx) || ...
+                        ~isfield(pulseInput, 'tensor_ny') || isempty(pulseInput.tensor_ny)
+                    error('nlolib:invalidPulseSpec', ...
+                          'pulse.tensor_nx and pulse.tensor_ny are required when pulse.tensor_nt is set');
+                end
+                tensorNx = double(pulseInput.tensor_nx);
+                tensorNy = double(pulseInput.tensor_ny);
+                if tensorNx <= 0 || floor(tensorNx) ~= tensorNx || ...
+                        tensorNy <= 0 || floor(tensorNy) ~= tensorNy
+                    error('nlolib:invalidPulseSpec', ...
+                          'pulse.tensor_nx and pulse.tensor_ny must be positive integers');
+                end
+                expected = tensorNt * tensorNx * tensorNy;
+                if n ~= expected
+                    error('nlolib:invalidPulseSpec', ...
+                          'numel(pulse.samples) must equal pulse.tensor_nt * pulse.tensor_nx * pulse.tensor_ny');
+                end
+                temporalSamples = tensorNt;
+                if isfield(pulseInput, 'tensor_layout') && ~isempty(pulseInput.tensor_layout)
+                    tensorLayout = double(pulseInput.tensor_layout);
+                end
+            end
+
             pulse = struct();
             pulse.samples = reshape(samples, 1, n);
             pulse.delta_time = deltaTime;
@@ -1318,19 +1344,10 @@ classdef NLolib < handle
                 pulse.frequency_grid = nlolib.NLolib.default_frequency_grid(temporalSamples, deltaTime);
             end
 
-            pulse.time_nt = [];
-            if isfield(pulseInput, 'time_nt') && ~isempty(pulseInput.time_nt)
-                pulse.time_nt = double(pulseInput.time_nt);
-            end
-
-            pulse.spatial_nx = [];
-            if isfield(pulseInput, 'spatial_nx') && ~isempty(pulseInput.spatial_nx)
-                pulse.spatial_nx = double(pulseInput.spatial_nx);
-            end
-            pulse.spatial_ny = [];
-            if isfield(pulseInput, 'spatial_ny') && ~isempty(pulseInput.spatial_ny)
-                pulse.spatial_ny = double(pulseInput.spatial_ny);
-            end
+            pulse.tensor_nt = tensorNt;
+            pulse.tensor_nx = tensorNx;
+            pulse.tensor_ny = tensorNy;
+            pulse.tensor_layout = tensorLayout;
 
             pulse.delta_x = 1.0;
             if isfield(pulseInput, 'delta_x') && ~isempty(pulseInput.delta_x)
@@ -1352,43 +1369,40 @@ classdef NLolib < handle
         end
 
         function validate_coupled_pulse_spec(pulse)
-            if ~isfield(pulse, 'time_nt') || isempty(pulse.time_nt) || double(pulse.time_nt) <= 0
+            if ~isfield(pulse, 'tensor_nt') || isempty(pulse.tensor_nt) || double(pulse.tensor_nt) <= 0
                 error('nlolib:invalidPulseSpec', ...
-                      'pulse.time_nt must be > 0 for coupled transverse simulations');
+                      'pulse.tensor_nt must be > 0 for coupled tensor simulations');
             end
-            if ~isfield(pulse, 'spatial_nx') || isempty(pulse.spatial_nx) || double(pulse.spatial_nx) <= 0
+            if ~isfield(pulse, 'tensor_nx') || isempty(pulse.tensor_nx) || double(pulse.tensor_nx) <= 0
                 error('nlolib:invalidPulseSpec', ...
-                      'pulse.spatial_nx must be > 0 for coupled transverse simulations');
+                      'pulse.tensor_nx must be > 0 for coupled tensor simulations');
             end
-            if ~isfield(pulse, 'spatial_ny') || isempty(pulse.spatial_ny) || double(pulse.spatial_ny) <= 0
+            if ~isfield(pulse, 'tensor_ny') || isempty(pulse.tensor_ny) || double(pulse.tensor_ny) <= 0
                 error('nlolib:invalidPulseSpec', ...
-                      'pulse.spatial_ny must be > 0 for coupled transverse simulations');
+                      'pulse.tensor_ny must be > 0 for coupled tensor simulations');
             end
 
-            nt = double(pulse.time_nt);
-            nx = double(pulse.spatial_nx);
-            ny = double(pulse.spatial_ny);
+            nt = double(pulse.tensor_nt);
+            nx = double(pulse.tensor_nx);
+            ny = double(pulse.tensor_ny);
             expected = nt * nx * ny;
             if numel(pulse.samples) ~= expected
                 error('nlolib:invalidPulseSpec', ...
-                      'numel(pulse.samples) must equal pulse.time_nt * pulse.spatial_nx * pulse.spatial_ny');
-            end
-
-            if ~isfield(pulse, 'spatial_frequency_grid') || isempty(pulse.spatial_frequency_grid)
-                error('nlolib:invalidPulseSpec', ...
-                      'pulse.spatial_frequency_grid is required for coupled transverse simulations');
+                      'numel(pulse.samples) must equal pulse.tensor_nt * pulse.tensor_nx * pulse.tensor_ny');
             end
             xy = nx * ny;
-            sfLen = numel(pulse.spatial_frequency_grid);
-            if sfLen ~= xy && sfLen ~= expected
-                error('nlolib:invalidPulseSpec', ...
-                      'spatial_frequency_grid length must equal spatial_nx*spatial_ny or full-volume size');
+            if isfield(pulse, 'spatial_frequency_grid') && ~isempty(pulse.spatial_frequency_grid)
+                sfLen = numel(pulse.spatial_frequency_grid);
+                if sfLen ~= xy && sfLen ~= expected
+                    error('nlolib:invalidPulseSpec', ...
+                          'spatial_frequency_grid length must equal tensor_nx*tensor_ny or full-volume size');
+                end
             end
             if isfield(pulse, 'potential_grid') && ~isempty(pulse.potential_grid)
                 potentialLen = numel(pulse.potential_grid);
                 if potentialLen ~= xy && potentialLen ~= expected
                     error('nlolib:invalidPulseSpec', ...
-                          'potential_grid length must equal spatial_nx*spatial_ny or full-volume size');
+                          'potential_grid length must equal tensor_nx*tensor_ny or full-volume size');
                 end
             end
         end
@@ -1481,11 +1495,6 @@ classdef NLolib < handle
                       '%s operator must define expr/fn or a known preset', context);
             end
 
-            if strcmpi(char(string(context)), 'transverse') && ~isempty(fn)
-                error('nlolib:invalidOperatorSpec', ...
-                      'transverse callable operators are not supported in MATLAB facade');
-            end
-
             if ~isempty(fn)
                 if ~isempty(params)
                     error('nlolib:invalidOperatorSpec', ...
@@ -1520,18 +1529,6 @@ classdef NLolib < handle
                         case {'kerr', 'default'}
                             expr = "i*gamma*A*I";
                             params = struct('gamma', 1.0);
-                        case 'none'
-                            expr = "0";
-                            params = struct();
-                        otherwise
-                            expr = string(name);
-                            matched = false;
-                    end
-                case 'transverse'
-                    switch key
-                        case {'diffraction', 'default'}
-                            expr = "i*beta_t*w";
-                            params = struct('beta_t', 1.0);
                         case 'none'
                             expr = "0";
                             params = struct();

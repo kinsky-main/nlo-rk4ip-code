@@ -16,6 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef NLO_TWO_PI
+#define NLO_TWO_PI 6.283185307179586476925286766559
+#endif
+
 size_t nlo_vec_element_size(nlo_vec_kind kind)
 {
     switch (kind) {
@@ -872,6 +876,152 @@ nlo_vec_status nlo_vec_complex_cos_inplace(nlo_vector_backend* backend, nlo_vec_
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         nlo_complex_cos_inplace((nlo_complex*)dst->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
+    }
+
+    return NLO_VEC_STATUS_UNSUPPORTED;
+}
+
+static double nlo_expected_unshifted_angular_frequency(size_t i, size_t n, double step)
+{
+    if (n == 0u) {
+        return 0.0;
+    }
+
+    const size_t positive_limit = (n - 1u) / 2u;
+    if (i <= positive_limit) {
+        return (double)i * step;
+    }
+
+    return -((double)n - (double)i) * step;
+}
+
+nlo_vec_status nlo_vec_complex_axis_unshifted_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    if (!(delta > 0.0)) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex* values = (nlo_complex*)dst->host_ptr;
+        const double step = NLO_TWO_PI / ((double)dst->length * delta);
+        for (size_t i = 0u; i < dst->length; ++i) {
+            values[i] = nlo_make(nlo_expected_unshifted_angular_frequency(i, dst->length, step), 0.0);
+        }
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        return nlo_vk_op_complex_axis_unshifted_from_delta(backend, dst, delta);
+    }
+
+    return NLO_VEC_STATUS_UNSUPPORTED;
+}
+
+nlo_vec_status nlo_vec_complex_axis_centered_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex* values = (nlo_complex*)dst->host_ptr;
+        const double center = 0.5 * (double)(dst->length - 1u);
+        for (size_t i = 0u; i < dst->length; ++i) {
+            values[i] = nlo_make(((double)i - center) * delta, 0.0);
+        }
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        return nlo_vk_op_complex_axis_centered_from_delta(backend, dst, delta);
+    }
+
+    return NLO_VEC_STATUS_UNSUPPORTED;
+}
+
+nlo_vec_status nlo_vec_complex_mesh_from_axis_tfast(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* axis,
+    size_t nt,
+    size_t ny,
+    nlo_vec_mesh_axis axis_kind
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_validate_buffer(backend, axis, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    if (nt == 0u || ny == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if ((dst->length % nt) != 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    const size_t xy_points = dst->length / nt;
+    if ((xy_points % ny) != 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    const size_t nx = xy_points / ny;
+    if (nx == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    size_t expected_axis_length = 0u;
+    if (axis_kind == NLO_VEC_MESH_AXIS_T) {
+        expected_axis_length = nt;
+    } else if (axis_kind == NLO_VEC_MESH_AXIS_Y) {
+        expected_axis_length = ny;
+    } else if (axis_kind == NLO_VEC_MESH_AXIS_X) {
+        expected_axis_length = nx;
+    } else {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (axis->length != expected_axis_length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex* dst_ptr = (nlo_complex*)dst->host_ptr;
+        const nlo_complex* axis_ptr = (const nlo_complex*)axis->host_ptr;
+        for (size_t x = 0u; x < nx; ++x) {
+            for (size_t y = 0u; y < ny; ++y) {
+                const nlo_complex axis_value =
+                    (axis_kind == NLO_VEC_MESH_AXIS_T)
+                        ? nlo_make(0.0, 0.0)
+                        : ((axis_kind == NLO_VEC_MESH_AXIS_Y) ? axis_ptr[y] : axis_ptr[x]);
+                const size_t base = ((x * ny) + y) * nt;
+                if (axis_kind == NLO_VEC_MESH_AXIS_T) {
+                    memcpy(dst_ptr + base, axis_ptr, nt * sizeof(nlo_complex));
+                } else {
+                    for (size_t t = 0u; t < nt; ++t) {
+                        dst_ptr[base + t] = axis_value;
+                    }
+                }
+            }
+        }
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        return nlo_vk_op_complex_mesh_from_axis_tfast(backend, dst, axis, nt, ny, axis_kind);
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;

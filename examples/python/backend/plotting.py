@@ -436,8 +436,12 @@ def plot_3d_intensity_scatter_propagation(
     *,
     intensity_cutoff: float = 0.05,
     xy_stride: int = 16,
+    z_stride: int = 1,
     min_marker_size: float = 2.0,
     max_marker_size: float = 36.0,
+    alpha_min: float = 0.08,
+    alpha_max: float = 0.90,
+    dpi: int = 320,
     title: str = "3D Propagation Intensity Scatter",
 ) -> Path | None:
 
@@ -454,8 +458,14 @@ def plot_3d_intensity_scatter_propagation(
 
     if xy_stride <= 0:
         raise ValueError("xy_stride must be positive.")
+    if z_stride <= 0:
+        raise ValueError("z_stride must be positive.")
     if intensity_cutoff < 0.0 or intensity_cutoff >= 1.0:
         raise ValueError("intensity_cutoff must be in [0, 1).")
+    if alpha_min < 0.0 or alpha_min > 1.0 or alpha_max < 0.0 or alpha_max > 1.0 or alpha_min > alpha_max:
+        raise ValueError("alpha_min/alpha_max must satisfy 0 <= alpha_min <= alpha_max <= 1.")
+    if dpi <= 0:
+        raise ValueError("dpi must be positive.")
 
     intensity = np.abs(records) ** 2
     max_intensity = float(np.max(intensity))
@@ -469,7 +479,7 @@ def plot_3d_intensity_scatter_propagation(
     c_points: list[float] = []
     s_points: list[float] = []
 
-    for zi in range(z.size):
+    for zi in range(0, z.size, z_stride):
         for yi in range(0, y.size, xy_stride):
             for xi in range(0, x.size, xy_stride):
                 norm_intensity = float(intensity[zi, yi, xi] / max_intensity)
@@ -487,24 +497,36 @@ def plot_3d_intensity_scatter_propagation(
         return None
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure()
+    fig = plt.figure(figsize=(9.0, 7.0))
     ax = fig.add_subplot(111, projection="3d")
+    norm_values = np.asarray(c_points, dtype=np.float64)
+    cmap = _resolve_cmap(plt, None)
+    rgba = cmap(np.clip(norm_values, 0.0, 1.0))
+    rgba[:, 3] = alpha_min + (alpha_max - alpha_min) * np.clip(norm_values, 0.0, 1.0)
     scatter = ax.scatter(
         np.asarray(x_points),
         np.asarray(y_points),
         np.asarray(z_points),
-        c=np.asarray(c_points),
+        c=rgba,
         s=np.asarray(s_points),
-        cmap=_resolve_cmap(plt, None),
-        alpha=0.70,
+        marker="o",
+        depthshade=False,
         linewidths=0.0,
     )
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
     ax.set_title(title)
-    cbar = fig.colorbar(scatter, ax=ax, pad=0.10)
+
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    cbar = fig.colorbar(
+        ScalarMappable(norm=Normalize(vmin=0.0, vmax=1.0), cmap=cmap),
+        ax=ax,
+        pad=0.10,
+    )
     cbar.set_label("Normalized intensity")
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    fig.savefig(output_path, dpi=int(dpi), bbox_inches="tight")
     plt.close(fig)
     return output_path

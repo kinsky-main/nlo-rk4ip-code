@@ -96,20 +96,24 @@ static nlo_vec_status nlo_prepare_raman_state(simulation_state* state);
 #define NLO_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
 #endif
 
+#ifndef NLO_DEFAULT_LINEAR_FACTOR_EXPR
+#define NLO_DEFAULT_LINEAR_FACTOR_EXPR "i*c0*wt*wt-c1"
+#endif
+
 #ifndef NLO_DEFAULT_DISPERSION_EXPR
 #define NLO_DEFAULT_DISPERSION_EXPR "exp(h*D)"
 #endif
 
+#ifndef NLO_DEFAULT_LINEAR_EXPR
+#define NLO_DEFAULT_LINEAR_EXPR "exp(h*D)"
+#endif
+
+#ifndef NLO_DEFAULT_POTENTIAL_EXPR
+#define NLO_DEFAULT_POTENTIAL_EXPR "0"
+#endif
+
 #ifndef NLO_DEFAULT_NONLINEAR_EXPR
 #define NLO_DEFAULT_NONLINEAR_EXPR "i*A*(c2*I + V)"
-#endif
-
-#ifndef NLO_DEFAULT_TRANSVERSE_FACTOR_EXPR
-#define NLO_DEFAULT_TRANSVERSE_FACTOR_EXPR "0"
-#endif
-
-#ifndef NLO_DEFAULT_TRANSVERSE_EXPR
-#define NLO_DEFAULT_TRANSVERSE_EXPR "exp(h*D)"
 #endif
 
 #ifndef NLO_DEFAULT_C0
@@ -534,13 +538,40 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     }
 
     size_t active_vec_count = 2u + NLO_WORK_VECTOR_COUNT;
-    if (state->spatial_frequency_grid_vec != NULL) {
+    if (state->working_vectors.wt_axis_vec != NULL) {
         active_vec_count += 1u;
     }
-    if (state->transverse_factor_vec != NULL) {
+    if (state->working_vectors.kx_axis_vec != NULL) {
         active_vec_count += 1u;
     }
-    if (state->transverse_operator_vec != NULL) {
+    if (state->working_vectors.ky_axis_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.t_axis_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.x_axis_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.y_axis_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.wt_mesh_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.kx_mesh_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.ky_mesh_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.t_mesh_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.x_mesh_vec != NULL) {
+        active_vec_count += 1u;
+    }
+    if (state->working_vectors.y_mesh_vec != NULL) {
         active_vec_count += 1u;
     }
     if (state->runtime_operator_stack_slots > SIZE_MAX - active_vec_count) {
@@ -637,14 +668,22 @@ static size_t nlo_estimate_active_vector_count(const sim_config* config)
 {
     size_t active_vec_count = 2u + NLO_WORK_VECTOR_COUNT + NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS;
     if (config != NULL) {
-        const size_t nt = config->time.nt;
-        const size_t nx = config->spatial.nx;
-        const size_t ny = config->spatial.ny;
+        const size_t nt = (config->tensor.nt > 0u) ? config->tensor.nt : config->time.nt;
+        const size_t nx = (config->tensor.nx > 0u) ? config->tensor.nx : config->spatial.nx;
+        const size_t ny = (config->tensor.ny > 0u) ? config->tensor.ny : config->spatial.ny;
+        const int tensor_mode_active = (config->tensor.nt > 0u) ? 1 : 0;
         const int explicit_nd = (nt > 0u) ? 1 : 0;
         const int enable_transverse = (explicit_nd != 0) && (nx > 1u || ny > 1u);
-        if (enable_transverse) {
+        if (enable_transverse && !tensor_mode_active) {
             if (active_vec_count <= SIZE_MAX - 3u) {
                 active_vec_count += 3u;
+            } else {
+                return SIZE_MAX;
+            }
+        }
+        if (config->tensor.nt > 0u) {
+            if (active_vec_count <= SIZE_MAX - 12u) {
+                active_vec_count += 12u;
             } else {
                 return SIZE_MAX;
             }
@@ -657,6 +696,19 @@ static size_t nlo_resolve_runtime_num_time_samples_from_config(const sim_config*
 {
     if (config == NULL) {
         return 0u;
+    }
+
+    if (config->tensor.nt > 0u) {
+        size_t ntx = 0u;
+        size_t total = 0u;
+        if (config->tensor.nx == 0u || config->tensor.ny == 0u) {
+            return 0u;
+        }
+        if (checked_mul_size_t(config->tensor.nt, config->tensor.nx, &ntx) != 0 ||
+            checked_mul_size_t(ntx, config->tensor.ny, &total) != 0) {
+            return 0u;
+        }
+        return total;
     }
 
     const size_t nt = config->time.nt;
@@ -801,17 +853,25 @@ sim_config* create_sim_config(size_t num_time_samples)
     }
 
     config->propagation.error_tolerance = 1e-6;
+    config->tensor.nt = 0u;
+    config->tensor.nx = 0u;
+    config->tensor.ny = 0u;
+    config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
     config->time.nt = 0u;
+    config->time.wt_axis = NULL;
     config->spatial.nx = num_time_samples;
     config->spatial.ny = 1u;
     config->spatial.delta_x = 1.0;
     config->spatial.delta_y = 1.0;
     config->spatial.spatial_frequency_grid = NULL;
+    config->spatial.kx_axis = NULL;
+    config->spatial.ky_axis = NULL;
     config->spatial.potential_grid = NULL;
+    config->runtime.linear_factor_expr = NULL;
+    config->runtime.linear_expr = NULL;
+    config->runtime.potential_expr = NULL;
     config->runtime.dispersion_factor_expr = NULL;
     config->runtime.dispersion_expr = NULL;
-    config->runtime.transverse_factor_expr = NULL;
-    config->runtime.transverse_expr = NULL;
     config->runtime.nonlinear_expr = NULL;
     config->runtime.nonlinear_model = NLO_NONLINEAR_MODEL_EXPR;
     config->runtime.nonlinear_gamma = 0.0;
@@ -875,12 +935,39 @@ simulation_state* create_simulation_state_with_storage(
     size_t spatial_nx = 0u;
     size_t spatial_ny = 0u;
     int explicit_nd = 0;
-    if (nlo_resolve_sim_dimensions_internal(config,
-                                            num_time_samples,
-                                            &resolved_nt,
-                                            &spatial_nx,
-                                            &spatial_ny,
-                                            &explicit_nd) != 0) {
+    int tensor_mode_active = 0;
+    if (config->tensor.nt > 0u) {
+        if (config->tensor.layout != NLO_TENSOR_LAYOUT_XYT_T_FAST ||
+            config->tensor.nx == 0u ||
+            config->tensor.ny == 0u) {
+            return NULL;
+        }
+        size_t ntx = 0u;
+        size_t resolved_total = 0u;
+        if (checked_mul_size_t(config->tensor.nt, config->tensor.nx, &ntx) != 0 ||
+            checked_mul_size_t(ntx, config->tensor.ny, &resolved_total) != 0 ||
+            resolved_total != num_time_samples) {
+            return NULL;
+        }
+        resolved_nt = config->tensor.nt;
+        spatial_nx = config->tensor.nx;
+        spatial_ny = config->tensor.ny;
+        explicit_nd = 1;
+        tensor_mode_active = 1;
+    } else if (nlo_resolve_sim_dimensions_internal(config,
+                                                   num_time_samples,
+                                                   &resolved_nt,
+                                                   &spatial_nx,
+                                                   &spatial_ny,
+                                                   &explicit_nd) != 0) {
+        return NULL;
+    }
+
+    if (!tensor_mode_active && (spatial_nx > 1u || spatial_ny > 1u)) {
+        nlo_log_emit(
+            NLO_LOG_LEVEL_ERROR,
+            "[nlolib] Coupled transverse runs require tensor descriptors (tensor.nt/tensor.nx/tensor.ny)."
+        );
         return NULL;
     }
 
@@ -894,10 +981,12 @@ simulation_state* create_simulation_state_with_storage(
     state->nt = resolved_nt;
     state->nx = spatial_nx;
     state->ny = spatial_ny;
+    state->tensor_layout = tensor_mode_active ? config->tensor.layout : NLO_TENSOR_LAYOUT_XYT_T_FAST;
+    state->tensor_mode_active = tensor_mode_active;
     state->num_time_samples = num_time_samples;
     state->num_points_xy = spatial_nx * spatial_ny;
     state->num_recorded_samples = num_recorded_samples;
-    const int enable_transverse = (explicit_nd != 0) && (spatial_nx > 1u || spatial_ny > 1u);
+    const int coupled_mode = (spatial_nx > 1u || spatial_ny > 1u);
     state->num_host_records = compute_host_record_capacity(num_time_samples, num_recorded_samples);
     const int storage_enabled = nlo_storage_options_enabled(storage_options);
     if (state->num_host_records == 0u && !storage_enabled) {
@@ -925,7 +1014,7 @@ simulation_state* create_simulation_state_with_storage(
     state->shock_omega0 = 0.0;
 
     if (config->runtime.nonlinear_model == NLO_NONLINEAR_MODEL_KERR_RAMAN) {
-        if (enable_transverse) {
+        if (coupled_mode) {
             nlo_log_emit(
                 NLO_LOG_LEVEL_ERROR,
                 "[nlolib] nonlinear_model=kerr_raman is currently supported for temporal-only runs."
@@ -1057,12 +1146,20 @@ simulation_state* create_simulation_state_with_storage(
         }
     }
 
-    state->transverse_active = 0;
-    if (enable_transverse) {
-        if (nlo_create_complex_vec(state->backend, num_time_samples, &state->spatial_frequency_grid_vec) != NLO_VEC_STATUS_OK ||
-            nlo_create_complex_vec(state->backend, num_time_samples, &state->transverse_factor_vec) != NLO_VEC_STATUS_OK ||
-            nlo_create_complex_vec(state->backend, num_time_samples, &state->transverse_operator_vec) != NLO_VEC_STATUS_OK) {
-            nlo_state_debug_log_failure("allocate_transverse_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
+    if (state->tensor_mode_active) {
+        if (nlo_create_complex_vec(state->backend, state->nt, &state->working_vectors.wt_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->nx, &state->working_vectors.kx_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->ny, &state->working_vectors.ky_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->nt, &state->working_vectors.t_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->nx, &state->working_vectors.x_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->ny, &state->working_vectors.y_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.wt_mesh_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.kx_mesh_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.ky_mesh_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.t_mesh_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.x_mesh_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.y_mesh_vec) != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("allocate_tensor_mesh_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
             free_simulation_state(state);
             return NULL;
         }
@@ -1076,7 +1173,139 @@ simulation_state* create_simulation_state_with_storage(
     }
 
     const double delta_time = nlo_resolve_delta_time(config, state->nt);
-    if (explicit_nd != 0) {
+    if (state->tensor_mode_active) {
+        const double safe_dt = (delta_time > 0.0) ? delta_time : 1.0;
+        const double safe_dx = (config->spatial.delta_x > 0.0) ? config->spatial.delta_x : 1.0;
+        const double safe_dy = (config->spatial.delta_y > 0.0) ? config->spatial.delta_y : 1.0;
+
+        if (config->time.wt_axis != NULL) {
+            status = nlo_vec_upload(state->backend,
+                                    state->working_vectors.wt_axis_vec,
+                                    config->time.wt_axis,
+                                    state->nt * sizeof(nlo_complex));
+        } else {
+            status = nlo_vec_complex_axis_unshifted_from_delta(state->backend,
+                                                               state->working_vectors.wt_axis_vec,
+                                                               safe_dt);
+        }
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("prepare_tensor_wt_axis", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        if (config->spatial.kx_axis != NULL) {
+            status = nlo_vec_upload(state->backend,
+                                    state->working_vectors.kx_axis_vec,
+                                    config->spatial.kx_axis,
+                                    state->nx * sizeof(nlo_complex));
+        } else {
+            status = nlo_vec_complex_axis_unshifted_from_delta(state->backend,
+                                                               state->working_vectors.kx_axis_vec,
+                                                               safe_dx);
+        }
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("prepare_tensor_kx_axis", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        if (config->spatial.ky_axis != NULL) {
+            status = nlo_vec_upload(state->backend,
+                                    state->working_vectors.ky_axis_vec,
+                                    config->spatial.ky_axis,
+                                    state->ny * sizeof(nlo_complex));
+        } else {
+            status = nlo_vec_complex_axis_unshifted_from_delta(state->backend,
+                                                               state->working_vectors.ky_axis_vec,
+                                                               safe_dy);
+        }
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("prepare_tensor_ky_axis", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = nlo_vec_complex_axis_centered_from_delta(state->backend,
+                                                          state->working_vectors.t_axis_vec,
+                                                          safe_dt);
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_complex_axis_centered_from_delta(state->backend,
+                                                              state->working_vectors.x_axis_vec,
+                                                              safe_dx);
+        }
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_complex_axis_centered_from_delta(state->backend,
+                                                              state->working_vectors.y_axis_vec,
+                                                              safe_dy);
+        }
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("prepare_tensor_physical_axes", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
+                                                      state->working_vectors.wt_mesh_vec,
+                                                      state->working_vectors.wt_axis_vec,
+                                                      state->nt,
+                                                      state->ny,
+                                                      NLO_VEC_MESH_AXIS_T);
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
+                                                          state->working_vectors.kx_mesh_vec,
+                                                          state->working_vectors.kx_axis_vec,
+                                                          state->nt,
+                                                          state->ny,
+                                                          NLO_VEC_MESH_AXIS_X);
+        }
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
+                                                          state->working_vectors.ky_mesh_vec,
+                                                          state->working_vectors.ky_axis_vec,
+                                                          state->nt,
+                                                          state->ny,
+                                                          NLO_VEC_MESH_AXIS_Y);
+        }
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
+                                                          state->working_vectors.t_mesh_vec,
+                                                          state->working_vectors.t_axis_vec,
+                                                          state->nt,
+                                                          state->ny,
+                                                          NLO_VEC_MESH_AXIS_T);
+        }
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
+                                                          state->working_vectors.x_mesh_vec,
+                                                          state->working_vectors.x_axis_vec,
+                                                          state->nt,
+                                                          state->ny,
+                                                          NLO_VEC_MESH_AXIS_X);
+        }
+        if (status == NLO_VEC_STATUS_OK) {
+            status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
+                                                          state->working_vectors.y_mesh_vec,
+                                                          state->working_vectors.y_axis_vec,
+                                                          state->nt,
+                                                          state->ny,
+                                                          NLO_VEC_MESH_AXIS_Y);
+        }
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("prepare_tensor_mesh_axes", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = nlo_vec_complex_copy(state->backend,
+                                      state->frequency_grid_vec,
+                                      state->working_vectors.wt_mesh_vec);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("upload_frequency_grid_tensor", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+    } else if (explicit_nd != 0) {
         nlo_complex* temporal_line = (nlo_complex*)malloc(state->nt * sizeof(nlo_complex));
         nlo_complex* temporal_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
         if (temporal_line == NULL || temporal_volume == NULL) {
@@ -1158,76 +1387,7 @@ simulation_state* create_simulation_state_with_storage(
         }
     }
 
-    if (enable_transverse) {
-        const size_t xy_points = state->num_points_xy;
-        nlo_complex* k2_xy = (nlo_complex*)malloc(xy_points * sizeof(nlo_complex));
-        nlo_complex* k2_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
-        nlo_complex* potential_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
-        if (k2_xy == NULL || k2_volume == NULL || potential_volume == NULL) {
-            free(k2_xy);
-            free(k2_volume);
-            free(potential_volume);
-            nlo_state_debug_log_failure("allocate_transverse_grids", NLO_VEC_STATUS_ALLOCATION_FAILED);
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        if (config->spatial.spatial_frequency_grid != NULL) {
-            memcpy(k2_xy, config->spatial.spatial_frequency_grid, xy_points * sizeof(nlo_complex));
-        } else {
-            nlo_fill_default_k2_grid_xy(k2_xy,
-                                        state->nx,
-                                        state->ny,
-                                        config->spatial.delta_x,
-                                        config->spatial.delta_y);
-        }
-        if (nlo_expand_xy_grid_to_volume(k2_volume, k2_xy, state->nt, state->nx, state->ny) != 0) {
-            free(k2_xy);
-            free(k2_volume);
-            free(potential_volume);
-            nlo_state_debug_log_failure("expand_spatial_frequency_grid", NLO_VEC_STATUS_INVALID_ARGUMENT);
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        if (config->spatial.potential_grid != NULL) {
-            if (nlo_expand_xy_grid_to_volume(potential_volume,
-                                             config->spatial.potential_grid,
-                                             state->nt,
-                                             state->nx,
-                                             state->ny) != 0) {
-                free(k2_xy);
-                free(k2_volume);
-                free(potential_volume);
-                nlo_state_debug_log_failure("expand_potential_grid", NLO_VEC_STATUS_INVALID_ARGUMENT);
-                free_simulation_state(state);
-                return NULL;
-            }
-        } else {
-            for (size_t i = 0u; i < num_time_samples; ++i) {
-                potential_volume[i] = nlo_make(0.0, 0.0);
-            }
-        }
-
-        status = nlo_vec_upload(state->backend,
-                                state->spatial_frequency_grid_vec,
-                                k2_volume,
-                                num_time_samples * sizeof(nlo_complex));
-        if (status == NLO_VEC_STATUS_OK) {
-            status = nlo_vec_upload(state->backend,
-                                    state->working_vectors.potential_vec,
-                                    potential_volume,
-                                    num_time_samples * sizeof(nlo_complex));
-        }
-        free(k2_xy);
-        free(k2_volume);
-        free(potential_volume);
-        if (status != NLO_VEC_STATUS_OK) {
-            nlo_state_debug_log_failure("upload_transverse_grids", status);
-            free_simulation_state(state);
-            return NULL;
-        }
-    } else {
+    if (!state->tensor_mode_active) {
         if (config->spatial.potential_grid != NULL) {
             if (explicit_nd != 0) {
                 nlo_complex* potential_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
@@ -1260,6 +1420,22 @@ simulation_state* create_simulation_state_with_storage(
             free_simulation_state(state);
             return NULL;
         }
+    } else {
+        if (config->spatial.potential_grid != NULL) {
+            status = nlo_vec_upload(state->backend,
+                                    state->working_vectors.potential_vec,
+                                    config->spatial.potential_grid,
+                                    num_time_samples * sizeof(nlo_complex));
+        } else {
+            status = nlo_vec_complex_fill(state->backend,
+                                          state->working_vectors.potential_vec,
+                                          nlo_make(0.0, 0.0));
+        }
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("upload_potential_grid_tensor", status);
+            free_simulation_state(state);
+            return NULL;
+        }
     }
 
     double resolved_runtime_constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
@@ -1273,58 +1449,75 @@ simulation_state* create_simulation_state_with_storage(
         return NULL;
     }
 
+    const char* linear_factor_expr = nlo_resolve_operator_expr(config->runtime.linear_factor_expr,
+                                                               nlo_resolve_operator_expr(
+                                                                   config->runtime.dispersion_factor_expr,
+                                                                   NLO_DEFAULT_LINEAR_FACTOR_EXPR));
+    const char* linear_expr = nlo_resolve_operator_expr(config->runtime.linear_expr,
+                                                        nlo_resolve_operator_expr(
+                                                            config->runtime.dispersion_expr,
+                                                            NLO_DEFAULT_LINEAR_EXPR));
+    const char* potential_expr = nlo_resolve_operator_expr(config->runtime.potential_expr,
+                                                           NLO_DEFAULT_POTENTIAL_EXPR);
     const char* dispersion_factor_expr = nlo_resolve_operator_expr(config->runtime.dispersion_factor_expr,
                                                                    NLO_DEFAULT_DISPERSION_FACTOR_EXPR);
     const char* dispersion_expr = nlo_resolve_operator_expr(config->runtime.dispersion_expr,
                                                             NLO_DEFAULT_DISPERSION_EXPR);
-    const char* transverse_factor_expr = nlo_resolve_operator_expr(config->runtime.transverse_factor_expr,
-                                                                   NLO_DEFAULT_TRANSVERSE_FACTOR_EXPR);
-    const char* transverse_expr = nlo_resolve_operator_expr(config->runtime.transverse_expr,
-                                                            NLO_DEFAULT_TRANSVERSE_EXPR);
     const char* nonlinear_expr = nlo_resolve_operator_expr(config->runtime.nonlinear_expr,
                                                            NLO_DEFAULT_NONLINEAR_EXPR);
 
-    status = nlo_operator_program_compile(dispersion_factor_expr,
-                                          NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR,
-                                          runtime_constant_count,
-                                          runtime_constants,
-                                          &state->dispersion_factor_operator_program);
-    if (status != NLO_VEC_STATUS_OK) {
-        nlo_state_debug_log_failure("compile_dispersion_factor_program", status);
-        free_simulation_state(state);
-        return NULL;
-    }
-
-    status = nlo_operator_program_compile(dispersion_expr,
-                                          NLO_OPERATOR_CONTEXT_DISPERSION,
-                                          runtime_constant_count,
-                                          runtime_constants,
-                                          &state->dispersion_operator_program);
-    if (status != NLO_VEC_STATUS_OK) {
-        nlo_state_debug_log_failure("compile_dispersion_program", status);
-        free_simulation_state(state);
-        return NULL;
-    }
-
-    if (enable_transverse) {
-        status = nlo_operator_program_compile(transverse_factor_expr,
-                                              NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR,
+    if (state->tensor_mode_active) {
+        status = nlo_operator_program_compile(potential_expr,
+                                              NLO_OPERATOR_CONTEXT_POTENTIAL,
                                               runtime_constant_count,
                                               runtime_constants,
-                                              &state->transverse_factor_operator_program);
+                                              &state->potential_operator_program);
         if (status != NLO_VEC_STATUS_OK) {
-            nlo_state_debug_log_failure("compile_transverse_factor_program", status);
+            nlo_state_debug_log_failure("compile_potential_program", status);
             free_simulation_state(state);
             return NULL;
         }
 
-        status = nlo_operator_program_compile(transverse_expr,
+        status = nlo_operator_program_compile(linear_factor_expr,
+                                              NLO_OPERATOR_CONTEXT_LINEAR_FACTOR,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->linear_factor_operator_program);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("compile_linear_factor_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = nlo_operator_program_compile(linear_expr,
+                                              NLO_OPERATOR_CONTEXT_LINEAR,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->linear_operator_program);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("compile_linear_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+    } else {
+        status = nlo_operator_program_compile(dispersion_factor_expr,
+                                              NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->dispersion_factor_operator_program);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("compile_dispersion_factor_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = nlo_operator_program_compile(dispersion_expr,
                                               NLO_OPERATOR_CONTEXT_DISPERSION,
                                               runtime_constant_count,
                                               runtime_constants,
-                                              &state->transverse_operator_program);
+                                              &state->dispersion_operator_program);
         if (status != NLO_VEC_STATUS_OK) {
-            nlo_state_debug_log_failure("compile_transverse_program", status);
+            nlo_state_debug_log_failure("compile_dispersion_program", status);
             free_simulation_state(state);
             return NULL;
         }
@@ -1342,18 +1535,24 @@ simulation_state* create_simulation_state_with_storage(
     }
     nlo_warn_legacy_nonlinear_expression(nonlinear_expr, &state->nonlinear_operator_program);
 
-    size_t required_stack_slots = state->dispersion_factor_operator_program.required_stack_slots;
-    if (state->dispersion_operator_program.required_stack_slots > required_stack_slots) {
-        required_stack_slots = state->dispersion_operator_program.required_stack_slots;
-    }
-    if (state->transverse_factor_operator_program.required_stack_slots > required_stack_slots) {
-        required_stack_slots = state->transverse_factor_operator_program.required_stack_slots;
-    }
-    if (state->transverse_operator_program.required_stack_slots > required_stack_slots) {
-        required_stack_slots = state->transverse_operator_program.required_stack_slots;
-    }
-    if (state->nonlinear_operator_program.required_stack_slots > required_stack_slots) {
-        required_stack_slots = state->nonlinear_operator_program.required_stack_slots;
+    size_t required_stack_slots = state->nonlinear_operator_program.required_stack_slots;
+    if (state->tensor_mode_active) {
+        if (state->potential_operator_program.required_stack_slots > required_stack_slots) {
+            required_stack_slots = state->potential_operator_program.required_stack_slots;
+        }
+        if (state->linear_factor_operator_program.required_stack_slots > required_stack_slots) {
+            required_stack_slots = state->linear_factor_operator_program.required_stack_slots;
+        }
+        if (state->linear_operator_program.required_stack_slots > required_stack_slots) {
+            required_stack_slots = state->linear_operator_program.required_stack_slots;
+        }
+    } else {
+        if (state->dispersion_factor_operator_program.required_stack_slots > required_stack_slots) {
+            required_stack_slots = state->dispersion_factor_operator_program.required_stack_slots;
+        }
+        if (state->dispersion_operator_program.required_stack_slots > required_stack_slots) {
+            required_stack_slots = state->dispersion_operator_program.required_stack_slots;
+        }
     }
 
     if (required_stack_slots == 0u ||
@@ -1374,45 +1573,77 @@ simulation_state* create_simulation_state_with_storage(
         }
     }
 
-    const nlo_operator_eval_context dispersion_factor_eval_ctx = {
-        .frequency_grid = state->frequency_grid_vec,
-        .field = state->current_field_vec,
-        .dispersion_factor = NULL,
-        .potential = state->working_vectors.potential_vec,
-        .half_step_size = state->current_half_step_exp
-    };
-    status = nlo_operator_program_execute(state->backend,
-                                          &state->dispersion_factor_operator_program,
-                                          &dispersion_factor_eval_ctx,
-                                          state->runtime_operator_stack_vec,
-                                          state->runtime_operator_stack_slots,
-                                          state->working_vectors.dispersion_factor_vec);
-    if (status != NLO_VEC_STATUS_OK) {
-        nlo_state_debug_log_failure("execute_dispersion_factor_program", status);
-        free_simulation_state(state);
-        return NULL;
-    }
+    if (state->tensor_mode_active) {
+        if (config->spatial.potential_grid == NULL) {
+            const nlo_operator_eval_context potential_eval_ctx = {
+                .frequency_grid = state->frequency_grid_vec,
+                .wt_grid = state->working_vectors.wt_mesh_vec,
+                .kx_grid = state->working_vectors.kx_mesh_vec,
+                .ky_grid = state->working_vectors.ky_mesh_vec,
+                .t_grid = state->working_vectors.t_mesh_vec,
+                .x_grid = state->working_vectors.x_mesh_vec,
+                .y_grid = state->working_vectors.y_mesh_vec,
+                .field = state->current_field_vec,
+                .dispersion_factor = NULL,
+                .potential = NULL,
+                .half_step_size = state->current_half_step_exp
+            };
+            status = nlo_operator_program_execute(state->backend,
+                                                  &state->potential_operator_program,
+                                                  &potential_eval_ctx,
+                                                  state->runtime_operator_stack_vec,
+                                                  state->runtime_operator_stack_slots,
+                                                  state->working_vectors.potential_vec);
+            if (status != NLO_VEC_STATUS_OK) {
+                nlo_state_debug_log_failure("execute_potential_program", status);
+                free_simulation_state(state);
+                return NULL;
+            }
+        }
 
-    if (enable_transverse) {
-        const nlo_operator_eval_context transverse_factor_eval_ctx = {
-            .frequency_grid = state->spatial_frequency_grid_vec,
+        const nlo_operator_eval_context linear_factor_eval_ctx = {
+            .frequency_grid = state->frequency_grid_vec,
+            .wt_grid = state->working_vectors.wt_mesh_vec,
+            .kx_grid = state->working_vectors.kx_mesh_vec,
+            .ky_grid = state->working_vectors.ky_mesh_vec,
+            .t_grid = state->working_vectors.t_mesh_vec,
+            .x_grid = state->working_vectors.x_mesh_vec,
+            .y_grid = state->working_vectors.y_mesh_vec,
             .field = state->current_field_vec,
             .dispersion_factor = NULL,
             .potential = state->working_vectors.potential_vec,
             .half_step_size = state->current_half_step_exp
         };
         status = nlo_operator_program_execute(state->backend,
-                                              &state->transverse_factor_operator_program,
-                                              &transverse_factor_eval_ctx,
+                                              &state->linear_factor_operator_program,
+                                              &linear_factor_eval_ctx,
                                               state->runtime_operator_stack_vec,
                                               state->runtime_operator_stack_slots,
-                                              state->transverse_factor_vec);
+                                              state->working_vectors.dispersion_factor_vec);
         if (status != NLO_VEC_STATUS_OK) {
-            nlo_state_debug_log_failure("execute_transverse_factor_program", status);
+            nlo_state_debug_log_failure("execute_linear_factor_program", status);
             free_simulation_state(state);
             return NULL;
         }
-        state->transverse_active = 1;
+    } else {
+        const nlo_operator_eval_context dispersion_factor_eval_ctx = {
+            .frequency_grid = state->frequency_grid_vec,
+            .field = state->current_field_vec,
+            .dispersion_factor = NULL,
+            .potential = state->working_vectors.potential_vec,
+            .half_step_size = state->current_half_step_exp
+        };
+        status = nlo_operator_program_execute(state->backend,
+                                              &state->dispersion_factor_operator_program,
+                                              &dispersion_factor_eval_ctx,
+                                              state->runtime_operator_stack_vec,
+                                              state->runtime_operator_stack_slots,
+                                              state->working_vectors.dispersion_factor_vec);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_state_debug_log_failure("execute_dispersion_factor_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
     }
 
     state->dispersion_valid = 1;
@@ -1534,9 +1765,18 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_derivative_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_response_fft_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_derivative_factor_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->spatial_frequency_grid_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->transverse_factor_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->transverse_operator_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.wt_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.kx_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.ky_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.t_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.x_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.y_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.wt_mesh_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.kx_mesh_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.ky_mesh_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.t_mesh_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.x_mesh_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.y_mesh_vec);
         for (size_t i = 0u; i < NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS; ++i) {
             nlo_destroy_vec_if_set(state->backend, &state->runtime_operator_stack_vec[i]);
         }

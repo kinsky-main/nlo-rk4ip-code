@@ -4,6 +4,7 @@ GRIN transverse phase validations with analytical references.
 This script now runs two analytical GRIN checks:
 1) Symmetric parabolic GRIN phase accumulation.
 2) Astigmatic (gx != gy) phase accumulation with offset input beam.
+3) Tensor diffraction operator proof-check against an FFT2 reference.
 """
 
 from __future__ import annotations
@@ -22,6 +23,14 @@ from backend.plotting import (
 )
 from backend.runner import NloExampleRunner, SimulationOptions
 from backend.storage import ExampleRunDB
+
+
+def flatten_xy_tfast(field_xy: np.ndarray) -> np.ndarray:
+    return np.asarray(field_xy, dtype=np.complex128).T.reshape(-1)
+
+
+def unflatten_xy_tfast(flat_tfast: np.ndarray, ny: int, nx: int) -> np.ndarray:
+    return np.asarray(flat_tfast, dtype=np.complex128).reshape(nx, ny).T
 
 
 def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
@@ -64,7 +73,7 @@ def run_phase_validation(
 
     phase_unit = (grin_gx * (xx * xx)) + (grin_gy * (yy * yy))
     field0 = np.exp(-(((xx - x_offset) ** 2 + (yy - y_offset) ** 2) / (w0 * w0))).astype(np.complex128)
-    field0_flat = field0.reshape(-1)
+    field0_tfast = flatten_xy_tfast(field0)
     nxy = nx * ny
 
     storage_kwargs: dict[str, object] = {}
@@ -78,8 +87,17 @@ def run_phase_validation(
             chunk_records=4,
         )
 
-    z_records, records = runner.propagate_flattened_xy_records(
-        field0_flat=field0_flat,
+    nlo = runner.nlo
+    runtime = nlo.RuntimeOperators(
+        linear_factor_expr="0",
+        linear_expr="exp(h*D)",
+        potential_expr="c0*(x*x) + c1*(y*y)",
+        nonlinear_expr="i*A*V",
+        constants=[float(grin_gx), float(grin_gy)],
+    )
+    z_records, records_flat = runner.propagate_tensor3d_records(
+        field0_tfast=field0_tfast,
+        nt=1,
         nx=nx,
         ny=ny,
         num_records=num_records,
@@ -88,13 +106,18 @@ def run_phase_validation(
         max_step_size=2e-3,
         min_step_size=5e-5,
         error_tolerance=1e-7,
+        delta_time=1.0,
+        pulse_period=1.0,
+        frequency_grid=np.asarray([0.0 + 0.0j], dtype=np.complex128),
         delta_x=dx,
         delta_y=dy,
-        potential_grid=phase_unit.astype(np.complex128).reshape(-1),
-        gamma=0.0,
-        alpha=0.0,
+        runtime=runtime,
         exec_options=exec_options,
         **storage_kwargs,
+    )
+    records = np.asarray(
+        [unflatten_xy_tfast(row, int(ny), int(nx)) for row in np.asarray(records_flat, dtype=np.complex128)],
+        dtype=np.complex128,
     )
     solver_run_id = ""
     if storage_db is not None:
@@ -179,10 +202,14 @@ def run_phase_validation(
         z_records,
         np.asarray(records, dtype=np.complex128),
         out_dir / "propagation_3d_numerical_scatter.png",
-        intensity_cutoff=0.08,
-        xy_stride=16,
-        min_marker_size=2.0,
-        max_marker_size=34.0,
+        intensity_cutoff=0.03,
+        xy_stride=6,
+        z_stride=1,
+        min_marker_size=1.2,
+        max_marker_size=30.0,
+        alpha_min=0.04,
+        alpha_max=0.92,
+        dpi=360,
         title=f"{scenario_name}: numerical propagation (3D scatter)",
     )
     if p5 is not None:
@@ -194,10 +221,14 @@ def run_phase_validation(
         z_records,
         np.asarray(analytical_records, dtype=np.complex128),
         out_dir / "propagation_3d_analytical_scatter.png",
-        intensity_cutoff=0.08,
-        xy_stride=16,
-        min_marker_size=2.0,
-        max_marker_size=34.0,
+        intensity_cutoff=0.03,
+        xy_stride=6,
+        z_stride=1,
+        min_marker_size=1.2,
+        max_marker_size=30.0,
+        alpha_min=0.04,
+        alpha_max=0.92,
+        dpi=360,
         title=f"{scenario_name}: analytical propagation (3D scatter)",
     )
     if p6 is not None:
@@ -238,6 +269,97 @@ def run_phase_validation(
         f"power_drift={power_drift:.6e}"
     )
     return saved_paths, final_error, power_drift
+
+
+def run_diffraction_operator_proof_check(
+    runner: NloExampleRunner,
+    *,
+    nx: int,
+    ny: int,
+    dx: float,
+    dy: float,
+    w0: float,
+    grin_gx: float,
+    grin_gy: float,
+    diffraction_coeff: float,
+    propagation_distance: float,
+    num_records: int,
+    exec_options: SimulationOptions,
+    output_root: Path,
+    max_final_error: float = 5.0e-2,
+) -> tuple[Path | None, float]:
+    nlo = runner.nlo
+    nxy = int(nx) * int(ny)
+    x = (np.arange(nx, dtype=np.float64) - 0.5 * (nx - 1)) * dx
+    y = (np.arange(ny, dtype=np.float64) - 0.5 * (ny - 1)) * dy
+    xx, yy = np.meshgrid(x, y, indexing="xy")
+
+    field0 = np.exp(-((xx * xx + yy * yy) / (w0 * w0))).astype(np.complex128)
+    field0_tfast = flatten_xy_tfast(field0)
+    kx = (2.0 * np.pi) * np.fft.fftfreq(nx, d=dx)
+    ky = (2.0 * np.pi) * np.fft.fftfreq(ny, d=dy)
+    k2 = (kx[np.newaxis, :] ** 2) + (ky[:, np.newaxis] ** 2)
+    runtime = nlo.RuntimeOperators(
+        linear_factor_expr="i*c0*(kx*kx + ky*ky)",
+        linear_expr="exp(h*D)",
+        nonlinear_expr="0",
+        constants=[float(diffraction_coeff)],
+    )
+    z_records, records_flat = runner.propagate_tensor3d_records(
+        field0_tfast=field0_tfast,
+        nt=1,
+        nx=nx,
+        ny=ny,
+        num_records=num_records,
+        propagation_distance=float(propagation_distance),
+        starting_step_size=1.0e-3,
+        max_step_size=2.0e-3,
+        min_step_size=5.0e-5,
+        error_tolerance=1.0e-7,
+        pulse_period=1.0,
+        delta_time=1.0,
+        frequency_grid=np.asarray([0.0 + 0.0j], dtype=np.complex128),
+        delta_x=float(dx),
+        delta_y=float(dy),
+        runtime=runtime,
+        exec_options=exec_options,
+    )
+    tensor_records = np.asarray(
+        [unflatten_xy_tfast(row, int(ny), int(nx)) for row in np.asarray(records_flat, dtype=np.complex128)],
+        dtype=np.complex128,
+    )
+
+    fft0 = np.fft.fft2(field0)
+    reference_records = np.empty_like(tensor_records, dtype=np.complex128)
+    for i, z in enumerate(z_records):
+        reference_records[i] = np.fft.ifft2(fft0 * np.exp((1.0j) * float(diffraction_coeff) * k2 * float(z)))
+
+    error_curve = relative_l2_error_curve(
+        tensor_records.reshape(int(num_records), nxy),
+        reference_records.reshape(int(num_records), nxy),
+    )
+    final_error = float(error_curve[-1])
+
+    out_dir = output_root / "diffraction_operator_proof_check"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    saved = plot_total_error_over_propagation(
+        z_records,
+        error_curve,
+        out_dir / "tensor_diffraction_operator_error_vs_fft2_reference.png",
+        title="GRIN diffraction proof check: tensor operator vs FFT2 reference",
+        y_label="Relative L2 error (tensor vs FFT2 reference)",
+    )
+
+    print(
+        "diffraction_operator_proof_check: "
+        f"records={num_records}, grid=({ny},{nx}), final_error={final_error:.6e}"
+    )
+    if final_error > float(max_final_error):
+        raise RuntimeError(
+            "diffraction operator proof check failed: "
+            f"final tensor-vs-FFT2 error {final_error:.6e} exceeds {max_final_error:.6e}"
+        )
+    return saved, final_error
 
 
 def main() -> None:
@@ -376,10 +498,14 @@ def main() -> None:
                 loaded.z_axis,
                 np.asarray(records, dtype=np.complex128),
                 out_dir / "propagation_3d_numerical_scatter.png",
-                intensity_cutoff=0.08,
-                xy_stride=16,
-                min_marker_size=2.0,
-                max_marker_size=34.0,
+                intensity_cutoff=0.03,
+                xy_stride=6,
+                z_stride=1,
+                min_marker_size=1.2,
+                max_marker_size=30.0,
+                alpha_min=0.04,
+                alpha_max=0.92,
+                dpi=360,
                 title=f"{scenario_name}: numerical propagation (3D scatter)",
             )
             if p5 is not None:
@@ -390,10 +516,14 @@ def main() -> None:
                 loaded.z_axis,
                 np.asarray(analytical_records, dtype=np.complex128),
                 out_dir / "propagation_3d_analytical_scatter.png",
-                intensity_cutoff=0.08,
-                xy_stride=16,
-                min_marker_size=2.0,
-                max_marker_size=34.0,
+                intensity_cutoff=0.03,
+                xy_stride=6,
+                z_stride=1,
+                min_marker_size=1.2,
+                max_marker_size=30.0,
+                alpha_min=0.04,
+                alpha_max=0.92,
+                dpi=360,
                 title=f"{scenario_name}: analytical propagation (3D scatter)",
             )
             if p6 is not None:
@@ -424,6 +554,24 @@ def main() -> None:
                 **scenario,
             )
             all_saved.extend(saved_paths)
+
+        proof_saved, _ = run_diffraction_operator_proof_check(
+            runner,
+            nx=128,
+            ny=128,
+            dx=0.7,
+            dy=0.7,
+            w0=9.0,
+            grin_gx=2.5e-4,
+            grin_gy=1.7e-4,
+            diffraction_coeff=-0.02,
+            propagation_distance=0.20,
+            num_records=6,
+            exec_options=exec_options,
+            output_root=output_root,
+        )
+        if proof_saved is not None:
+            all_saved.append(proof_saved)
 
     print(f"grin_fiber_xy run_group={run_group}")
 

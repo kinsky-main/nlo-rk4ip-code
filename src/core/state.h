@@ -65,6 +65,7 @@ typedef struct {
     size_t nt;
     double pulse_period;
     double delta_time;
+    nlo_complex* wt_axis;
 } time_grid;
 
 /**
@@ -83,8 +84,28 @@ typedef struct {
     double delta_x;
     double delta_y;
     nlo_complex* spatial_frequency_grid;
+    nlo_complex* kx_axis;
+    nlo_complex* ky_axis;
     nlo_complex* potential_grid;
 } spatial_grid;
+
+/**
+ * @brief Tensor memory layout selector for explicit 3D field descriptors.
+ */
+typedef enum {
+    /** Flatten with temporal index fastest: idx = ((x * ny) + y) * nt + t. */
+    NLO_TENSOR_LAYOUT_XYT_T_FAST = 0
+} nlo_tensor_layout;
+
+/**
+ * @brief Explicit tensor descriptor for 3D runs.
+ */
+typedef struct {
+    size_t nt;
+    size_t nx;
+    size_t ny;
+    int layout;
+} nlo_tensor3d_desc;
 
 /**
  * @brief Nonlinear operator execution model selector.
@@ -102,10 +123,11 @@ typedef enum {
  * String expressions are compiled at runtime into operator programs.
  */
 typedef struct {
+    const char* linear_factor_expr;
+    const char* linear_expr;
+    const char* potential_expr;
     const char* dispersion_factor_expr;
     const char* dispersion_expr;
-    const char* transverse_factor_expr;
-    const char* transverse_expr;
     const char* nonlinear_expr;
     int nonlinear_model;
     double nonlinear_gamma;
@@ -124,6 +146,7 @@ typedef struct {
  */
 typedef struct {
     propagation_params propagation;
+    nlo_tensor3d_desc tensor;
     time_grid time;
     frequency_grid frequency;
     spatial_grid spatial;
@@ -141,6 +164,7 @@ typedef runtime_operator_params nlo_physics_config;
  */
 typedef struct {
     propagation_params propagation;
+    nlo_tensor3d_desc tensor;
     time_grid time;
     frequency_grid frequency;
     spatial_grid spatial;
@@ -246,6 +270,18 @@ typedef struct {
     nlo_vec_buffer* raman_derivative_vec;
     nlo_vec_buffer* raman_response_fft_vec;
     nlo_vec_buffer* raman_derivative_factor_vec;
+    nlo_vec_buffer* wt_axis_vec;
+    nlo_vec_buffer* kx_axis_vec;
+    nlo_vec_buffer* ky_axis_vec;
+    nlo_vec_buffer* t_axis_vec;
+    nlo_vec_buffer* x_axis_vec;
+    nlo_vec_buffer* y_axis_vec;
+    nlo_vec_buffer* wt_mesh_vec;
+    nlo_vec_buffer* kx_mesh_vec;
+    nlo_vec_buffer* ky_mesh_vec;
+    nlo_vec_buffer* t_mesh_vec;
+    nlo_vec_buffer* x_mesh_vec;
+    nlo_vec_buffer* y_mesh_vec;
 } simulation_working_vectors;
 
 typedef struct nlo_fft_plan nlo_fft_plan;
@@ -261,6 +297,8 @@ typedef struct {
     size_t nt;
     size_t nx;
     size_t ny;
+    int tensor_layout;
+    int tensor_mode_active;
     size_t num_time_samples;
     size_t num_points_xy;
     size_t num_recorded_samples;
@@ -294,21 +332,18 @@ typedef struct {
     double current_half_step_exp;
     int dispersion_valid;
 
+    nlo_operator_program linear_factor_operator_program;
+    nlo_operator_program linear_operator_program;
+    nlo_operator_program potential_operator_program;
     nlo_operator_program dispersion_factor_operator_program;
     nlo_operator_program dispersion_operator_program;
-    nlo_operator_program transverse_factor_operator_program;
-    nlo_operator_program transverse_operator_program;
     nlo_operator_program nonlinear_operator_program;
-    int transverse_active;
     nlo_nonlinear_model nonlinear_model;
     int nonlinear_raman_active;
     int nonlinear_shock_active;
     double nonlinear_gamma;
     double raman_fraction;
     double shock_omega0;
-    nlo_vec_buffer* spatial_frequency_grid_vec;
-    nlo_vec_buffer* transverse_factor_vec;
-    nlo_vec_buffer* transverse_operator_vec;
     size_t runtime_operator_stack_slots;
     nlo_vec_buffer* runtime_operator_stack_vec[NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS];
 } simulation_state;

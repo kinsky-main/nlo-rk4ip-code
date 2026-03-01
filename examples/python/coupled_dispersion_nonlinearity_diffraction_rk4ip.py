@@ -40,15 +40,16 @@ def _relative_l2_error_curve(records_a: np.ndarray, records_b: np.ndarray) -> np
     return out
 
 
-def _k2_grid(nx: int, ny: int, dx: float, dy: float) -> np.ndarray:
-    kx = 2.0 * np.pi * np.fft.fftfreq(nx, d=dx)
-    ky = 2.0 * np.pi * np.fft.fftfreq(ny, d=dy)
-    kkx, kky = np.meshgrid(kx, ky, indexing="xy")
-    return (kkx * kkx + kky * kky).astype(np.complex128)
-
-
 def _omega_grid(nt: int, dt: float) -> np.ndarray:
     return (2.0 * np.pi * np.fft.fftfreq(nt, d=dt)).astype(np.float64)
+
+
+def _flatten_tfast(volume_tyx: np.ndarray) -> np.ndarray:
+    return np.asarray(volume_tyx, dtype=np.complex128).transpose(2, 1, 0).reshape(-1)
+
+
+def _unflatten_records_tfast(records_flat: np.ndarray, num_records: int, nt: int, ny: int, nx: int) -> np.ndarray:
+    return np.asarray(records_flat, dtype=np.complex128).reshape(num_records, nx, ny, nt).transpose(0, 3, 2, 1)
 
 
 def _run_case(
@@ -85,29 +86,25 @@ def _run_case(
     field0 = (temporal[:, None, None] * spatial[None, :, :]).astype(np.complex128)
 
     omega = _omega_grid(nt, dt)
-    k2 = _k2_grid(nx, ny, dx, dy)
     potential = (grin_strength * (xx * xx + yy * yy)).astype(np.complex128)
+    potential_tfast = np.tile(potential.T.reshape(-1), nt)
 
     pulse = nlo.PulseSpec(
-        samples=field0.reshape(-1).tolist(),
+        samples=_flatten_tfast(field0).tolist(),
         delta_time=dt,
         pulse_period=float(nt) * dt,
-        time_nt=nt,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
+        tensor_layout=int(nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
         frequency_grid=[complex(float(w), 0.0) for w in omega],
-        spatial_nx=nx,
-        spatial_ny=ny,
         delta_x=dx,
         delta_y=dy,
-        spatial_frequency_grid=k2.reshape(-1).tolist(),
-        potential_grid=potential.reshape(-1).tolist(),
+        potential_grid=potential_tfast.tolist(),
     )
     linear_operator = nlo.OperatorSpec(
-        expr="i*beta2*w*w-loss",
-        params={"beta2": 0.5 * beta2, "loss": 0.0},
-    )
-    transverse_operator = nlo.OperatorSpec(
-        expr="i*beta_t*w",
-        params={"beta_t": diffraction_coeff},
+        expr="i*(beta2*wt*wt + beta_t*(kx*kx + ky*ky))",
+        params={"beta2": 0.5 * beta2, "beta_t": diffraction_coeff},
     )
     nonlinear_operator = nlo.OperatorSpec(
         expr="i*A*(gamma*I + V)",
@@ -128,7 +125,6 @@ def _run_case(
         pulse,
         linear_operator,
         nonlinear_operator,
-        transverse_operator=transverse_operator,
         propagation_distance=float(z_final),
         output="dense",
         preset="accuracy",
@@ -136,7 +132,7 @@ def _run_case(
         exec_options=exec_options_ctypes,
         **propagate_kwargs,
     )
-    records = np.asarray(result.records, dtype=np.complex128).reshape(num_records, nt, ny, nx)
+    records = _unflatten_records_tfast(result.records, int(num_records), int(nt), int(ny), int(nx))
     z_records = np.asarray(result.z_axis, dtype=np.float64)
     return t, x, y, z_records, field0, records, dict(result.meta)
 

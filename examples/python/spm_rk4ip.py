@@ -54,7 +54,7 @@ def main() -> float:
 
     n = 2**10
     dt = 0.01
-    gamma = 1.7
+    gamma = 80.0
     z_final = 0.5
     pulse_width = 0.2
     t = centered_time_grid(n, dt)

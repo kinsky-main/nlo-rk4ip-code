@@ -57,6 +57,7 @@ NLO_PROPAGATE_OUTPUT_FINAL_ONLY = 1
 
 NLO_NONLINEAR_MODEL_EXPR = 0
 NLO_NONLINEAR_MODEL_KERR_RAMAN = 1
+NLO_TENSOR_LAYOUT_XYT_T_FAST = 0
 
 
 class NloComplex(ctypes.Structure):
@@ -96,6 +97,7 @@ class TimeGrid(ctypes.Structure):
         ("nt", ctypes.c_size_t),
         ("pulse_period", ctypes.c_double),
         ("delta_time", ctypes.c_double),
+        ("wt_axis", ctypes.POINTER(NloComplex)),
     ]
 
 
@@ -110,16 +112,28 @@ class SpatialGrid(ctypes.Structure):
         ("delta_x", ctypes.c_double),
         ("delta_y", ctypes.c_double),
         ("spatial_frequency_grid", ctypes.POINTER(NloComplex)),
+        ("kx_axis", ctypes.POINTER(NloComplex)),
+        ("ky_axis", ctypes.POINTER(NloComplex)),
         ("potential_grid", ctypes.POINTER(NloComplex)),
+    ]
+
+
+class NloTensor3dDesc(ctypes.Structure):
+    _fields_ = [
+        ("nt", ctypes.c_size_t),
+        ("nx", ctypes.c_size_t),
+        ("ny", ctypes.c_size_t),
+        ("layout", ctypes.c_int),
     ]
 
 
 class RuntimeOperatorParams(ctypes.Structure):
     _fields_ = [
+        ("linear_factor_expr", ctypes.c_char_p),
+        ("linear_expr", ctypes.c_char_p),
+        ("potential_expr", ctypes.c_char_p),
         ("dispersion_factor_expr", ctypes.c_char_p),
         ("dispersion_expr", ctypes.c_char_p),
-        ("transverse_factor_expr", ctypes.c_char_p),
-        ("transverse_expr", ctypes.c_char_p),
         ("nonlinear_expr", ctypes.c_char_p),
         ("nonlinear_model", ctypes.c_int),
         ("nonlinear_gamma", ctypes.c_double),
@@ -137,6 +151,7 @@ class RuntimeOperatorParams(ctypes.Structure):
 class NloSimulationConfig(ctypes.Structure):
     _fields_ = [
         ("propagation", PropagationParams),
+        ("tensor", NloTensor3dDesc),
         ("time", TimeGrid),
         ("frequency", FrequencyGrid),
         ("spatial", SpatialGrid),
@@ -493,15 +508,14 @@ def default_storage_options(
 
 @dataclass
 class RuntimeOperators:
+    linear_factor_expr: str | None = None
+    linear_expr: str | None = None
+    potential_expr: str | None = None
     dispersion_factor_expr: str | None = None
     dispersion_expr: str | None = None
-    transverse_factor_expr: str | None = None
-    transverse_expr: str | None = None
     nonlinear_expr: str | None = None
     dispersion_factor_fn: Callable[..., object] | None = None
     dispersion_fn: Callable[..., object] | None = None
-    transverse_factor_fn: Callable[..., object] | None = None
-    transverse_fn: Callable[..., object] | None = None
     nonlinear_fn: Callable[..., object] | None = None
     nonlinear_model: int = NLO_NONLINEAR_MODEL_EXPR
     nonlinear_gamma: float = 0.0
@@ -521,9 +535,10 @@ class PulseSpec:
     delta_time: float
     pulse_period: float | None = None
     frequency_grid: Sequence[complex] | None = None
-    time_nt: int | None = None
-    spatial_nx: int | None = None
-    spatial_ny: int | None = None
+    tensor_nt: int | None = None
+    tensor_nx: int | None = None
+    tensor_ny: int | None = None
+    tensor_layout: int = NLO_TENSOR_LAYOUT_XYT_T_FAST
     delta_x: float = 1.0
     delta_y: float = 1.0
     spatial_frequency_grid: Sequence[complex] | None = None
@@ -570,12 +585,6 @@ _LINEAR_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
     "gvd": {"expr": "i*beta2*w*w-loss", "params": {"beta2": -0.5, "loss": 0.0}},
 }
 
-_TRANSVERSE_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
-    "none": {"expr": "0", "params": {}},
-    "diffraction": {"expr": "i*beta_t*w", "params": {"beta_t": 1.0}},
-    "default": {"expr": "i*beta_t*w", "params": {"beta_t": 1.0}},
-}
-
 _NONLINEAR_OPERATOR_PRESETS: dict[str, dict[str, object]] = {
     "none": {"expr": "0", "params": {}},
     "kerr": {"expr": "i*gamma*A*I", "params": {"gamma": 1.0}},
@@ -602,14 +611,20 @@ def _normalize_pulse_spec(pulse: PulseSpec | Mapping[str, object]) -> PulseSpec:
     elif isinstance(pulse, Mapping):
         if "samples" not in pulse or "delta_time" not in pulse:
             raise ValueError("pulse mapping must define 'samples' and 'delta_time'")
+        for legacy_key in ("time_nt", "spatial_nx", "spatial_ny"):
+            if pulse.get(legacy_key) is not None:
+                raise ValueError(
+                    f"pulse.{legacy_key} has been removed; use tensor_nt/tensor_nx/tensor_ny instead"
+                )
         spec = PulseSpec(
             samples=pulse["samples"],  # type: ignore[arg-type]
             delta_time=float(pulse["delta_time"]),  # type: ignore[arg-type]
             pulse_period=float(pulse["pulse_period"]) if pulse.get("pulse_period") is not None else None,
             frequency_grid=pulse.get("frequency_grid"),  # type: ignore[arg-type]
-            time_nt=int(pulse["time_nt"]) if pulse.get("time_nt") is not None else None,
-            spatial_nx=int(pulse["spatial_nx"]) if pulse.get("spatial_nx") is not None else None,
-            spatial_ny=int(pulse["spatial_ny"]) if pulse.get("spatial_ny") is not None else None,
+            tensor_nt=int(pulse["tensor_nt"]) if pulse.get("tensor_nt") is not None else None,
+            tensor_nx=int(pulse["tensor_nx"]) if pulse.get("tensor_nx") is not None else None,
+            tensor_ny=int(pulse["tensor_ny"]) if pulse.get("tensor_ny") is not None else None,
+            tensor_layout=int(pulse.get("tensor_layout", NLO_TENSOR_LAYOUT_XYT_T_FAST)),
             delta_x=float(pulse.get("delta_x", 1.0)),
             delta_y=float(pulse.get("delta_y", 1.0)),
             spatial_frequency_grid=pulse.get("spatial_frequency_grid"),  # type: ignore[arg-type]
@@ -621,37 +636,35 @@ def _normalize_pulse_spec(pulse: PulseSpec | Mapping[str, object]) -> PulseSpec:
         raise ValueError("pulse.samples must be non-empty")
     if spec.delta_time <= 0.0:
         raise ValueError("pulse.delta_time must be > 0")
-    if spec.time_nt is not None and int(spec.time_nt) <= 0:
-        raise ValueError("pulse.time_nt must be > 0 when provided")
+    if spec.tensor_nt is not None and int(spec.tensor_nt) <= 0:
+        raise ValueError("pulse.tensor_nt must be > 0 when provided")
     return spec
 
 
 def _validate_coupled_pulse_spec(pulse: PulseSpec) -> None:
-    if pulse.time_nt is None or int(pulse.time_nt) <= 0:
-        raise ValueError("pulse.time_nt must be > 0 for coupled transverse simulations")
-    if pulse.spatial_nx is None or int(pulse.spatial_nx) <= 0:
-        raise ValueError("pulse.spatial_nx must be > 0 for coupled transverse simulations")
-    if pulse.spatial_ny is None or int(pulse.spatial_ny) <= 0:
-        raise ValueError("pulse.spatial_ny must be > 0 for coupled transverse simulations")
+    if pulse.tensor_nt is None or int(pulse.tensor_nt) <= 0:
+        raise ValueError("pulse.tensor_nt must be > 0 for coupled tensor simulations")
+    if pulse.tensor_nx is None or int(pulse.tensor_nx) <= 0:
+        raise ValueError("pulse.tensor_nx must be > 0 for coupled tensor simulations")
+    if pulse.tensor_ny is None or int(pulse.tensor_ny) <= 0:
+        raise ValueError("pulse.tensor_ny must be > 0 for coupled tensor simulations")
 
-    nt = int(pulse.time_nt)
-    nx = int(pulse.spatial_nx)
-    ny = int(pulse.spatial_ny)
+    nt = int(pulse.tensor_nt)
+    nx = int(pulse.tensor_nx)
+    ny = int(pulse.tensor_ny)
     total = nt * nx * ny
     if len(pulse.samples) != total:
-        raise ValueError("len(pulse.samples) must equal pulse.time_nt * pulse.spatial_nx * pulse.spatial_ny")
+        raise ValueError("len(pulse.samples) must equal pulse.tensor_nt * pulse.tensor_nx * pulse.tensor_ny")
 
     xy = nx * ny
-    if pulse.spatial_frequency_grid is None:
-        raise ValueError("pulse.spatial_frequency_grid is required for coupled transverse simulations")
-    if len(pulse.spatial_frequency_grid) not in {xy, total}:
+    if pulse.spatial_frequency_grid is not None and len(pulse.spatial_frequency_grid) not in {xy, total}:
         raise ValueError(
-            "pulse.spatial_frequency_grid length must match pulse.spatial_nx*pulse.spatial_ny "
+            "pulse.spatial_frequency_grid length must match pulse.tensor_nx*pulse.tensor_ny "
             "(or full-volume length)"
         )
     if pulse.potential_grid is not None and len(pulse.potential_grid) not in {xy, total}:
         raise ValueError(
-            "pulse.potential_grid length must match pulse.spatial_nx*pulse.spatial_ny "
+            "pulse.potential_grid length must match pulse.tensor_nx*pulse.tensor_ny "
             "(or full-volume length)"
         )
 
@@ -733,8 +746,6 @@ def _resolve_operator_spec(
 ) -> tuple[str | None, Callable[..., object] | None, list[float], Mapping[str, float] | None]:
     if context == "linear":
         presets = _LINEAR_OPERATOR_PRESETS
-    elif context == "transverse":
-        presets = _TRANSVERSE_OPERATOR_PRESETS
     else:
         presets = _NONLINEAR_OPERATOR_PRESETS
 
@@ -838,12 +849,16 @@ def prepare_sim_config(
     error_tolerance: float,
     pulse_period: float,
     delta_time: float,
-    time_nt: int | None = None,
+    tensor_nt: int | None = None,
+    tensor_nx: int | None = None,
+    tensor_ny: int | None = None,
+    tensor_layout: int = NLO_TENSOR_LAYOUT_XYT_T_FAST,
     frequency_grid: Sequence[complex],
-    spatial_nx: int | None = None,
-    spatial_ny: int | None = None,
+    wt_axis: Sequence[complex] | None = None,
     delta_x: float = 1.0,
     delta_y: float = 1.0,
+    kx_axis: Sequence[complex] | None = None,
+    ky_axis: Sequence[complex] | None = None,
     spatial_frequency_grid: Sequence[complex] | None = None,
     potential_grid: Sequence[complex] | None = None,
     runtime: RuntimeOperators | None = None,
@@ -853,14 +868,26 @@ def prepare_sim_config(
     """
     if num_time_samples <= 0:
         raise ValueError("num_time_samples must be > 0")
-    if time_nt is not None and int(time_nt) > 0:
-        time_nt_int = int(time_nt)
-        if len(frequency_grid) not in {time_nt_int, num_time_samples}:
-            raise ValueError(
-                "frequency_grid length must match time_nt (or num_time_samples for full-volume grids)"
-            )
-    elif len(frequency_grid) != num_time_samples:
-        raise ValueError("frequency_grid length must match num_time_samples")
+
+    tensor_mode = tensor_nt is not None and int(tensor_nt) > 0
+    resolved_nt = int(num_time_samples)
+    resolved_nx = 1
+    resolved_ny = 1
+    if tensor_mode:
+        if tensor_nx is None or tensor_ny is None:
+            raise ValueError("tensor_nx and tensor_ny are required when tensor_nt is set")
+        resolved_nt = int(tensor_nt)
+        resolved_nx = int(tensor_nx)
+        resolved_ny = int(tensor_ny)
+        if resolved_nt <= 0 or resolved_nx <= 0 or resolved_ny <= 0:
+            raise ValueError("tensor_nt/tensor_nx/tensor_ny must be positive")
+        if (resolved_nt * resolved_nx * resolved_ny) != int(num_time_samples):
+            raise ValueError("tensor_nt * tensor_nx * tensor_ny must match num_time_samples")
+
+    if len(frequency_grid) not in {resolved_nt, num_time_samples}:
+        raise ValueError(
+            "frequency_grid length must match resolved nt (or num_time_samples for full-volume grids)"
+        )
 
     sim_cfg = NloSimulationConfig()
     physics_cfg = NloPhysicsConfig()
@@ -872,44 +899,85 @@ def prepare_sim_config(
     sim_cfg.propagation.min_step_size = float(min_step_size)
     sim_cfg.propagation.error_tolerance = float(error_tolerance)
 
-    sim_cfg.time.nt = int(time_nt) if time_nt is not None else 0
+    if tensor_mode:
+        sim_cfg.tensor.nt = resolved_nt
+        sim_cfg.tensor.nx = resolved_nx
+        sim_cfg.tensor.ny = resolved_ny
+        sim_cfg.tensor.layout = int(tensor_layout)
+    else:
+        sim_cfg.tensor.nt = 0
+        sim_cfg.tensor.nx = 0
+        sim_cfg.tensor.ny = 0
+        sim_cfg.tensor.layout = int(NLO_TENSOR_LAYOUT_XYT_T_FAST)
+
+    sim_cfg.time.nt = 0
     sim_cfg.time.pulse_period = float(pulse_period)
     sim_cfg.time.delta_time = float(delta_time)
+    sim_cfg.time.wt_axis = None
 
     freq_arr = make_complex_array(frequency_grid)
     keepalive.append(freq_arr)
     sim_cfg.frequency.frequency_grid = ctypes.cast(freq_arr, ctypes.POINTER(NloComplex))
 
-    nx = int(spatial_nx) if spatial_nx is not None else (1 if sim_cfg.time.nt > 0 else int(num_time_samples))
-    ny = int(spatial_ny) if spatial_ny is not None else 1
-    if sim_cfg.time.nt > 0:
-        if nx <= 0 or ny <= 0:
-            raise ValueError("spatial_nx and spatial_ny must be positive when time_nt is set")
-        if (sim_cfg.time.nt * nx * ny) != int(num_time_samples):
-            raise ValueError("time_nt * spatial_nx * spatial_ny must match num_time_samples")
-    sim_cfg.spatial.nx = nx
-    sim_cfg.spatial.ny = ny
+    if tensor_mode:
+        sim_cfg.spatial.nx = resolved_nx
+        sim_cfg.spatial.ny = resolved_ny
+    else:
+        sim_cfg.spatial.nx = 0
+        sim_cfg.spatial.ny = 0
     sim_cfg.spatial.delta_x = float(delta_x)
     sim_cfg.spatial.delta_y = float(delta_y)
+    sim_cfg.spatial.kx_axis = None
+    sim_cfg.spatial.ky_axis = None
 
-    if sim_cfg.time.nt > 0:
-        xy_points = nx * ny
-        if spatial_frequency_grid is not None and len(spatial_frequency_grid) not in {
-            xy_points,
-            num_time_samples,
-        }:
+    axis_nt = resolved_nt
+    if wt_axis is not None:
+        if len(wt_axis) != axis_nt:
+            raise ValueError("wt_axis length must match resolved nt")
+        wt_arr = make_complex_array(wt_axis)
+        keepalive.append(wt_arr)
+        sim_cfg.time.wt_axis = ctypes.cast(wt_arr, ctypes.POINTER(NloComplex))
+    if kx_axis is not None:
+        if len(kx_axis) != resolved_nx:
+            raise ValueError("kx_axis length must match resolved nx")
+        kx_arr = make_complex_array(kx_axis)
+        keepalive.append(kx_arr)
+        sim_cfg.spatial.kx_axis = ctypes.cast(kx_arr, ctypes.POINTER(NloComplex))
+    if ky_axis is not None:
+        if len(ky_axis) != resolved_ny:
+            raise ValueError("ky_axis length must match resolved ny")
+        ky_arr = make_complex_array(ky_axis)
+        keepalive.append(ky_arr)
+        sim_cfg.spatial.ky_axis = ctypes.cast(ky_arr, ctypes.POINTER(NloComplex))
+
+    resolved_potential_grid = potential_grid
+    if tensor_mode:
+        xy_points = resolved_nx * resolved_ny
+        if spatial_frequency_grid is not None and len(spatial_frequency_grid) not in {xy_points, num_time_samples}:
             raise ValueError(
-                "spatial_frequency_grid length must match spatial_nx*spatial_ny "
+                "spatial_frequency_grid length must match tensor_nx*tensor_ny "
                 "(or num_time_samples for full-volume grids)"
             )
-        if potential_grid is not None and len(potential_grid) not in {
-            xy_points,
-            num_time_samples,
-        }:
-            raise ValueError(
-                "potential_grid length must match spatial_nx*spatial_ny "
-                "(or num_time_samples for full-volume grids)"
-            )
+        if potential_grid is not None:
+            potential_len = len(potential_grid)
+            if potential_len == xy_points:
+                resolved_potential_grid = [
+                    complex(value)
+                    for value in potential_grid
+                    for _ in range(resolved_nt)
+                ]
+            elif potential_len == num_time_samples:
+                resolved_potential_grid = potential_grid
+            else:
+                raise ValueError(
+                    "potential_grid length must match num_time_samples "
+                    "(or tensor_nx*tensor_ny for static XY broadcast) when tensor mode is enabled"
+                )
+    else:
+        if spatial_frequency_grid is not None and len(spatial_frequency_grid) != num_time_samples:
+            raise ValueError("spatial_frequency_grid length must match num_time_samples for temporal runs")
+        if potential_grid is not None and len(potential_grid) != num_time_samples:
+            raise ValueError("potential_grid length must match num_time_samples for temporal runs")
 
     if spatial_frequency_grid is not None:
         spatial_arr = make_complex_array(spatial_frequency_grid)
@@ -920,8 +988,8 @@ def prepare_sim_config(
     else:
         sim_cfg.spatial.spatial_frequency_grid = None
 
-    if potential_grid is not None:
-        potential_arr = make_complex_array(potential_grid)
+    if resolved_potential_grid is not None:
+        potential_arr = make_complex_array(resolved_potential_grid)
         keepalive.append(potential_arr)
         sim_cfg.spatial.potential_grid = ctypes.cast(
             potential_arr, ctypes.POINTER(NloComplex)
@@ -956,14 +1024,12 @@ def prepare_sim_config(
             )
         if runtime.dispersion_expr and runtime.dispersion_fn is not None:
             raise ValueError("runtime.dispersion_expr and runtime.dispersion_fn are mutually exclusive")
-        if runtime.transverse_factor_expr and runtime.transverse_factor_fn is not None:
-            raise ValueError(
-                "runtime.transverse_factor_expr and runtime.transverse_factor_fn are mutually exclusive"
-            )
-        if runtime.transverse_expr and runtime.transverse_fn is not None:
-            raise ValueError("runtime.transverse_expr and runtime.transverse_fn are mutually exclusive")
         if runtime.nonlinear_expr and runtime.nonlinear_fn is not None:
             raise ValueError("runtime.nonlinear_expr and runtime.nonlinear_fn are mutually exclusive")
+
+        linear_factor_expr = runtime.linear_factor_expr
+        linear_expr = runtime.linear_expr
+        potential_expr = runtime.potential_expr
 
         dispersion_factor_expr = runtime.dispersion_factor_expr
         if runtime.dispersion_factor_fn is not None:
@@ -989,30 +1055,6 @@ def prepare_sim_config(
             constants.extend(translated.constants)
             dispersion_expr = shifted
 
-        transverse_factor_expr = runtime.transverse_factor_expr
-        if runtime.transverse_factor_fn is not None:
-            translated = translate_callable(
-                runtime.transverse_factor_fn,
-                RUNTIME_CONTEXT_DISPERSION_FACTOR,
-                constant_bindings=constant_bindings,
-                auto_capture=auto_capture,
-            )
-            shifted = _shift_constant_indices(translated.expression, len(constants))
-            constants.extend(translated.constants)
-            transverse_factor_expr = shifted
-
-        transverse_expr = runtime.transverse_expr
-        if runtime.transverse_fn is not None:
-            translated = translate_callable(
-                runtime.transverse_fn,
-                RUNTIME_CONTEXT_DISPERSION,
-                constant_bindings=constant_bindings,
-                auto_capture=auto_capture,
-            )
-            shifted = _shift_constant_indices(translated.expression, len(constants))
-            constants.extend(translated.constants)
-            transverse_expr = shifted
-
         nonlinear_expr = runtime.nonlinear_expr
         if runtime.nonlinear_fn is not None:
             translated = translate_callable(
@@ -1031,6 +1073,27 @@ def prepare_sim_config(
                 f"{NLO_RUNTIME_OPERATOR_CONSTANTS_MAX}"
             )
 
+        if linear_factor_expr:
+            linear_factor_bytes = linear_factor_expr.encode("utf-8")
+            keepalive.append(linear_factor_bytes)
+            physics_cfg.runtime.linear_factor_expr = ctypes.c_char_p(linear_factor_bytes)
+        else:
+            physics_cfg.runtime.linear_factor_expr = None
+
+        if linear_expr:
+            linear_bytes = linear_expr.encode("utf-8")
+            keepalive.append(linear_bytes)
+            physics_cfg.runtime.linear_expr = ctypes.c_char_p(linear_bytes)
+        else:
+            physics_cfg.runtime.linear_expr = None
+
+        if potential_expr:
+            potential_bytes = potential_expr.encode("utf-8")
+            keepalive.append(potential_bytes)
+            physics_cfg.runtime.potential_expr = ctypes.c_char_p(potential_bytes)
+        else:
+            physics_cfg.runtime.potential_expr = None
+
         if dispersion_factor_expr:
             disp_factor_bytes = dispersion_factor_expr.encode("utf-8")
             keepalive.append(disp_factor_bytes)
@@ -1045,20 +1108,6 @@ def prepare_sim_config(
         else:
             physics_cfg.runtime.dispersion_expr = None
 
-        if transverse_factor_expr:
-            trans_factor_bytes = transverse_factor_expr.encode("utf-8")
-            keepalive.append(trans_factor_bytes)
-            physics_cfg.runtime.transverse_factor_expr = ctypes.c_char_p(trans_factor_bytes)
-        else:
-            physics_cfg.runtime.transverse_factor_expr = None
-
-        if transverse_expr:
-            trans_bytes = transverse_expr.encode("utf-8")
-            keepalive.append(trans_bytes)
-            physics_cfg.runtime.transverse_expr = ctypes.c_char_p(trans_bytes)
-        else:
-            physics_cfg.runtime.transverse_expr = None
-
         if nonlinear_expr:
             nonlin_bytes = nonlinear_expr.encode("utf-8")
             keepalive.append(nonlin_bytes)
@@ -1070,10 +1119,11 @@ def prepare_sim_config(
         for i, constant in enumerate(constants):
             physics_cfg.runtime.constants[i] = float(constant)
     else:
+        physics_cfg.runtime.linear_factor_expr = None
+        physics_cfg.runtime.linear_expr = None
+        physics_cfg.runtime.potential_expr = None
         physics_cfg.runtime.dispersion_factor_expr = None
         physics_cfg.runtime.dispersion_expr = None
-        physics_cfg.runtime.transverse_factor_expr = None
-        physics_cfg.runtime.transverse_expr = None
         physics_cfg.runtime.nonlinear_expr = None
         physics_cfg.runtime.nonlinear_model = int(NLO_NONLINEAR_MODEL_EXPR)
         physics_cfg.runtime.nonlinear_gamma = 0.0
@@ -1330,7 +1380,11 @@ class NLolib:
         if len(args) >= 2:
             nonlinear_operator = args[1]
 
-        transverse_operator = kwargs.pop("transverse_operator", "none")
+        if "transverse_operator" in kwargs:
+            raise TypeError(
+                "transverse_operator has been removed; encode diffraction in linear_operator "
+                "with tensor descriptors (tensor_nt/tensor_nx/tensor_ny)"
+            )
         propagation_distance = kwargs.pop("propagation_distance", None)
         output = kwargs.pop("output", "dense")
         preset = kwargs.pop("preset", "balanced")
@@ -1367,27 +1421,12 @@ class NLolib:
         linear_expr, linear_fn, linear_constants, linear_bindings = _resolve_operator_spec(
             "linear", linear_operator, 0
         )
-        transverse_requested = not (
-            isinstance(transverse_operator, str) and transverse_operator.strip().lower() == "none"
-        )
-        if transverse_requested:
-            _validate_coupled_pulse_spec(pulse_spec)
-            transverse_expr, transverse_fn, transverse_constants, transverse_bindings = _resolve_operator_spec(
-                "transverse", transverse_operator, len(linear_constants)
-            )
-            if transverse_fn is not None:
-                raise ValueError("transverse callable operators are not supported in the high-level facade")
-        else:
-            transverse_expr = None
-            transverse_fn = None
-            transverse_constants = []
-            transverse_bindings = None
         nonlinear_expr, nonlinear_fn, nonlinear_constants, nonlinear_bindings = _resolve_operator_spec(
-            "nonlinear", nonlinear_operator, len(linear_constants) + len(transverse_constants)
+            "nonlinear", nonlinear_operator, len(linear_constants)
         )
 
         binding_map: dict[str, float] = {}
-        for source in (linear_bindings, transverse_bindings, nonlinear_bindings):
+        for source in (linear_bindings, nonlinear_bindings):
             if source is None:
                 continue
             for key, value in source.items():
@@ -1397,9 +1436,16 @@ class NLolib:
                 binding_map[key] = value
 
         num_time_samples = len(pulse_spec.samples)
+        tensor_mode = (
+            pulse_spec.tensor_nt is not None and
+            pulse_spec.tensor_nx is not None and
+            pulse_spec.tensor_ny is not None
+        )
+        if tensor_mode:
+            _validate_coupled_pulse_spec(pulse_spec)
         temporal_samples = (
-            int(pulse_spec.time_nt)
-            if pulse_spec.time_nt is not None and int(pulse_spec.time_nt) > 0
+            int(pulse_spec.tensor_nt)
+            if pulse_spec.tensor_nt is not None and int(pulse_spec.tensor_nt) > 0
             else num_time_samples
         )
         pulse_period = (
@@ -1415,13 +1461,10 @@ class NLolib:
 
         runtime = RuntimeOperators(
             dispersion_factor_expr=linear_expr,
-            transverse_factor_expr=transverse_expr,
-            transverse_expr=("exp(h*D)" if transverse_requested else None),
             nonlinear_expr=nonlinear_expr,
             dispersion_factor_fn=linear_fn,
-            transverse_factor_fn=transverse_fn,
             nonlinear_fn=nonlinear_fn,
-            constants=[*linear_constants, *transverse_constants, *nonlinear_constants],
+            constants=[*linear_constants, *nonlinear_constants],
             constant_bindings=binding_map if binding_map else None,
             auto_capture_constants=(not binding_map),
         )
@@ -1435,10 +1478,11 @@ class NLolib:
             error_tolerance=float(profile["error_tolerance"]),
             pulse_period=float(pulse_period),
             delta_time=float(pulse_spec.delta_time),
-            time_nt=pulse_spec.time_nt,
+            tensor_nt=pulse_spec.tensor_nt,
+            tensor_nx=pulse_spec.tensor_nx,
+            tensor_ny=pulse_spec.tensor_ny,
+            tensor_layout=int(pulse_spec.tensor_layout),
             frequency_grid=frequency_grid,
-            spatial_nx=pulse_spec.spatial_nx,
-            spatial_ny=pulse_spec.spatial_ny,
             delta_x=float(pulse_spec.delta_x),
             delta_y=float(pulse_spec.delta_y),
             spatial_frequency_grid=pulse_spec.spatial_frequency_grid,
@@ -1466,7 +1510,9 @@ class NLolib:
             meta_overrides={
                 "preset": preset,
                 "output": output,
-                "coupled": bool(transverse_requested),
+                "coupled": bool(
+                    tensor_mode and ((int(pulse_spec.tensor_nx) > 1) or (int(pulse_spec.tensor_ny) > 1))
+                ),
             },
         )
 
@@ -1674,7 +1720,9 @@ __all__ = [
     "NLO_PROPAGATE_OUTPUT_FINAL_ONLY",
     "NLO_NONLINEAR_MODEL_EXPR",
     "NLO_NONLINEAR_MODEL_KERR_RAMAN",
+    "NLO_TENSOR_LAYOUT_XYT_T_FAST",
     "NloComplex",
+    "NloTensor3dDesc",
     "NloSimulationConfig",
     "NloPhysicsConfig",
     "NloExecutionOptions",

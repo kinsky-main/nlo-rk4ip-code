@@ -475,7 +475,12 @@ static nlo_vec_status nlo_vk_create_kernels(nlo_vector_backend* backend)
         NLO_VK_SHADER_COMPLEX_RELATIVE_ERROR_REDUCE_PATH,
         NLO_VK_SHADER_REAL_MAX_REDUCE_PATH,
         NLO_VK_SHADER_COMPLEX_WEIGHTED_RMS_REDUCE_PATH,
-        NLO_VK_SHADER_PAIR_SUM_REDUCE_PATH
+        NLO_VK_SHADER_PAIR_SUM_REDUCE_PATH,
+        NLO_VK_SHADER_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA_PATH,
+        NLO_VK_SHADER_COMPLEX_AXIS_CENTERED_FROM_DELTA_PATH,
+        NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_T_PATH,
+        NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_Y_PATH,
+        NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_X_PATH
     };
 
     for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
@@ -1988,6 +1993,112 @@ nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
         rtol = 1e-6;
     }
     return nlo_vk_dispatch_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
+}
+
+nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+)
+{
+    if (!(delta > 0.0)) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA,
+                                  dst,
+                                  NULL,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  delta,
+                                  0.0);
+}
+
+nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    return nlo_vk_dispatch_kernel(backend,
+                                  NLO_VK_KERNEL_COMPLEX_AXIS_CENTERED_FROM_DELTA,
+                                  dst,
+                                  NULL,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  delta,
+                                  0.0);
+}
+
+nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* axis,
+    size_t nt,
+    size_t ny,
+    nlo_vec_mesh_axis axis_kind
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_validate_buffer(backend, axis, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    if (nt == 0u || ny == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if ((dst->length % nt) != 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    const size_t xy_points = dst->length / nt;
+    if ((xy_points % ny) != 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    const size_t nx = xy_points / ny;
+    if (nx == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    size_t expected_axis_length = 0u;
+    nlo_vk_kernel_id kernel_id = NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_T;
+    if (axis_kind == NLO_VEC_MESH_AXIS_T) {
+        expected_axis_length = nt;
+        kernel_id = NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_T;
+    } else if (axis_kind == NLO_VEC_MESH_AXIS_Y) {
+        expected_axis_length = ny;
+        kernel_id = NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_Y;
+    } else if (axis_kind == NLO_VEC_MESH_AXIS_X) {
+        expected_axis_length = nx;
+        kernel_id = NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_X;
+    } else {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (axis->length != expected_axis_length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    return nlo_vk_dispatch_kernel(backend,
+                                  kernel_id,
+                                  dst,
+                                  axis,
+                                  sizeof(nlo_complex),
+                                  dst->length,
+                                  (double)nt,
+                                  (double)ny);
 }
 
 

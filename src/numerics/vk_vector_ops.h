@@ -274,3 +274,51 @@ nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
     double* out_error
 );
 
+/**
+ * @brief Build one unshifted angular-frequency axis from sample spacing.
+ *
+ * @param backend Backend handle.
+ * @param dst Destination axis vector.
+ * @param delta Sample spacing (> 0).
+ * @return nlo_vec_status Operation status.
+ */
+nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+);
+
+/**
+ * @brief Build one centered coordinate axis from sample spacing.
+ *
+ * @param backend Backend handle.
+ * @param dst Destination axis vector.
+ * @param delta Sample spacing.
+ * @return nlo_vec_status Operation status.
+ */
+nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+);
+
+/**
+ * @brief Expand one axis vector into a full 3D mesh for t-fast layout.
+ *
+ * @param backend Backend handle.
+ * @param dst Destination full-volume vector.
+ * @param axis Source 1D axis vector.
+ * @param nt Temporal sample count.
+ * @param ny Y sample count.
+ * @param axis_kind Axis selector.
+ * @return nlo_vec_status Operation status.
+ */
+nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* axis,
+    size_t nt,
+    size_t ny,
+    nlo_vec_mesh_axis axis_kind
+);
+

@@ -133,6 +133,10 @@ static void nlo_compute_config_hash(const sim_config* config, char out_hash[17])
         hash = nlo_fnv1a_step(hash,
                               &config->propagation.propagation_distance,
                               sizeof(config->propagation.propagation_distance));
+        hash = nlo_fnv1a_step(hash, &config->tensor.nt, sizeof(config->tensor.nt));
+        hash = nlo_fnv1a_step(hash, &config->tensor.nx, sizeof(config->tensor.nx));
+        hash = nlo_fnv1a_step(hash, &config->tensor.ny, sizeof(config->tensor.ny));
+        hash = nlo_fnv1a_step(hash, &config->tensor.layout, sizeof(config->tensor.layout));
         hash = nlo_fnv1a_step(hash, &config->time.nt, sizeof(config->time.nt));
         hash = nlo_fnv1a_step(hash, &config->time.pulse_period, sizeof(config->time.pulse_period));
         hash = nlo_fnv1a_step(hash, &config->time.delta_time, sizeof(config->time.delta_time));
@@ -142,10 +146,11 @@ static void nlo_compute_config_hash(const sim_config* config, char out_hash[17])
         hash = nlo_fnv1a_step(hash, &config->spatial.delta_y, sizeof(config->spatial.delta_y));
         hash = nlo_fnv1a_step(hash, &config->runtime.num_constants, sizeof(config->runtime.num_constants));
         hash = nlo_fnv1a_step(hash, config->runtime.constants, sizeof(config->runtime.constants));
+        nlo_hash_cstr(&hash, config->runtime.linear_factor_expr);
+        nlo_hash_cstr(&hash, config->runtime.linear_expr);
+        nlo_hash_cstr(&hash, config->runtime.potential_expr);
         nlo_hash_cstr(&hash, config->runtime.dispersion_factor_expr);
         nlo_hash_cstr(&hash, config->runtime.dispersion_expr);
-        nlo_hash_cstr(&hash, config->runtime.transverse_factor_expr);
-        nlo_hash_cstr(&hash, config->runtime.transverse_expr);
         nlo_hash_cstr(&hash, config->runtime.nonlinear_expr);
     }
     nlo_hash_hex16(hash, out_hash);
@@ -387,10 +392,11 @@ static int nlo_store_initialize_schema(sqlite3* db)
         "  tolerance REAL NOT NULL,"
         "  pulse_period REAL NOT NULL,"
         "  delta_time REAL NOT NULL,"
+        "  linear_factor_expr TEXT,"
+        "  linear_expr TEXT,"
+        "  potential_expr TEXT,"
         "  disp_factor_expr TEXT,"
         "  disp_expr TEXT,"
-        "  trans_factor_expr TEXT,"
-        "  trans_expr TEXT,"
         "  nonlinear_expr TEXT,"
         "  constants_blob BLOB,"
         "  created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
@@ -430,7 +436,57 @@ static int nlo_store_initialize_schema(sqlite3* db)
         "  FOREIGN KEY(run_id) REFERENCES io_runs(run_id) ON DELETE CASCADE"
         ");";
 
-    return nlo_sqlite_exec(db, schema_sql);
+    if (nlo_sqlite_exec(db, schema_sql) != 0) {
+        return -1;
+    }
+
+    sqlite3_stmt* pragma_stmt = NULL;
+    if (nlo_prepare(db, "PRAGMA table_info(io_sim_config);", &pragma_stmt) != 0) {
+        return -1;
+    }
+
+    int has_linear_factor_expr = 0;
+    int has_linear_expr = 0;
+    int has_potential_expr = 0;
+    for (;;) {
+        const int rc = sqlite3_step(pragma_stmt);
+        if (rc == SQLITE_DONE) {
+            break;
+        }
+        if (rc != SQLITE_ROW) {
+            sqlite3_finalize(pragma_stmt);
+            return -1;
+        }
+
+        const unsigned char* raw_name = sqlite3_column_text(pragma_stmt, 1);
+        const char* col_name = (const char*)raw_name;
+        if (col_name == NULL) {
+            continue;
+        }
+        if (strcmp(col_name, "linear_factor_expr") == 0) {
+            has_linear_factor_expr = 1;
+        } else if (strcmp(col_name, "linear_expr") == 0) {
+            has_linear_expr = 1;
+        } else if (strcmp(col_name, "potential_expr") == 0) {
+            has_potential_expr = 1;
+        }
+    }
+    sqlite3_finalize(pragma_stmt);
+
+    if (!has_linear_factor_expr &&
+        nlo_sqlite_exec(db, "ALTER TABLE io_sim_config ADD COLUMN linear_factor_expr TEXT;") != 0) {
+        return -1;
+    }
+    if (!has_linear_expr &&
+        nlo_sqlite_exec(db, "ALTER TABLE io_sim_config ADD COLUMN linear_expr TEXT;") != 0) {
+        return -1;
+    }
+    if (!has_potential_expr &&
+        nlo_sqlite_exec(db, "ALTER TABLE io_sim_config ADD COLUMN potential_expr TEXT;") != 0) {
+        return -1;
+    }
+
+    return 0;
 }
 
 static int nlo_store_insert_metadata(
@@ -479,8 +535,9 @@ static int nlo_store_insert_metadata(
     if (nlo_prepare(store->db,
                     "INSERT INTO io_sim_config("
                     "config_hash, z_end, h_start, h_max, h_min, tolerance, pulse_period, delta_time, "
-                    "disp_factor_expr, disp_expr, trans_factor_expr, trans_expr, nonlinear_expr, constants_blob"
-                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "linear_factor_expr, linear_expr, potential_expr, "
+                    "disp_factor_expr, disp_expr, nonlinear_expr, constants_blob"
+                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                     "ON CONFLICT(config_hash) DO NOTHING;",
                     &stmt) != 0) {
         return -1;
@@ -493,13 +550,14 @@ static int nlo_store_insert_metadata(
         sqlite3_bind_double(stmt, 6, config->propagation.error_tolerance) != SQLITE_OK ||
         sqlite3_bind_double(stmt, 7, config->time.pulse_period) != SQLITE_OK ||
         sqlite3_bind_double(stmt, 8, config->time.delta_time) != SQLITE_OK ||
-        nlo_bind_text(stmt, 9, config->runtime.dispersion_factor_expr) != 0 ||
-        nlo_bind_text(stmt, 10, config->runtime.dispersion_expr) != 0 ||
-        nlo_bind_text(stmt, 11, config->runtime.transverse_factor_expr) != 0 ||
-        nlo_bind_text(stmt, 12, config->runtime.transverse_expr) != 0 ||
-        nlo_bind_text(stmt, 13, config->runtime.nonlinear_expr) != 0 ||
+        nlo_bind_text(stmt, 9, config->runtime.linear_factor_expr) != 0 ||
+        nlo_bind_text(stmt, 10, config->runtime.linear_expr) != 0 ||
+        nlo_bind_text(stmt, 11, config->runtime.potential_expr) != 0 ||
+        nlo_bind_text(stmt, 12, config->runtime.dispersion_factor_expr) != 0 ||
+        nlo_bind_text(stmt, 13, config->runtime.dispersion_expr) != 0 ||
+        nlo_bind_text(stmt, 14, config->runtime.nonlinear_expr) != 0 ||
         sqlite3_bind_blob(stmt,
-                          14,
+                          15,
                           config->runtime.constants,
                           (int)sizeof(config->runtime.constants),
                           SQLITE_TRANSIENT) != SQLITE_OK ||
@@ -709,6 +767,120 @@ nlo_snapshot_store_status nlo_snapshot_store_flush(nlo_snapshot_store* store)
     return status;
 }
 
+nlo_snapshot_store_status nlo_snapshot_store_read_all_records(
+    nlo_snapshot_store* store,
+    nlo_complex* out_records,
+    size_t num_recorded_samples,
+    size_t num_time_samples
+)
+{
+    if (store == NULL ||
+        out_records == NULL ||
+        num_recorded_samples == 0u ||
+        num_time_samples != store->num_time_samples ||
+        store->db == NULL) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+
+    const nlo_snapshot_store_status flush_status = nlo_snapshot_store_flush(store);
+    if (flush_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+
+    size_t total_elements = 0u;
+    if (nlo_checked_mul_size_t(num_recorded_samples, num_time_samples, &total_elements) != 0) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    memset(out_records, 0, total_elements * sizeof(nlo_complex));
+
+    unsigned char* seen_records = (unsigned char*)calloc(num_recorded_samples, sizeof(unsigned char));
+    if (seen_records == NULL) {
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+
+    sqlite3_stmt* stmt = NULL;
+    if (nlo_prepare(store->db,
+                    "SELECT record_start, record_count, payload "
+                    "FROM io_record_chunks "
+                    "WHERE run_id=? "
+                    "ORDER BY chunk_index ASC;",
+                    &stmt) != 0 ||
+        stmt == NULL) {
+        free(seen_records);
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    if (nlo_bind_text(stmt, 1, store->result.run_id) != 0) {
+        sqlite3_finalize(stmt);
+        free(seen_records);
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+
+    size_t copied_records = 0u;
+    int rc = SQLITE_OK;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const sqlite3_int64 record_start_i64 = sqlite3_column_int64(stmt, 0);
+        const sqlite3_int64 record_count_i64 = sqlite3_column_int64(stmt, 1);
+        const void* payload = sqlite3_column_blob(stmt, 2);
+        const int payload_bytes = sqlite3_column_bytes(stmt, 2);
+
+        if (record_start_i64 < 0 || record_count_i64 <= 0 || payload == NULL || payload_bytes <= 0) {
+            sqlite3_finalize(stmt);
+            free(seen_records);
+            return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+        }
+
+        const size_t record_start = (size_t)record_start_i64;
+        const size_t record_count = (size_t)record_count_i64;
+        if (record_start >= num_recorded_samples ||
+            record_count > (num_recorded_samples - record_start)) {
+            sqlite3_finalize(stmt);
+            free(seen_records);
+            return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+        }
+
+        size_t expected_payload_bytes = 0u;
+        if (nlo_checked_mul_size_t(record_count, num_time_samples, &expected_payload_bytes) != 0 ||
+            nlo_checked_mul_size_t(expected_payload_bytes,
+                                   sizeof(nlo_complex),
+                                   &expected_payload_bytes) != 0 ||
+            expected_payload_bytes != (size_t)payload_bytes) {
+            sqlite3_finalize(stmt);
+            free(seen_records);
+            return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+        }
+
+        const size_t dst_offset = record_start * num_time_samples;
+        memcpy(out_records + dst_offset, payload, expected_payload_bytes);
+
+        for (size_t i = 0u; i < record_count; ++i) {
+            const size_t idx = record_start + i;
+            if (seen_records[idx] != 0u) {
+                sqlite3_finalize(stmt);
+                free(seen_records);
+                return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+            }
+            seen_records[idx] = 1u;
+            copied_records += 1u;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        free(seen_records);
+        return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+    }
+
+    if (copied_records != num_recorded_samples) {
+        const nlo_snapshot_store_status status =
+            store->result.truncated ? NLO_SNAPSHOT_STORE_STATUS_SOFT_LIMIT : NLO_SNAPSHOT_STORE_STATUS_ERROR;
+        free(seen_records);
+        return status;
+    }
+
+    free(seen_records);
+    return flush_status;
+}
+
 void nlo_snapshot_store_get_result(const nlo_snapshot_store* store, nlo_storage_result* out_result)
 {
     if (out_result == NULL) {
@@ -807,6 +979,20 @@ nlo_snapshot_store_status nlo_snapshot_store_write_final_output_field(
 nlo_snapshot_store_status nlo_snapshot_store_flush(nlo_snapshot_store* store)
 {
     (void)store;
+    return NLO_SNAPSHOT_STORE_STATUS_ERROR;
+}
+
+nlo_snapshot_store_status nlo_snapshot_store_read_all_records(
+    nlo_snapshot_store* store,
+    nlo_complex* out_records,
+    size_t num_recorded_samples,
+    size_t num_time_samples
+)
+{
+    (void)store;
+    (void)out_records;
+    (void)num_recorded_samples;
+    (void)num_time_samples;
     return NLO_SNAPSHOT_STORE_STATUS_ERROR;
 }
 

@@ -134,7 +134,7 @@ Multi-config generators use `--config <type>` during build/test.
   - `raman_tau1`, `raman_tau2` default Raman kernel shape constants (`0.0122`, `0.0320`).
   - `raman_response_time` optional custom time-domain Raman response (`num_time_samples` complex values); when omitted, the normalized default response is generated from `tau1/tau2`.
   - `shock_omega0` enables self-steepening when `> 0` (set `0` to disable).
-- Current limitation: `NLO_NONLINEAR_MODEL_KERR_RAMAN` is supported for temporal-only runs (not coupled transverse `time_nt*nx*ny` grids).
+- Current limitation: `NLO_NONLINEAR_MODEL_KERR_RAMAN` is supported for temporal-only runs (not tensor-coupled `tensor_nt*tensor_nx*tensor_ny` grids).
 
 Common migration examples:
 

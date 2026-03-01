@@ -3,6 +3,7 @@ import math
 from nlolib_ctypes import (
     NLO_VECTOR_BACKEND_AUTO,
     NLO_VECTOR_BACKEND_CPU,
+    NLO_TENSOR_LAYOUT_XYT_T_FAST,
     NLolib,
     OperatorSpec,
     PulseSpec,
@@ -115,17 +116,18 @@ def main():
         error_tolerance=1e-6,
         pulse_period=1.0,
         delta_time=0.001,
-        frequency_grid=[0j] * nxy,
-        spatial_nx=nx,
-        spatial_ny=ny,
-        spatial_frequency_grid=[0j] * nxy,
+        tensor_nt=1,
+        tensor_nx=nx,
+        tensor_ny=ny,
+        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
+        frequency_grid=[0j],
         potential_grid=[1 + 0j] * nxy,
         runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
     )
     out_2d = api.propagate(cfg_2d, [0j] * nxy, 1, cpu_opts).records
     assert len(out_2d) == 1
     assert len(out_2d[0]) == nxy
-    print("test_python_api_smoke: flattened 2D propagation returned expected shape.")
+    print("test_python_api_smoke: tensor 2D propagation returned expected shape.")
 
     nt = 4
     nx3 = 4
@@ -140,12 +142,12 @@ def main():
         error_tolerance=1e-6,
         pulse_period=1.0,
         delta_time=0.001,
-        time_nt=nt,
+        tensor_nt=nt,
+        tensor_nx=nx3,
+        tensor_ny=ny3,
+        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[0j] * nt,
-        spatial_nx=nx3,
-        spatial_ny=ny3,
-        spatial_frequency_grid=[0j] * (nx3 * ny3),
-        potential_grid=[0j] * (nx3 * ny3),
+        potential_grid=[0j] * n3,
         runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0, 0.0]),
     )
     out_3d = api.propagate(cfg_3d, [0j] * n3, 1, cpu_opts).records
@@ -153,26 +155,26 @@ def main():
     assert len(out_3d[0]) == n3
     print("test_python_api_smoke: explicit 3+1D layout propagation returned expected shape.")
 
-    bad_cfg_2d = prepare_sim_config(
-        nxy,
-        propagation_distance=0.0,
-        starting_step_size=0.01,
-        max_step_size=0.1,
-        min_step_size=0.001,
-        error_tolerance=1e-6,
-        pulse_period=1.0,
-        delta_time=0.001,
-        frequency_grid=[0j] * nxy,
-        spatial_nx=nx + 1,
-        spatial_ny=ny,
-        runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
-    )
     try:
-        api.propagate(bad_cfg_2d, [0j] * nxy, 1, cpu_opts)
-        raise AssertionError("expected invalid flattened shape to fail")
-    except RuntimeError as exc:
-        assert "status=1" in str(exc)
-    print("test_python_api_smoke: invalid flattened XY shape rejected as expected.")
+        _ = prepare_sim_config(
+            nxy,
+            propagation_distance=0.0,
+            starting_step_size=0.01,
+            max_step_size=0.1,
+            min_step_size=0.001,
+            error_tolerance=1e-6,
+            pulse_period=1.0,
+            delta_time=0.001,
+            tensor_nt=2,
+            tensor_nx=nx,
+            tensor_ny=ny,
+            frequency_grid=[0j, 0j],
+            runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
+        )
+        raise AssertionError("expected inconsistent tensor shape to fail")
+    except ValueError as exc:
+        assert "tensor_nt * tensor_nx * tensor_ny must match num_time_samples" in str(exc)
+    print("test_python_api_smoke: inconsistent tensor shape rejected as expected.")
 
     pulse = PulseSpec(
         samples=input_field,
@@ -212,18 +214,17 @@ def main():
         samples=[0j] * n_c,
         delta_time=0.001,
         pulse_period=1.0,
-        time_nt=nt_c,
+        tensor_nt=nt_c,
+        tensor_nx=nx_c,
+        tensor_ny=ny_c,
+        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[0j] * nt_c,
-        spatial_nx=nx_c,
-        spatial_ny=ny_c,
-        spatial_frequency_grid=[0j] * (nx_c * ny_c),
-        potential_grid=[0j] * (nx_c * ny_c),
+        potential_grid=[0j] * n_c,
     )
     coupled_result = api.propagate(
         pulse_coupled,
-        OperatorSpec(expr="i*beta2*w*w-loss", params={"beta2": 0.0, "loss": 0.0}),
+        OperatorSpec(expr="i*(beta2*wt*wt + beta_t*(kx*kx + ky*ky))", params={"beta2": 0.0, "beta_t": 0.0}),
         OperatorSpec(expr="i*A*(gamma*I + V)", params={"gamma": 0.0}),
-        transverse_operator=OperatorSpec(expr="i*beta_t*w", params={"beta_t": 0.0}),
         propagation_distance=0.01,
         records=2,
         exec_options=cpu_opts,
@@ -231,7 +232,22 @@ def main():
     assert len(coupled_result.records) == 2
     assert len(coupled_result.records[0]) == n_c
     assert coupled_result.meta["coupled"] is True
-    print("test_python_api_smoke: coupled transverse propagate returned expected shape.")
+    print("test_python_api_smoke: coupled tensor propagate returned expected shape.")
+
+    try:
+        api.propagate(
+            pulse,
+            "gvd",
+            "kerr",
+            transverse_operator=OperatorSpec(expr="i*beta_t*w", params={"beta_t": 0.0}),
+            propagation_distance=0.01,
+            records=2,
+            exec_options=cpu_opts,
+        )
+        raise AssertionError("expected removed transverse_operator kwarg to fail")
+    except TypeError as exc:
+        assert "transverse_operator has been removed" in str(exc)
+    print("test_python_api_smoke: removed transverse_operator kwarg rejected as expected.")
 
     try:
         api.propagate(

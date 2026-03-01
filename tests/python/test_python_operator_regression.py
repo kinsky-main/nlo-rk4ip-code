@@ -297,14 +297,13 @@ def test_extended_runtime_operators_execute(api, opts):
     assert len(records[0]) == n
 
 
-def test_transverse_runtime_callable_matches_string(api, opts):
+def test_tensor_linear_factor_alias_matches(api, opts):
     nt = 4
     nx = 6
     ny = 4
     n = nt * nx * ny
     coef = -0.015
     input_field = _random_input_field(n, seed=91)
-    k2 = [complex(float(i % (nx * ny)), 0.0) for i in range(nx * ny)]
 
     common = dict(
         propagation_distance=0.01,
@@ -314,41 +313,38 @@ def test_transverse_runtime_callable_matches_string(api, opts):
         error_tolerance=1e-7,
         pulse_period=float(nt) * 0.02,
         delta_time=0.02,
-        time_nt=nt,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
         frequency_grid=[0j] * nt,
-        spatial_nx=nx,
-        spatial_ny=ny,
-        spatial_frequency_grid=k2,
-        potential_grid=[0j] * (nx * ny),
+        potential_grid=[0j] * n,
     )
 
-    string_cfg = prepare_sim_config(
+    explicit_tensor_cfg = prepare_sim_config(
         n,
         runtime=RuntimeOperators(
-            dispersion_factor_expr="0",
-            transverse_factor_expr="i*c3*w",
-            transverse_expr="exp(h*D)",
+            linear_factor_expr="i*c0*(kx*kx + ky*ky)",
+            linear_expr="exp(h*D)",
             nonlinear_expr="0",
-            constants=[0.0, 0.0, 0.0, coef],
+            constants=[coef, 0.0, 0.0, 0.0],
         ),
         **common,
     )
-    callable_cfg = prepare_sim_config(
+    alias_cfg = prepare_sim_config(
         n,
         runtime=RuntimeOperators(
-            dispersion_factor_expr="0",
-            transverse_factor_fn=lambda A, w: (1j * coef) * w,  # noqa: E731
-            transverse_fn=lambda A, D, h: cmath.exp(h * D),  # noqa: E731
+            dispersion_factor_expr="i*c0*(kx*kx + ky*ky)",
+            dispersion_expr="exp(h*D)",
             nonlinear_expr="0",
-            constants=[0.0, 0.0, 0.0, 0.0],
+            constants=[coef, 0.0, 0.0, 0.0],
         ),
         **common,
     )
 
-    string_final = api.propagate(string_cfg, input_field, 2, opts).records[1]
-    callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
-    err = _max_abs_diff(string_final, callable_final)
-    assert err <= 2e-8, f"transverse callable mismatch: err={err}"
+    explicit_final = api.propagate(explicit_tensor_cfg, input_field, 2, opts).records[1]
+    alias_final = api.propagate(alias_cfg, input_field, 2, opts).records[1]
+    err = _max_abs_diff(explicit_final, alias_final)
+    assert err <= 2e-8, f"tensor linear factor alias mismatch: err={err}"
 
 
 def test_beta_sum_callable_matches_string(api, opts):
@@ -396,58 +392,59 @@ def test_beta_sum_callable_matches_string(api, opts):
     assert err <= 2e-6, f"beta-sum callable mismatch: err={err}"
 
 
-def test_diffraction_callable_matches_string(api, opts):
-    nt = 4
-    nx = 6
-    ny = 4
+def test_tensor_diffraction_matches_fft_reference(api, opts):
+    nt = 1
+    nx = 20
+    ny = 18
     n = nt * nx * ny
     beta_t = -0.018
     input_field = _random_input_field(n, seed=101)
-    k2 = [complex(float((i % (nx * ny)) + 1), 0.0) for i in range(nx * ny)]
 
-    common = dict(
+    explicit_cfg = prepare_sim_config(
+        n,
         propagation_distance=0.01,
         starting_step_size=1e-3,
         max_step_size=2e-3,
         min_step_size=1e-5,
         error_tolerance=1e-7,
-        pulse_period=float(nt) * 0.02,
-        delta_time=0.02,
-        time_nt=nt,
+        pulse_period=1.0,
+        delta_time=1.0,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
         frequency_grid=[0j] * nt,
-        spatial_nx=nx,
-        spatial_ny=ny,
-        spatial_frequency_grid=k2,
-        potential_grid=[0j] * (nx * ny),
+        runtime=RuntimeOperators(
+            linear_factor_expr="i*c0*(kx*kx + ky*ky)",
+            linear_expr="exp(h*D)",
+            nonlinear_expr="0",
+            constants=[beta_t, 0.0, 0.0, 0.0],
+        ),
+    )
+    split_cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.01,
+        starting_step_size=1e-3,
+        max_step_size=2e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=1.0,
+        delta_time=1.0,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
+        frequency_grid=[0j] * nt,
+        runtime=RuntimeOperators(
+            linear_factor_expr="i*(c0*kx*kx + c1*ky*ky)",
+            linear_expr="exp(h*D)",
+            nonlinear_expr="0",
+            constants=[beta_t, beta_t, 0.0, 0.0],
+        ),
     )
 
-    string_cfg = prepare_sim_config(
-        n,
-        runtime=RuntimeOperators(
-            dispersion_factor_expr="0",
-            transverse_factor_expr="i*c3*w",
-            transverse_expr="exp(h*D)",
-            nonlinear_expr="0",
-            constants=[0.0, 0.0, 0.0, beta_t],
-        ),
-        **common,
-    )
-    callable_cfg = prepare_sim_config(
-        n,
-        runtime=RuntimeOperators(
-            dispersion_factor_expr="0",
-            transverse_factor_fn=lambda A, w: (1j * beta_t) * w,  # noqa: E731
-            transverse_fn=lambda A, D, h: cmath.exp(h * D),  # noqa: E731
-            nonlinear_expr="0",
-            constants=[0.0, 0.0, 0.0, 0.0],
-        ),
-        **common,
-    )
-
-    string_final = api.propagate(string_cfg, input_field, 2, opts).records[1]
-    callable_final = api.propagate(callable_cfg, input_field, 2, opts).records[1]
-    err = _max_abs_diff(string_final, callable_final)
-    assert err <= 2e-8, f"diffraction callable mismatch: err={err}"
+    explicit_final = api.propagate(explicit_cfg, input_field, 2, opts).records[1]
+    split_final = api.propagate(split_cfg, input_field, 2, opts).records[1]
+    rel = _relative_l2_error(explicit_final, split_final)
+    assert rel <= 2e-8, f"tensor diffraction expression mismatch: rel={rel}"
 
 
 def test_raman_like_nonlinear_callable_matches_string(api, opts):
@@ -457,10 +454,9 @@ def test_raman_like_nonlinear_callable_matches_string(api, opts):
     n = nt * nx * ny
     gamma = 0.015
     f_r = 0.18
-    beta_t = -0.01
     input_field = _random_input_field(n, seed=131)
-    k2 = [complex(float((i % (nx * ny)) + 1), 0.0) for i in range(nx * ny)]
-    potential = [complex(0.02 * float(i + 1), 0.0) for i in range(nx * ny)]
+    potential_xy = [complex(0.02 * float(i + 1), 0.0) for i in range(nx * ny)]
+    potential = potential_xy * nt
 
     common = dict(
         propagation_distance=0.008,
@@ -470,31 +466,28 @@ def test_raman_like_nonlinear_callable_matches_string(api, opts):
         error_tolerance=1e-7,
         pulse_period=float(nt) * 0.02,
         delta_time=0.02,
-        time_nt=nt,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
         frequency_grid=[0j] * nt,
-        spatial_nx=nx,
-        spatial_ny=ny,
-        spatial_frequency_grid=k2,
         potential_grid=potential,
     )
 
     string_cfg = prepare_sim_config(
         n,
         runtime=RuntimeOperators(
-            dispersion_factor_expr="0",
-            transverse_factor_expr="i*c3*w",
-            transverse_expr="exp(h*D)",
+            linear_factor_expr="0",
+            linear_expr="exp(h*D)",
             nonlinear_expr="i*A*(c0*(1.0-c1)*I + c0*c1*V)",
-            constants=[gamma, f_r, 0.0, beta_t],
+            constants=[gamma, f_r, 0.0, 0.0],
         ),
         **common,
     )
     callable_cfg = prepare_sim_config(
         n,
         runtime=RuntimeOperators(
-            dispersion_factor_expr="0",
-            transverse_factor_fn=lambda A, w: (1j * beta_t) * w,  # noqa: E731
-            transverse_fn=lambda A, D, h: cmath.exp(h * D),  # noqa: E731
+            linear_factor_expr="0",
+            linear_expr="exp(h*D)",
             nonlinear_fn=lambda A, I, V: (1j * A) * (gamma * (1.0 - f_r) * I + gamma * f_r * V),  # noqa: E731
             constants=[0.0, 0.0, 0.0, 0.0],
         ),
@@ -633,12 +626,11 @@ def test_kerr_raman_rejects_coupled_mode(api, opts):
         error_tolerance=1e-7,
         pulse_period=float(nt) * 0.02,
         delta_time=0.02,
-        time_nt=nt,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
         frequency_grid=[0j] * nt,
-        spatial_nx=nx,
-        spatial_ny=ny,
-        spatial_frequency_grid=[0j] * (nx * ny),
-        potential_grid=[0j] * (nx * ny),
+        potential_grid=[0j] * n,
         runtime=RuntimeOperators(
             dispersion_factor_expr="0",
             nonlinear_expr="0",
@@ -818,9 +810,9 @@ def main():
     test_nonlinear_legacy_multiplier_warns(api, opts)
     test_field_first_callable_signature_enforced()
     test_extended_runtime_operators_execute(api, opts)
-    test_transverse_runtime_callable_matches_string(api, opts)
+    test_tensor_linear_factor_alias_matches(api, opts)
     test_beta_sum_callable_matches_string(api, opts)
-    test_diffraction_callable_matches_string(api, opts)
+    test_tensor_diffraction_matches_fft_reference(api, opts)
     test_raman_like_nonlinear_callable_matches_string(api, opts)
     test_kerr_raman_model_reduces_to_kerr_when_fraction_zero(api, opts)
     test_kerr_raman_custom_response_matches_generated_default(api, opts)

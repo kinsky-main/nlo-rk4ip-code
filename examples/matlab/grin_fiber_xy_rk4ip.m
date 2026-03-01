@@ -33,6 +33,12 @@ for idx = 1:numel(scenarios)
     allSaved = [allSaved; savedPaths(:)]; %#ok<AGROW>
 end
 
+[proofSaved, proofError] = run_diffraction_operator_proof_check(api, simOptions, outputRoot);
+fprintf("diffraction_operator_proof_check: final_error=%.6e\n", proofError);
+if ~isempty(proofSaved)
+    allSaved = [allSaved; string(proofSaved)]; %#ok<AGROW>
+end
+
 for idx = 1:numel(allSaved)
     fprintf("saved plot: %s\n", allSaved(idx));
 end
@@ -58,8 +64,10 @@ pulse.samples = field0Flat;
 pulse.delta_time = 1.0;
 pulse.pulse_period = double(nx);
 pulse.frequency_grid = complex(zeros(1, nxy), zeros(1, nxy));
-pulse.spatial_nx = nx;
-pulse.spatial_ny = ny;
+pulse.tensor_nt = 1;
+pulse.tensor_nx = nx;
+pulse.tensor_ny = ny;
+pulse.tensor_layout = 0;
 pulse.delta_x = scenario.dx;
 pulse.delta_y = scenario.dy;
 pulse.potential_grid = flatten_xy_row_major(complex(phaseUnit, zeros(size(phaseUnit))));
@@ -166,6 +174,88 @@ finalError = fullError(end);
 finalProfileError = profileError(end);
 fprintf("%s: records=%d, grid=(%d,%d), final_full_error=%.6e, final_profile_error=%.6e, power_drift=%.6e\n", ...
         scenario.scenario_name, numRecords, ny, nx, finalError, finalProfileError, powerDrift);
+end
+
+function [savedPath, finalError] = run_diffraction_operator_proof_check(api, simOptions, outputRoot)
+nx = 128;
+ny = 128;
+dx = 0.7;
+dy = 0.7;
+w0 = 9.0;
+grinGx = 2.5e-4;
+grinGy = 1.7e-4;
+diffractionCoeff = -0.02;
+propagationDistance = 0.20;
+numRecords = 6;
+maxFinalError = 5.0e-2;
+
+x = ((0:(nx - 1)) - 0.5 * (nx - 1)) * dx;
+y = ((0:(ny - 1)) - 0.5 * (ny - 1)) * dy;
+[xx, yy] = meshgrid(x, y);
+field0 = exp(-((xx .* xx + yy .* yy) / (w0 ^ 2)));
+field0 = complex(field0, zeros(size(field0)));
+field0Flat = flatten_xy_row_major(field0);
+nxy = nx * ny;
+
+kx = backend.angular_frequency_grid(nx, dx);
+ky = backend.angular_frequency_grid(ny, dy);
+[kxx, kyy] = meshgrid(kx, ky);
+k2 = (kxx .* kxx) + (kyy .* kyy);
+
+execOptions = backend.make_exec_options(simOptions, numRecords);
+
+cfgTensor = struct();
+cfgTensor.num_time_samples = nxy;
+cfgTensor.propagation_distance = propagationDistance;
+cfgTensor.starting_step_size = 1.0e-3;
+cfgTensor.max_step_size = 2.0e-3;
+cfgTensor.min_step_size = 5.0e-5;
+cfgTensor.error_tolerance = 1.0e-7;
+cfgTensor.pulse_period = 1.0;
+cfgTensor.delta_time = 1.0;
+cfgTensor.tensor_nt = 1;
+cfgTensor.tensor_nx = nx;
+cfgTensor.tensor_ny = ny;
+cfgTensor.tensor_layout = 0;
+cfgTensor.delta_x = dx;
+cfgTensor.delta_y = dy;
+cfgTensor.frequency_grid = complex(0.0, 0.0);
+cfgTensor.runtime = struct( ...
+    'linear_factor_expr', "i*c0*(kx*kx + ky*ky)", ...
+    'linear_expr', "exp(h*D)", ...
+    'nonlinear_expr', "0", ...
+    'constants', diffractionCoeff);
+
+tensorResult = api.propagate(cfgTensor, field0Flat, numRecords, execOptions);
+tensorRecords = unflatten_records_row_major(tensorResult.records, numRecords, ny, nx);
+zRecords = tensorResult.z_axis;
+
+fft0 = fft2(field0);
+fftReference = complex(zeros(numRecords, ny, nx));
+for ridx = 1:numRecords
+    z = zRecords(ridx);
+    spectralPhase = exp((1.0i) * diffractionCoeff .* k2 .* z);
+    fftReference(ridx, :, :) = ifft2(fft0 .* spectralPhase);
+end
+
+reference2d = reshape(fftReference, [numRecords, nxy]);
+tensor2d = reshape(tensorRecords, [numRecords, nxy]);
+errorCurve = relative_l2_error_curve(tensor2d, reference2d);
+finalError = errorCurve(end);
+if finalError > maxFinalError
+    error("Diffraction operator proof check failed (tensor vs FFT2): final error %.6e exceeds %.6e", ...
+          finalError, maxFinalError);
+end
+
+outDir = fullfile(outputRoot, "diffraction_operator_proof_check");
+if ~isfolder(outDir)
+    mkdir(outDir);
+end
+savedPath = backend.plot_total_error_over_propagation( ...
+    zRecords, errorCurve, ...
+    fullfile(outDir, "tensor_diffraction_operator_error_vs_fft2_reference.png"), ...
+    "title", "GRIN diffraction proof check: tensor operator vs FFT2 reference", ...
+    "y_label", "Relative L2 error (tensor vs FFT2 reference)");
 end
 
 function flat = flatten_xy_row_major(field)
