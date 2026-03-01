@@ -103,6 +103,47 @@ def _fit_loglog_slope(
     intercept = mean_y - (slope * mean_x)
     return slope, intercept, valid_mask
 
+
+def _aligned_step_counts(
+    *,
+    min_steps: int,
+    max_steps: int,
+    count: int,
+    alignment: int,
+) -> np.ndarray:
+    if min_steps <= 0 or max_steps < min_steps:
+        raise ValueError("invalid min/max step bounds.")
+    if count <= 0:
+        raise ValueError("count must be positive.")
+    if alignment <= 0:
+        raise ValueError("alignment must be positive.")
+
+    lo_mult = max(1, int(math.ceil(float(min_steps) / float(alignment))))
+    hi_mult = max(lo_mult, int(math.floor(float(max_steps) / float(alignment))))
+    multipliers = np.round(np.geomspace(lo_mult, hi_mult, count), decimals=0).astype(int)
+    multipliers = np.clip(multipliers, lo_mult, hi_mult)
+    multipliers = np.unique(multipliers)
+    steps = multipliers * int(alignment)
+
+    if int(steps[0]) != min_steps:
+        steps = np.unique(np.concatenate((np.asarray([int(min_steps)]), steps)))
+    if int(steps[-1]) != max_steps:
+        steps = np.unique(np.concatenate((steps, np.asarray([int(max_steps)]))))
+    return np.asarray(steps, dtype=int)
+
+
+def _step_history_range(step_history: dict[str, object] | None) -> tuple[float, float] | None:
+    if not isinstance(step_history, dict):
+        return None
+    values = np.asarray(step_history.get("step_size", []), dtype=np.float64).reshape(-1)
+    if values.size <= 0:
+        return None
+    finite = values[np.isfinite(values)]
+    if finite.size <= 0:
+        return None
+    return float(np.min(finite)), float(np.max(finite))
+
+
 def main() -> float:
     beta2 = -0.01
     gamma = 0.01
@@ -128,7 +169,14 @@ def main() -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "fixed_step_soliton_convergence_rk4ip"
 
-    step_counts_base = np.round(np.geomspace(16, 1024, 32), decimals=0).astype(int)
+    base_record_intervals = 16
+    step_counts_base = _aligned_step_counts(
+        min_steps=base_record_intervals,
+        max_steps=1024,
+        count=32,
+        alignment=base_record_intervals,
+    )
+    target_records = base_record_intervals + 1
 
     runner = NloExampleRunner()
     _configure_runtime_logging(runner)
@@ -148,6 +196,13 @@ def main() -> float:
                 case_dz = z_final / float(case_steps)
             if case_steps <= 0 or case_dz <= 0.0:
                 continue
+            step_history = db.load_step_history(run_id=loaded.run_id)
+            step_range = _step_history_range(step_history)
+            if step_range is not None:
+                print(
+                    f"[replot] steps={case_steps:4d} requested_dz={case_dz:.6e} "
+                    f"applied_step_range=[{step_range[0]:.6e},{step_range[1]:.6e}]"
+                )
             run_data.append(
                 (
                     int(case_steps),
@@ -160,7 +215,6 @@ def main() -> float:
             raise RuntimeError("replot mode needs at least two valid stored step-size cases.")
     else:
         run_group = db.begin_group(example_name, args.run_group)
-        target_records = int(np.min(step_counts_base)) + 1
         for step_count in step_counts_base.tolist():
             dz = z_final / float(step_count)
             sim_cfg = TemporalSimulationConfig(
@@ -190,8 +244,16 @@ def main() -> float:
                 sim_cfg,
                 num_records=target_records,
                 exec_options=exec_options,
+                capture_step_history=True,
+                step_history_capacity=max(2048, int(step_count) + 256),
                 **storage_kwargs,
             )
+            step_range = _step_history_range(runner.last_meta.get("step_history"))
+            if step_range is not None:
+                print(
+                    f"[run] steps={int(step_count):4d} requested_dz={float(dz):.6e} "
+                    f"applied_step_range=[{step_range[0]:.6e},{step_range[1]:.6e}]"
+                )
             db.save_case_from_solver_meta(
                 example_name=example_name,
                 run_group=run_group,
@@ -202,6 +264,7 @@ def main() -> float:
                     "step_size": float(dz),
                     "target_records": int(target_records),
                 },
+                save_step_history=True,
             )
             run_data.append(
                 (
@@ -229,14 +292,14 @@ def main() -> float:
 
     fitted_order, fitted_intercept, fit_mask_valid = _fit_loglog_slope(step_sizes, errors, fit_mask)
 
-    output_dir = Path(__file__).resolve().parent / "output" / "fixed_step_soliton_convergence"
+    output_dir = args.output_dir
     plot_path = plot_convergence_loglog(
         step_sizes,
         errors,
         fit_mask_valid,
         fitted_order,
         fitted_intercept,
-        output_dir / "error_vs_step_size.png",
+        output_dir / "error_vs_fixed_step_size.png",
     )
 
     print(f"fixed-step soliton convergence summary (run_group={run_group}):")

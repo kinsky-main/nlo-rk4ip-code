@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 _DEFAULT_CMAP_NAME = "nlolib_white_cyan_yellow_hdr"
 _DEFAULT_CMAP = None
 _STYLE_CMAP_NAME = "nlolib_hdr"
+_PRIMARY_OUTPUT_DIR: Path | None = None
+_REPORT_OUTPUT_DIR: Path | None = None
+_SELECTED_PLOT_KEYS: set[str] | None = None
 
 
 import matplotlib
@@ -54,6 +58,75 @@ def _resolve_cmap(plt, cmap):
         return _default_colormap()
     return cmap
 
+
+def configure_plot_saving(
+    *,
+    primary_output_dir: Path | None = None,
+    report_dir: Path | None = None,
+    selected_plot_keys: set[str] | None = None,
+) -> None:
+    global _PRIMARY_OUTPUT_DIR
+    global _REPORT_OUTPUT_DIR
+    global _SELECTED_PLOT_KEYS
+
+    _PRIMARY_OUTPUT_DIR = (
+        Path(primary_output_dir).resolve()
+        if primary_output_dir is not None
+        else None
+    )
+    _REPORT_OUTPUT_DIR = (
+        Path(report_dir).resolve()
+        if report_dir is not None
+        else None
+    )
+    _SELECTED_PLOT_KEYS = (
+        {str(key).strip().lower() for key in selected_plot_keys}
+        if selected_plot_keys is not None
+        else None
+    )
+
+
+def _plot_key_from_path(output_path: Path) -> str:
+    return output_path.stem.strip().lower()
+
+
+def _plot_is_selected(output_path: Path) -> bool:
+    if _SELECTED_PLOT_KEYS is None:
+        return True
+    return _plot_key_from_path(output_path) in _SELECTED_PLOT_KEYS
+
+
+def _resolve_report_output_path(output_path: Path) -> Path | None:
+    if _REPORT_OUTPUT_DIR is None:
+        return None
+
+    relative_path = Path(output_path.name)
+    if _PRIMARY_OUTPUT_DIR is not None:
+        try:
+            relative_path = output_path.resolve().relative_to(_PRIMARY_OUTPUT_DIR)
+        except Exception:
+            relative_path = Path(output_path.name)
+    return _REPORT_OUTPUT_DIR / relative_path
+
+
+def _save_figure(fig: Any, output_path: Path, **kwargs: Any) -> Path | None:
+    output_path = Path(output_path)
+    if not _plot_is_selected(output_path):
+        return None
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, **kwargs)
+
+    report_output_path = _resolve_report_output_path(output_path)
+    if report_output_path is not None:
+        report_output_path = Path(report_output_path)
+        if report_output_path.resolve() != output_path.resolve():
+            report_output_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(report_output_path, **kwargs)
+
+    return output_path
+
+
 def plot_intensity_colormap_vs_propagation(
     x_axis: np.ndarray,
     z_axis: np.ndarray,
@@ -75,7 +148,6 @@ def plot_intensity_colormap_vs_propagation(
     if peak > 0.0:
         data = data / peak
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     mesh = ax.pcolormesh(x_axis, z_axis, data, shading="auto", cmap=_resolve_cmap(plt, cmap))
     ax.set_xlabel(x_label)
@@ -83,9 +155,9 @@ def plot_intensity_colormap_vs_propagation(
     ax.set_title(title)
     cbar = fig.colorbar(mesh, ax=ax)
     cbar.set_label(colorbar_label)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_final_re_im_comparison(
@@ -104,7 +176,6 @@ def plot_final_re_im_comparison(
     ref = np.asarray(reference_field, dtype=np.complex128)
     out = np.asarray(final_field, dtype=np.complex128)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(x_axis, np.real(ref), lw=2.0, color="C0", label=f"{reference_label} Re")
     ax.plot(x_axis, np.imag(ref), lw=2.0, color="C1", label=f"{reference_label} Im")
@@ -115,9 +186,9 @@ def plot_final_re_im_comparison(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_two_curve_comparison(
@@ -134,7 +205,6 @@ def plot_two_curve_comparison(
 ) -> Path | None:
 
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(x_axis, curve_a, lw=2.0, label=label_a)
     ax.plot(x_axis, curve_b, lw=1.5, ls="--", label=label_b)
@@ -143,9 +213,9 @@ def plot_two_curve_comparison(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_three_curve_drift(
@@ -164,7 +234,6 @@ def plot_three_curve_drift(
 ) -> Path | None:
 
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(x_axis, curve_a, lw=1.8, label=label_a)
     ax.plot(x_axis, curve_b, lw=1.8, label=label_b)
@@ -174,9 +243,9 @@ def plot_three_curve_drift(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=220, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_mode_power_exchange(
@@ -189,7 +258,6 @@ def plot_mode_power_exchange(
 ) -> Path | None:
 
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(z_axis, mode1_ref, lw=2.0, color="C0", label="|A1|^2 analytical")
     ax.plot(z_axis, mode2_ref, lw=2.0, color="C1", label="|A2|^2 analytical")
@@ -200,9 +268,9 @@ def plot_mode_power_exchange(
     ax.set_title("Two-Mode Linear Beating: Power Exchange")
     ax.grid(True, alpha=0.3)
     ax.legend(ncol=2)
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=220, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_phase_shift_comparison(
@@ -219,7 +287,6 @@ def plot_phase_shift_comparison(
     phase_num_plot = np.where(phase_mask, phase_num, np.nan)
     phase_ref_plot = np.where(phase_mask, phase_ref, np.nan)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(t_axis, phase_ref_plot, lw=2.0, label="Analytical phase shift")
     ax.plot(t_axis, phase_num_plot, "--", lw=1.5, label="Numerical phase shift")
@@ -228,9 +295,9 @@ def plot_phase_shift_comparison(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    fig.savefig(output_path, dpi=220, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=220, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_convergence_loglog(
@@ -253,7 +320,6 @@ def plot_convergence_loglog(
     ref = errors_plot[anchor] * (step_sizes_plot / step_sizes_plot[anchor]) ** 4
     fit_line = np.exp(fitted_intercept) * (step_sizes_plot**fitted_order)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
     ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="C4", label="Fitted power law")
@@ -263,9 +329,9 @@ def plot_convergence_loglog(
     ax.set_title(f"Fixed-Step Soliton Convergence (fitted order p = {fitted_order:.3f})")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
-    fig.savefig(output_path, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_summary_curve(
@@ -279,16 +345,15 @@ def plot_summary_curve(
 ) -> Path | None:
 
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(x_values, y_values, marker="o", lw=1.8)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_wavelength_step_history(
@@ -299,6 +364,7 @@ def plot_wavelength_step_history(
     *,
     accepted_z: np.ndarray | None = None,
     accepted_step_sizes: np.ndarray | None = None,
+    proposed_step_sizes: np.ndarray | None = None,
 ) -> Path | None:
 
     z_axis = np.asarray(z_samples, dtype=np.float64)
@@ -313,7 +379,6 @@ def plot_wavelength_step_history(
     if peak > 0.0:
         data = data / peak
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig = plt.figure(figsize=(4.0, 6.0))
     grid = fig.add_gridspec(2, 1, height_ratios=[4.6, 1.4], hspace=0.24)
 
@@ -331,22 +396,41 @@ def plot_wavelength_step_history(
     if accepted_z is not None and accepted_step_sizes is not None:
         z_plot = np.asarray(accepted_z, dtype=np.float64).reshape(-1)
         step_plot = np.asarray(accepted_step_sizes, dtype=np.float64).reshape(-1)
+        next_plot = (
+            np.asarray(proposed_step_sizes, dtype=np.float64).reshape(-1)
+            if proposed_step_sizes is not None
+            else None
+        )
         n = min(z_plot.size, step_plot.size)
+        if next_plot is not None:
+            n = min(n, next_plot.size)
         if n > 0:
             order = np.argsort(z_plot[:n])
+            z_sorted = z_plot[:n][order]
+            step_sorted = step_plot[:n][order]
             ax_step.plot(
-                z_plot[:n][order],
-                step_plot[:n][order],
+                z_sorted,
+                step_sorted,
                 lw=1.2,
                 color="C1",
-                label="Accepted step_size",
+                label="Accepted step size",
             )
+            if next_plot is not None:
+                ax_step.plot(
+                    z_sorted,
+                    next_plot[:n][order],
+                    lw=1.0,
+                    ls="--",
+                    color="C4",
+                    label="Next candidate step size",
+                )
             has_series = True
 
     if has_series:
         ax_step.set_xlabel("Propagation distance z (m)")
         ax_step.set_ylabel("Step size (m)")
         ax_step.set_title("Adaptive RK4IP Step Sizes")
+        ax_step.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3), useOffset=False)
         ax_step.grid(True, alpha=0.3)
         ax_step.legend()
     else:
@@ -366,9 +450,9 @@ def plot_wavelength_step_history(
     step_pos = ax_step.get_position()
     ax_step.set_position([map_pos.x0, step_pos.y0, map_pos.width, step_pos.height])
 
-    fig.savefig(output_path, dpi=260, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=260, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_final_intensity_comparison(
@@ -387,7 +471,6 @@ def plot_final_intensity_comparison(
     ref_intensity = np.abs(np.asarray(reference_field, dtype=np.complex128)) ** 2
     out_intensity = np.abs(np.asarray(final_field, dtype=np.complex128)) ** 2
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(x_axis, ref_intensity, lw=2.0, color="C0", label=f"{reference_label} |A|^2")
     ax.plot(x_axis, out_intensity, lw=1.5, ls="--", color="C1", label=f"{final_label} |A|^2")
@@ -396,9 +479,9 @@ def plot_final_intensity_comparison(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_total_error_over_propagation(
@@ -415,16 +498,15 @@ def plot_total_error_over_propagation(
     errors = np.nan_to_num(errors, nan=0.0, posinf=0.0, neginf=0.0)
     errors = np.clip(errors, 0.0, None)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots()
     ax.plot(z_axis, errors, lw=1.8, color="C3")
     ax.set_xlabel("Propagation distance z")
     ax.set_ylabel(y_label)
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
-    fig.savefig(output_path, bbox_inches="tight")
+    saved = _save_figure(fig, output_path, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved
 
 
 def plot_3d_intensity_scatter_propagation(
@@ -496,8 +578,7 @@ def plot_3d_intensity_scatter_propagation(
         print("no points passed intensity cutoff; skipping 3D propagation scatter plot.")
         return None
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig = plt.figure(figsize=(9.0, 7.0))
+    fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
     norm_values = np.asarray(c_points, dtype=np.float64)
     cmap = _resolve_cmap(plt, None)
@@ -527,6 +608,6 @@ def plot_3d_intensity_scatter_propagation(
         pad=0.10,
     )
     cbar.set_label("Normalized intensity")
-    fig.savefig(output_path, dpi=int(dpi), bbox_inches="tight")
+    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    return output_path
+    return saved

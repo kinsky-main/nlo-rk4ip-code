@@ -301,7 +301,7 @@ def main() -> None:
         f"full={power_drift_full:.6e}, linear={power_drift_linear:.6e}"
     )
 
-    output_dir = Path(__file__).resolve().parent / "output" / "coupled_dispersion_nonlinearity_diffraction"
+    output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
@@ -310,7 +310,7 @@ def main() -> None:
         y,
         z_records,
         full_spatial_records,
-        output_dir / "full_spatial_integrated_3d_scatter.png",
+        output_dir / "coupled_full_spatial_integrated_3d_scatter.png",
         intensity_cutoff=0.08,
         xy_stride=4,
         min_marker_size=2.0,

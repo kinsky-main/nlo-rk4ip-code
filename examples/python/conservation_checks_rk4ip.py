@@ -155,13 +155,13 @@ def main() -> tuple[float, float, float]:
     max_momentum_drift = float(np.max(np.abs(momentum_drift)))
     max_hamiltonian_drift = float(np.max(np.abs(hamiltonian_drift)))
 
-    output_dir = Path(__file__).resolve().parent / "output" / "conservation_checks"
+    output_dir = args.output_dir
     saved = plot_three_curve_drift(
         z_axis,
         energy_drift,
         momentum_drift,
         hamiltonian_drift,
-        output_dir / "relative_invariant_drift.png",
+        output_dir / "energy_conservation_relative_invariant_drift.png",
         label_a="Energy drift",
         label_b="Momentum drift",
         label_c="Hamiltonian drift",
