@@ -28,6 +28,14 @@
 #define NLO_DEVICE_RING_BUDGET_HEADROOM_DEN 10u
 #endif
 
+#ifndef NLO_DEVICE_RING_SAFETY_MIN_BYTES
+#define NLO_DEVICE_RING_SAFETY_MIN_BYTES (256u * 1024u * 1024u)
+#endif
+
+#ifndef NLO_DEVICE_RING_SAFETY_TOTAL_DEN
+#define NLO_DEVICE_RING_SAFETY_TOTAL_DEN 20u
+#endif
+
 #ifndef NLO_TWO_PI
 #define NLO_TWO_PI 6.283185307179586476925286766559
 #endif
@@ -388,6 +396,189 @@ static nlo_vec_status nlo_prepare_raman_state(simulation_state* state)
     return NLO_VEC_STATUS_OK;
 }
 
+static void nlo_state_debug_log_backend_memory_stage(const simulation_state* state, const char* stage)
+{
+    if (state == NULL || state->backend == NULL) {
+        nlo_state_debug_log_memory_checkpoint(stage, NLO_VEC_STATUS_INVALID_ARGUMENT, 0u, 0u, 0u);
+        return;
+    }
+
+    nlo_vec_backend_memory_info mem_info = {0};
+    const nlo_vec_status status = nlo_vec_query_memory_info(state->backend, &mem_info);
+    nlo_state_debug_log_memory_checkpoint(stage,
+                                          status,
+                                          mem_info.device_local_total_bytes,
+                                          mem_info.device_local_available_bytes,
+                                          mem_info.max_storage_buffer_range);
+}
+
+static size_t nlo_count_full_volume_vectors(const simulation_state* state)
+{
+    if (state == NULL) {
+        return 0u;
+    }
+
+    size_t count = 0u;
+    if (state->current_field_vec != NULL) {
+        count += 1u;
+    }
+    if (state->frequency_grid_vec != NULL) {
+        count += 1u;
+    }
+
+    if (state->working_vectors.ip_field_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.field_magnitude_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.field_working_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.field_freq_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.omega_power_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.k_1_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.k_2_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.k_3_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.k_4_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.dispersion_factor_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.dispersion_operator_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.potential_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.previous_field_vec != NULL) {
+        count += 1u;
+    }
+
+    if (state->working_vectors.raman_intensity_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.raman_delayed_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.raman_spectrum_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.raman_mix_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.raman_polarization_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.raman_derivative_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.raman_response_fft_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.raman_derivative_factor_vec != NULL) {
+        count += 1u;
+    }
+
+    if (state->working_vectors.wt_mesh_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.kx_mesh_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.ky_mesh_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.t_mesh_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.x_mesh_vec != NULL) {
+        count += 1u;
+    }
+    if (state->working_vectors.y_mesh_vec != NULL) {
+        count += 1u;
+    }
+
+    if (state->runtime_operator_stack_slots > SIZE_MAX - count) {
+        return SIZE_MAX;
+    }
+    count += state->runtime_operator_stack_slots;
+
+    if (state->fft_plan != NULL && nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN) {
+        if (count == SIZE_MAX) {
+            return SIZE_MAX;
+        }
+        count += 1u;
+    }
+
+    return count;
+}
+
+static int nlo_estimate_active_device_bytes(
+    const simulation_state* state,
+    size_t per_record_bytes,
+    size_t* out_active_bytes
+)
+{
+    if (out_active_bytes == NULL || state == NULL || per_record_bytes == 0u) {
+        return -1;
+    }
+
+    const size_t full_volume_count = nlo_count_full_volume_vectors(state);
+    if (full_volume_count == SIZE_MAX) {
+        return -1;
+    }
+
+    size_t active_bytes = 0u;
+    size_t full_volume_bytes = 0u;
+    if (nlo_checked_mul_size_t(full_volume_count, per_record_bytes, &full_volume_bytes) != 0) {
+        return -1;
+    }
+    active_bytes += full_volume_bytes;
+
+    if (state->tensor_mode_active) {
+        size_t axis_nt = 0u;
+        size_t axis_nx = 0u;
+        size_t axis_ny = 0u;
+        if (nlo_checked_mul_size_t(state->nt, 2u, &axis_nt) != 0 ||
+            nlo_checked_mul_size_t(state->nx, 2u, &axis_nx) != 0 ||
+            nlo_checked_mul_size_t(state->ny, 2u, &axis_ny) != 0) {
+            return -1;
+        }
+        if (axis_nt > SIZE_MAX - axis_nx) {
+            return -1;
+        }
+        size_t axis_elements = axis_nt + axis_nx;
+        if (axis_elements > SIZE_MAX - axis_ny) {
+            return -1;
+        }
+        axis_elements += axis_ny;
+
+        size_t axis_bytes = 0u;
+        if (nlo_checked_mul_size_t(axis_elements, sizeof(nlo_complex), &axis_bytes) != 0) {
+            return -1;
+        }
+        if (axis_bytes > SIZE_MAX - active_bytes) {
+            return -1;
+        }
+        active_bytes += axis_bytes;
+    }
+
+    *out_active_bytes = active_bytes;
+    return 0;
+}
+
 static size_t nlo_compute_device_ring_capacity(const simulation_state* state, size_t requested_records)
 {
     if (state == NULL || state->backend == NULL || requested_records == 0u) {
@@ -405,7 +596,7 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
 
     nlo_vec_backend_memory_info mem_info = {0};
     if (nlo_vec_query_memory_info(state->backend, &mem_info) != NLO_VEC_STATUS_OK) {
-        return NLO_MIN_DEVICE_RING_CAPACITY;
+        return 0u;
     }
 
     const size_t per_record_bytes = state->num_time_samples * sizeof(nlo_complex);
@@ -414,74 +605,83 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     }
 
     size_t budget_bytes = state->exec_options.forced_device_budget_bytes;
-    if (budget_bytes == 0u) {
+    if (budget_bytes > 0u) {
+        if (mem_info.device_local_available_bytes > 0u &&
+            budget_bytes > mem_info.device_local_available_bytes) {
+            budget_bytes = mem_info.device_local_available_bytes;
+        }
+    } else {
         budget_bytes = (size_t)((double)mem_info.device_local_available_bytes * frac);
     }
     budget_bytes =
         (budget_bytes / NLO_DEVICE_RING_BUDGET_HEADROOM_DEN) *
         NLO_DEVICE_RING_BUDGET_HEADROOM_NUM;
     if (budget_bytes == 0u) {
-        return NLO_MIN_DEVICE_RING_CAPACITY;
+        return 0u;
     }
-
-    size_t active_vec_count = 2u + NLO_WORK_VECTOR_COUNT;
-    if (state->working_vectors.wt_axis_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.kx_axis_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.ky_axis_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.t_axis_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.x_axis_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.y_axis_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.wt_mesh_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.kx_mesh_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.ky_mesh_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.t_mesh_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.x_mesh_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->working_vectors.y_mesh_vec != NULL) {
-        active_vec_count += 1u;
-    }
-    if (state->runtime_operator_stack_slots > SIZE_MAX - active_vec_count) {
-        return NLO_MIN_DEVICE_RING_CAPACITY;
-    }
-    active_vec_count += state->runtime_operator_stack_slots;
 
     size_t active_bytes = 0u;
-    if (nlo_checked_mul_size_t(active_vec_count, per_record_bytes, &active_bytes) != 0) {
-        return NLO_MIN_DEVICE_RING_CAPACITY;
+    if (nlo_estimate_active_device_bytes(state, per_record_bytes, &active_bytes) != 0) {
+        return 0u;
     }
 
-    if (active_bytes > SIZE_MAX - per_record_bytes) {
-        return NLO_MIN_DEVICE_RING_CAPACITY;
+    size_t conservative_vec_count = 2u + NLO_WORK_VECTOR_COUNT;
+    if (state->working_vectors.wt_axis_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.kx_axis_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.ky_axis_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.t_axis_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.x_axis_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.y_axis_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.wt_mesh_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.kx_mesh_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.ky_mesh_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.t_mesh_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.x_mesh_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->working_vectors.y_mesh_vec != NULL) {
+        conservative_vec_count += 1u;
+    }
+    if (state->runtime_operator_stack_slots > SIZE_MAX - conservative_vec_count) {
+        return 0u;
+    }
+    conservative_vec_count += state->runtime_operator_stack_slots;
+    if (state->fft_plan != NULL) {
+        if (conservative_vec_count == SIZE_MAX) {
+            return 0u;
+        }
+        conservative_vec_count += 1u;
     }
 
-    if (budget_bytes <= active_bytes + per_record_bytes) {
-        return NLO_MIN_DEVICE_RING_CAPACITY;
+    size_t conservative_active_bytes = 0u;
+    if (nlo_checked_mul_size_t(conservative_vec_count, per_record_bytes, &conservative_active_bytes) == 0 &&
+        conservative_active_bytes > active_bytes) {
+        active_bytes = conservative_active_bytes;
     }
 
-    size_t ring_capacity = (budget_bytes - active_bytes) / per_record_bytes;
-    if (ring_capacity < NLO_MIN_DEVICE_RING_CAPACITY) {
-        ring_capacity = NLO_MIN_DEVICE_RING_CAPACITY;
+    size_t ring_capacity = 0u;
+    if (budget_bytes > active_bytes) {
+        ring_capacity = (budget_bytes - active_bytes) / per_record_bytes;
     }
 
     if (state->exec_options.record_ring_target > 0u &&
@@ -491,6 +691,25 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
 
     if (ring_capacity > requested_records) {
         ring_capacity = requested_records;
+    }
+
+    size_t reserve_bytes = per_record_bytes;
+    if (reserve_bytes < (size_t)NLO_DEVICE_RING_SAFETY_MIN_BYTES) {
+        reserve_bytes = (size_t)NLO_DEVICE_RING_SAFETY_MIN_BYTES;
+    }
+    if (mem_info.device_local_total_bytes > 0u) {
+        const size_t five_percent = mem_info.device_local_total_bytes / (size_t)NLO_DEVICE_RING_SAFETY_TOTAL_DEN;
+        if (reserve_bytes < five_percent) {
+            reserve_bytes = five_percent;
+        }
+    }
+
+    size_t safe_capacity = 0u;
+    if (mem_info.device_local_available_bytes > reserve_bytes) {
+        safe_capacity = (mem_info.device_local_available_bytes - reserve_bytes) / per_record_bytes;
+    }
+    if (ring_capacity > safe_capacity) {
+        ring_capacity = safe_capacity;
     }
 
     nlo_state_debug_log_ring_capacity(requested_records,
@@ -720,6 +939,7 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    nlo_state_debug_log_backend_memory_stage(state, "backend_created");
 
     if (nlo_create_complex_vec(state->backend, num_time_samples, &state->current_field_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->frequency_grid_vec) != NLO_VEC_STATUS_OK ||
@@ -740,6 +960,7 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    nlo_state_debug_log_backend_memory_stage(state, "base_vectors_allocated");
     if (state->nonlinear_raman_active) {
         if (nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_intensity_vec) != NLO_VEC_STATUS_OK ||
             nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_delayed_vec) != NLO_VEC_STATUS_OK ||
@@ -753,6 +974,7 @@ simulation_state* create_simulation_state_with_storage(
             free_simulation_state(state);
             return NULL;
         }
+        nlo_state_debug_log_backend_memory_stage(state, "raman_vectors_allocated");
     }
 
     if (state->tensor_mode_active) {
@@ -772,6 +994,7 @@ simulation_state* create_simulation_state_with_storage(
             free_simulation_state(state);
             return NULL;
         }
+        nlo_state_debug_log_backend_memory_stage(state, "tensor_vectors_allocated");
     }
 
     nlo_vec_status status = nlo_vec_complex_fill(state->backend, state->current_field_vec, nlo_make(0.0, 0.0));
@@ -1181,6 +1404,7 @@ simulation_state* create_simulation_state_with_storage(
             return NULL;
         }
     }
+    nlo_state_debug_log_backend_memory_stage(state, "runtime_stack_allocated");
 
     if (state->tensor_mode_active) {
         if (config->spatial.potential_grid == NULL) {
@@ -1307,6 +1531,7 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    nlo_state_debug_log_backend_memory_stage(state, "fft_plan_created");
 
     if (state->nonlinear_raman_active) {
         status = nlo_prepare_raman_state(state);
@@ -1315,8 +1540,10 @@ simulation_state* create_simulation_state_with_storage(
             free_simulation_state(state);
             return NULL;
         }
+        nlo_state_debug_log_backend_memory_stage(state, "raman_state_prepared");
     }
 
+    nlo_state_debug_log_backend_memory_stage(state, "pre_ring_allocation");
     state->record_ring_capacity = nlo_compute_device_ring_capacity(state, state->num_recorded_samples);
     if (state->record_ring_capacity > 0u) {
         state->record_ring_vec = (nlo_vec_buffer**)calloc(state->record_ring_capacity, sizeof(nlo_vec_buffer*));
@@ -1326,14 +1553,56 @@ simulation_state* create_simulation_state_with_storage(
             return NULL;
         }
 
+        const size_t per_record_bytes = num_time_samples * sizeof(nlo_complex);
+        nlo_vec_backend_memory_info ring_mem_info = {0};
+        (void)nlo_vec_query_memory_info(state->backend, &ring_mem_info);
+        size_t ring_reserve_bytes = per_record_bytes;
+        if (ring_reserve_bytes < (size_t)NLO_DEVICE_RING_SAFETY_MIN_BYTES) {
+            ring_reserve_bytes = (size_t)NLO_DEVICE_RING_SAFETY_MIN_BYTES;
+        }
+        if (ring_mem_info.device_local_total_bytes > 0u) {
+            const size_t five_percent =
+                ring_mem_info.device_local_total_bytes / (size_t)NLO_DEVICE_RING_SAFETY_TOTAL_DEN;
+            if (ring_reserve_bytes < five_percent) {
+                ring_reserve_bytes = five_percent;
+            }
+        }
+
         for (size_t i = 0; i < state->record_ring_capacity; ++i) {
+            if ((i & 7u) == 0u) {
+                nlo_vec_backend_memory_info live_mem_info = {0};
+                if (nlo_vec_query_memory_info(state->backend, &live_mem_info) == NLO_VEC_STATUS_OK &&
+                    live_mem_info.device_local_available_bytes > 0u &&
+                    live_mem_info.device_local_available_bytes <= ring_reserve_bytes + per_record_bytes) {
+                    nlo_log_emit(
+                        NLO_LOG_LEVEL_WARN,
+                        "[nlolib] record-ring allocation stopped at %zu/%zu records (available VRAM reached safety reserve).",
+                        i,
+                        state->record_ring_capacity);
+                    state->record_ring_capacity = i;
+                    break;
+                }
+            }
+
             if (nlo_create_complex_vec(state->backend, num_time_samples, &state->record_ring_vec[i]) != NLO_VEC_STATUS_OK) {
+                nlo_log_emit(
+                    NLO_LOG_LEVEL_WARN,
+                    "[nlolib] record-ring allocation truncated at %zu/%zu records; continuing with reduced ring.",
+                    i,
+                    state->record_ring_capacity);
                 nlo_state_debug_log_failure("allocate_record_ring_vectors", NLO_VEC_STATUS_ALLOCATION_FAILED);
-                free_simulation_state(state);
-                return NULL;
+                if (i == 0u) {
+                    free(state->record_ring_vec);
+                    state->record_ring_vec = NULL;
+                    state->record_ring_capacity = 0u;
+                } else {
+                    state->record_ring_capacity = i;
+                }
+                break;
             }
         }
     }
+    nlo_state_debug_log_backend_memory_stage(state, "post_ring_allocation");
 
     return state;
 }

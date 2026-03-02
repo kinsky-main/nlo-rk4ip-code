@@ -78,6 +78,17 @@ static size_t nlo_compute_record_bytes(size_t num_recorded_samples, size_t num_t
     return per_record_bytes * num_recorded_samples;
 }
 
+static const char* nlo_resolve_runtime_expr_alias(const char* primary, const char* alias)
+{
+    if (primary != NULL && primary[0] != '\0') {
+        return primary;
+    }
+    if (alias != NULL && alias[0] != '\0') {
+        return alias;
+    }
+    return NULL;
+}
+
 static int nlo_storage_enabled(const nlo_storage_options* storage_options)
 {
     return (storage_options != NULL &&
@@ -220,6 +231,19 @@ static void nlo_log_nlse_propagate_call(
     }
 
     char message[4096];
+    const char* linear_factor_op =
+        (config != NULL)
+            ? nlo_resolve_runtime_expr_alias(config->runtime.linear_factor_expr,
+                                             config->runtime.dispersion_factor_expr)
+            : NULL;
+    const char* linear_op =
+        (config != NULL)
+            ? nlo_resolve_runtime_expr_alias(config->runtime.linear_expr,
+                                             config->runtime.dispersion_expr)
+            : NULL;
+    const char* potential_op = (config != NULL) ? config->runtime.potential_expr : NULL;
+    const char* nonlinear_op = (config != NULL) ? config->runtime.nonlinear_expr : NULL;
+
     const int written = snprintf(
         message,
         sizeof(message),
@@ -234,13 +258,11 @@ static void nlo_log_nlse_propagate_call(
         "    - input_field: %p\n"
         "    - output_records: %p\n"
         "    - exec_options: %p\n"
-        "  - runtime_expressions:\n"
-        "    - linear_factor_expr: %s\n"
-        "    - linear_expr: %s\n"
-        "    - potential_expr: %s\n"
-        "    - dispersion_factor_expr: %s\n"
-        "    - dispersion_expr: %s\n"
-        "    - nonlinear_expr: %s\n"
+        "  - runtime_operators:\n"
+        "    - linear_factor_op: %s\n"
+        "    - linear_op: %s\n"
+        "    - potential_op: %s\n"
+        "    - nonlinear_op: %s\n"
         "  - runtime_constants (%s):\n"
         "%s"
         "  - grids:\n"
@@ -264,16 +286,10 @@ static void nlo_log_nlse_propagate_call(
         (const void*)input_field,
         (const void*)output_records,
         (const void*)exec_options,
-        (config != NULL && config->runtime.linear_factor_expr != NULL)
-            ? config->runtime.linear_factor_expr
-            : "(null)",
-        (config != NULL && config->runtime.linear_expr != NULL) ? config->runtime.linear_expr : "(null)",
-        (config != NULL && config->runtime.potential_expr != NULL) ? config->runtime.potential_expr : "(null)",
-        (config != NULL && config->runtime.dispersion_factor_expr != NULL)
-            ? config->runtime.dispersion_factor_expr
-            : "(null)",
-        (config != NULL && config->runtime.dispersion_expr != NULL) ? config->runtime.dispersion_expr : "(null)",
-        (config != NULL && config->runtime.nonlinear_expr != NULL) ? config->runtime.nonlinear_expr : "(null)",
+        (linear_factor_op != NULL) ? linear_factor_op : "(null)",
+        (linear_op != NULL) ? linear_op : "(null)",
+        (potential_op != NULL && potential_op[0] != '\0') ? potential_op : "(null)",
+        (nonlinear_op != NULL && nonlinear_op[0] != '\0') ? nonlinear_op : "(null)",
         runtime_constants_text,
         constants_lines,
         (config != NULL) ? (const void*)config->frequency.frequency_grid : NULL,
@@ -425,6 +441,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
             ? *local_options.exec_options
             : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
     simulation_state* state = NULL;
+    nlo_allocation_info allocation_info = {0};
     const int init_status =
         nlo_storage_enabled(local_options.storage_options)
             ? nlo_init_simulation_state_with_storage(config,
@@ -432,13 +449,13 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                                      num_recorded_samples,
                                                      &local_exec_options,
                                                      local_options.storage_options,
-                                                     NULL,
+                                                     &allocation_info,
                                                      &state)
             : nlo_init_simulation_state(config,
                                         num_time_samples,
                                         num_recorded_samples,
                                         &local_exec_options,
-                                        NULL,
+                                        &allocation_info,
                                         &state);
     if (init_status != 0 || state == NULL) {
         return nlo_propagate_fail("init_simulation_state", NLOLIB_STATUS_ALLOCATION_FAILED);
@@ -450,6 +467,34 @@ NLOLIB_API nlolib_status nlolib_propagate(
                  "  - actual: %s",
                  nlo_backend_type_to_string(local_exec_options.backend_type),
                  nlo_backend_type_to_string(nlo_vector_backend_get_type(state->backend)));
+
+    size_t record_ring_bytes = 0u;
+    if (nlo_checked_mul_size_t(allocation_info.per_record_bytes,
+                               allocation_info.device_ring_capacity,
+                               &record_ring_bytes) != 0) {
+        record_ring_bytes = 0u;
+    }
+    nlo_vec_backend_memory_info mem_info = {0};
+    (void)nlo_vec_query_memory_info(state->backend, &mem_info);
+    nlo_log_emit(
+        NLO_LOG_LEVEL_INFO,
+        "[nlolib] allocation summary:\n"
+        "  - per_record_bytes: %zu\n"
+        "  - working_vector_bytes_estimate: %zu\n"
+        "  - host_snapshot_bytes: %zu\n"
+        "  - record_ring_capacity: %zu\n"
+        "  - record_ring_bytes: %zu\n"
+        "  - device_budget_bytes_effective: %zu\n"
+        "  - device_local_total_bytes: %zu\n"
+        "  - device_local_available_bytes: %zu",
+        allocation_info.per_record_bytes,
+        allocation_info.working_vector_bytes,
+        allocation_info.host_snapshot_bytes,
+        allocation_info.device_ring_capacity,
+        record_ring_bytes,
+        allocation_info.device_budget_bytes,
+        mem_info.device_local_total_bytes,
+        mem_info.device_local_available_bytes);
 
     if (simulation_state_upload_initial_field(state, input_field) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);

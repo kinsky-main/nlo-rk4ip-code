@@ -86,3 +86,26 @@ void nlo_state_debug_log_ring_capacity(
             budget_bytes,
             ring_capacity);
 }
+
+void nlo_state_debug_log_memory_checkpoint(
+    const char* stage,
+    int query_status,
+    size_t total_device_local_bytes,
+    size_t available_device_local_bytes,
+    size_t max_storage_buffer_range_bytes
+)
+{
+    if (!nlo_state_debug_enabled()) {
+        return;
+    }
+
+    fprintf(stderr,
+            "[NLO_STATE_DEBUG] memory_checkpoint stage=%s query_status=%d "
+            "device_local_total=%zu device_local_available=%zu "
+            "max_storage_buffer_range=%zu\n",
+            (stage != NULL) ? stage : "unknown",
+            query_status,
+            total_device_local_bytes,
+            available_device_local_bytes,
+            max_storage_buffer_range_bytes);
+}

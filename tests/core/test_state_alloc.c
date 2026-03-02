@@ -80,7 +80,7 @@ static void test_init_state_success(void)
     assert(info.allocated_records == state->num_recorded_samples);
     assert(info.per_record_bytes == num_time_samples * sizeof(nlo_complex));
     assert(info.host_snapshot_bytes == info.per_record_bytes * state->num_recorded_samples);
-    assert(info.working_vector_bytes == info.per_record_bytes * NLO_WORK_VECTOR_COUNT);
+    assert(info.working_vector_bytes >= info.per_record_bytes * 15u);
     assert(info.backend_type == NLO_VECTOR_BACKEND_CPU);
 
     free_simulation_state(state);

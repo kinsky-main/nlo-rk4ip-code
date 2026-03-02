@@ -268,6 +268,31 @@ def test_field_first_callable_signature_enforced():
         assert "dispersion_factor callable" in str(exc)
 
 
+def test_linear_dispersion_aliases_are_mutually_exclusive():
+    n = 64
+    dt = 0.05
+    omega = _omega_grid_unshifted(n, dt)
+    try:
+        prepare_sim_config(
+            n,
+            propagation_distance=0.01,
+            starting_step_size=1e-3,
+            max_step_size=2e-3,
+            min_step_size=1e-5,
+            error_tolerance=1e-8,
+            pulse_period=float(n) * dt,
+            delta_time=dt,
+            frequency_grid=[complex(w, 0.0) for w in omega],
+            runtime=RuntimeOperators(
+                linear_factor_expr="i*0.1*w*w",
+                dispersion_factor_expr="i*0.1*w*w",
+            ),
+        )
+        raise AssertionError("expected linear/dispersive alias exclusivity check to fail")
+    except ValueError as exc:
+        assert "aliases; provide only one" in str(exc)
+
+
 def test_extended_runtime_operators_execute(api, opts):
     n = 128
     dt = 0.02
@@ -809,6 +834,7 @@ def main():
     test_nonlinear_callable_matches_string(api, opts)
     test_nonlinear_legacy_multiplier_warns(api, opts)
     test_field_first_callable_signature_enforced()
+    test_linear_dispersion_aliases_are_mutually_exclusive()
     test_extended_runtime_operators_execute(api, opts)
     test_tensor_linear_factor_alias_matches(api, opts)
     test_beta_sum_callable_matches_string(api, opts)
