@@ -679,10 +679,7 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
         active_bytes = conservative_active_bytes;
     }
 
-    size_t ring_capacity = 0u;
-    if (budget_bytes > active_bytes) {
-        ring_capacity = (budget_bytes - active_bytes) / per_record_bytes;
-    }
+    size_t ring_capacity = budget_bytes / per_record_bytes;
 
     if (state->exec_options.record_ring_target > 0u &&
         ring_capacity > state->exec_options.record_ring_target) {
@@ -1485,7 +1482,7 @@ simulation_state* create_simulation_state_with_storage(
     if (explicit_nd != 0 && state->nt > 1u && state->nx > 1u && state->ny > 1u) {
         const nlo_fft_shape shape = {
             .rank = 3u,
-            .dims = {state->nt, state->ny, state->nx}
+            .dims = {state->nx, state->ny, state->nt}
         };
         fft_status = nlo_fft_plan_create_shaped_with_backend(state->backend,
                                                              &shape,
@@ -1504,7 +1501,7 @@ simulation_state* create_simulation_state_with_storage(
     } else if (explicit_nd != 0 && state->nx > 1u && state->ny > 1u) {
         const nlo_fft_shape shape = {
             .rank = 2u,
-            .dims = {state->ny, state->nx, 1u}
+            .dims = {state->nx, state->ny, 1u}
         };
         fft_status = nlo_fft_plan_create_shaped_with_backend(state->backend,
                                                              &shape,

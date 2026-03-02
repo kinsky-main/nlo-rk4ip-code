@@ -25,6 +25,10 @@ add_test(NAME test_python_runtime_expr_translation
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_runtime_expr_translation.py"
 )
 
+add_test(NAME test_python_grin_plot_validation
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_grin_plot_validation.py"
+)
+
 set(_NLOLIB_TEST_PATH "$ENV{PATH}")
 string(REPLACE ";" "\\;" _NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}")
 
@@ -41,5 +45,9 @@ set_tests_properties(test_python_storage_chunking PROPERTIES
 )
 
 set_tests_properties(test_python_runtime_expr_translation PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
+)
+
+set_tests_properties(test_python_grin_plot_validation PROPERTIES
   ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
 )

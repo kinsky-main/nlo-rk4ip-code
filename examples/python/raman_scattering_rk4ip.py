@@ -200,10 +200,10 @@ def main() -> float:
     pulse_width = 0.08
     num_records = 120
 
-    f_r = 0.18
-    tau1 = 0.0122
+    f_r = 0.18 # TODO: Switch in fraction sign results in allocation failure in the solver.
+    tau1 = 0.0522
     tau2 = 0.0320
-    shock_omega0 = 0.0
+    shock_omega0 = 0.0 # TODO: Any shock results in inf values and solver failure.
     lambda0_nm = 1550.0
 
     t = centered_time_grid(n, dt)
@@ -421,7 +421,7 @@ def main() -> float:
         wavelength_map,
         output_dir / "raman_wavelength_intensity_propagation.png",
         x_label="Wavelength (nm)",
-        title="Raman: Wavelength Intensity Over Propagation (around lambda0)",
+        title="Raman: Wavelength Intensity Over Propagation",
         colorbar_label="Normalized spectral intensity",
     )
     if p3 is not None:

@@ -472,6 +472,72 @@ def test_tensor_diffraction_matches_fft_reference(api, opts):
     assert rel <= 2e-8, f"tensor diffraction expression mismatch: rel={rel}"
 
 
+def test_tensor_wt_only_matches_transverse_tiling(api, opts):
+    nt = 64
+    nx = 6
+    ny = 4
+    dt = 0.02
+    beta2 = -0.018
+    omega = _omega_grid_unshifted(nt, dt)
+    t = _centered_time_grid(nt, dt)
+    pulse = _gaussian_with_phase(t, sigma=0.18, d=5.0)
+
+    common = dict(
+        propagation_distance=0.03,
+        starting_step_size=1e-3,
+        max_step_size=3e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(nt) * dt,
+        delta_time=dt,
+        runtime=RuntimeOperators(
+            linear_factor_expr="i*c0*wt*wt",
+            linear_expr="exp(h*D)",
+            nonlinear_expr="0",
+            constants=[0.5 * beta2, 0.0, 0.0, 0.0],
+        ),
+    )
+
+    ref_cfg = prepare_sim_config(
+        nt,
+        tensor_nt=nt,
+        tensor_nx=1,
+        tensor_ny=1,
+        frequency_grid=[complex(w, 0.0) for w in omega],
+        potential_grid=[0j] * nt,
+        **common,
+    )
+    ref_final = api.propagate(ref_cfg, pulse, 2, opts).records[1]
+
+    tiled_input = []
+    for _ in range(nx * ny):
+        tiled_input.extend(pulse)
+
+    tiled_cfg = prepare_sim_config(
+        nt * nx * ny,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
+        frequency_grid=[complex(w, 0.0) for w in omega],
+        potential_grid=[0j] * (nt * nx * ny),
+        **common,
+    )
+    tiled_final = api.propagate(tiled_cfg, tiled_input, 2, opts).records[1]
+
+    tiled = [complex(v) for v in tiled_final]
+    ref = [complex(v) for v in ref_final]
+    max_rel = 0.0
+    for xi in range(nx):
+        for yi in range(ny):
+            base = ((xi * ny) + yi) * nt
+            slab = tiled[base : base + nt]
+            rel = _relative_l2_error(slab, ref)
+            if rel > max_rel:
+                max_rel = rel
+
+    assert max_rel <= 2e-6, f"wt-only tensor tiling mismatch: max_rel={max_rel}"
+
+
 def test_raman_like_nonlinear_callable_matches_string(api, opts):
     nt = 4
     nx = 4
@@ -839,6 +905,7 @@ def main():
     test_tensor_linear_factor_alias_matches(api, opts)
     test_beta_sum_callable_matches_string(api, opts)
     test_tensor_diffraction_matches_fft_reference(api, opts)
+    test_tensor_wt_only_matches_transverse_tiling(api, opts)
     test_raman_like_nonlinear_callable_matches_string(api, opts)
     test_kerr_raman_model_reduces_to_kerr_when_fraction_zero(api, opts)
     test_kerr_raman_custom_response_matches_generated_default(api, opts)

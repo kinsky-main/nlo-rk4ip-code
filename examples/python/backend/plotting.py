@@ -111,14 +111,11 @@ def _resolve_report_output_path(output_path: Path) -> Path | None:
 # TODO: Fix double save in examples and ensure default output dirs are always saved to
 def _save_figure(fig: Any, output_path: Path, **kwargs: Any) -> Path | None:
     output_path = Path(output_path)
-    if not _plot_is_selected(output_path):
-        return None
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, **kwargs)
 
     report_output_path = _resolve_report_output_path(output_path)
-    if report_output_path is not None:
+    if report_output_path is not None and _plot_is_selected(output_path):
         report_output_path = Path(report_output_path)
         if report_output_path.resolve() != output_path.resolve():
             report_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,6 +134,7 @@ def plot_intensity_colormap_vs_propagation(
     y_label: str = "Propagation distance z",
     title: str = "Intensity vs Propagation",
     colorbar_label: str = "Normalized intensity",
+    normalization_peak: float | None = None,
     cmap="nlolib_hdr",
 ) -> Path | None:
 
@@ -145,11 +143,22 @@ def plot_intensity_colormap_vs_propagation(
     data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
     data = np.clip(data, 0.0, None)
     peak = float(np.max(data))
-    if peak > 0.0:
-        data = data / peak
+    norm_peak = peak if normalization_peak is None else float(normalization_peak)
+    if norm_peak < 0.0:
+        raise ValueError("normalization_peak must be non-negative.")
+    if norm_peak > 0.0:
+        data = np.clip(data / norm_peak, 0.0, 1.0)
 
     fig, ax = plt.subplots()
-    mesh = ax.pcolormesh(x_axis, z_axis, data, shading="auto", cmap=_resolve_cmap(plt, cmap))
+    mesh = ax.pcolormesh(
+        x_axis,
+        z_axis,
+        data,
+        shading="auto",
+        cmap=_resolve_cmap(plt, cmap),
+        vmin=0.0,
+        vmax=1.0,
+    )
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_title(title)
@@ -383,7 +392,15 @@ def plot_wavelength_step_history(
     grid = fig.add_gridspec(2, 1, height_ratios=[4.6, 1.4], hspace=0.24)
 
     ax_map = fig.add_subplot(grid[0, 0])
-    mesh = ax_map.pcolormesh(z_axis, lambda_axis, data.T, shading="auto", cmap=_resolve_cmap(plt, None))
+    mesh = ax_map.pcolormesh(
+        z_axis,
+        lambda_axis,
+        data.T,
+        shading="auto",
+        cmap=_resolve_cmap(plt, None),
+        vmin=0.0,
+        vmax=1.0,
+    )
     ax_map.set_xlabel("Propagation distance z (m)")
     ax_map.set_ylabel("Wavelength (nm)")
     ax_map.set_title("")
@@ -524,11 +541,16 @@ def plot_3d_intensity_scatter_propagation(
     alpha_min: float = 0.08,
     alpha_max: float = 0.90,
     dpi: int = 320,
+    input_is_intensity: bool = False,
+    normalization_peak: float | None = None,
     title: str = "3D Propagation Intensity Scatter",
 ) -> Path | None:
 
 
-    records = np.asarray(field_records, dtype=np.complex128)
+    if input_is_intensity:
+        records = np.asarray(field_records, dtype=np.float64)
+    else:
+        records = np.asarray(field_records, dtype=np.complex128)
     if records.ndim != 3:
         raise ValueError("field_records must be [record, y, x].")
 
@@ -549,11 +571,19 @@ def plot_3d_intensity_scatter_propagation(
     if dpi <= 0:
         raise ValueError("dpi must be positive.")
 
-    intensity = np.abs(records) ** 2
+    if input_is_intensity:
+        intensity = np.asarray(records, dtype=np.float64)
+        intensity = np.nan_to_num(intensity, nan=0.0, posinf=0.0, neginf=0.0)
+        intensity = np.clip(intensity, 0.0, None)
+    else:
+        intensity = np.abs(records) ** 2
     max_intensity = float(np.max(intensity))
     if max_intensity <= 0.0:
         print("intensity is zero everywhere; skipping 3D propagation scatter plot.")
         return None
+    norm_peak = max_intensity if normalization_peak is None else float(normalization_peak)
+    if norm_peak <= 0.0:
+        raise ValueError("normalization_peak must be positive when provided.")
 
     x_points: list[float] = []
     y_points: list[float] = []
@@ -564,15 +594,16 @@ def plot_3d_intensity_scatter_propagation(
     for zi in range(0, z.size, z_stride):
         for yi in range(0, y.size, xy_stride):
             for xi in range(0, x.size, xy_stride):
-                norm_intensity = float(intensity[zi, yi, xi] / max_intensity)
-                if norm_intensity < intensity_cutoff:
+                norm_intensity = float(intensity[zi, yi, xi] / norm_peak)
+                norm_intensity_clipped = float(np.clip(norm_intensity, 0.0, 1.0))
+                if norm_intensity_clipped < intensity_cutoff:
                     continue
 
                 x_points.append(float(x[xi]))
                 y_points.append(float(y[yi]))
                 z_points.append(float(z[zi]))
-                c_points.append(norm_intensity)
-                s_points.append(min_marker_size + (max_marker_size - min_marker_size) * norm_intensity)
+                c_points.append(norm_intensity_clipped)
+                s_points.append(min_marker_size + (max_marker_size - min_marker_size) * norm_intensity_clipped)
 
     if not x_points:
         print("no points passed intensity cutoff; skipping 3D propagation scatter plot.")

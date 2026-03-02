@@ -19,6 +19,8 @@
 - Do prioritize the GPU backend
 - Do update README build/test/docs sections when CMake options or targets change
 - Do keep Windows and Linux command examples in sync for setup/build/test paths
+- Do attempt to reduce bloat in code where possible, via structs/helpers/templates, while maintaining 
+- Do check bloat by line count
 
 ## Formatting
 - Put doxygen docstrings in function declarations in header files
