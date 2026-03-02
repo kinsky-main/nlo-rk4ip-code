@@ -78,9 +78,8 @@ def main() -> float:
             delta_x=1.0,
             delta_y=1.0,
             runtime=nlo.RuntimeOperators(
-                dispersion_factor_expr="i*c0*w",
-                nonlinear_expr="0",
-                constants=[kappa],
+                linear_factor_fn=lambda A, w: (1.0j * kappa) * w,
+                nonlinear_fn=lambda A, I: 0.0,
             ),
         )
         exec_options = nlo.default_execution_options(

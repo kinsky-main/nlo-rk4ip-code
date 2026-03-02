@@ -41,12 +41,20 @@ def _relative_l2_error_curve(records_num: np.ndarray, records_ref: np.ndarray) -
     if records_num.shape != records_ref.shape:
         raise ValueError("records_num and records_ref must have the same shape")
 
-    out = np.empty(records_num.shape[0], dtype=np.float64)
-    for i in range(records_num.shape[0]):
-        ref = np.asarray(records_ref[i], dtype=np.complex128).reshape(-1)
-        num = np.asarray(records_num[i], dtype=np.complex128).reshape(-1)
-        denom = max(float(np.linalg.norm(ref)), 1e-15)
-        out[i] = float(np.linalg.norm(num - ref) / denom)
+    num_records = int(records_num.shape[0])
+    out = np.empty(num_records, dtype=np.float64)
+    diff_work = np.empty(records_num.shape[1:], dtype=np.complex128)
+
+    for i in range(num_records):
+        ref = np.asarray(records_ref[i], dtype=np.complex128)
+        num = np.asarray(records_num[i], dtype=np.complex128)
+
+        ref_sq = float(np.vdot(ref.reshape(-1), ref.reshape(-1)).real)
+        denom = np.sqrt(max(ref_sq, 1e-30))
+
+        np.subtract(num, ref, out=diff_work)
+        diff_sq = float(np.vdot(diff_work.reshape(-1), diff_work.reshape(-1)).real)
+        out[i] = float(np.sqrt(max(diff_sq, 0.0)) / denom)
     return out
 
 
@@ -103,18 +111,17 @@ def main() -> None:
     case_key = "default"
 
     nt = 512
-    nx = 172
-    ny = 172
+    nx = 64
+    ny = 64
     beta2 = -0.01
     gamma = 0.01
     t0 = 0.1 / (2.0 * np.log(1.0 + np.sqrt(2.0)))
     z_final = 0.5 * ((t0 * t0) / abs(beta2))
-    num_records = 20
+    num_records = 40
     dt = (16.0 * t0) / float(nt)
     dx = 0.6
     dy = 0.6
     grin_g = 0.020
-    step_size = z_final / 320.0
     lambda0_nm = 1550.0
 
     runner = NloExampleRunner()
@@ -153,17 +160,16 @@ def main() -> None:
         )
 
         runtime = nlo.RuntimeOperators(
-            linear_factor_expr="i*c0*wt*wt",
-            linear_expr="exp(h*D)",
-            nonlinear_expr="i*A*(c1*I + V)",
-            constants=[0.5 * beta2, gamma, 0.0, 0.0],
+            linear_factor_fn=lambda A, wt: (1.0j * (0.5 * beta2)) * (wt * wt),
+            linear_fn=lambda A, D, h: np.exp(h * D),
+            nonlinear_fn=lambda A, I, V: (1.0j * A) * (gamma * I + V),
         )
         cfg = nlo.prepare_sim_config(
             nt * nx * ny,
             propagation_distance=float(z_final),
-            starting_step_size=float(step_size),
-            max_step_size=float(step_size),
-            min_step_size=float(step_size),
+            starting_step_size=0.001,
+            max_step_size=0.01,
+            min_step_size=0.00001,
             error_tolerance=1e-6,
             pulse_period=float(nt) * dt,
             delta_time=dt,

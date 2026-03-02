@@ -234,14 +234,12 @@ class NloExampleRunner:
 
         if runtime_cfg is not None or bool(sim_cfg.honor_solver_controls):
             if runtime_cfg is None:
+                beta2_scale = 0.5 * float(sim_cfg.beta2)
+                loss = 0.5 * float(sim_cfg.alpha)
+                gamma = float(sim_cfg.gamma)
                 runtime_cfg = self.nlo.RuntimeOperators(
-                    dispersion_factor_expr="i*c0*w*w-c1",
-                    nonlinear_expr="i*A*(c2*I + V)",
-                    constants=[
-                        0.5 * float(sim_cfg.beta2),
-                        0.5 * float(sim_cfg.alpha),
-                        float(sim_cfg.gamma),
-                    ],
+                    linear_factor_fn=lambda A, w: ((1.0j * beta2_scale) * (w * w) - loss),
+                    nonlinear_fn=lambda A, I, V: (1.0j * A) * (gamma * I + V),
                 )
             prepared = self.nlo.prepare_sim_config(
                 n,
@@ -287,16 +285,12 @@ class NloExampleRunner:
             pulse_period=float(sim_cfg.resolved_pulse_period()),
             frequency_grid=[complex(float(om), 0.0) for om in omega],
         )
-        linear_operator = self.nlo.OperatorSpec(
-            expr="i*beta2*w*w-loss",
-            params={
-                "beta2": 0.5 * float(sim_cfg.beta2),
-                "loss": 0.5 * float(sim_cfg.alpha),
-            },
-        )
+        beta2_scale = 0.5 * float(sim_cfg.beta2)
+        loss = 0.5 * float(sim_cfg.alpha)
+        gamma = float(sim_cfg.gamma)
+        linear_operator = self.nlo.OperatorSpec(fn=lambda A, w: ((1.0j * beta2_scale) * (w * w) - loss))
         nonlinear_operator = self.nlo.OperatorSpec(
-            expr="i*A*(gamma*I + V)",
-            params={"gamma": float(sim_cfg.gamma)},
+            fn=lambda A, I, V: (1.0j * A) * (gamma * I + V),
         )
         result = self.api.propagate(
             pulse,

@@ -16,6 +16,9 @@ try:
     from .runtime_expr import (  # type: ignore[attr-defined]
         RUNTIME_CONTEXT_DISPERSION_FACTOR,
         RUNTIME_CONTEXT_DISPERSION,
+        RUNTIME_CONTEXT_LINEAR_FACTOR,
+        RUNTIME_CONTEXT_LINEAR,
+        RUNTIME_CONTEXT_POTENTIAL,
         RUNTIME_CONTEXT_NONLINEAR,
         translate_callable,
     )
@@ -23,6 +26,9 @@ except ImportError:
     from runtime_expr import (
         RUNTIME_CONTEXT_DISPERSION_FACTOR,
         RUNTIME_CONTEXT_DISPERSION,
+        RUNTIME_CONTEXT_LINEAR_FACTOR,
+        RUNTIME_CONTEXT_LINEAR,
+        RUNTIME_CONTEXT_POTENTIAL,
         RUNTIME_CONTEXT_NONLINEAR,
         translate_callable,
     )
@@ -511,9 +517,14 @@ class RuntimeOperators:
     linear_factor_expr: str | None = None
     linear_expr: str | None = None
     potential_expr: str | None = None
+    # Backward-compatible aliases for linear_*; do not provide both names together.
     dispersion_factor_expr: str | None = None
     dispersion_expr: str | None = None
     nonlinear_expr: str | None = None
+    linear_factor_fn: Callable[..., object] | None = None
+    linear_fn: Callable[..., object] | None = None
+    potential_fn: Callable[..., object] | None = None
+    # Backward-compatible aliases for linear_*_fn; do not provide both names together.
     dispersion_factor_fn: Callable[..., object] | None = None
     dispersion_fn: Callable[..., object] | None = None
     nonlinear_fn: Callable[..., object] | None = None
@@ -1018,42 +1029,74 @@ def prepare_sim_config(
             physics_cfg.runtime.raman_response_time = None
             physics_cfg.runtime.raman_response_len = 0
 
-        if runtime.dispersion_factor_expr and runtime.dispersion_factor_fn is not None:
+        if runtime.linear_factor_expr and runtime.dispersion_factor_expr:
             raise ValueError(
-                "runtime.dispersion_factor_expr and runtime.dispersion_factor_fn are mutually exclusive"
+                "runtime.linear_factor_expr and runtime.dispersion_factor_expr are aliases; provide only one"
             )
-        if runtime.dispersion_expr and runtime.dispersion_fn is not None:
-            raise ValueError("runtime.dispersion_expr and runtime.dispersion_fn are mutually exclusive")
+        if runtime.linear_expr and runtime.dispersion_expr:
+            raise ValueError("runtime.linear_expr and runtime.dispersion_expr are aliases; provide only one")
+        if runtime.linear_factor_fn is not None and runtime.dispersion_factor_fn is not None:
+            raise ValueError("runtime.linear_factor_fn and runtime.dispersion_factor_fn are aliases; provide only one")
+        if runtime.linear_fn is not None and runtime.dispersion_fn is not None:
+            raise ValueError("runtime.linear_fn and runtime.dispersion_fn are aliases; provide only one")
         if runtime.nonlinear_expr and runtime.nonlinear_fn is not None:
             raise ValueError("runtime.nonlinear_expr and runtime.nonlinear_fn are mutually exclusive")
+        if runtime.potential_expr and runtime.potential_fn is not None:
+            raise ValueError("runtime.potential_expr and runtime.potential_fn are mutually exclusive")
 
-        linear_factor_expr = runtime.linear_factor_expr
-        linear_expr = runtime.linear_expr
+        linear_factor_expr = (
+            runtime.linear_factor_expr
+            if runtime.linear_factor_expr is not None
+            else runtime.dispersion_factor_expr
+        )
+        linear_factor_fn = runtime.linear_factor_fn
+        linear_factor_context = RUNTIME_CONTEXT_LINEAR_FACTOR
+        if linear_factor_fn is None and runtime.dispersion_factor_fn is not None:
+            linear_factor_fn = runtime.dispersion_factor_fn
+            linear_factor_context = RUNTIME_CONTEXT_DISPERSION_FACTOR
+        if linear_factor_expr and linear_factor_fn is not None:
+            raise ValueError("runtime linear/dispersive factor expression and callable are mutually exclusive")
+        if linear_factor_fn is not None:
+            translated = translate_callable(
+                linear_factor_fn,
+                linear_factor_context,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            linear_factor_expr = shifted
+
+        linear_expr = runtime.linear_expr if runtime.linear_expr is not None else runtime.dispersion_expr
+        linear_fn = runtime.linear_fn
+        linear_context = RUNTIME_CONTEXT_LINEAR
+        if linear_fn is None and runtime.dispersion_fn is not None:
+            linear_fn = runtime.dispersion_fn
+            linear_context = RUNTIME_CONTEXT_DISPERSION
+        if linear_expr and linear_fn is not None:
+            raise ValueError("runtime linear/dispersive expression and callable are mutually exclusive")
+        if linear_fn is not None:
+            translated = translate_callable(
+                linear_fn,
+                linear_context,
+                constant_bindings=constant_bindings,
+                auto_capture=auto_capture,
+            )
+            shifted = _shift_constant_indices(translated.expression, len(constants))
+            constants.extend(translated.constants)
+            linear_expr = shifted
+
         potential_expr = runtime.potential_expr
-
-        dispersion_factor_expr = runtime.dispersion_factor_expr
-        if runtime.dispersion_factor_fn is not None:
+        if runtime.potential_fn is not None:
             translated = translate_callable(
-                runtime.dispersion_factor_fn,
-                RUNTIME_CONTEXT_DISPERSION_FACTOR,
+                runtime.potential_fn,
+                RUNTIME_CONTEXT_POTENTIAL,
                 constant_bindings=constant_bindings,
                 auto_capture=auto_capture,
             )
             shifted = _shift_constant_indices(translated.expression, len(constants))
             constants.extend(translated.constants)
-            dispersion_factor_expr = shifted
-
-        dispersion_expr = runtime.dispersion_expr
-        if runtime.dispersion_fn is not None:
-            translated = translate_callable(
-                runtime.dispersion_fn,
-                RUNTIME_CONTEXT_DISPERSION,
-                constant_bindings=constant_bindings,
-                auto_capture=auto_capture,
-            )
-            shifted = _shift_constant_indices(translated.expression, len(constants))
-            constants.extend(translated.constants)
-            dispersion_expr = shifted
+            potential_expr = shifted
 
         nonlinear_expr = runtime.nonlinear_expr
         if runtime.nonlinear_fn is not None:
@@ -1077,15 +1120,19 @@ def prepare_sim_config(
             linear_factor_bytes = linear_factor_expr.encode("utf-8")
             keepalive.append(linear_factor_bytes)
             physics_cfg.runtime.linear_factor_expr = ctypes.c_char_p(linear_factor_bytes)
+            physics_cfg.runtime.dispersion_factor_expr = ctypes.c_char_p(linear_factor_bytes)
         else:
             physics_cfg.runtime.linear_factor_expr = None
+            physics_cfg.runtime.dispersion_factor_expr = None
 
         if linear_expr:
             linear_bytes = linear_expr.encode("utf-8")
             keepalive.append(linear_bytes)
             physics_cfg.runtime.linear_expr = ctypes.c_char_p(linear_bytes)
+            physics_cfg.runtime.dispersion_expr = ctypes.c_char_p(linear_bytes)
         else:
             physics_cfg.runtime.linear_expr = None
+            physics_cfg.runtime.dispersion_expr = None
 
         if potential_expr:
             potential_bytes = potential_expr.encode("utf-8")
@@ -1093,20 +1140,6 @@ def prepare_sim_config(
             physics_cfg.runtime.potential_expr = ctypes.c_char_p(potential_bytes)
         else:
             physics_cfg.runtime.potential_expr = None
-
-        if dispersion_factor_expr:
-            disp_factor_bytes = dispersion_factor_expr.encode("utf-8")
-            keepalive.append(disp_factor_bytes)
-            physics_cfg.runtime.dispersion_factor_expr = ctypes.c_char_p(disp_factor_bytes)
-        else:
-            physics_cfg.runtime.dispersion_factor_expr = None
-
-        if dispersion_expr:
-            disp_bytes = dispersion_expr.encode("utf-8")
-            keepalive.append(disp_bytes)
-            physics_cfg.runtime.dispersion_expr = ctypes.c_char_p(disp_bytes)
-        else:
-            physics_cfg.runtime.dispersion_expr = None
 
         if nonlinear_expr:
             nonlin_bytes = nonlinear_expr.encode("utf-8")
@@ -1460,9 +1493,9 @@ class NLolib:
         )
 
         runtime = RuntimeOperators(
-            dispersion_factor_expr=linear_expr,
+            linear_factor_expr=linear_expr,
             nonlinear_expr=nonlinear_expr,
-            dispersion_factor_fn=linear_fn,
+            linear_factor_fn=linear_fn,
             nonlinear_fn=nonlinear_fn,
             constants=[*linear_constants, *nonlinear_constants],
             constant_bindings=binding_map if binding_map else None,

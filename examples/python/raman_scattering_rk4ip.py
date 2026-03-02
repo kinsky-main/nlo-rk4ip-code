@@ -242,18 +242,16 @@ def main() -> float:
     else:
         run_group = db.begin_group(example_name, args.run_group)
         runtime_kerr = RuntimeOperators(
-            dispersion_factor_expr="i*c0*w*w-c1",
-            nonlinear_expr="i*c2*A*I",
-            constants=[0.5 * beta2, 0.0, gamma],
+            linear_factor_fn=lambda A, w: (1.0j * (0.5 * beta2)) * (w * w),
+            nonlinear_fn=lambda A, I: (1.0j * gamma) * A * I,
             nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
             nonlinear_gamma=gamma,
             raman_fraction=0.0,
             shock_omega0=0.0,
         )
         runtime_raman = RuntimeOperators(
-            dispersion_factor_expr="i*c0*w*w-c1",
-            nonlinear_expr="0",
-            constants=[0.5 * beta2, 0.0, gamma],
+            linear_factor_fn=lambda A, w: (1.0j * (0.5 * beta2)) * (w * w),
+            nonlinear_fn=lambda A, I: 0.0,
             nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
             nonlinear_gamma=gamma,
             raman_fraction=f_r,

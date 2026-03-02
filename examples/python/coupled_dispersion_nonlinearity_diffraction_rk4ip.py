@@ -103,12 +103,12 @@ def _run_case(
         potential_grid=potential_tfast.tolist(),
     )
     linear_operator = nlo.OperatorSpec(
-        expr="i*(beta2*wt*wt + beta_t*(kx*kx + ky*ky))",
-        params={"beta2": 0.5 * beta2, "beta_t": diffraction_coeff},
+        fn=lambda A, wt, kx, ky: (1.0j) * (
+            (0.5 * beta2) * (wt * wt) + diffraction_coeff * ((kx * kx) + (ky * ky))
+        ),
     )
     nonlinear_operator = nlo.OperatorSpec(
-        expr="i*A*(gamma*I + V)",
-        params={"gamma": gamma},
+        fn=lambda A, I, V: (1.0j * A) * (gamma * I + V),
     )
 
     exec_options_ctypes = exec_options.to_ctypes(nlo)

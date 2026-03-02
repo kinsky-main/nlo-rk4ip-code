@@ -67,8 +67,7 @@ def main() -> None:
             fn=lambda A, w: (1.0j * (beta2 / 2.0)) * (w * w),
         )
         nonlinear_operator = OperatorSpec(
-            expr="i*A*(gamma*I + V)",
-            params={"gamma": 0.01},
+            fn=lambda A, I, V: (1.0j * A) * (0.01 * I + V),
         )
         exec_options = default_execution_options(
             backend_type=NLO_VECTOR_BACKEND_AUTO,

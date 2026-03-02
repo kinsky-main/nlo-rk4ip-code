@@ -467,7 +467,7 @@ def main() -> float:
         U0 = 2.0 * sech(t)
         A0 = to_physical_envelope(U0, 0.0, p0, alpha)
 
-        num_recorded_samples = 100
+        num_recorded_samples = 160
         sim_cfg = TemporalSimulationConfig(
             gamma=gamma,
             beta2=beta2,
@@ -478,9 +478,9 @@ def main() -> float:
             pulse_period=n * dt,
             omega=omega,
             starting_step_size=0.001,
-            max_step_size=0.001,
-            min_step_size=0.001,
-            error_tolerance=5e-3,
+            max_step_size=0.01,
+            min_step_size=0.00005,
+            error_tolerance=1e-5,
             honor_solver_controls=True,
         )
         configured_start_step = float(sim_cfg.starting_step_size)

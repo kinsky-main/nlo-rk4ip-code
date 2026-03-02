@@ -112,9 +112,32 @@ class ExampleRunDB:
             return None
         return str(row["run_group"])
 
+    def nth_latest_run_group(self, example_name: str, run_number: int) -> str | None:
+        if run_number <= 0:
+            return None
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT run_group FROM ex_run_groups WHERE example_name=? "
+                "ORDER BY created_utc DESC, run_group DESC LIMIT 1 OFFSET ?;",
+                (example_name, int(run_number - 1)),
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row["run_group"])
+
     def resolve_replot_group(self, example_name: str, run_group: str | None) -> str:
         if run_group:
-            return run_group
+            selector = str(run_group).strip()
+            if selector.isdigit():
+                run_number = int(selector)
+                resolved = self.nth_latest_run_group(example_name, run_number)
+                if resolved is None:
+                    raise RuntimeError(
+                        f"run number {run_number} is not available for example '{example_name}' "
+                        f"in DB: {self.db_path}"
+                    )
+                return resolved
+            return selector
         latest = self.latest_run_group(example_name)
         if latest is None:
             raise RuntimeError(

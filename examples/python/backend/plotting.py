@@ -108,7 +108,7 @@ def _resolve_report_output_path(output_path: Path) -> Path | None:
             relative_path = Path(output_path.name)
     return _REPORT_OUTPUT_DIR / relative_path
 
-
+# TODO: Fix double save in examples and ensure default output dirs are always saved to
 def _save_figure(fig: Any, output_path: Path, **kwargs: Any) -> Path | None:
     output_path = Path(output_path)
     if not _plot_is_selected(output_path):
@@ -155,7 +155,7 @@ def plot_intensity_colormap_vs_propagation(
     ax.set_title(title)
     cbar = fig.colorbar(mesh, ax=ax)
     cbar.set_label(colorbar_label)
-    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
+    saved = _save_figure(fig, output_path)
     plt.close(fig)
     return saved
 
@@ -186,7 +186,7 @@ def plot_final_re_im_comparison(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
+    saved = _save_figure(fig, output_path)
     plt.close(fig)
     return saved
 
@@ -213,7 +213,7 @@ def plot_two_curve_comparison(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
+    saved = _save_figure(fig, output_path)
     plt.close(fig)
     return saved
 
@@ -243,7 +243,7 @@ def plot_three_curve_drift(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    saved = _save_figure(fig, output_path, dpi=220, bbox_inches="tight")
+    saved = _save_figure(fig, output_path)
     plt.close(fig)
     return saved
 
@@ -268,7 +268,7 @@ def plot_mode_power_exchange(
     ax.set_title("Two-Mode Linear Beating: Power Exchange")
     ax.grid(True, alpha=0.3)
     ax.legend(ncol=2)
-    saved = _save_figure(fig, output_path, dpi=220, bbox_inches="tight")
+    saved = _save_figure(fig, output_path)
     plt.close(fig)
     return saved
 
@@ -295,7 +295,7 @@ def plot_phase_shift_comparison(
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
-    saved = _save_figure(fig, output_path, dpi=220, bbox_inches="tight")
+    saved = _save_figure(fig, output_path)
     plt.close(fig)
     return saved
 
@@ -322,7 +322,7 @@ def plot_convergence_loglog(
 
     fig, ax = plt.subplots()
     ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
-    ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="C4", label="Fitted power law")
+    ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="C3", label="Fitted power law")
     ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^4)$")
     ax.set_xlabel("Step size Delta z (m)")
     ax.set_ylabel("Total relative L2 error")
@@ -421,7 +421,7 @@ def plot_wavelength_step_history(
                     next_plot[:n][order],
                     lw=1.0,
                     ls="--",
-                    color="C4",
+                    color="C0",
                     label="Next candidate step size",
                 )
             has_series = True

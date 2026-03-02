@@ -50,8 +50,8 @@ def main() -> None:
         pulse_period=1.0,
         frequency_grid=freq,
     )
-    linear = OperatorSpec(expr="0")
-    nonlinear = OperatorSpec(expr="0")
+    linear = OperatorSpec(fn=lambda A, w: 0.0)
+    nonlinear = OperatorSpec(fn=lambda A, I: 0.0)
 
     if args.replot:
         run_group = db.resolve_replot_group(example_name, args.run_group)

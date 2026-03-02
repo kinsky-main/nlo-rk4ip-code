@@ -88,16 +88,17 @@ def run_phase_validation(
         )
 
     nlo = runner.nlo
+    gx = float(grin_gx)
+    gy = float(grin_gy)
     runtime = nlo.RuntimeOperators(
-        linear_factor_expr="0",
-        linear_expr="exp(h*D)",
-        potential_expr="c0*(x*x) + c1*(y*y)",
-        nonlinear_expr="i*A*V",
-        constants=[float(grin_gx), float(grin_gy)],
+        linear_factor_fn=lambda A, wt, kx, ky: 0.0,
+        linear_fn=lambda A, D, h: np.exp(h * D),
+        potential_fn=lambda x, y: (gx * (x * x)) + (gy * (y * y)),
+        nonlinear_fn=lambda A, I, V: (1.0j * A) * V,
     )
     z_records, records_flat = runner.propagate_tensor3d_records(
         field0_tfast=field0_tfast,
-        nt=1,
+        nt=128,
         nx=nx,
         ny=ny,
         num_records=num_records,
@@ -299,11 +300,13 @@ def run_diffraction_operator_proof_check(
     kx = (2.0 * np.pi) * np.fft.fftfreq(nx, d=dx)
     ky = (2.0 * np.pi) * np.fft.fftfreq(ny, d=dy)
     k2 = (kx[np.newaxis, :] ** 2) + (ky[:, np.newaxis] ** 2)
+    coeff = float(diffraction_coeff)
     runtime = nlo.RuntimeOperators(
-        linear_factor_expr="i*c0*(kx*kx + ky*ky)",
-        linear_expr="exp(h*D)",
-        nonlinear_expr="0",
-        constants=[float(diffraction_coeff)],
+        linear_factor_fn=lambda A, wt, kx, ky: (1.0j * coeff) * (
+            (kx * kx) + (ky * ky)
+        ),
+        linear_fn=lambda A, D, h: np.exp(h * D),
+        nonlinear_fn=lambda A, I: 0.0,
     )
     z_records, records_flat = runner.propagate_tensor3d_records(
         field0_tfast=field0_tfast,
