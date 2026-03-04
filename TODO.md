@@ -1,6 +1,31 @@
 # Final Year Project TODO List for NLOLib
 
 ## Main Tasks
+
+- [ ] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
+- [ ] Fix MATLAB output for installed packages where progress is not printed.
+- [ ] Improve printout for progress of solver, showing estimated time of completion.
+
+## Potentially Required Tasks
+
+- [ ] Implement more efficient GPU memory management and data transfer strategies, e.g. pinned memory, async transfers, etc.
+- [ ] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
+- [ ] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
+- [ ] Loading bar with estimated time remaining for long-running simulations.
+- [ ] Refactor state.c into respective init files.
+- [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.
+
+## Extensions
+
+- [ ] Add Massively Parallel Algorithm solver mode for coupled mode problems.
+- [ ] OpenMP backend for multi-core CPU parallelism.
+- [ ] Add example problem documentation on the physics of the problems (Do this in the report first).
+- [ ] Review directory and module sturcture for better organisation. Currently there are some looped dependencies between modules which are not ideal, e.g. core -> physics -> core.
+- [ ] Add finite difference kernel for solving course/sharp problems with high accuracy and ability to parallelise much more efficiently on GPU following the approach used in [NLSEMagic](https://github.com/sumseq/NLSEMagic).
+- [ ] Replicate all examples from [MMTools](https://github.com/AaHaHaa/MMTools?tab=readme-ov-file) and compare results to ensure consistency modal solver.
+
+## Complete
+
 - [x] Fix double declarations and definitions of vector operations in backend and numerics
 - [x] Assess whether SPIR-V is required for GPU backend or if Vulkan compute shaders are sufficient. Ideally remove as it is a runtime dependency.
 - [x] Investigate GPU benchmark failure.
@@ -12,34 +37,15 @@
 - [x] Combine grin vector operator into dispersion and nonlinear operator expressions.
 - [x] Remove old API and just have custom functions for dispersion and nonlinearity, this removes the complications of additional vector operators.
 - [x] Implement new GRIN operations using preferred kernels for (2+1)D operations.
-- [ ] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
 - [x] Package and distribute library for Windows and Linux.
-- [ ] Go over soliton analytical solution and ensure it is correct as there is still an oscillatory L2 error in the solver compared to analytical solution.
-- [ ] Fix MATLAB output for installed packages where progress is not printed.
-- [ ] Improve printout for progress of solver, showing estimated time of completion.
-- [ ] Remove redundant wrappers and functions from MATLAB and Python bindings, duplications of factor expressions and dispersion expressions.
+- [x] Go over soliton analytical solution and ensure it is correct as there is still an oscillatory L2 error in the solver compared to analytical solution.
+- [x] Remove redundant wrappers and functions from MATLAB and Python bindings, duplications of factor expressions and dispersion expressions.
 - [x] Remove bloat in nlolib.c which results in 3 pointless function wrappers for the same operations.
 - [x] Remove bloat in wrappers which mirrors public API functions in nlolib.c bloat.
 - [x] Fix soliton example, actually find original reference for analytical solution and ensure it is correct.
-- [ ] Change linear drift error to show total error rather than centroid difference.
-- [ ] Plot pulse evolution in the soliton example against the step size to show convergence of the solver.
-- [ ] Create benchmark to run multiple fixed step sizes to evaluate convergence of the solver and show that it is consistent with the expected order of the RK4 method.
-- [ ] Remap (3+1)D problems to use full size tensors rather than flattening to 1D arrays, this will also require implementation of dedicated GPU kernels for (3+1)D problems.
-- [ ] Redefine nonlinear operator inputs to not separate the field, it should allow for non-seperable nonlinear operators.
-
-## Potentially Required Tasks
-
-- [ ] Implement more efficient GPU memory management and data transfer strategies, e.g. pinned memory, async transfers, etc.
-- [ ] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
-- [ ] Move transverse operator into main nonlinear and dispersion operators, may be required for certain potentials.
-- [ ] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
-- [ ] Loading bar with estimated time remaining for long-running simulations.
-- [ ] Refactor state.c into respective init files.
-- [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.
-
-## Extensions
-
-- [ ] Add Massively Parallel Algorithm solver mode for coupled mode problems.
-- [ ] OpenMP backend for multi-core CPU parallelism.
-- [ ] Add example problem documentation on the physics of the problems (Do this in the report first ;)).
-- [ ] Review directory and module sturcture for better organisation. Currnetly there are some looped dependencies between modules which are not ideal, e.g. core -> physics -> core.
+- [x] Change linear drift error to show total error rather than centroid difference.
+- [x] Plot pulse evolution in the soliton example against the step size to show convergence of the solver.
+- [x] Create benchmark to run multiple fixed step sizes to evaluate convergence of the solver and show that it is consistent with the expected order of the RK4 method.
+- [x] Remap (3+1)D problems to use full size tensors rather than flattening to 1D arrays, this will also require implementation of dedicated GPU kernels for (3+1)D problems.
+- [x] Redefine nonlinear operator inputs to not separate the field, it should allow for non-seperable nonlinear operators.
+- [x] Move transverse operator into main nonlinear and dispersion operators, may be required for certain potentials.

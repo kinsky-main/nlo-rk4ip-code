@@ -149,10 +149,13 @@ def _run(args: argparse.Namespace) -> tuple[float, float, float]:
     max_energy_drift = float(np.max(np.abs(energy_drift)))
     max_momentum_drift = float(np.max(np.abs(momentum_drift)))
     max_hamiltonian_drift = float(np.max(np.abs(hamiltonian_drift)))
+    if not np.isfinite(ld) or ld <= 0.0:
+        raise RuntimeError("invalid dispersion length computed for plotting normalization.")
+    z_axis_norm = z_axis / float(ld)
 
     output_dir = args.output_dir
     saved = plot_three_curve_drift(
-        z_axis,
+        z_axis_norm,
         energy_drift,
         momentum_drift,
         hamiltonian_drift,
@@ -160,6 +163,7 @@ def _run(args: argparse.Namespace) -> tuple[float, float, float]:
         label_a="Energy drift",
         label_b="Momentum drift",
         label_c="Hamiltonian drift",
+        x_label="Normalized propagation z / L_D",
     )
 
     print(f"conservation-check summary (run_group={run_group}):")

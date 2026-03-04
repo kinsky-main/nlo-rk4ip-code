@@ -49,6 +49,19 @@ def _relative_l2_error_curve(records_num: np.ndarray, records_ref: np.ndarray) -
     )
 
 
+def _dispersion_length(beta2: float, t0: float) -> float:
+    if beta2 == 0.0:
+        raise ValueError("beta2 must be non-zero to compute dispersion-length normalization.")
+    ld = (float(t0) * float(t0)) / abs(float(beta2))
+    if not np.isfinite(ld) or ld <= 0.0:
+        raise ValueError("computed dispersion length is not finite and positive.")
+    return float(ld)
+
+
+def _normalized_propagation_axis(z_axis: np.ndarray, beta2: float, t0: float) -> np.ndarray:
+    return np.asarray(z_axis, dtype=np.float64) / _dispersion_length(beta2, t0)
+
+
 @dataclass(frozen=True)
 class PhaseOnlyConfig:
     nt: int = 512
@@ -284,6 +297,9 @@ class GrinSolitonApp:
 
         records = np.asarray([_unflatten_record_tfast(row, cfg.nt, cfg.ny, cfg.nx) for row in records_flat], dtype=np.complex128)
         records_ref = _analytical_phase_records(field0[:, 0, 0], potential_xy, z_axis, cfg.beta2, cfg.t0)
+        z_axis_norm = _normalized_propagation_axis(z_axis, cfg.beta2, cfg.t0)
+        z_axis_label = "Normalized propagation z / L_D"
+        z_axis_label_3d = "z / L_D"
 
         error_curve = _relative_l2_error_curve(records, records_ref)
         final_error = float(error_curve[-1])
@@ -324,11 +340,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 t,
-                z_axis,
+                z_axis_norm,
                 np.abs(temporal_num) ** 2,
                 out_dir / "center_temporal_intensity_colormap.png",
                 x_label="Time t",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Center-point temporal intensity (numerical)",
                 colorbar_label="Normalized intensity",
             )
@@ -359,11 +375,12 @@ class GrinSolitonApp:
         )
         _record(
             plot_total_error_over_propagation(
-                z_axis,
+                z_axis_norm,
                 error_curve,
                 out_dir / "relative_error_over_propagation.png",
                 title="GRIN potential + soliton: mean pointwise abs-relative error over z",
                 y_label="Mean pointwise abs-relative error",
+                x_label=z_axis_label,
             )
         )
 
@@ -374,7 +391,7 @@ class GrinSolitonApp:
             plot_3d_intensity_scatter_propagation(
                 x,
                 y,
-                z_axis,
+                z_axis_norm,
                 spatial_num,
                 out_dir / "spatial_integrated_3d_numerical_scatter.png",
                 intensity_cutoff=0.02,
@@ -388,6 +405,7 @@ class GrinSolitonApp:
                 input_is_intensity=True,
                 normalization_peak=spatial_peak,
                 title="GRIN+Soliton: spatial intensity integrated over time (numerical, uniform expected)",
+                z_label=z_axis_label_3d,
             ),
             allow_uniform=True,
         )
@@ -395,7 +413,7 @@ class GrinSolitonApp:
             plot_3d_intensity_scatter_propagation(
                 x,
                 y,
-                z_axis,
+                z_axis_norm,
                 spatial_ref,
                 out_dir / "spatial_integrated_3d_expected_scatter.png",
                 intensity_cutoff=0.02,
@@ -409,6 +427,7 @@ class GrinSolitonApp:
                 input_is_intensity=True,
                 normalization_peak=spatial_peak,
                 title="GRIN+Soliton: spatial intensity integrated over time (expected, uniform)",
+                z_label=z_axis_label_3d,
             ),
             allow_uniform=True,
         )
@@ -419,11 +438,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 freq_axis,
-                z_axis,
+                z_axis_norm,
                 np.abs(spec_num) ** 2,
                 out_dir / "frequency_profile_numerical.png",
                 x_label="Frequency detuning (1/time)",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Frequency propagation profile (numerical)",
                 colorbar_label="Normalized spectral intensity",
                 normalization_peak=spec_peak,
@@ -432,11 +451,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 freq_axis,
-                z_axis,
+                z_axis_norm,
                 np.abs(spec_ref) ** 2,
                 out_dir / "frequency_profile_expected.png",
                 x_label="Frequency detuning (1/time)",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Frequency propagation profile (expected)",
                 colorbar_label="Normalized spectral intensity",
                 normalization_peak=spec_peak,
@@ -458,11 +477,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 wl_axis,
-                z_axis,
+                z_axis_norm,
                 wl_num,
                 out_dir / "wavelength_profile_numerical.png",
                 x_label="Wavelength (nm)",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Wavelength propagation profile (numerical)",
                 colorbar_label="Normalized spectral intensity",
                 normalization_peak=wl_peak,
@@ -471,11 +490,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 wl_axis,
-                z_axis,
+                z_axis_norm,
                 wl_ref,
                 out_dir / "wavelength_profile_expected.png",
                 x_label="Wavelength (nm)",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Wavelength propagation profile (expected)",
                 colorbar_label="Normalized spectral intensity",
                 normalization_peak=wl_peak,
@@ -486,11 +505,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 x,
-                z_axis,
+                z_axis_norm,
                 xz_profile_num,
                 out_dir / "x_profile_vs_z_numerical_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="X-profile intensity propagation (numerical, t=t_mid, y=y_mid)",
                 colorbar_label="Normalized intensity",
                 normalization_peak=xz_peak,
@@ -500,11 +519,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 x,
-                z_axis,
+                z_axis_norm,
                 xz_profile_ref,
                 out_dir / "x_profile_vs_z_expected_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="X-profile intensity propagation (expected, t=t_mid, y=y_mid)",
                 colorbar_label="Normalized intensity",
                 normalization_peak=xz_peak,
@@ -515,11 +534,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 y,
-                z_axis,
+                z_axis_norm,
                 yz_profile_num,
                 out_dir / "y_profile_vs_z_numerical_tmid_xcenter.png",
                 x_label="Transverse coordinate y",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Y-profile intensity propagation (numerical, t=t_mid, x=x_mid)",
                 colorbar_label="Normalized intensity",
                 normalization_peak=yz_peak,
@@ -529,11 +548,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 y,
-                z_axis,
+                z_axis_norm,
                 yz_profile_ref,
                 out_dir / "y_profile_vs_z_expected_tmid_xcenter.png",
                 x_label="Transverse coordinate y",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Y-profile intensity propagation (expected, t=t_mid, x=x_mid)",
                 colorbar_label="Normalized intensity",
                 normalization_peak=yz_peak,
@@ -542,13 +561,13 @@ class GrinSolitonApp:
         )
         _record(
             plot_two_curve_comparison(
-                z_axis,
+                z_axis_norm,
                 xz_error_curve,
                 yz_error_curve,
                 out_dir / "xy_profile_error_over_propagation.png",
                 label_a="X-profile mean pointwise abs-relative error",
                 label_b="Y-profile mean pointwise abs-relative error",
-                x_label="Propagation distance z",
+                x_label=z_axis_label,
                 y_label="Mean pointwise abs-relative error",
                 title="X/Y profile intensity error over propagation",
             ),
@@ -679,6 +698,9 @@ class GrinSolitonApp:
                 },
             )
         records_ref = _fft3_linear_reference(field0, t, x, y, z_axis, cfg.beta2, cfg.diffraction_coeff)
+        z_axis_norm = _normalized_propagation_axis(z_axis, cfg.beta2, cfg.t0)
+        z_axis_label = "Normalized propagation z / L_D"
+        z_axis_label_3d = "z / L_D"
         error_curve = _relative_l2_error_curve(records, records_ref)
         final_error = float(error_curve[-1])
 
@@ -710,11 +732,12 @@ class GrinSolitonApp:
 
         _record(
             plot_total_error_over_propagation(
-                z_axis,
+                z_axis_norm,
                 error_curve,
                 out_dir / "relative_error_over_propagation.png",
                 title="GRIN diffraction: mean pointwise abs-relative error over z",
                 y_label="Mean pointwise abs-relative error",
+                x_label=z_axis_label,
             )
         )
         xz_peak = float(max(np.max(xz_num), np.max(xz_ref)))
@@ -722,11 +745,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 x,
-                z_axis,
+                z_axis_norm,
                 xz_num,
                 out_dir / "x_profile_vs_z_numerical_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="X-profile intensity propagation (numerical, diffraction)",
                 colorbar_label="Normalized intensity",
                 normalization_peak=xz_peak,
@@ -735,11 +758,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 x,
-                z_axis,
+                z_axis_norm,
                 xz_ref,
                 out_dir / "x_profile_vs_z_expected_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="X-profile intensity propagation (expected, diffraction)",
                 colorbar_label="Normalized intensity",
                 normalization_peak=xz_peak,
@@ -748,11 +771,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 y,
-                z_axis,
+                z_axis_norm,
                 yz_num,
                 out_dir / "y_profile_vs_z_numerical_tmid_xcenter.png",
                 x_label="Transverse coordinate y",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Y-profile intensity propagation (numerical, diffraction)",
                 colorbar_label="Normalized intensity",
                 normalization_peak=yz_peak,
@@ -761,11 +784,11 @@ class GrinSolitonApp:
         _record(
             plot_intensity_colormap_vs_propagation(
                 y,
-                z_axis,
+                z_axis_norm,
                 yz_ref,
                 out_dir / "y_profile_vs_z_expected_tmid_xcenter.png",
                 x_label="Transverse coordinate y",
-                y_label="Propagation distance z",
+                y_label=z_axis_label,
                 title="Y-profile intensity propagation (expected, diffraction)",
                 colorbar_label="Normalized intensity",
                 normalization_peak=yz_peak,
@@ -779,7 +802,7 @@ class GrinSolitonApp:
             plot_3d_intensity_scatter_propagation(
                 x,
                 y,
-                z_axis,
+                z_axis_norm,
                 spatial_num,
                 out_dir / "spatial_integrated_3d_numerical_scatter.png",
                 intensity_cutoff=0.01,
@@ -793,13 +816,14 @@ class GrinSolitonApp:
                 input_is_intensity=True,
                 normalization_peak=spatial_peak,
                 title="GRIN diffraction: spatial integrated intensity (numerical)",
+                z_label=z_axis_label_3d,
             )
         )
         _record(
             plot_3d_intensity_scatter_propagation(
                 x,
                 y,
-                z_axis,
+                z_axis_norm,
                 spatial_ref,
                 out_dir / "spatial_integrated_3d_expected_scatter.png",
                 intensity_cutoff=0.01,
@@ -813,6 +837,7 @@ class GrinSolitonApp:
                 input_is_intensity=True,
                 normalization_peak=spatial_peak,
                 title="GRIN diffraction: spatial integrated intensity (expected)",
+                z_label=z_axis_label_3d,
             )
         )
 

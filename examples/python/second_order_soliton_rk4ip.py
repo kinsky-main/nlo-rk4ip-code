@@ -290,13 +290,27 @@ def select_step_telemetry_for_plot(
     return filtered
 
 
+def normalize_step_telemetry(telemetry: StepTelemetry, z_scale: float) -> StepTelemetry:
+    if not np.isfinite(z_scale) or z_scale <= 0.0:
+        raise ValueError("z_scale must be a finite positive value.")
+    inv_scale = 1.0 / float(z_scale)
+    return StepTelemetry(
+        accepted_z=np.asarray(telemetry.accepted_z, dtype=np.float64) * inv_scale,
+        accepted_step_sizes=np.asarray(telemetry.accepted_step_sizes, dtype=np.float64) * inv_scale,
+        next_z=np.asarray(telemetry.next_z, dtype=np.float64) * inv_scale,
+        next_step_sizes=np.asarray(telemetry.next_step_sizes, dtype=np.float64) * inv_scale,
+        dropped=int(telemetry.dropped),
+    )
+
+
 def save_plots(
     t: np.ndarray,
     U_num: np.ndarray,
     U_true: np.ndarray,
     error_curve: np.ndarray,
     z_final: float,
-    z_samples: np.ndarray,
+    z_final_norm: float,
+    z_samples_norm: np.ndarray,
     lambda_nm: np.ndarray,
     spectral_map: np.ndarray,
     telemetry: StepTelemetry,
@@ -307,13 +321,16 @@ def save_plots(
 
     telemetry_plot = telemetry
     p1 = plot_wavelength_step_history(
-        z_samples,
+        z_samples_norm,
         lambda_nm,
         spectral_map,
         output_dir / "soliton_wavelength_intensity_colormap.png",
         accepted_z=telemetry_plot.accepted_z,
         accepted_step_sizes=telemetry_plot.accepted_step_sizes,
         proposed_step_sizes=telemetry_plot.next_step_sizes,
+        map_x_label="Normalized propagation z / Z0",
+        step_x_label="Normalized propagation z / Z0",
+        step_y_label="Normalized step size Delta z / Z0",
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -324,7 +341,7 @@ def save_plots(
         U_num,
         output_dir / "soliton_final_re_im_comparison.png",
         x_label="Dimensionless time t = T/T0",
-        title=f"Second-Order Soliton at z = {z_final:.3f} m: Re/Im Comparison",
+        title=f"Second-Order Soliton at z/Z0 = {z_final_norm:.3f} ({z_final:.3f} m): Re/Im Comparison",
         reference_label="Analytical",
         final_label="Numerical",
     )
@@ -337,7 +354,7 @@ def save_plots(
         U_num,
         output_dir / "soliton_final_intensity_comparison.png",
         x_label="Dimensionless time t = T/T0",
-        title=f"Second-Order Soliton at z = {z_final:.3f} m: Intensity Comparison",
+        title=f"Second-Order Soliton at z/Z0 = {z_final_norm:.3f} ({z_final:.3f} m): Intensity Comparison",
         reference_label="Analytical",
         final_label="Numerical",
     )
@@ -345,11 +362,12 @@ def save_plots(
         saved_paths.append(p3)
 
     p4 = plot_total_error_over_propagation(
-        z_samples,
+        z_samples_norm,
         error_curve,
         output_dir / "soliton_total_error_over_propagation.png",
-        title="Second-Order Soliton: Total Error Over Propagation",
+        title="Second-Order Soliton: Total Error Over Normalized Propagation",
         y_label="Mean pointwise abs-relative error (numerical vs analytical)",
+        x_label="Normalized propagation z / Z0",
     )
     if p4 is not None:
         saved_paths.append(p4)
@@ -514,6 +532,9 @@ def _run(args: argparse.Namespace) -> float:
         )
 
     sgn_beta2, ld, lnl = normalized_nlse_coefficients(beta2, gamma, t0, p0)
+    z0 = 0.5 * math.pi * ld
+    if not np.isfinite(z0) or z0 <= 0.0:
+        raise RuntimeError("invalid soliton period Z0 computed for plotting normalization.")
     ensure_finite_records_or_raise(A_records, z_records)
     U_num_records = np.empty_like(A_records, dtype=np.complex128)
     U_true_records = np.empty_like(A_records, dtype=np.complex128)
@@ -540,6 +561,10 @@ def _run(args: argparse.Namespace) -> float:
     if not np.all(np.isfinite(spectral_map)):
         raise RuntimeError("spectral map contains non-finite values; refusing to render blank output.")
 
+    z_map_norm = np.asarray(z_map, dtype=np.float64) / z0
+    telemetry_plot = normalize_step_telemetry(telemetry, z0)
+    z_final_norm = float(z_final) / z0
+
     output_dir = args.output_dir
     saved_paths = save_plots(
         t,
@@ -547,10 +572,11 @@ def _run(args: argparse.Namespace) -> float:
         U_true,
         error_curve,
         z_final,
-        z_map,
+        z_final_norm,
+        z_map_norm,
         lambda_nm,
         spectral_map,
-        telemetry,
+        telemetry_plot,
         output_dir,
     )
 

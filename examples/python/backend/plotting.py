@@ -314,6 +314,10 @@ def plot_convergence_loglog(
     fitted_order: float,
     fitted_intercept: float,
     output_path: Path,
+    *,
+    x_label: str = "Step size Delta z (m)",
+    y_label: str = "Mean pointwise abs-relative error",
+    title: str | None = None,
 ) -> Path | None:
 
 
@@ -331,9 +335,14 @@ def plot_convergence_loglog(
     ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
     ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="C3", label="Fitted power law")
     ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^4)$")
-    ax.set_xlabel("Step size Delta z (m)")
-    ax.set_ylabel("Mean pointwise abs-relative error")
-    ax.set_title(f"Fixed-Step Soliton Convergence (fitted order p = {fitted_order:.3f})")
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    resolved_title = (
+        f"Fixed-Step Soliton Convergence (fitted order p = {fitted_order:.3f})"
+        if title is None
+        else title
+    )
+    ax.set_title(resolved_title)
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path, bbox_inches="tight")
@@ -372,6 +381,9 @@ def plot_wavelength_step_history(
     accepted_z: np.ndarray | None = None,
     accepted_step_sizes: np.ndarray | None = None,
     proposed_step_sizes: np.ndarray | None = None,
+    map_x_label: str = "Propagation distance z (m)",
+    step_x_label: str = "Propagation distance z (m)",
+    step_y_label: str = "Step size (m)",
 ) -> Path | None:
 
     z_axis = np.asarray(z_samples, dtype=np.float64)
@@ -399,7 +411,7 @@ def plot_wavelength_step_history(
         vmin=0.0,
         vmax=1.0,
     )
-    ax_map.set_xlabel("Propagation distance z (m)")
+    ax_map.set_xlabel(map_x_label)
     ax_map.set_ylabel("Wavelength (nm)")
     ax_map.set_title("")
     ax_map.set_box_aspect(1.0)
@@ -442,8 +454,8 @@ def plot_wavelength_step_history(
             has_series = True
 
     if has_series:
-        ax_step.set_xlabel("Propagation distance z (m)")
-        ax_step.set_ylabel("Step size (m)")
+        ax_step.set_xlabel(step_x_label)
+        ax_step.set_ylabel(step_y_label)
         ax_step.set_title("Adaptive RK4IP Step Sizes")
         ax_step.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3), useOffset=False)
         ax_step.grid(True, alpha=0.3)
@@ -506,6 +518,7 @@ def plot_total_error_over_propagation(
     *,
     title: str = "Total Error Over Propagation",
     y_label: str = "Mean pointwise abs-relative error",
+    x_label: str = "Propagation distance z",
 ) -> Path | None:
 
 
@@ -515,7 +528,7 @@ def plot_total_error_over_propagation(
 
     fig, ax = plt.subplots()
     ax.plot(z_axis, errors, lw=1.8, color="C3")
-    ax.set_xlabel("Propagation distance z")
+    ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
@@ -542,6 +555,7 @@ def plot_3d_intensity_scatter_propagation(
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
     title: str = "3D Propagation Intensity Scatter",
+    z_label: str = "z",
 ) -> Path | None:
 
 
@@ -625,7 +639,7 @@ def plot_3d_intensity_scatter_propagation(
     )
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    ax.set_zlabel("z")
+    ax.set_zlabel(z_label)
     ax.set_title(title)
 
     from matplotlib.cm import ScalarMappable

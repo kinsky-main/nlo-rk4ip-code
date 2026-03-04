@@ -279,6 +279,7 @@ def _run(args) -> float:
     min_records_common = min(int(records.shape[0]) for _, _, _, records in run_data)
     step_counts = np.asarray([entry[0] for entry in run_data], dtype=int)
     step_sizes = np.asarray([entry[1] for entry in run_data], dtype=np.float64)
+    step_sizes_norm = step_sizes / float(ld)
     fit_mask = step_counts <= 128
     errors = np.asarray(
         [
@@ -288,16 +289,17 @@ def _run(args) -> float:
         dtype=np.float64,
     )
 
-    fitted_order, fitted_intercept, fit_mask_valid = _fit_loglog_slope(step_sizes, errors, fit_mask)
+    fitted_order, fitted_intercept, fit_mask_valid = _fit_loglog_slope(step_sizes_norm, errors, fit_mask)
 
     output_dir = args.output_dir
     plot_path = plot_convergence_loglog(
-        step_sizes,
+        step_sizes_norm,
         errors,
         fit_mask_valid,
         fitted_order,
         fitted_intercept,
         output_dir / "error_vs_fixed_step_size.png",
+        x_label="Normalized step size Delta z / L_D",
     )
 
     print(f"fixed-step soliton convergence summary (run_group={run_group}):")
@@ -307,8 +309,8 @@ def _run(args) -> float:
     fit_counts = step_counts[fit_mask_valid].tolist()
     print(f"fit window step counts = {fit_counts}")
     print(f"fitted order p = {fitted_order:.6f}")
-    print(f"fitted line: error ~= exp({fitted_intercept:.6f}) * (Delta z)^{fitted_order:.6f}")
-    print("expected RK4 scaling reference: O(Delta z^4)")
+    print(f"fitted line: error ~= exp({fitted_intercept:.6f}) * (Delta z / L_D)^{fitted_order:.6f}")
+    print("expected RK4 scaling reference: O((Delta z / L_D)^4)")
     if fitted_order < 3.5:
         print("warning: observed order is below 4th-order expectation for this coupled soliton benchmark.")
         print("         this suggests a coupled-case integrator limitation rather than a plotting issue.")

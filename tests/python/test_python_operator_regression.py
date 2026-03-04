@@ -792,6 +792,69 @@ def test_linear_drift_signed_prediction(api, opts):
     assert mag_sym <= 0.20
 
 
+def test_adaptive_embedded_error_estimator_remains_stable(api, opts):
+    n = 192
+    dt = 0.004
+    z_final = 0.06
+    t = _centered_time_grid(n, dt)
+    omega = _omega_grid_unshifted(n, dt)
+    a0 = [complex(math.exp(-((ti / 0.10) ** 2)), 0.0) for ti in t]
+
+    adaptive_cfg = prepare_sim_config(
+        n,
+        propagation_distance=z_final,
+        starting_step_size=1e-3,
+        max_step_size=8e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-6,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*c0*A*I",
+            constants=[6.0, 0.0, 0.0, 0.0],
+        ),
+    )
+    adaptive_result = api.propagate(
+        adaptive_cfg,
+        a0,
+        2,
+        opts,
+        capture_step_history=True,
+        step_history_capacity=4096,
+    )
+    adaptive_final = adaptive_result.records[1]
+    assert all(math.isfinite(v.real) and math.isfinite(v.imag) for v in adaptive_final)
+
+    step_history = adaptive_result.meta.get("step_history")
+    assert isinstance(step_history, dict)
+    step_sizes = [float(v) for v in step_history.get("step_size", [])]
+    errors = [float(v) for v in step_history.get("error", [])]
+    assert len(step_sizes) > 0
+    assert all(math.isfinite(v) and v >= 0.0 for v in errors)
+
+    reference_cfg = prepare_sim_config(
+        n,
+        propagation_distance=z_final,
+        starting_step_size=2.5e-4,
+        max_step_size=2.5e-4,
+        min_step_size=2.5e-4,
+        error_tolerance=1e-6,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*c0*A*I",
+            constants=[6.0, 0.0, 0.0, 0.0],
+        ),
+    )
+    reference_final = api.propagate(reference_cfg, a0, 2, opts).records[1]
+    rel_err = _relative_l2_error(adaptive_final, reference_final)
+    assert rel_err <= 0.15, f"adaptive h-dependent nonlinear run deviated too much: {rel_err}"
+
+
 def test_second_order_soliton_intensity_error(api, opts):
     beta2 = -0.01
     gamma = 0.01
@@ -911,6 +974,7 @@ def main():
     test_kerr_raman_custom_response_matches_generated_default(api, opts)
     test_kerr_raman_rejects_coupled_mode(api, opts)
     test_linear_drift_signed_prediction(api, opts)
+    test_adaptive_embedded_error_estimator_remains_stable(api, opts)
     test_second_order_soliton_intensity_error(api, opts)
     test_fixed_step_fundamental_soliton_order(api, opts)
     print("test_python_operator_regression: runtime-operator propagation regressions validated.")

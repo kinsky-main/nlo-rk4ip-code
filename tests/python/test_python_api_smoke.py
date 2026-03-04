@@ -270,10 +270,27 @@ def main():
             constants=[0.0, 0.0, 0.0, 0.0],
         ),
     )
-    fixed_aligned = api.propagate(fixed_identity_cfg, gaussian, 11, cpu_opts)
+    fixed_aligned = api.propagate(
+        fixed_identity_cfg,
+        gaussian,
+        11,
+        cpu_opts,
+        capture_step_history=True,
+        step_history_capacity=128,
+    )
     assert len(fixed_aligned.records) == 11
     assert len(fixed_aligned.z_axis) == 11
     assert int(fixed_aligned.meta.get("records_written", -1)) == 11
+    fixed_history = fixed_aligned.meta.get("step_history")
+    assert isinstance(fixed_history, dict)
+    fixed_step_sizes = [float(v) for v in fixed_history.get("step_size", [])]
+    fixed_next_sizes = [float(v) for v in fixed_history.get("next_step_size", [])]
+    fixed_errors = [float(v) for v in fixed_history.get("error", [])]
+    assert len(fixed_step_sizes) > 0
+    assert all(abs(v) <= 1e-15 for v in fixed_errors)
+    count = min(len(fixed_step_sizes), len(fixed_next_sizes))
+    for i in range(count):
+        assert abs(fixed_step_sizes[i] - fixed_next_sizes[i]) <= 1e-15
 
     fixed_oversubscribed = api.propagate(fixed_identity_cfg, gaussian, 64, cpu_opts)
     assert len(fixed_oversubscribed.records) == 11
