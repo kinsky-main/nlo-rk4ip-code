@@ -99,6 +99,7 @@ typedef struct
     size_t nt;
     double pulse_period;
     double delta_time;
+    nlo_complex *wt_axis;
 } time_grid;
 
 /**
@@ -119,8 +120,29 @@ typedef struct
     double delta_x;
     double delta_y;
     nlo_complex *spatial_frequency_grid;
+    nlo_complex *kx_axis;
+    nlo_complex *ky_axis;
     nlo_complex *potential_grid;
 } spatial_grid;
+
+/**
+ * @brief Tensor memory layout selector for explicit 3D field descriptors.
+ */
+typedef enum
+{
+    NLO_TENSOR_LAYOUT_XYT_T_FAST = 0
+} nlo_tensor_layout;
+
+/**
+ * @brief Explicit tensor descriptor for 3D runs.
+ */
+typedef struct
+{
+    size_t nt;
+    size_t nx;
+    size_t ny;
+    int layout;
+} nlo_tensor3d_desc;
 
 /**
  * @brief Nonlinear operator execution model selector.
@@ -136,10 +158,11 @@ typedef enum
  */
 typedef struct
 {
+    const char *linear_factor_expr;
+    const char *linear_expr;
+    const char *potential_expr;
     const char *dispersion_factor_expr;
     const char *dispersion_expr;
-    const char *transverse_factor_expr;
-    const char *transverse_expr;
     const char *nonlinear_expr;
     int nonlinear_model;
     double nonlinear_gamma;
@@ -159,6 +182,7 @@ typedef struct
 typedef struct
 {
     propagation_params propagation;
+    nlo_tensor3d_desc tensor;
     time_grid time;
     nlo_frequency_grid frequency;
     spatial_grid spatial;
@@ -175,6 +199,7 @@ typedef runtime_operator_params nlo_physics_config;
 typedef struct
 {
     propagation_params propagation;
+    nlo_tensor3d_desc tensor;
     time_grid time;
     nlo_frequency_grid frequency;
     spatial_grid spatial;

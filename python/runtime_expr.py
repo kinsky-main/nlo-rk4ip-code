@@ -15,8 +15,38 @@ from typing import Any, Callable, Mapping
 RUNTIME_CONTEXT_DISPERSION = "dispersion"
 RUNTIME_CONTEXT_DISPERSION_FACTOR = "dispersion_factor"
 RUNTIME_CONTEXT_NONLINEAR = "nonlinear"
+RUNTIME_CONTEXT_LINEAR_FACTOR = "linear_factor"
+RUNTIME_CONTEXT_LINEAR = "linear"
+RUNTIME_CONTEXT_POTENTIAL = "potential"
 
 _ALLOWED_FUNCS = {"exp", "log", "sqrt", "sin", "cos"}
+
+_CONTEXT_ALLOWED_SYMBOLS: dict[str, set[str]] = {
+    RUNTIME_CONTEXT_DISPERSION_FACTOR: {"A", "w", "wt", "kx", "ky", "x", "y", "t"},
+    RUNTIME_CONTEXT_DISPERSION: {"A", "D", "h", "w", "wt", "kx", "ky", "x", "y", "t", "V"},
+    RUNTIME_CONTEXT_NONLINEAR: {"A", "I", "V"},
+    RUNTIME_CONTEXT_LINEAR_FACTOR: {"A", "wt", "kx", "ky", "x", "y", "t"},
+    RUNTIME_CONTEXT_LINEAR: {"A", "D", "h", "wt", "kx", "ky", "x", "y", "t", "V"},
+    RUNTIME_CONTEXT_POTENTIAL: {"x", "y", "t", "wt", "kx", "ky"},
+}
+
+_CONTEXT_DEFAULT_PARAM_SYMBOLS: dict[str, list[str]] = {
+    RUNTIME_CONTEXT_DISPERSION_FACTOR: ["A", "w", "wt", "kx", "ky", "x", "y", "t"],
+    RUNTIME_CONTEXT_DISPERSION: ["A", "D", "h", "w", "wt", "kx", "ky", "x", "y", "t", "V"],
+    RUNTIME_CONTEXT_NONLINEAR: ["A", "I", "V"],
+    RUNTIME_CONTEXT_LINEAR_FACTOR: ["A", "wt", "kx", "ky", "x", "y", "t"],
+    RUNTIME_CONTEXT_LINEAR: ["A", "D", "h", "wt", "kx", "ky", "x", "y", "t", "V"],
+    RUNTIME_CONTEXT_POTENTIAL: ["x", "y", "t", "wt", "kx", "ky"],
+}
+
+_CONTEXT_MIN_PARAMS: dict[str, int] = {
+    RUNTIME_CONTEXT_DISPERSION_FACTOR: 1,
+    RUNTIME_CONTEXT_DISPERSION: 1,
+    RUNTIME_CONTEXT_NONLINEAR: 1,
+    RUNTIME_CONTEXT_LINEAR_FACTOR: 1,
+    RUNTIME_CONTEXT_LINEAR: 1,
+    RUNTIME_CONTEXT_POTENTIAL: 1,
+}
 
 
 @dataclass
@@ -106,17 +136,8 @@ class _ExpressionTranslator:
         self._constants_by_name: dict[str, int] = {}
 
     def _require_symbol_allowed(self, symbol: str) -> None:
-        if symbol == "A":
-            return
-        if symbol == "w" and self._context in {RUNTIME_CONTEXT_DISPERSION_FACTOR, RUNTIME_CONTEXT_DISPERSION}:
-            return
-        if symbol == "D" and self._context == RUNTIME_CONTEXT_DISPERSION:
-            return
-        if symbol == "h" and self._context == RUNTIME_CONTEXT_DISPERSION:
-            return
-        if symbol == "I" and self._context == RUNTIME_CONTEXT_NONLINEAR:
-            return
-        if symbol == "V" and self._context in {RUNTIME_CONTEXT_DISPERSION, RUNTIME_CONTEXT_NONLINEAR}:
+        allowed = _CONTEXT_ALLOWED_SYMBOLS.get(self._context, set())
+        if symbol in allowed:
             return
         raise ValueError(f"'{symbol}' is not valid in {self._context} runtime expressions")
 
@@ -210,7 +231,9 @@ class _ExpressionTranslator:
                 self._require_symbol_allowed(symbol)
                 return symbol
 
-            if node.id in {"w", "A", "I", "D", "V", "h", "i"}:
+            if node.id == "i":
+                return node.id
+            if node.id in {"w", "wt", "A", "I", "D", "V", "h", "kx", "ky", "x", "y", "t"}:
                 self._require_symbol_allowed(node.id)
                 return node.id
 
@@ -239,12 +262,12 @@ def translate_callable(
     constant_bindings: Mapping[str, float] | None = None,
     auto_capture: bool = True,
 ) -> TranslatedExpression:
-    if context not in {
-        RUNTIME_CONTEXT_DISPERSION_FACTOR,
-        RUNTIME_CONTEXT_DISPERSION,
-        RUNTIME_CONTEXT_NONLINEAR,
-    }:
-        raise ValueError("context must be 'dispersion_factor', 'dispersion', or 'nonlinear'")
+    if context not in _CONTEXT_ALLOWED_SYMBOLS:
+        raise ValueError(
+            "context must be one of: "
+            "'dispersion_factor', 'dispersion', 'nonlinear', "
+            "'linear_factor', 'linear', or 'potential'"
+        )
 
     sig = inspect.signature(func)
     params = list(sig.parameters.values())
@@ -255,30 +278,30 @@ def translate_callable(
         ):
             raise ValueError("runtime callables must only use positional parameters")
 
-    if context == RUNTIME_CONTEXT_DISPERSION_FACTOR:
-        if len(params) < 1 or len(params) > 2:
-            raise ValueError("dispersion_factor callable must take one or two positional arguments")
-        symbol_map = {params[0].name: "A"}
-        if len(params) > 1:
-            symbol_map[params[1].name] = "w"
-    elif context == RUNTIME_CONTEXT_DISPERSION:
-        if len(params) < 1 or len(params) > 4:
-            raise ValueError("dispersion callable must take one to four positional arguments")
-        symbol_map = {params[0].name: "A"}
-        if len(params) > 1:
-            symbol_map[params[1].name] = "D"
-        if len(params) > 2:
-            symbol_map[params[2].name] = "h"
-        if len(params) > 3:
-            symbol_map[params[3].name] = "w"
-    else:
-        if len(params) < 1 or len(params) > 3:
-            raise ValueError("nonlinear callable must take one to three positional arguments")
-        symbol_map = {params[0].name: "A"}
-        if len(params) > 1:
-            symbol_map[params[1].name] = "I"
-        if len(params) > 2:
-            symbol_map[params[2].name] = "V"
+    min_params = _CONTEXT_MIN_PARAMS[context]
+    default_symbols = _CONTEXT_DEFAULT_PARAM_SYMBOLS[context]
+    if len(params) < min_params or len(params) > len(default_symbols):
+        raise ValueError(
+            f"{context} callable must take between {min_params} and "
+            f"{len(default_symbols)} positional arguments"
+        )
+
+    allowed_symbols = _CONTEXT_ALLOWED_SYMBOLS[context]
+    symbol_map: dict[str, str] = {}
+    used_symbols: set[str] = set()
+    default_idx = 0
+    for param in params:
+        if param.name in allowed_symbols and param.name not in used_symbols:
+            symbol = param.name
+        else:
+            while default_idx < len(default_symbols) and default_symbols[default_idx] in used_symbols:
+                default_idx += 1
+            if default_idx >= len(default_symbols):
+                raise ValueError(f"unsupported parameter '{param.name}' for {context} callable")
+            symbol = default_symbols[default_idx]
+            default_idx += 1
+        symbol_map[param.name] = symbol
+        used_symbols.add(symbol)
 
     closure_vars = inspect.getclosurevars(func)
     captured_scope: dict[str, Any] = {}

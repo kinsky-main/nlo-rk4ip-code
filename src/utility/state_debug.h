@@ -39,6 +39,23 @@ void nlo_state_debug_log_ring_capacity(
     size_t ring_capacity
 );
 
+/**
+ * @brief Emit a backend-memory checkpoint for initialization-stage tracing.
+ *
+ * @param stage Stable stage identifier for the checkpoint.
+ * @param query_status Status returned by nlo_vec_query_memory_info.
+ * @param total_device_local_bytes Reported total device-local bytes.
+ * @param available_device_local_bytes Reported available device-local bytes.
+ * @param max_storage_buffer_range_bytes Reported max storage-buffer range.
+ */
+void nlo_state_debug_log_memory_checkpoint(
+    const char* stage,
+    int query_status,
+    size_t total_device_local_bytes,
+    size_t available_device_local_bytes,
+    size_t max_storage_buffer_range_bytes
+);
+
 #ifdef __cplusplus
 }
 #endif

@@ -251,7 +251,7 @@ cbar = colorbar(axMap);
 cbar.Label.String = "Normalized spectral intensity";
 
 axStep = nexttile(2);
-telemetryPlot = filter_record_clipped_steps(telemetry, zAxis);
+telemetryPlot = telemetry;
 hasSeries = false;
 if ~isempty(telemetryPlot.accepted_z)
     [zSorted, order] = sort(telemetryPlot.accepted_z, "ascend");

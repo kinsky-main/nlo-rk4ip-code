@@ -13,6 +13,8 @@
 #include "io/log_sink.h"
 #include "io/snapshot_store.h"
 #include "numerics/rk4_kernel.h"
+#include <float.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -78,6 +80,106 @@ static size_t nlo_compute_record_bytes(size_t num_recorded_samples, size_t num_t
     return per_record_bytes * num_recorded_samples;
 }
 
+static int nlo_values_near(double lhs, double rhs)
+{
+    const double scale = fmax(1.0, fmax(fabs(lhs), fabs(rhs)));
+    const double eps = 64.0 * DBL_EPSILON * scale;
+    return (fabs(lhs - rhs) <= eps) ? 1 : 0;
+}
+
+static size_t nlo_compute_fixed_step_sample_count(double z_end, double step)
+{
+    if (!(z_end > 0.0) || !(step > 0.0) || !isfinite(z_end) || !isfinite(step)) {
+        return 0u;
+    }
+
+    const double ratio = z_end / step;
+    if (!isfinite(ratio) || ratio < 0.0) {
+        return 0u;
+    }
+
+    const double ratio_floor = floor(ratio);
+    size_t full_steps = 0u;
+    if (ratio_floor > (double)(SIZE_MAX - 2u)) {
+        return SIZE_MAX;
+    }
+    full_steps = (size_t)ratio_floor;
+
+    size_t samples = full_steps + 1u;
+    const double covered = (double)full_steps * step;
+    if (!nlo_values_near(covered, z_end)) {
+        if (samples == SIZE_MAX) {
+            return SIZE_MAX;
+        }
+        samples += 1u;
+    }
+
+    return samples;
+}
+
+static int nlo_fixed_step_requested(const sim_config* config, double* out_step)
+{
+    if (config == NULL) {
+        return 0;
+    }
+
+    const double start_step = config->propagation.starting_step_size;
+    const double min_step = config->propagation.min_step_size;
+    const double max_step = config->propagation.max_step_size;
+    if (!(start_step > 0.0) || !(min_step > 0.0) || !(max_step > 0.0)) {
+        return 0;
+    }
+    if (!(nlo_values_near(start_step, min_step) && nlo_values_near(start_step, max_step))) {
+        return 0;
+    }
+
+    if (out_step != NULL) {
+        *out_step = start_step;
+    }
+    return 1;
+}
+
+static size_t nlo_resolve_effective_record_count(
+    const sim_config* config,
+    size_t requested_records
+)
+{
+    if (config == NULL || requested_records == 0u) {
+        return requested_records;
+    }
+
+    double start_step = 0.0;
+    if (!nlo_fixed_step_requested(config, &start_step)) {
+        return requested_records;
+    }
+
+    const size_t available_samples =
+        nlo_compute_fixed_step_sample_count(config->propagation.propagation_distance, start_step);
+    if (available_samples == 0u || requested_records <= available_samples) {
+        return requested_records;
+    }
+
+    nlo_log_emit(
+        NLO_LOG_LEVEL_WARN,
+        "[nlolib] fixed-step run requested %zu records, but only %zu step-aligned samples are available; "
+        "reducing record count to %zu.",
+        requested_records,
+        available_samples,
+        available_samples);
+    return available_samples;
+}
+
+static const char* nlo_resolve_runtime_expr_alias(const char* primary, const char* alias)
+{
+    if (primary != NULL && primary[0] != '\0') {
+        return primary;
+    }
+    if (alias != NULL && alias[0] != '\0') {
+        return alias;
+    }
+    return NULL;
+}
+
 static int nlo_storage_enabled(const nlo_storage_options* storage_options)
 {
     return (storage_options != NULL &&
@@ -99,6 +201,7 @@ static sim_config nlo_merge_simulation_and_physics(
     memset(&merged, 0, sizeof(merged));
     if (simulation_config != NULL) {
         merged.propagation = simulation_config->propagation;
+        merged.tensor = simulation_config->tensor;
         merged.time = simulation_config->time;
         merged.frequency = simulation_config->frequency;
         merged.spatial = simulation_config->spatial;
@@ -219,6 +322,19 @@ static void nlo_log_nlse_propagate_call(
     }
 
     char message[4096];
+    const char* linear_factor_op =
+        (config != NULL)
+            ? nlo_resolve_runtime_expr_alias(config->runtime.linear_factor_expr,
+                                             config->runtime.dispersion_factor_expr)
+            : NULL;
+    const char* linear_op =
+        (config != NULL)
+            ? nlo_resolve_runtime_expr_alias(config->runtime.linear_expr,
+                                             config->runtime.dispersion_expr)
+            : NULL;
+    const char* potential_op = (config != NULL) ? config->runtime.potential_expr : NULL;
+    const char* nonlinear_op = (config != NULL) ? config->runtime.nonlinear_expr : NULL;
+
     const int written = snprintf(
         message,
         sizeof(message),
@@ -233,12 +349,11 @@ static void nlo_log_nlse_propagate_call(
         "    - input_field: %p\n"
         "    - output_records: %p\n"
         "    - exec_options: %p\n"
-        "  - runtime_expressions:\n"
-        "    - dispersion_factor_expr: %s\n"
-        "    - dispersion_expr: %s\n"
-        "    - transverse_factor_expr: %s\n"
-        "    - transverse_expr: %s\n"
-        "    - nonlinear_expr: %s\n"
+        "  - runtime_operators:\n"
+        "    - linear_factor_op: %s\n"
+        "    - linear_op: %s\n"
+        "    - potential_op: %s\n"
+        "    - nonlinear_op: %s\n"
         "  - runtime_constants (%s):\n"
         "%s"
         "  - grids:\n"
@@ -262,15 +377,10 @@ static void nlo_log_nlse_propagate_call(
         (const void*)input_field,
         (const void*)output_records,
         (const void*)exec_options,
-        (config != NULL && config->runtime.dispersion_factor_expr != NULL)
-            ? config->runtime.dispersion_factor_expr
-            : "(null)",
-        (config != NULL && config->runtime.dispersion_expr != NULL) ? config->runtime.dispersion_expr : "(null)",
-        (config != NULL && config->runtime.transverse_factor_expr != NULL)
-            ? config->runtime.transverse_factor_expr
-            : "(null)",
-        (config != NULL && config->runtime.transverse_expr != NULL) ? config->runtime.transverse_expr : "(null)",
-        (config != NULL && config->runtime.nonlinear_expr != NULL) ? config->runtime.nonlinear_expr : "(null)",
+        (linear_factor_op != NULL) ? linear_factor_op : "(null)",
+        (linear_op != NULL) ? linear_op : "(null)",
+        (potential_op != NULL && potential_op[0] != '\0') ? potential_op : "(null)",
+        (nonlinear_op != NULL && nonlinear_op[0] != '\0') ? nonlinear_op : "(null)",
         runtime_constants_text,
         constants_lines,
         (config != NULL) ? (const void*)config->frequency.frequency_grid : NULL,
@@ -336,6 +446,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (local_options.output_mode == NLO_PROPAGATE_OUTPUT_FINAL_ONLY) {
         num_recorded_samples = 1u;
     }
+    num_recorded_samples = nlo_resolve_effective_record_count(config, num_recorded_samples);
     if (num_recorded_samples == 0u) {
         return nlo_propagate_fail("validate.num_recorded_samples", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
@@ -422,6 +533,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
             ? *local_options.exec_options
             : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
     simulation_state* state = NULL;
+    nlo_allocation_info allocation_info = {0};
     const int init_status =
         nlo_storage_enabled(local_options.storage_options)
             ? nlo_init_simulation_state_with_storage(config,
@@ -429,13 +541,13 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                                      num_recorded_samples,
                                                      &local_exec_options,
                                                      local_options.storage_options,
-                                                     NULL,
+                                                     &allocation_info,
                                                      &state)
             : nlo_init_simulation_state(config,
                                         num_time_samples,
                                         num_recorded_samples,
                                         &local_exec_options,
-                                        NULL,
+                                        &allocation_info,
                                         &state);
     if (init_status != 0 || state == NULL) {
         return nlo_propagate_fail("init_simulation_state", NLOLIB_STATUS_ALLOCATION_FAILED);
@@ -447,6 +559,34 @@ NLOLIB_API nlolib_status nlolib_propagate(
                  "  - actual: %s",
                  nlo_backend_type_to_string(local_exec_options.backend_type),
                  nlo_backend_type_to_string(nlo_vector_backend_get_type(state->backend)));
+
+    size_t record_ring_bytes = 0u;
+    if (nlo_checked_mul_size_t(allocation_info.per_record_bytes,
+                               allocation_info.device_ring_capacity,
+                               &record_ring_bytes) != 0) {
+        record_ring_bytes = 0u;
+    }
+    nlo_vec_backend_memory_info mem_info = {0};
+    (void)nlo_vec_query_memory_info(state->backend, &mem_info);
+    nlo_log_emit(
+        NLO_LOG_LEVEL_INFO,
+        "[nlolib] allocation summary:\n"
+        "  - per_record_bytes: %zu\n"
+        "  - working_vector_bytes_estimate: %zu\n"
+        "  - host_snapshot_bytes: %zu\n"
+        "  - record_ring_capacity: %zu\n"
+        "  - record_ring_bytes: %zu\n"
+        "  - device_budget_bytes_effective: %zu\n"
+        "  - device_local_total_bytes: %zu\n"
+        "  - device_local_available_bytes: %zu",
+        allocation_info.per_record_bytes,
+        allocation_info.working_vector_bytes,
+        allocation_info.host_snapshot_bytes,
+        allocation_info.device_ring_capacity,
+        record_ring_bytes,
+        allocation_info.device_budget_bytes,
+        mem_info.device_local_total_bytes,
+        mem_info.device_local_available_bytes);
 
     if (simulation_state_upload_initial_field(state, input_field) != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
@@ -463,6 +603,23 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (state->snapshot_status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
         return nlo_propagate_fail("snapshot_capture", NLOLIB_STATUS_ALLOCATION_FAILED);
+    }
+
+    size_t records_available = num_recorded_samples;
+    if (num_recorded_samples > 1u) {
+        if (nlo_fixed_step_requested(config, NULL)) {
+            records_available = state->current_record_index;
+            if (records_available > num_recorded_samples) {
+                records_available = num_recorded_samples;
+            }
+            if (records_available < num_recorded_samples) {
+                nlo_log_emit(
+                    NLO_LOG_LEVEL_WARN,
+                    "[nlolib] record capture completed with %zu/%zu records.",
+                    records_available,
+                    num_recorded_samples);
+            }
+        }
     }
 
     int final_downloaded = 0;
@@ -513,19 +670,42 @@ NLOLIB_API nlolib_status nlolib_propagate(
         }
         final_output_field_cached = local_output.output_records;
     } else if (local_options.return_records != 0 && local_output.output_records != NULL) {
-        if (state->num_host_records != num_recorded_samples || state->field_buffer == NULL) {
+        if (state->num_host_records == num_recorded_samples && state->field_buffer != NULL) {
+            const size_t records_bytes = nlo_compute_record_bytes(records_available, num_time_samples);
+            if (records_bytes == 0u) {
+                if (records_available > 0u) {
+                    free_simulation_state(state);
+                    return nlo_propagate_fail("validate.output_record_bytes", NLOLIB_STATUS_ALLOCATION_FAILED);
+                }
+            } else {
+                memcpy(local_output.output_records, state->field_buffer, records_bytes);
+            }
+        } else if (state->snapshot_store != NULL) {
+            if (records_available > 0u) {
+                const nlo_snapshot_store_status restore_status =
+                    nlo_snapshot_store_read_all_records(state->snapshot_store,
+                                                       local_output.output_records,
+                                                       records_available,
+                                                       state->num_time_samples);
+                if (restore_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
+                    free_simulation_state(state);
+                    return nlo_propagate_fail("restore_records_from_storage", NLOLIB_STATUS_ALLOCATION_FAILED);
+                }
+                if (restore_status == NLO_SNAPSHOT_STORE_STATUS_SOFT_LIMIT) {
+                    free_simulation_state(state);
+                    return nlo_propagate_fail("restore_records_from_storage.truncated",
+                                              NLOLIB_STATUS_ALLOCATION_FAILED);
+                }
+            }
+        } else {
             free_simulation_state(state);
             return nlo_propagate_fail("validate.host_record_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
 
-        const size_t records_bytes = nlo_compute_record_bytes(num_recorded_samples, num_time_samples);
-        if (records_bytes == 0u) {
-            free_simulation_state(state);
-            return nlo_propagate_fail("validate.output_record_bytes", NLOLIB_STATUS_ALLOCATION_FAILED);
+        if (records_available > 0u) {
+            final_output_field_cached =
+                local_output.output_records + ((records_available - 1u) * state->num_time_samples);
         }
-        memcpy(local_output.output_records, state->field_buffer, records_bytes);
-        final_output_field_cached =
-            local_output.output_records + ((num_recorded_samples - 1u) * state->num_time_samples);
     }
 
     if (state->snapshot_store != NULL &&
@@ -534,7 +714,9 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
         nlo_complex* final_output_scratch = NULL;
         if (final_output_field == NULL) {
-            final_output_scratch = simulation_state_get_field_record(state, num_recorded_samples - 1u);
+            if (records_available > 0u) {
+                final_output_scratch = simulation_state_get_field_record(state, records_available - 1u);
+            }
             if (final_output_scratch == NULL) {
                 final_output_scratch = state->snapshot_scratch_record;
             }
@@ -568,9 +750,13 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
     const size_t step_events_written = state->step_events_written;
     const size_t step_events_dropped = state->step_events_dropped;
+    size_t records_written_actual = 0u;
+    if (local_options.return_records != 0) {
+        records_written_actual = (num_recorded_samples == 1u) ? 1u : records_available;
+    }
     free_simulation_state(state);
     if (local_output.records_written != NULL) {
-        *local_output.records_written = (local_options.return_records != 0) ? num_recorded_samples : 0u;
+        *local_output.records_written = records_written_actual;
     }
     if (local_output.step_events_written != NULL) {
         *local_output.step_events_written = step_events_written;

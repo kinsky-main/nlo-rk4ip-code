@@ -79,6 +79,25 @@ nlo_snapshot_store_status nlo_snapshot_store_write_final_output_field(
 nlo_snapshot_store_status nlo_snapshot_store_flush(nlo_snapshot_store* store);
 
 /**
+ * @brief Read all recorded snapshot chunks into a caller-provided dense buffer.
+ *
+ * The destination layout is record-major with contiguous records:
+ * [record0 samples][record1 samples]...[recordN-1 samples].
+ *
+ * @param store Snapshot store handle.
+ * @param out_records Destination dense record buffer.
+ * @param num_recorded_samples Number of records expected in @p out_records.
+ * @param num_time_samples Number of complex samples per record.
+ * @return nlo_snapshot_store_status Read status.
+ */
+nlo_snapshot_store_status nlo_snapshot_store_read_all_records(
+    nlo_snapshot_store* store,
+    nlo_complex* out_records,
+    size_t num_recorded_samples,
+    size_t num_time_samples
+);
+
+/**
  * @brief Retrieve current storage result snapshot.
  *
  * @param store Snapshot store handle.

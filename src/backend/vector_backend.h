@@ -80,6 +80,18 @@ typedef struct {
     size_t max_kernel_chunk_bytes;
 } nlo_vec_backend_memory_info;
 
+/**
+ * @brief Axis selector used when expanding one axis vector to a 3D mesh.
+ */
+typedef enum {
+    /** Expand temporal axis (t-fast layout index). */
+    NLO_VEC_MESH_AXIS_T = 0,
+    /** Expand y axis (t-fast layout index). */
+    NLO_VEC_MESH_AXIS_Y = 1,
+    /** Expand x axis (t-fast layout index). */
+    NLO_VEC_MESH_AXIS_X = 2
+} nlo_vec_mesh_axis;
+
 // MARK: Backend Lifecycle
 
 /**
@@ -460,6 +472,61 @@ nlo_vec_status nlo_vec_complex_sin_inplace(nlo_vector_backend* backend, nlo_vec_
  * @return nlo_vec_status Operation status.
  */
 nlo_vec_status nlo_vec_complex_cos_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+
+/**
+ * @brief Build one unshifted angular-frequency axis from sample spacing.
+ *
+ * Output follows FFT ordering compatible with `fftfreq`-style grids:
+ * `[0, 1, ..., floor((n-1)/2), -ceil((n-1)/2), ..., -1] * 2*pi/(n*delta)`.
+ *
+ * @param backend Backend handle.
+ * @param dst Destination complex axis vector.
+ * @param delta Sample spacing (> 0).
+ * @return nlo_vec_status Operation status.
+ */
+nlo_vec_status nlo_vec_complex_axis_unshifted_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+);
+
+/**
+ * @brief Build one centered coordinate axis from sample spacing.
+ *
+ * Output is `coord[i] = (i - 0.5*(n-1)) * delta`.
+ *
+ * @param backend Backend handle.
+ * @param dst Destination complex axis vector.
+ * @param delta Sample spacing.
+ * @return nlo_vec_status Operation status.
+ */
+nlo_vec_status nlo_vec_complex_axis_centered_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+);
+
+/**
+ * @brief Expand one axis vector into a full 3D mesh (t-fast flattening).
+ *
+ * Uses index mapping `idx = ((x * ny) + y) * nt + t`.
+ *
+ * @param backend Backend handle.
+ * @param dst Destination full-volume complex vector (`nt*nx*ny`).
+ * @param axis Source 1D axis vector.
+ * @param nt Temporal sample count.
+ * @param ny Y sample count.
+ * @param axis_kind Axis role for expansion.
+ * @return nlo_vec_status Operation status.
+ */
+nlo_vec_status nlo_vec_complex_mesh_from_axis_tfast(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* axis,
+    size_t nt,
+    size_t ny,
+    nlo_vec_mesh_axis axis_kind
+);
 
 /**
  * @brief Compute relative L-infinity complex error:

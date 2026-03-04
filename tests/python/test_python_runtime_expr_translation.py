@@ -2,6 +2,8 @@ import math
 
 from runtime_expr import (
     RUNTIME_CONTEXT_DISPERSION_FACTOR,
+    RUNTIME_CONTEXT_LINEAR_FACTOR,
+    RUNTIME_CONTEXT_POTENTIAL,
     RUNTIME_CONTEXT_NONLINEAR,
     translate_callable,
 )
@@ -76,6 +78,31 @@ def test_raman_like_nonlinear_translation():
     assert translated.constants == [gamma, f_r]
 
 
+def test_tensor_linear_factor_symbols_translate():
+    beta2 = 0.02
+    beta_t = -0.01
+    translated = translate_callable(
+        lambda A, wt, kx, ky: 1j * (beta2 * (wt**2) + beta_t * ((kx**2) + (ky**2))),  # noqa: E731
+        RUNTIME_CONTEXT_LINEAR_FACTOR,
+    )
+    assert "wt" in translated.expression
+    assert "kx" in translated.expression
+    assert "ky" in translated.expression
+    assert translated.constants == [beta2, beta_t]
+
+
+def test_potential_symbols_translate():
+    gx = 2.0e-4
+    gy = 1.5e-4
+    translated = translate_callable(
+        lambda x, y: gx * (x**2) + gy * (y**2),  # noqa: E731
+        RUNTIME_CONTEXT_POTENTIAL,
+    )
+    assert "x" in translated.expression
+    assert "y" in translated.expression
+    assert translated.constants == [gx, gy]
+
+
 def test_rejects_unsupported_numpy_call():
     _assert_raises_value_error(
         lambda: translate_callable(  # noqa: E731
@@ -112,6 +139,8 @@ def main():
     test_beta_sum_translation()
     test_diffraction_factor_translation()
     test_raman_like_nonlinear_translation()
+    test_tensor_linear_factor_symbols_translate()
+    test_potential_symbols_translate()
     test_rejects_unsupported_numpy_call()
     test_rejects_invalid_signature()
     test_rejects_disallowed_complex_literal()

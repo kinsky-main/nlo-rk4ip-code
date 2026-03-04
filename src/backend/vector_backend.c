@@ -16,6 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef NLO_TWO_PI
+#define NLO_TWO_PI 6.283185307179586476925286766559
+#endif
+
 size_t nlo_vec_element_size(nlo_vec_kind kind)
 {
     switch (kind) {
@@ -82,6 +86,148 @@ static const char* nlo_vk_device_type_to_string(VkPhysicalDeviceType device_type
     return "disabled";
 #endif
 }
+
+static int nlo_vk_memory_info_source_logged = 0;
+
+#if NLO_ENABLE_VULKAN_BACKEND
+static size_t nlo_size_saturating_add(size_t lhs, size_t rhs)
+{
+    if (rhs > SIZE_MAX - lhs) {
+        return SIZE_MAX;
+    }
+    return lhs + rhs;
+}
+
+static size_t nlo_size_from_u64_saturating(uint64_t value)
+{
+    if (value > (uint64_t)SIZE_MAX) {
+        return SIZE_MAX;
+    }
+    return (size_t)value;
+}
+
+static size_t nlo_vk_sum_device_local_heaps(const VkPhysicalDeviceMemoryProperties* memory_properties)
+{
+    if (memory_properties == NULL) {
+        return 0u;
+    }
+
+    size_t total_device_local = 0u;
+    for (uint32_t i = 0u; i < memory_properties->memoryHeapCount; ++i) {
+        if ((memory_properties->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) == 0u) {
+            continue;
+        }
+        total_device_local = nlo_size_saturating_add(
+            total_device_local,
+            nlo_size_from_u64_saturating((uint64_t)memory_properties->memoryHeaps[i].size));
+    }
+
+    return total_device_local;
+}
+
+static bool nlo_vk_device_supports_extension(VkPhysicalDevice physical_device, const char* extension_name)
+{
+    if (physical_device == VK_NULL_HANDLE || extension_name == NULL || extension_name[0] == '\0') {
+        return false;
+    }
+
+    uint32_t extension_count = 0u;
+    if (vkEnumerateDeviceExtensionProperties(physical_device, NULL, &extension_count, NULL) != VK_SUCCESS ||
+        extension_count == 0u) {
+        return false;
+    }
+
+    VkExtensionProperties* extensions =
+        (VkExtensionProperties*)calloc((size_t)extension_count, sizeof(*extensions));
+    if (extensions == NULL) {
+        return false;
+    }
+
+    bool supported = false;
+    if (vkEnumerateDeviceExtensionProperties(physical_device,
+                                             NULL,
+                                             &extension_count,
+                                             extensions) == VK_SUCCESS) {
+        for (uint32_t i = 0u; i < extension_count; ++i) {
+            if (strcmp(extensions[i].extensionName, extension_name) == 0) {
+                supported = true;
+                break;
+            }
+        }
+    }
+
+    free(extensions);
+    return supported;
+}
+
+static bool nlo_vk_try_query_device_local_available_bytes(
+    VkPhysicalDevice physical_device,
+    size_t* out_available_bytes
+)
+{
+    if (physical_device == VK_NULL_HANDLE || out_available_bytes == NULL) {
+        return false;
+    }
+
+#if defined(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME) && \
+    (defined(VK_VERSION_1_1) || defined(VK_KHR_get_physical_device_properties2))
+    if (!nlo_vk_device_supports_extension(physical_device, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
+        return false;
+    }
+
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget_properties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT
+    };
+    VkPhysicalDeviceMemoryProperties2 memory_properties_2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
+        .pNext = &budget_properties
+    };
+
+#if defined(VK_VERSION_1_1)
+    vkGetPhysicalDeviceMemoryProperties2(physical_device, &memory_properties_2);
+#elif defined(VK_KHR_get_physical_device_properties2)
+    vkGetPhysicalDeviceMemoryProperties2KHR(physical_device, &memory_properties_2);
+#endif
+
+    size_t available_device_local = 0u;
+    bool has_budget_data = false;
+    for (uint32_t i = 0u; i < memory_properties_2.memoryProperties.memoryHeapCount; ++i) {
+        if ((memory_properties_2.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) == 0u) {
+            continue;
+        }
+
+        const uint64_t heap_budget = budget_properties.heapBudget[i];
+        const uint64_t heap_usage = budget_properties.heapUsage[i];
+        if (heap_budget == 0u && heap_usage == 0u) {
+            continue;
+        }
+
+        has_budget_data = true;
+        const uint64_t heap_available = (heap_budget > heap_usage) ? (heap_budget - heap_usage) : 0u;
+        available_device_local = nlo_size_saturating_add(
+            available_device_local,
+            nlo_size_from_u64_saturating(heap_available));
+    }
+
+    if (!has_budget_data) {
+        return false;
+    }
+
+    const size_t total_device_local =
+        nlo_vk_sum_device_local_heaps(&memory_properties_2.memoryProperties);
+    if (available_device_local > total_device_local) {
+        available_device_local = total_device_local;
+    }
+
+    *out_available_bytes = available_device_local;
+    return true;
+#else
+    (void)physical_device;
+    (void)out_available_bytes;
+    return false;
+#endif
+}
+#endif
 
 static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template);
 
@@ -310,20 +456,23 @@ nlo_vec_status nlo_vec_query_memory_info(
         VkPhysicalDeviceMemoryProperties memory_properties;
         vkGetPhysicalDeviceMemoryProperties(backend->vk.physical_device, &memory_properties);
 
-        size_t total_device_local = 0u;
-        for (uint32_t i = 0u; i < memory_properties.memoryHeapCount; ++i) {
-            if ((memory_properties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0u) {
-                size_t heap_size = (size_t)memory_properties.memoryHeaps[i].size;
-                if (heap_size > SIZE_MAX - total_device_local) {
-                    total_device_local = SIZE_MAX;
-                } else {
-                    total_device_local += heap_size;
-                }
-            }
+        const size_t total_device_local = nlo_vk_sum_device_local_heaps(&memory_properties);
+        size_t available_device_local = total_device_local;
+        const bool used_budget_extension = nlo_vk_try_query_device_local_available_bytes(
+            backend->vk.physical_device,
+            &available_device_local);
+
+        if (nlo_vk_memory_info_source_logged == 0) {
+            fprintf(stderr,
+                    "[nlo_vk] memory_info source=%s device_local_total_bytes=%zu device_local_available_bytes=%zu\n",
+                    used_budget_extension ? "VK_EXT_memory_budget" : "heap_total_fallback",
+                    total_device_local,
+                    available_device_local);
+            nlo_vk_memory_info_source_logged = 1;
         }
 
         out_info->device_local_total_bytes = total_device_local;
-        out_info->device_local_available_bytes = total_device_local;
+        out_info->device_local_available_bytes = available_device_local;
         out_info->max_storage_buffer_range = (size_t)backend->vk.limits.maxStorageBufferRange;
         out_info->max_compute_workgroups_x = (size_t)backend->vk.limits.maxComputeWorkGroupCount[0];
         out_info->max_kernel_chunk_bytes = (size_t)backend->vk.max_kernel_chunk_bytes;
@@ -872,6 +1021,152 @@ nlo_vec_status nlo_vec_complex_cos_inplace(nlo_vector_backend* backend, nlo_vec_
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         nlo_complex_cos_inplace((nlo_complex*)dst->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
+    }
+
+    return NLO_VEC_STATUS_UNSUPPORTED;
+}
+
+static double nlo_expected_unshifted_angular_frequency(size_t i, size_t n, double step)
+{
+    if (n == 0u) {
+        return 0.0;
+    }
+
+    const size_t positive_limit = (n - 1u) / 2u;
+    if (i <= positive_limit) {
+        return (double)i * step;
+    }
+
+    return -((double)n - (double)i) * step;
+}
+
+nlo_vec_status nlo_vec_complex_axis_unshifted_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    if (!(delta > 0.0)) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex* values = (nlo_complex*)dst->host_ptr;
+        const double step = NLO_TWO_PI / ((double)dst->length * delta);
+        for (size_t i = 0u; i < dst->length; ++i) {
+            values[i] = nlo_make(nlo_expected_unshifted_angular_frequency(i, dst->length, step), 0.0);
+        }
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        return nlo_vk_op_complex_axis_unshifted_from_delta(backend, dst, delta);
+    }
+
+    return NLO_VEC_STATUS_UNSUPPORTED;
+}
+
+nlo_vec_status nlo_vec_complex_axis_centered_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex* values = (nlo_complex*)dst->host_ptr;
+        const double center = 0.5 * (double)(dst->length - 1u);
+        for (size_t i = 0u; i < dst->length; ++i) {
+            values[i] = nlo_make(((double)i - center) * delta, 0.0);
+        }
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        return nlo_vk_op_complex_axis_centered_from_delta(backend, dst, delta);
+    }
+
+    return NLO_VEC_STATUS_UNSUPPORTED;
+}
+
+nlo_vec_status nlo_vec_complex_mesh_from_axis_tfast(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* axis,
+    size_t nt,
+    size_t ny,
+    nlo_vec_mesh_axis axis_kind
+)
+{
+    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_validate_buffer(backend, axis, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    if (nt == 0u || ny == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if ((dst->length % nt) != 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    const size_t xy_points = dst->length / nt;
+    if ((xy_points % ny) != 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    const size_t nx = xy_points / ny;
+    if (nx == 0u) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    size_t expected_axis_length = 0u;
+    if (axis_kind == NLO_VEC_MESH_AXIS_T) {
+        expected_axis_length = nt;
+    } else if (axis_kind == NLO_VEC_MESH_AXIS_Y) {
+        expected_axis_length = ny;
+    } else if (axis_kind == NLO_VEC_MESH_AXIS_X) {
+        expected_axis_length = nx;
+    } else {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (axis->length != expected_axis_length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex* dst_ptr = (nlo_complex*)dst->host_ptr;
+        const nlo_complex* axis_ptr = (const nlo_complex*)axis->host_ptr;
+        for (size_t x = 0u; x < nx; ++x) {
+            for (size_t y = 0u; y < ny; ++y) {
+                const nlo_complex axis_value =
+                    (axis_kind == NLO_VEC_MESH_AXIS_T)
+                        ? nlo_make(0.0, 0.0)
+                        : ((axis_kind == NLO_VEC_MESH_AXIS_Y) ? axis_ptr[y] : axis_ptr[x]);
+                const size_t base = ((x * ny) + y) * nt;
+                if (axis_kind == NLO_VEC_MESH_AXIS_T) {
+                    memcpy(dst_ptr + base, axis_ptr, nt * sizeof(nlo_complex));
+                } else {
+                    for (size_t t = 0u; t < nt; ++t) {
+                        dst_ptr[base + t] = axis_value;
+                    }
+                }
+            }
+        }
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        return nlo_vk_op_complex_mesh_from_axis_tfast(backend, dst, axis, nt, ny, axis_kind);
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;

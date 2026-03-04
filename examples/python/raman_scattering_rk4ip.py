@@ -4,10 +4,15 @@ Temporal Raman scattering validation with an analytical self-frequency-shift che
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
+from backend.metrics import (
+    mean_pointwise_abs_relative_error,
+    pointwise_abs_relative_error,
+)
 from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
     plot_three_curve_drift,
@@ -20,14 +25,16 @@ from backend.runner import (
     TemporalSimulationConfig,
     centered_time_grid,
 )
+from backend.spectral import (
+    omega_centroid_to_wavelength_nm,
+    omega_detuning_to_wavelength_nm,
+)
 from backend.storage import ExampleRunDB
 from nlolib_ctypes import (
     NLO_NONLINEAR_MODEL_EXPR,
     NLO_NONLINEAR_MODEL_KERR_RAMAN,
     RuntimeOperators,
 )
-
-_C_NM_PER_PS = 299792.458
 
 
 def _spectral_centroid(freq_axis: np.ndarray, spectral_intensity: np.ndarray) -> np.ndarray:
@@ -76,28 +83,22 @@ def _spectral_map_to_wavelength_map(
     spectral_map: np.ndarray,
     lambda0_nm: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    if not (lambda0_nm > 0.0):
-        raise ValueError("lambda0_nm must be > 0.")
-    freq0 = _C_NM_PER_PS / float(lambda0_nm)
-    freq_detuning = np.asarray(omega_axis, dtype=np.float64) / (2.0 * np.pi)
-    freq_total = freq0 + freq_detuning
-    valid = freq_total > 0.0
-    if not np.any(valid):
-        raise ValueError("no positive total frequency samples for wavelength map.")
-    lambda_axis = _C_NM_PER_PS / freq_total[valid]
+    lambda_axis, valid = omega_detuning_to_wavelength_nm(
+        omega_axis,
+        lambda0_nm,
+        time_unit_seconds=1.0e-12,
+    )
     map_valid = np.asarray(spectral_map, dtype=np.float64)[:, valid]
     order = np.argsort(lambda_axis)
     return lambda_axis[order], map_valid[:, order]
 
 
 def _omega_centroid_to_wavelength_nm(omega_centroid: np.ndarray, lambda0_nm: float) -> np.ndarray:
-    if not (lambda0_nm > 0.0):
-        raise ValueError("lambda0_nm must be > 0.")
-    freq0 = _C_NM_PER_PS / float(lambda0_nm)
-    freq_total = freq0 + (np.asarray(omega_centroid, dtype=np.float64) / (2.0 * np.pi))
-    if np.any(freq_total <= 0.0):
-        raise ValueError("centroid mapping to wavelength requires positive total frequency.")
-    return _C_NM_PER_PS / freq_total
+    return omega_centroid_to_wavelength_nm(
+        omega_centroid,
+        lambda0_nm,
+        time_unit_seconds=1.0e-12,
+    )
 
 
 def _row_centroid(axis: np.ndarray, rows: np.ndarray) -> np.ndarray:
@@ -181,12 +182,7 @@ def _run_case(
     return np.asarray(z_axis, dtype=np.float64), np.asarray(records, dtype=np.complex128)
 
 
-def main() -> float:
-    parser = build_example_parser(
-        example_slug="raman_scattering",
-        description="Raman self-frequency shift validation (temporal only) with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
+def _run(args: argparse.Namespace) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "raman_scattering_rk4ip"
     kerr_case_key = "kerr_only"
@@ -200,10 +196,10 @@ def main() -> float:
     pulse_width = 0.08
     num_records = 120
 
-    f_r = 0.18
-    tau1 = 0.0122
+    f_r = 0.18 # TODO: Switch in fraction sign results in allocation failure in the solver.
+    tau1 = 0.0522
     tau2 = 0.0320
-    shock_omega0 = 0.0
+    shock_omega0 = 0.0 # TODO: Any shock results in inf values and solver failure.
     lambda0_nm = 1550.0
 
     t = centered_time_grid(n, dt)
@@ -242,18 +238,16 @@ def main() -> float:
     else:
         run_group = db.begin_group(example_name, args.run_group)
         runtime_kerr = RuntimeOperators(
-            dispersion_factor_expr="i*c0*w*w-c1",
-            nonlinear_expr="i*c2*A*I",
-            constants=[0.5 * beta2, 0.0, gamma],
+            linear_factor_fn=lambda A, w: (1.0j * (0.5 * beta2)) * (w * w),
+            nonlinear_fn=lambda A, I: (1.0j * gamma) * A * I,
             nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
             nonlinear_gamma=gamma,
             raman_fraction=0.0,
             shock_omega0=0.0,
         )
         runtime_raman = RuntimeOperators(
-            dispersion_factor_expr="i*c0*w*w-c1",
-            nonlinear_expr="0",
-            constants=[0.5 * beta2, 0.0, gamma],
+            linear_factor_fn=lambda A, w: (1.0j * (0.5 * beta2)) * (w * w),
+            nonlinear_fn=lambda A, I: 0.0,
             nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
             nonlinear_gamma=gamma,
             raman_fraction=f_r,
@@ -364,13 +358,20 @@ def main() -> float:
     predicted_centroid = raman_spec_centroid[0] + _cumulative_trapezoid(centroid_rhs, z_axis)
     centered_num = raman_spec_centroid - raman_spec_centroid[0]
     centered_pred = predicted_centroid - predicted_centroid[0]
-    centered_abs_scale = max(float(np.max(np.abs(centered_num))), 1e-12)
-    centroid_pointwise_rel_error = np.abs(centered_num - centered_pred) / centered_abs_scale
-    centroid_curve_rel_error = float(
-        np.linalg.norm(centered_num - centered_pred) / max(np.linalg.norm(centered_num), 1e-15)
+    centroid_pointwise_rel_error = pointwise_abs_relative_error(
+        centered_num,
+        centered_pred,
+        context="raman_scattering:centroid_shift",
     )
-    centroid_derivative_rel_error = float(
-        np.linalg.norm(centroid_derivative_num - centroid_rhs) / max(np.linalg.norm(centroid_derivative_num), 1e-15)
+    centroid_curve_rel_error = mean_pointwise_abs_relative_error(
+        centered_num,
+        centered_pred,
+        context="raman_scattering:centroid_shift",
+    )
+    centroid_derivative_rel_error = mean_pointwise_abs_relative_error(
+        centroid_derivative_num,
+        centroid_rhs,
+        context="raman_scattering:centroid_derivative",
     )
 
     final_kerr = _normalized_rows(kerr_spec_map)[-1]
@@ -398,7 +399,7 @@ def main() -> float:
         raman_spec_map,
         output_dir / "raman_spectral_intensity_propagation.png",
         x_label="Angular-frequency detuning (rad/time)",
-        title="Raman: Spectral Intensity Over Propagation",
+        
         colorbar_label="Normalized spectral intensity",
     )
     if p1 is not None:
@@ -412,7 +413,7 @@ def main() -> float:
         label_a="Numerical centroid shift",
         label_b="Analytical centroid shift",
         y_label="Delta spectral centroid (rad/time)",
-        title="Raman Analytical Validation: Centroid Shift",
+        
     )
     if p2 is not None:
         saved_paths.append(p2)
@@ -423,7 +424,7 @@ def main() -> float:
         wavelength_map,
         output_dir / "raman_wavelength_intensity_propagation.png",
         x_label="Wavelength (nm)",
-        title="Raman: Wavelength Intensity Over Propagation (around lambda0)",
+        
         colorbar_label="Normalized spectral intensity",
     )
     if p3 is not None:
@@ -439,7 +440,7 @@ def main() -> float:
         label_b="Kerr+Raman",
         label_c="Moment-theorem prediction",
         y_label="Delta centroid wavelength (nm)",
-        title="Raman Analytical Validation: Wavelength Centroid Shift",
+        
     )
     if p4 is not None:
         saved_paths.append(p4)
@@ -453,7 +454,7 @@ def main() -> float:
         label_b="Kerr+Raman final",
         x_label="Angular-frequency detuning (rad/time)",
         y_label="Normalized spectral intensity",
-        title="Final Spectrum: Kerr-only vs Raman",
+        
     )
     if p5 is not None:
         saved_paths.append(p5)
@@ -466,7 +467,7 @@ def main() -> float:
         label_a="Numerical d(centroid)/dz",
         label_b="Analytical moment RHS",
         y_label="Centroid derivative (rad/time/m)",
-        title="Raman Analytical Validation: Centroid Derivative",
+        
     )
     if p6 is not None:
         saved_paths.append(p6)
@@ -475,8 +476,8 @@ def main() -> float:
         z_axis,
         centroid_pointwise_rel_error,
         output_dir / "raman_spectral_centroid_shift_relative_error.png",
-        title="Raman Analytical Validation: Pointwise Relative Error",
-        y_label="Relative error of centroid shift",
+        
+        y_label="Pointwise abs-relative error of centroid shift",
     )
     if p8 is not None:
         saved_paths.append(p8)
@@ -491,11 +492,19 @@ def main() -> float:
     print(f"  max pointwise rel. error         = {float(np.max(centroid_pointwise_rel_error)):.6e}")
     print(f"  final centroid shift (raman-kerr)= {centroid_delta_final:.6e}")
     print(f"  predicted centroid shift         = {predicted_delta_final:.6e}")
-    if saved_paths:
-        print("saved plots:")
-        for path in saved_paths:
-            print(f"  {path}")
     return centroid_curve_rel_error
+
+
+class RamanScatteringApp(ExampleAppBase):
+    example_slug = "raman_scattering"
+    description = "Raman self-frequency shift validation (temporal only) with DB-backed run/replot."
+
+    def run(self) -> float:
+        return _run(self.args)
+
+
+def main() -> float:
+    return RamanScatteringApp.from_cli().run()
 
 
 if __name__ == "__main__":

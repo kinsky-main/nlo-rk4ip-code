@@ -104,33 +104,29 @@ function testDiffractionPropagationParity(testCase)
 api = nlolib.NLolib();
 execOpts = struct('backend_type', int32(0));
 
-nt = 4;
+nt = 1;
 nx = 6;
 ny = 4;
 n = nt * nx * ny;
 betaT = -0.018;
-k2 = complex(double(1:(nx * ny)), zeros(1, nx * ny));
 inputField = deterministic_complex_field(n);
 
 cfgCommon = coupled_runtime_config(nt, nx, ny);
-cfgCommon.spatial_frequency_grid = k2;
-cfgCommon.potential_grid = complex(zeros(1, nx * ny), zeros(1, nx * ny));
+cfgCommon.potential_grid = complex(zeros(1, n), zeros(1, n));
 
 cfgString = cfgCommon;
 cfgString.runtime = struct( ...
-    'dispersion_factor_expr', "0", ...
-    'transverse_factor_expr', "i*c3*w", ...
-    'transverse_expr', "exp(h*D)", ...
+    'linear_factor_expr', "i*c0*(kx*kx + ky*ky)", ...
+    'linear_expr', "exp(h*D)", ...
     'nonlinear_expr', "0", ...
-    'constants', [0.0, 0.0, 0.0, betaT]);
+    'constants', [betaT, 0.0, 0.0, 0.0]);
 
 cfgCallable = cfgCommon;
 cfgCallable.runtime = struct( ...
-    'dispersion_factor_expr', "0", ...
-    'transverse_factor_fn', @(A, w) 1i * betaT .* w, ...
-    'transverse_fn', @(A, D, h) exp(h .* D), ...
+    'dispersion_factor_expr', "i*c0*(kx*kx + ky*ky)", ...
+    'dispersion_expr', "exp(h*D)", ...
     'nonlinear_expr', "0", ...
-    'constants', [0.0, 0.0, 0.0, 0.0]);
+    'constants', [betaT, 0.0, 0.0, 0.0]);
 
 resString = api.propagate(cfgString, inputField, uint64(2), execOpts);
 resCallable = api.propagate(cfgCallable, inputField, uint64(2), execOpts);
@@ -148,29 +144,25 @@ ny = 4;
 n = nt * nx * ny;
 gamma = 0.015;
 fR = 0.18;
-betaT = -0.01;
-k2 = complex(double(1:(nx * ny)), zeros(1, nx * ny));
-potential = complex(0.02 * double(1:(nx * ny)), zeros(1, nx * ny));
+potentialXY = complex(0.02 * double(1:(nx * ny)), zeros(1, nx * ny));
+potential = repmat(potentialXY, 1, nt);
 inputField = deterministic_complex_field(n);
 
 cfgCommon = coupled_runtime_config(nt, nx, ny);
-cfgCommon.spatial_frequency_grid = k2;
 cfgCommon.potential_grid = potential;
 cfgCommon.propagation_distance = 0.008;
 
 cfgString = cfgCommon;
 cfgString.runtime = struct( ...
-    'dispersion_factor_expr', "0", ...
-    'transverse_factor_expr', "i*c3*w", ...
-    'transverse_expr', "exp(h*D)", ...
+    'linear_factor_expr', "0", ...
+    'linear_expr', "exp(h*D)", ...
     'nonlinear_expr', "i*A*(c0*(1.0-c1)*I + c0*c1*V)", ...
-    'constants', [gamma, fR, 0.0, betaT]);
+    'constants', [gamma, fR, 0.0, 0.0]);
 
 cfgCallable = cfgCommon;
 cfgCallable.runtime = struct( ...
-    'dispersion_factor_expr', "0", ...
-    'transverse_factor_fn', @(A, w) 1i * betaT .* w, ...
-    'transverse_fn', @(A, D, h) exp(h .* D), ...
+    'linear_factor_expr', "0", ...
+    'linear_expr', "exp(h*D)", ...
     'nonlinear_fn', @(A, I, V) 1i .* A .* (gamma .* (1.0 - fR) .* I + gamma .* fR .* V), ...
     'constants', [0.0, 0.0, 0.0, 0.0]);
 
@@ -203,10 +195,11 @@ cfg.min_step_size = 1e-5;
 cfg.error_tolerance = 1e-7;
 cfg.pulse_period = nt * 0.02;
 cfg.delta_time = 0.02;
-cfg.time_nt = uint64(nt);
+cfg.tensor_nt = uint64(nt);
+cfg.tensor_nx = uint64(nx);
+cfg.tensor_ny = uint64(ny);
+cfg.tensor_layout = int32(0);
 cfg.frequency_grid = complex(zeros(1, nt), zeros(1, nt));
-cfg.spatial_nx = uint64(nx);
-cfg.spatial_ny = uint64(ny);
 end
 
 function out = omega_grid_unshifted(n, dt)

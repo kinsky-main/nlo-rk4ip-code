@@ -14,7 +14,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
+from backend.metrics import mean_pointwise_abs_relative_error_curve
 from backend.plotting import (
     plot_3d_intensity_scatter_propagation,
     plot_final_intensity_comparison,
@@ -28,27 +29,23 @@ from backend.storage import ExampleRunDB
 
 
 def _relative_l2_error_curve(records_a: np.ndarray, records_b: np.ndarray) -> np.ndarray:
-    if records_a.shape != records_b.shape:
-        raise ValueError("records_a and records_b must have the same shape.")
-
-    out = np.empty(records_a.shape[0], dtype=np.float64)
-    for i in range(records_a.shape[0]):
-        a = np.asarray(records_a[i], dtype=np.complex128).reshape(-1)
-        b = np.asarray(records_b[i], dtype=np.complex128).reshape(-1)
-        denom = max(float(np.linalg.norm(b)), 1e-12)
-        out[i] = float(np.linalg.norm(a - b) / denom)
-    return out
-
-
-def _k2_grid(nx: int, ny: int, dx: float, dy: float) -> np.ndarray:
-    kx = 2.0 * np.pi * np.fft.fftfreq(nx, d=dx)
-    ky = 2.0 * np.pi * np.fft.fftfreq(ny, d=dy)
-    kkx, kky = np.meshgrid(kx, ky, indexing="xy")
-    return (kkx * kkx + kky * kky).astype(np.complex128)
+    return mean_pointwise_abs_relative_error_curve(
+        records_a,
+        records_b,
+        context="coupled_dispersion_nonlinearity_diffraction:full_vs_linear",
+    )
 
 
 def _omega_grid(nt: int, dt: float) -> np.ndarray:
     return (2.0 * np.pi * np.fft.fftfreq(nt, d=dt)).astype(np.float64)
+
+
+def _flatten_tfast(volume_tyx: np.ndarray) -> np.ndarray:
+    return np.asarray(volume_tyx, dtype=np.complex128).transpose(2, 1, 0).reshape(-1)
+
+
+def _unflatten_records_tfast(records_flat: np.ndarray, num_records: int, nt: int, ny: int, nx: int) -> np.ndarray:
+    return np.asarray(records_flat, dtype=np.complex128).reshape(num_records, nx, ny, nt).transpose(0, 3, 2, 1)
 
 
 def _run_case(
@@ -85,33 +82,29 @@ def _run_case(
     field0 = (temporal[:, None, None] * spatial[None, :, :]).astype(np.complex128)
 
     omega = _omega_grid(nt, dt)
-    k2 = _k2_grid(nx, ny, dx, dy)
     potential = (grin_strength * (xx * xx + yy * yy)).astype(np.complex128)
+    potential_tfast = np.tile(potential.T.reshape(-1), nt)
 
     pulse = nlo.PulseSpec(
-        samples=field0.reshape(-1).tolist(),
+        samples=_flatten_tfast(field0).tolist(),
         delta_time=dt,
         pulse_period=float(nt) * dt,
-        time_nt=nt,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
+        tensor_layout=int(nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
         frequency_grid=[complex(float(w), 0.0) for w in omega],
-        spatial_nx=nx,
-        spatial_ny=ny,
         delta_x=dx,
         delta_y=dy,
-        spatial_frequency_grid=k2.reshape(-1).tolist(),
-        potential_grid=potential.reshape(-1).tolist(),
+        potential_grid=potential_tfast.tolist(),
     )
     linear_operator = nlo.OperatorSpec(
-        expr="i*beta2*w*w-loss",
-        params={"beta2": 0.5 * beta2, "loss": 0.0},
-    )
-    transverse_operator = nlo.OperatorSpec(
-        expr="i*beta_t*w",
-        params={"beta_t": diffraction_coeff},
+        fn=lambda A, wt, kx, ky: (1.0j) * (
+            (0.5 * beta2) * (wt * wt) + diffraction_coeff * ((kx * kx) + (ky * ky))
+        ),
     )
     nonlinear_operator = nlo.OperatorSpec(
-        expr="i*A*(gamma*I + V)",
-        params={"gamma": gamma},
+        fn=lambda A, I, V: (1.0j * A) * (gamma * I + V),
     )
 
     exec_options_ctypes = exec_options.to_ctypes(nlo)
@@ -128,7 +121,6 @@ def _run_case(
         pulse,
         linear_operator,
         nonlinear_operator,
-        transverse_operator=transverse_operator,
         propagation_distance=float(z_final),
         output="dense",
         preset="accuracy",
@@ -136,17 +128,12 @@ def _run_case(
         exec_options=exec_options_ctypes,
         **propagate_kwargs,
     )
-    records = np.asarray(result.records, dtype=np.complex128).reshape(num_records, nt, ny, nx)
+    records = _unflatten_records_tfast(result.records, int(num_records), int(nt), int(ny), int(nx))
     z_records = np.asarray(result.z_axis, dtype=np.float64)
     return t, x, y, z_records, field0, records, dict(result.meta)
 
 
-def main() -> None:
-    parser = build_example_parser(
-        example_slug="coupled_dispersion_nonlinearity_diffraction",
-        description="Coupled dispersion/nonlinearity/diffraction with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
+def _run(args: argparse.Namespace) -> None:
     db = ExampleRunDB(args.db_path)
     example_name = "coupled_dispersion_nonlinearity_diffraction_rk4ip"
     full_case_key = "full"
@@ -319,7 +306,7 @@ def main() -> None:
         xy_stride=4,
         min_marker_size=2.0,
         max_marker_size=36.0,
-        title="Full coupled case: spatial intensity integrated over time",
+        
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -334,7 +321,7 @@ def main() -> None:
         xy_stride=4,
         min_marker_size=2.0,
         max_marker_size=36.0,
-        title="Linear baseline: spatial intensity integrated over time",
+        
     )
     if p2 is not None:
         saved_paths.append(p2)
@@ -346,7 +333,7 @@ def main() -> None:
         output_dir / "temporal_center_colormap_full.png",
         x_label="Time t",
         y_label="Propagation distance z",
-        title="Full coupled case: center-point temporal intensity vs z",
+        
         colorbar_label="Normalized intensity",
     )
     if p3 is not None:
@@ -359,7 +346,7 @@ def main() -> None:
         output_dir / "transverse_centerline_colormap_full.png",
         x_label="Transverse x (t = t_mid, y = y_mid)",
         y_label="Propagation distance z",
-        title="Full coupled case: transverse center-line intensity vs z",
+        
         colorbar_label="Normalized intensity",
     )
     if p4 is not None:
@@ -371,7 +358,7 @@ def main() -> None:
         full_records[-1, :, ny // 2, nx // 2],
         output_dir / "final_temporal_center_re_im_comparison.png",
         x_label="Time t",
-        title="Final center-point temporal field (linear baseline vs full)",
+        
         reference_label="Linear baseline",
         final_label="Full coupled",
     )
@@ -384,7 +371,7 @@ def main() -> None:
         full_records[-1, nt // 2, ny // 2, :],
         output_dir / "final_transverse_centerline_intensity_comparison.png",
         x_label="Transverse coordinate x",
-        title="Final transverse center-line intensity (linear baseline vs full)",
+        
         reference_label="Linear baseline",
         final_label="Full coupled",
     )
@@ -395,8 +382,8 @@ def main() -> None:
         z_records,
         error_curve,
         output_dir / "full_vs_linear_relative_error_over_propagation.png",
-        title="Full coupled vs linear baseline: relative L2 error over z",
-        y_label="Relative L2 error",
+        
+        y_label="Mean pointwise abs-relative error",
     )
     if p7 is not None:
         saved_paths.append(p7)
@@ -409,15 +396,22 @@ def main() -> None:
         label_a="Full coupled",
         label_b="Linear baseline",
         y_label="Total power sum(|A|^2)",
-        title="Power trend over propagation",
+        
     )
     if p8 is not None:
         saved_paths.append(p8)
 
-    if saved_paths:
-        print("saved plots:")
-        for path in saved_paths:
-            print(f"  {path}")
+
+class CoupledDispersionNonlinearityDiffractionApp(ExampleAppBase):
+    example_slug = "coupled_dispersion_nonlinearity_diffraction"
+    description = "Coupled dispersion/nonlinearity/diffraction with DB-backed run/replot."
+
+    def run(self) -> None:
+        _run(self.args)
+
+
+def main() -> None:
+    CoupledDispersionNonlinearityDiffractionApp.from_cli().run()
 
 
 if __name__ == "__main__":

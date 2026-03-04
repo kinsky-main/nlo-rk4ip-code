@@ -33,7 +33,16 @@ maxConstants = 16;            % NLO_RUNTIME_OPERATOR_CONSTANTS_MAX from nlolib_m
 
 numTs = double(cfg.num_time_samples);
 
-[dispersionFactorExpr, dispersionExpr, transverseFactorExpr, transverseExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
+legacyShapeFields = {"time_nt", "spatial_nx", "spatial_ny"};
+for idx = 1:numel(legacyShapeFields)
+    key = legacyShapeFields{idx};
+    if isfield(cfg, key) && ~isempty(cfg.(key))
+        error('nlolib:legacyApiRemoved', ...
+              'cfg.%s has been removed; use tensor_nt/tensor_nx/tensor_ny instead.', key);
+    end
+end
+
+[linearFactorExpr, linearExpr, potentialExpr, dispersionFactorExpr, dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg);
 constants = double(constants(:).');
 numConstants = numel(constants);
 if numConstants > maxConstants
@@ -50,28 +59,88 @@ freqPtr = nlolib.pack_complex_array(cfg.frequency_grid);
 keepalive{end + 1} = freqPtr; %#ok<AGROW>
 
 spatialMl = struct();
-defaultNx = numTs;
-if isfield(cfg, "time_nt") && ~isempty(cfg.time_nt) && double(cfg.time_nt) > 0
-    defaultNx = 1;
+tensorNt = double(get_optional(cfg, "tensor_nt", 0));
+tensorNx = double(get_optional(cfg, "tensor_nx", 0));
+tensorNy = double(get_optional(cfg, "tensor_ny", 0));
+if tensorNt > 0
+    if tensorNx <= 0 || tensorNy <= 0
+        error('nlolib:invalidTensorShape', ...
+              'tensor_nt requires tensor_nx and tensor_ny to be positive.');
+    end
+    defaultNx = tensorNx;
+    defaultNy = tensorNy;
+else
+    defaultNx = numTs;
+    defaultNy = 1;
 end
-spatialMl.nx = uint64(get_optional(cfg, "spatial_nx", defaultNx));
-spatialMl.ny = uint64(get_optional(cfg, "spatial_ny", 1));
+spatialMl.nx = uint64(defaultNx);
+spatialMl.ny = uint64(defaultNy);
 spatialMl.delta_x = double(get_optional(cfg, "delta_x", 1.0));
 spatialMl.delta_y = double(get_optional(cfg, "delta_y", 1.0));
 
 if isfield(cfg, "spatial_frequency_grid") && ~isempty(cfg.spatial_frequency_grid)
+    sfLen = numel(cfg.spatial_frequency_grid);
+    if tensorNt > 0
+        xyCount = tensorNx * tensorNy;
+        if sfLen ~= xyCount && sfLen ~= numTs
+            error('nlolib:invalidSpatialFrequencyGridShape', ...
+                  'cfg.spatial_frequency_grid length must equal num_time_samples or tensor_nx*tensor_ny for tensor runs.');
+        end
+    elseif sfLen ~= numTs
+        error('nlolib:invalidSpatialFrequencyGridShape', ...
+              'cfg.spatial_frequency_grid length must equal num_time_samples for temporal runs.');
+    end
     spatialFreqPtr = nlolib.pack_complex_array(cfg.spatial_frequency_grid);
     spatialMl.spatial_frequency_grid = spatialFreqPtr;
     keepalive{end + 1} = spatialFreqPtr; %#ok<AGROW>
 end
+if isfield(cfg, "kx_axis") && ~isempty(cfg.kx_axis)
+    kxAxisPtr = nlolib.pack_complex_array(cfg.kx_axis);
+    spatialMl.kx_axis = kxAxisPtr;
+    keepalive{end + 1} = kxAxisPtr; %#ok<AGROW>
+end
+if isfield(cfg, "ky_axis") && ~isempty(cfg.ky_axis)
+    kyAxisPtr = nlolib.pack_complex_array(cfg.ky_axis);
+    spatialMl.ky_axis = kyAxisPtr;
+    keepalive{end + 1} = kyAxisPtr; %#ok<AGROW>
+end
 
 if isfield(cfg, "potential_grid") && ~isempty(cfg.potential_grid)
-    potentialPtr = nlolib.pack_complex_array(cfg.potential_grid);
+    potentialValues = cfg.potential_grid;
+    if tensorNt > 0
+        xyCount = tensorNx * tensorNy;
+        potentialLen = numel(potentialValues);
+        if potentialLen == xyCount
+            potentialValues = kron(reshape(potentialValues, 1, []), ones(1, tensorNt));
+        elseif potentialLen ~= numTs
+            error('nlolib:invalidPotentialGridShape', ...
+                  'cfg.potential_grid length must equal num_time_samples or tensor_nx*tensor_ny for tensor runs.');
+        end
+    elseif numel(potentialValues) ~= numTs
+        error('nlolib:invalidPotentialGridShape', ...
+              'cfg.potential_grid length must equal num_time_samples for temporal runs.');
+    end
+    potentialPtr = nlolib.pack_complex_array(potentialValues);
     spatialMl.potential_grid = potentialPtr;
     keepalive{end + 1} = potentialPtr; %#ok<AGROW>
 end
 
 runtimeMl = struct();
+if strlength(linearFactorExpr) > 0
+    linearFactorPtr = cstring_ptr(linearFactorExpr);
+    runtimeMl.linear_factor_expr = linearFactorPtr;
+    keepalive{end + 1} = linearFactorPtr; %#ok<AGROW>
+end
+if strlength(linearExpr) > 0
+    linearPtr = cstring_ptr(linearExpr);
+    runtimeMl.linear_expr = linearPtr;
+    keepalive{end + 1} = linearPtr; %#ok<AGROW>
+end
+if strlength(potentialExpr) > 0
+    potentialExprPtr = cstring_ptr(potentialExpr);
+    runtimeMl.potential_expr = potentialExprPtr;
+    keepalive{end + 1} = potentialExprPtr; %#ok<AGROW>
+end
 if strlength(dispersionFactorExpr) > 0
     dispersionFactorPtr = cstring_ptr(dispersionFactorExpr);
     runtimeMl.dispersion_factor_expr = dispersionFactorPtr;
@@ -81,16 +150,6 @@ if strlength(dispersionExpr) > 0
     dispersionPtr = cstring_ptr(dispersionExpr);
     runtimeMl.dispersion_expr = dispersionPtr;
     keepalive{end + 1} = dispersionPtr; %#ok<AGROW>
-end
-if strlength(transverseFactorExpr) > 0
-    transverseFactorPtr = cstring_ptr(transverseFactorExpr);
-    runtimeMl.transverse_factor_expr = transverseFactorPtr;
-    keepalive{end + 1} = transverseFactorPtr; %#ok<AGROW>
-end
-if strlength(transverseExpr) > 0
-    transversePtr = cstring_ptr(transverseExpr);
-    runtimeMl.transverse_expr = transversePtr;
-    keepalive{end + 1} = transversePtr; %#ok<AGROW>
 end
 if strlength(nonlinearExpr) > 0
     nonlinearPtr = cstring_ptr(nonlinearExpr);
@@ -125,10 +184,21 @@ simMl.propagation = struct( ...
     'min_step_size', double(cfg.min_step_size), ...
     'error_tolerance', double(cfg.error_tolerance), ...
     'propagation_distance', double(cfg.propagation_distance));
+simMl.tensor = struct( ...
+    'nt', uint64(get_optional(cfg, "tensor_nt", 0)), ...
+    'nx', uint64(get_optional(cfg, "tensor_nx", 0)), ...
+    'ny', uint64(get_optional(cfg, "tensor_ny", 0)), ...
+    'layout', int32(get_optional(cfg, "tensor_layout", 0)));
 simMl.time = struct( ...
-    'nt', uint64(get_optional(cfg, "time_nt", 0)), ...
+    'nt', uint64(0), ...
     'pulse_period', double(cfg.pulse_period), ...
-    'delta_time', double(cfg.delta_time));
+    'delta_time', double(cfg.delta_time), ...
+    'wt_axis', []);
+if isfield(cfg, "wt_axis") && ~isempty(cfg.wt_axis)
+    wtAxisPtr = nlolib.pack_complex_array(cfg.wt_axis);
+    simMl.time.wt_axis = wtAxisPtr;
+    keepalive{end + 1} = wtAxisPtr; %#ok<AGROW>
+end
 simMl.frequency = struct('frequency_grid', freqPtr);
 simMl.spatial = spatialMl;
 
@@ -159,11 +229,12 @@ function ptr = cstring_ptr(text)
 ptr = libpointer('cstring', char(string(text)));
 end
 
-function [dispersionFactorExpr, dispersionExpr, transverseFactorExpr, transverseExpr, nonlinearExpr, constants] = resolve_runtime(cfg)
+function [linearFactorExpr, linearExpr, potentialExpr, dispersionFactorExpr, dispersionExpr, nonlinearExpr, constants] = resolve_runtime(cfg)
+linearFactorExpr = "";
+linearExpr = "";
+potentialExpr = "";
 dispersionFactorExpr = "";
 dispersionExpr = "";
-transverseFactorExpr = "";
-transverseExpr = "";
 nonlinearExpr = "";
 constants = [];
 
@@ -172,21 +243,32 @@ if ~isfield(cfg, "runtime") || isempty(cfg.runtime)
 end
 
 runtime = cfg.runtime;
+legacyRuntimeFields = {"transverse_factor_expr", "transverse_expr", "transverse_factor_fn", "transverse_fn"};
+for idx = 1:numel(legacyRuntimeFields)
+    key = legacyRuntimeFields{idx};
+    if isfield(runtime, key) && ~isempty(runtime.(key))
+        error('nlolib:legacyApiRemoved', ...
+              'cfg.runtime.%s has been removed; encode diffraction in linear_factor_expr/linear_expr.', key);
+    end
+end
 if isfield(runtime, "constants") && ~isempty(runtime.constants)
     constants = double(runtime.constants(:).');
 end
 
+if isfield(runtime, "linear_factor_expr") && ~isempty(runtime.linear_factor_expr)
+    linearFactorExpr = string(runtime.linear_factor_expr);
+end
+if isfield(runtime, "linear_expr") && ~isempty(runtime.linear_expr)
+    linearExpr = string(runtime.linear_expr);
+end
+if isfield(runtime, "potential_expr") && ~isempty(runtime.potential_expr)
+    potentialExpr = string(runtime.potential_expr);
+end
 if isfield(runtime, "dispersion_factor_expr") && ~isempty(runtime.dispersion_factor_expr)
     dispersionFactorExpr = string(runtime.dispersion_factor_expr);
 end
 if isfield(runtime, "dispersion_expr") && ~isempty(runtime.dispersion_expr)
     dispersionExpr = string(runtime.dispersion_expr);
-end
-if isfield(runtime, "transverse_factor_expr") && ~isempty(runtime.transverse_factor_expr)
-    transverseFactorExpr = string(runtime.transverse_factor_expr);
-end
-if isfield(runtime, "transverse_expr") && ~isempty(runtime.transverse_expr)
-    transverseExpr = string(runtime.transverse_expr);
 end
 if isfield(runtime, "nonlinear_expr") && ~isempty(runtime.nonlinear_expr)
     nonlinearExpr = string(runtime.nonlinear_expr);
@@ -204,20 +286,6 @@ if isfield(runtime, "dispersion_fn") && ~isempty(runtime.dispersion_fn)
     translated = shift_constant_indices(translated, numel(constants));
     constants = [constants, captured];
     dispersionExpr = translated;
-end
-
-if isfield(runtime, "transverse_factor_fn") && ~isempty(runtime.transverse_factor_fn)
-    [translated, captured] = nlolib.translate_runtime_handle(runtime.transverse_factor_fn, "dispersion_factor", runtime);
-    translated = shift_constant_indices(translated, numel(constants));
-    constants = [constants, captured];
-    transverseFactorExpr = translated;
-end
-
-if isfield(runtime, "transverse_fn") && ~isempty(runtime.transverse_fn)
-    [translated, captured] = nlolib.translate_runtime_handle(runtime.transverse_fn, "dispersion", runtime);
-    translated = shift_constant_indices(translated, numel(constants));
-    constants = [constants, captured];
-    transverseExpr = translated;
 end
 
 if isfield(runtime, "nonlinear_fn") && ~isempty(runtime.nonlinear_fn)

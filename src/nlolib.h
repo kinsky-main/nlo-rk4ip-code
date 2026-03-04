@@ -154,7 +154,7 @@ NLOLIB_API nlo_propagate_output nlolib_propagate_output_default(void);
  *
  * @param simulation_config Simulation configuration parameters.
  * @param physics_config Runtime physics/operator expression parameters.
- * @param num_time_samples Number of samples in flattened input.
+ * @param num_time_samples Total number of input field samples.
  * @param input_field Pointer to input field buffer.
  * @param options Optional propagation options.
  * @param output Optional propagation output descriptor.

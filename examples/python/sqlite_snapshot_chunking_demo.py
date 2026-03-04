@@ -10,7 +10,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
 from backend.storage import ExampleRunDB
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -21,12 +21,7 @@ if str(PYTHON_API_DIR) not in sys.path:
 from nlolib_ctypes import NLolib, OperatorSpec, PulseSpec
 
 
-def main() -> None:
-    parser = build_example_parser(
-        example_slug="sqlite_snapshot_chunking_demo",
-        description="SQLite snapshot chunking demo with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
+def _run(args: argparse.Namespace) -> None:
     db = ExampleRunDB(args.db_path)
     example_name = "sqlite_snapshot_chunking_demo"
     case_key = "default"
@@ -50,8 +45,8 @@ def main() -> None:
         pulse_period=1.0,
         frequency_grid=freq,
     )
-    linear = OperatorSpec(expr="0")
-    nonlinear = OperatorSpec(expr="0")
+    linear = OperatorSpec(fn=lambda A, w: 0.0)
+    nonlinear = OperatorSpec(fn=lambda A, I: 0.0)
 
     if args.replot:
         run_group = db.resolve_replot_group(example_name, args.run_group)
@@ -125,6 +120,18 @@ def main() -> None:
                 "run row: "
                 f"records_written={int(row[0])} chunks_written={int(row[1])} truncated={int(row[2])}"
             )
+
+
+class SqliteSnapshotChunkingDemoApp(ExampleAppBase):
+    example_slug = "sqlite_snapshot_chunking_demo"
+    description = "SQLite snapshot chunking demo with DB-backed run/replot."
+
+    def run(self) -> None:
+        _run(self.args)
+
+
+def main() -> None:
+    SqliteSnapshotChunkingDemoApp.from_cli().run()
 
 
 if __name__ == "__main__":

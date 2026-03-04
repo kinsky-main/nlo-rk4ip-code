@@ -22,7 +22,10 @@ extern "C" {
 typedef enum {
     NLO_OPERATOR_CONTEXT_DISPERSION_FACTOR = 0,
     NLO_OPERATOR_CONTEXT_DISPERSION = 1,
-    NLO_OPERATOR_CONTEXT_NONLINEAR = 2
+    NLO_OPERATOR_CONTEXT_NONLINEAR = 2,
+    NLO_OPERATOR_CONTEXT_LINEAR_FACTOR = 3,
+    NLO_OPERATOR_CONTEXT_LINEAR = 4,
+    NLO_OPERATOR_CONTEXT_POTENTIAL = 5
 } nlo_operator_program_context;
 
 typedef enum {
@@ -43,7 +46,13 @@ typedef enum {
     NLO_OPERATOR_OP_LOG = 14,
     NLO_OPERATOR_OP_SQRT = 15,
     NLO_OPERATOR_OP_SIN = 16,
-    NLO_OPERATOR_OP_COS = 17
+    NLO_OPERATOR_OP_COS = 17,
+    NLO_OPERATOR_OP_PUSH_SYMBOL_WT = 18,
+    NLO_OPERATOR_OP_PUSH_SYMBOL_KX = 19,
+    NLO_OPERATOR_OP_PUSH_SYMBOL_KY = 20,
+    NLO_OPERATOR_OP_PUSH_SYMBOL_T = 21,
+    NLO_OPERATOR_OP_PUSH_SYMBOL_X = 22,
+    NLO_OPERATOR_OP_PUSH_SYMBOL_Y = 23
 } nlo_operator_opcode;
 
 typedef struct {
@@ -61,6 +70,12 @@ typedef struct {
 
 typedef struct {
     const nlo_vec_buffer* frequency_grid;
+    const nlo_vec_buffer* wt_grid;
+    const nlo_vec_buffer* kx_grid;
+    const nlo_vec_buffer* ky_grid;
+    const nlo_vec_buffer* t_grid;
+    const nlo_vec_buffer* x_grid;
+    const nlo_vec_buffer* y_grid;
     const nlo_vec_buffer* field;
     const nlo_vec_buffer* dispersion_factor;
     const nlo_vec_buffer* potential;

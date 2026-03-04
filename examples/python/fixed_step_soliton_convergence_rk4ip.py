@@ -12,7 +12,8 @@ import math
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
+from backend.metrics import mean_pointwise_abs_relative_error
 from backend.plotting import plot_convergence_loglog
 from backend.runner import (
     NloExampleRunner,
@@ -35,9 +36,11 @@ def _configure_runtime_logging(runner: NloExampleRunner) -> None:
 
 
 def _relative_l2_error(num: np.ndarray, ref: np.ndarray) -> float:
-    ref_norm = float(np.linalg.norm(ref))
-    denom = max(ref_norm, 1e-15)
-    return float(np.linalg.norm(num - ref) / denom)
+    return mean_pointwise_abs_relative_error(
+        num,
+        ref,
+        context="fixed_step_soliton_convergence:trajectory_error",
+    )
 
 
 def _total_trajectory_error(
@@ -144,7 +147,7 @@ def _step_history_range(step_history: dict[str, object] | None) -> tuple[float, 
     return float(np.min(finite)), float(np.max(finite))
 
 
-def main() -> float:
+def _run(args) -> float:
     beta2 = -0.01
     gamma = 0.01
     alpha = 0.0
@@ -161,11 +164,6 @@ def main() -> float:
     omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
     a0 = (math.sqrt(p0) / np.cosh(tau)).astype(np.complex128)
 
-    parser = build_example_parser(
-        example_slug="fixed_step_soliton_convergence",
-        description="Fixed-step soliton convergence sweep with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
     db = ExampleRunDB(args.db_path)
     example_name = "fixed_step_soliton_convergence_rk4ip"
 
@@ -281,6 +279,7 @@ def main() -> float:
     min_records_common = min(int(records.shape[0]) for _, _, _, records in run_data)
     step_counts = np.asarray([entry[0] for entry in run_data], dtype=int)
     step_sizes = np.asarray([entry[1] for entry in run_data], dtype=np.float64)
+    step_sizes_norm = step_sizes / float(ld)
     fit_mask = step_counts <= 128
     errors = np.asarray(
         [
@@ -290,16 +289,17 @@ def main() -> float:
         dtype=np.float64,
     )
 
-    fitted_order, fitted_intercept, fit_mask_valid = _fit_loglog_slope(step_sizes, errors, fit_mask)
+    fitted_order, fitted_intercept, fit_mask_valid = _fit_loglog_slope(step_sizes_norm, errors, fit_mask)
 
     output_dir = args.output_dir
     plot_path = plot_convergence_loglog(
-        step_sizes,
+        step_sizes_norm,
         errors,
         fit_mask_valid,
         fitted_order,
         fitted_intercept,
         output_dir / "error_vs_fixed_step_size.png",
+        x_label="Normalized step size Delta z / L_D",
     )
 
     print(f"fixed-step soliton convergence summary (run_group={run_group}):")
@@ -309,15 +309,25 @@ def main() -> float:
     fit_counts = step_counts[fit_mask_valid].tolist()
     print(f"fit window step counts = {fit_counts}")
     print(f"fitted order p = {fitted_order:.6f}")
-    print(f"fitted line: error ~= exp({fitted_intercept:.6f}) * (Delta z)^{fitted_order:.6f}")
-    print("expected RK4 scaling reference: O(Delta z^4)")
+    print(f"fitted line: error ~= exp({fitted_intercept:.6f}) * (Delta z / L_D)^{fitted_order:.6f}")
+    print("expected RK4 scaling reference: O((Delta z / L_D)^4)")
     if fitted_order < 3.5:
         print("warning: observed order is below 4th-order expectation for this coupled soliton benchmark.")
         print("         this suggests a coupled-case integrator limitation rather than a plotting issue.")
-    if plot_path is not None:
-        print(f"saved plot: {plot_path}")
 
     return fitted_order
+
+
+class FixedStepSolitonConvergenceApp(ExampleAppBase):
+    example_slug = "fixed_step_soliton_convergence"
+    description = "Fixed-step soliton convergence sweep with DB-backed run/replot."
+
+    def run(self) -> float:
+        return _run(self.args)
+
+
+def main() -> float:
+    return FixedStepSolitonConvergenceApp.from_cli().run()
 
 
 if __name__ == "__main__":

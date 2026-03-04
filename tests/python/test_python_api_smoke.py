@@ -3,6 +3,7 @@ import math
 from nlolib_ctypes import (
     NLO_VECTOR_BACKEND_AUTO,
     NLO_VECTOR_BACKEND_CPU,
+    NLO_TENSOR_LAYOUT_XYT_T_FAST,
     NLolib,
     OperatorSpec,
     PulseSpec,
@@ -61,9 +62,10 @@ def main():
     print("test_python_api_smoke: CPU 1D propagation returned expected record-major shape.")
 
     auto_opts = default_execution_options(NLO_VECTOR_BACKEND_AUTO)
+    identity_distance = 0.02
     identity_cfg = prepare_sim_config(
         n,
-        propagation_distance=0.02,
+        propagation_distance=identity_distance,
         starting_step_size=1e-3,
         max_step_size=2e-3,
         min_step_size=1e-5,
@@ -115,17 +117,18 @@ def main():
         error_tolerance=1e-6,
         pulse_period=1.0,
         delta_time=0.001,
-        frequency_grid=[0j] * nxy,
-        spatial_nx=nx,
-        spatial_ny=ny,
-        spatial_frequency_grid=[0j] * nxy,
+        tensor_nt=1,
+        tensor_nx=nx,
+        tensor_ny=ny,
+        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
+        frequency_grid=[0j],
         potential_grid=[1 + 0j] * nxy,
         runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
     )
     out_2d = api.propagate(cfg_2d, [0j] * nxy, 1, cpu_opts).records
     assert len(out_2d) == 1
     assert len(out_2d[0]) == nxy
-    print("test_python_api_smoke: flattened 2D propagation returned expected shape.")
+    print("test_python_api_smoke: tensor 2D propagation returned expected shape.")
 
     nt = 4
     nx3 = 4
@@ -140,12 +143,12 @@ def main():
         error_tolerance=1e-6,
         pulse_period=1.0,
         delta_time=0.001,
-        time_nt=nt,
+        tensor_nt=nt,
+        tensor_nx=nx3,
+        tensor_ny=ny3,
+        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[0j] * nt,
-        spatial_nx=nx3,
-        spatial_ny=ny3,
-        spatial_frequency_grid=[0j] * (nx3 * ny3),
-        potential_grid=[0j] * (nx3 * ny3),
+        potential_grid=[0j] * n3,
         runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0, 0.0]),
     )
     out_3d = api.propagate(cfg_3d, [0j] * n3, 1, cpu_opts).records
@@ -153,26 +156,26 @@ def main():
     assert len(out_3d[0]) == n3
     print("test_python_api_smoke: explicit 3+1D layout propagation returned expected shape.")
 
-    bad_cfg_2d = prepare_sim_config(
-        nxy,
-        propagation_distance=0.0,
-        starting_step_size=0.01,
-        max_step_size=0.1,
-        min_step_size=0.001,
-        error_tolerance=1e-6,
-        pulse_period=1.0,
-        delta_time=0.001,
-        frequency_grid=[0j] * nxy,
-        spatial_nx=nx + 1,
-        spatial_ny=ny,
-        runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
-    )
     try:
-        api.propagate(bad_cfg_2d, [0j] * nxy, 1, cpu_opts)
-        raise AssertionError("expected invalid flattened shape to fail")
-    except RuntimeError as exc:
-        assert "status=1" in str(exc)
-    print("test_python_api_smoke: invalid flattened XY shape rejected as expected.")
+        _ = prepare_sim_config(
+            nxy,
+            propagation_distance=0.0,
+            starting_step_size=0.01,
+            max_step_size=0.1,
+            min_step_size=0.001,
+            error_tolerance=1e-6,
+            pulse_period=1.0,
+            delta_time=0.001,
+            tensor_nt=2,
+            tensor_nx=nx,
+            tensor_ny=ny,
+            frequency_grid=[0j, 0j],
+            runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
+        )
+        raise AssertionError("expected inconsistent tensor shape to fail")
+    except ValueError as exc:
+        assert "tensor_nt * tensor_nx * tensor_ny must match num_time_samples" in str(exc)
+    print("test_python_api_smoke: inconsistent tensor shape rejected as expected.")
 
     pulse = PulseSpec(
         samples=input_field,
@@ -212,18 +215,17 @@ def main():
         samples=[0j] * n_c,
         delta_time=0.001,
         pulse_period=1.0,
-        time_nt=nt_c,
+        tensor_nt=nt_c,
+        tensor_nx=nx_c,
+        tensor_ny=ny_c,
+        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[0j] * nt_c,
-        spatial_nx=nx_c,
-        spatial_ny=ny_c,
-        spatial_frequency_grid=[0j] * (nx_c * ny_c),
-        potential_grid=[0j] * (nx_c * ny_c),
+        potential_grid=[0j] * n_c,
     )
     coupled_result = api.propagate(
         pulse_coupled,
-        OperatorSpec(expr="i*beta2*w*w-loss", params={"beta2": 0.0, "loss": 0.0}),
+        OperatorSpec(expr="i*(beta2*wt*wt + beta_t*(kx*kx + ky*ky))", params={"beta2": 0.0, "beta_t": 0.0}),
         OperatorSpec(expr="i*A*(gamma*I + V)", params={"gamma": 0.0}),
-        transverse_operator=OperatorSpec(expr="i*beta_t*w", params={"beta_t": 0.0}),
         propagation_distance=0.01,
         records=2,
         exec_options=cpu_opts,
@@ -231,7 +233,86 @@ def main():
     assert len(coupled_result.records) == 2
     assert len(coupled_result.records[0]) == n_c
     assert coupled_result.meta["coupled"] is True
-    print("test_python_api_smoke: coupled transverse propagate returned expected shape.")
+    print("test_python_api_smoke: coupled tensor propagate returned expected shape.")
+
+    dense_record_count = 257
+    dense_history_result = api.propagate(
+        identity_cfg,
+        gaussian,
+        dense_record_count,
+        cpu_opts,
+        capture_step_history=True,
+        step_history_capacity=20000,
+    )
+    dense_history = dense_history_result.meta.get("step_history")
+    assert isinstance(dense_history, dict)
+    dense_steps = [float(v) for v in dense_history.get("step_size", [])]
+    assert len(dense_steps) > 0
+    dense_spacing = float(identity_distance) / float(dense_record_count - 1)
+    assert max(dense_steps) > (4.0 * dense_spacing)
+    assert len(dense_history.get("z", [])) < dense_record_count
+    assert len(dense_history_result.records) == dense_record_count
+    print("test_python_api_smoke: adaptive step sizes are no longer capped by record spacing.")
+
+    fixed_identity_cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.01,
+        starting_step_size=1e-3,
+        max_step_size=1e-3,
+        min_step_size=1e-3,
+        error_tolerance=1e-7,
+        pulse_period=1.0,
+        delta_time=0.001,
+        frequency_grid=[0j] * n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="0",
+            constants=[0.0, 0.0, 0.0, 0.0],
+        ),
+    )
+    fixed_aligned = api.propagate(
+        fixed_identity_cfg,
+        gaussian,
+        11,
+        cpu_opts,
+        capture_step_history=True,
+        step_history_capacity=128,
+    )
+    assert len(fixed_aligned.records) == 11
+    assert len(fixed_aligned.z_axis) == 11
+    assert int(fixed_aligned.meta.get("records_written", -1)) == 11
+    fixed_history = fixed_aligned.meta.get("step_history")
+    assert isinstance(fixed_history, dict)
+    fixed_step_sizes = [float(v) for v in fixed_history.get("step_size", [])]
+    fixed_next_sizes = [float(v) for v in fixed_history.get("next_step_size", [])]
+    fixed_errors = [float(v) for v in fixed_history.get("error", [])]
+    assert len(fixed_step_sizes) > 0
+    assert all(abs(v) <= 1e-15 for v in fixed_errors)
+    count = min(len(fixed_step_sizes), len(fixed_next_sizes))
+    for i in range(count):
+        assert abs(fixed_step_sizes[i] - fixed_next_sizes[i]) <= 1e-15
+
+    fixed_oversubscribed = api.propagate(fixed_identity_cfg, gaussian, 64, cpu_opts)
+    assert len(fixed_oversubscribed.records) == 11
+    assert len(fixed_oversubscribed.z_axis) == 11
+    assert int(fixed_oversubscribed.meta.get("records_requested", -1)) == 64
+    assert int(fixed_oversubscribed.meta.get("records_written", -1)) == 11
+    print("test_python_api_smoke: fixed-step oversubscribed records are clamped to step-aligned samples.")
+
+    try:
+        api.propagate(
+            pulse,
+            "gvd",
+            "kerr",
+            transverse_operator=OperatorSpec(expr="i*beta_t*w", params={"beta_t": 0.0}),
+            propagation_distance=0.01,
+            records=2,
+            exec_options=cpu_opts,
+        )
+        raise AssertionError("expected removed transverse_operator kwarg to fail")
+    except TypeError as exc:
+        assert "transverse_operator has been removed" in str(exc)
+    print("test_python_api_smoke: removed transverse_operator kwarg rejected as expected.")
 
     try:
         api.propagate(

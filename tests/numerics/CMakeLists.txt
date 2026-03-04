@@ -21,7 +21,11 @@ add_executable(test_nlo_vector_backend
   ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vk_vector_ops.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_resources.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_phase.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_dispatch.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
 )
 
 target_include_directories(test_nlo_vector_backend PRIVATE
@@ -56,7 +60,11 @@ add_executable(test_nlo_vector_backend_vulkan
   ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vk_vector_ops.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_resources.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_phase.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_dispatch.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
 )
 
 target_include_directories(test_nlo_vector_backend_vulkan PRIVATE

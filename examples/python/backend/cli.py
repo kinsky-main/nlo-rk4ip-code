@@ -50,6 +50,12 @@ def _configure_plot_saving_from_args(args: argparse.Namespace, selected_plot_key
 class _ExampleArgumentParser(argparse.ArgumentParser):
     def parse_args(self, args=None, namespace=None):
         parsed = super().parse_args(args=args, namespace=namespace)
+        replot_selector = getattr(parsed, "replot", None)
+        if replot_selector is not None and getattr(parsed, "run_group", None) is None:
+            selector_text = str(replot_selector).strip()
+            if selector_text and selector_text.lower() != "latest":
+                parsed.run_group = selector_text
+        parsed.replot = (replot_selector is not None)
         selected_plot_keys = _parse_save_plots_arg(getattr(parsed, "save_plots", None))
         _configure_plot_saving_from_args(parsed, selected_plot_keys)
         return parsed
@@ -76,16 +82,24 @@ def build_example_parser(
     parser.add_argument(
         "--save-plots",
         type=str,
-        default="linear_drift_intensity_propagation_map,linear_drift_final_intensity_comparison,soliton_total_error_over_propagation,soliton_final_re_im_comparison,soliton_wavelength_intensity_colormap,error_vs_fixed_step_size,spm_time_intensity_propagation,spm_frequency_intensity_propagation",
+        default="linear_drift_intensity_propagation_map,linear_drift_final_intensity_comparison,soliton_total_error_over_propagation,soliton_final_re_im_comparison,soliton_wavelength_intensity_colormap,error_vs_fixed_step_size,spm_time_intensity_propagation,spm_frequency_intensity_propagation,raman_spectral_intensity_propagation,raman_wavelength_intensity_propagation",
         help=(
-            "Comma-separated plot keys to save (output filename stems, without extension). "
-            "Use 'all' (default) to save every plot or 'none' to disable plot writes."
+            "Comma-separated plot keys to mirror into --report-dir (output filename stems, without extension). "
+            "All plots are always saved to --output-dir. Use 'all' to mirror every plot or "
+            "'none' to disable report-dir mirroring."
         ),
     )
     parser.add_argument(
         "--replot",
-        action="store_true",
-        help="Replot from an existing DB run group instead of running the solver.",
+        nargs="?",
+        const="latest",
+        default=None,
+        metavar="RUN",
+        help=(
+            "Replot from an existing DB run group instead of running the solver. "
+            "Optional RUN may be a run-group ID or a positive integer selecting "
+            "the nth latest run (1=latest)."
+        ),
     )
     parser.add_argument(
         "--db-path",

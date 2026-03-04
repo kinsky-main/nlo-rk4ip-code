@@ -2,10 +2,15 @@
 
 set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/nlolib.c
-  ${CMAKE_CURRENT_LIST_DIR}/core/state.c
   ${CMAKE_CURRENT_LIST_DIR}/core/init.c
+  ${CMAKE_CURRENT_LIST_DIR}/core/init_defaults.c
+  ${CMAKE_CURRENT_LIST_DIR}/core/init_limits.c
+  ${CMAKE_CURRENT_LIST_DIR}/core/init_state_builder.c
+  ${CMAKE_CURRENT_LIST_DIR}/core/state_lifecycle.c
+  ${CMAKE_CURRENT_LIST_DIR}/core/state_snapshots.c
   ${CMAKE_CURRENT_LIST_DIR}/physics/operators.c
-  ${CMAKE_CURRENT_LIST_DIR}/physics/operator_program.c
+  ${CMAKE_CURRENT_LIST_DIR}/physics/operator_program_compile.c
+  ${CMAKE_CURRENT_LIST_DIR}/physics/operator_program_execute.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/math_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/vector_ops.c
   ${CMAKE_CURRENT_LIST_DIR}/numerics/rk4_kernel.c
@@ -22,7 +27,11 @@ set(NLOLIB_SOURCES
 if(NLO_ENABLE_VULKAN_BACKEND)
   list(APPEND NLOLIB_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/backend/vk_auto_context.c
-    ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_vector_ops.c
+    ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_resources.c
+    ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_phase.c
+    ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_dispatch.c
+    ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_transfer.c
+    ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_ops.c
   )
 else()
   list(APPEND NLOLIB_SOURCES

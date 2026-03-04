@@ -44,6 +44,11 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
     nlo_real_max_reduce
     nlo_complex_weighted_rms_reduce
     nlo_pair_sum_reduce
+    nlo_complex_axis_unshifted_from_delta
+    nlo_complex_axis_centered_from_delta
+    nlo_complex_mesh_from_axis_tfast_t
+    nlo_complex_mesh_from_axis_tfast_y
+    nlo_complex_mesh_from_axis_tfast_x
   )
 
   set(_nlo_vk_spv_outputs "")
@@ -83,6 +88,11 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
   set(NLO_VK_SHADER_REAL_MAX_REDUCE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_real_max_reduce.spv")
   set(NLO_VK_SHADER_COMPLEX_WEIGHTED_RMS_REDUCE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_weighted_rms_reduce.spv")
   set(NLO_VK_SHADER_PAIR_SUM_REDUCE_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_pair_sum_reduce.spv")
+  set(NLO_VK_SHADER_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_axis_unshifted_from_delta.spv")
+  set(NLO_VK_SHADER_COMPLEX_AXIS_CENTERED_FROM_DELTA_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_axis_centered_from_delta.spv")
+  set(NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_T_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_mesh_from_axis_tfast_t.spv")
+  set(NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_Y_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_mesh_from_axis_tfast_y.spv")
+  set(NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_X_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_mesh_from_axis_tfast_x.spv")
 
   configure_file(
     "${target_source_dir}/backend/vulkan/nlo_vk_shader_paths.h.in"

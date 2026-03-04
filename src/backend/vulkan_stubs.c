@@ -266,3 +266,45 @@ nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
     }
     return nlo_vk_unavailable_status();
 }
+
+nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)delta;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    double delta
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)delta;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* axis,
+    size_t nt,
+    size_t ny,
+    nlo_vec_mesh_axis axis_kind
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)axis;
+    (void)nt;
+    (void)ny;
+    (void)axis_kind;
+    return nlo_vk_unavailable_status();
+}
