@@ -63,6 +63,18 @@ typedef enum {
 } nlolib_log_level;
 
 /**
+ * @brief Output stream selection for runtime progress TUI rendering.
+ */
+typedef enum {
+    /** Render progress updates to stderr only. */
+    NLOLIB_PROGRESS_STREAM_STDERR = 0,
+    /** Render progress updates to stdout only. */
+    NLOLIB_PROGRESS_STREAM_STDOUT = 1,
+    /** Render progress updates to both stderr and stdout. */
+    NLOLIB_PROGRESS_STREAM_BOTH = 2
+} nlolib_progress_stream_mode;
+
+/**
  * @brief Query runtime-derived limits for current backend/config selection.
  *
  * @param simulation_config Optional simulation configuration used to estimate
@@ -240,6 +252,14 @@ NLOLIB_API nlolib_status nlolib_set_progress_options(
     int milestone_percent,
     int emit_on_step_adjust
 );
+
+/**
+ * @brief Configure output stream selection for runtime progress TUI lines.
+ *
+ * @param stream_mode Stream mode in @ref nlolib_progress_stream_mode range.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_set_progress_stream(int stream_mode);
 
 #ifdef __cplusplus
 }

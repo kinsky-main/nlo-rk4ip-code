@@ -1,6 +1,8 @@
 import math
 
 from nlolib_ctypes import (
+    NLOLIB_PROGRESS_STREAM_BOTH,
+    NLOLIB_PROGRESS_STREAM_STDERR,
     NLO_VECTOR_BACKEND_AUTO,
     NLO_VECTOR_BACKEND_CPU,
     NLO_TENSOR_LAYOUT_XYT_T_FAST,
@@ -41,6 +43,8 @@ def main():
     api.set_log_buffer(128 * 1024)
     api.set_log_level(2)
     api.set_progress_options(enabled=True, milestone_percent=20, emit_on_step_adjust=True)
+    api.set_progress_stream(NLOLIB_PROGRESS_STREAM_BOTH)
+    api.set_progress_stream(NLOLIB_PROGRESS_STREAM_STDERR)
     api.clear_log_buffer()
     print("test_python_api_smoke: runtime log API configured.")
 

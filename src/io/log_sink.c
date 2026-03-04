@@ -35,6 +35,7 @@ typedef struct
     int progress_enabled;
     int progress_milestone_percent;
     int progress_emit_on_step_adjust;
+    int progress_stream_mode;
     int progress_active;
     int progress_next_milestone_percent;
     double progress_z_start;
@@ -57,6 +58,7 @@ static nlo_log_state g_nlo_log_state = {
     1,
     5,
     0,
+    NLO_LOG_PROGRESS_STREAM_STDERR,
     0,
     0,
     0.0,
@@ -68,6 +70,34 @@ static nlo_log_state g_nlo_log_state = {
     0u,
     0
 };
+
+static void nlo_progress_write_bytes(const char* text, size_t text_len)
+{
+    if (text == NULL || text_len == 0u) {
+        return;
+    }
+
+    if (g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_STDOUT ||
+        g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_BOTH) {
+        (void)fwrite(text, 1u, text_len, stdout);
+    }
+    if (g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_STDERR ||
+        g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_BOTH) {
+        (void)fwrite(text, 1u, text_len, stderr);
+    }
+}
+
+static void nlo_progress_flush(void)
+{
+    if (g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_STDOUT ||
+        g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_BOTH) {
+        fflush(stdout);
+    }
+    if (g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_STDERR ||
+        g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_BOTH) {
+        fflush(stderr);
+    }
+}
 
 static double nlo_log_now_seconds(void)
 {
@@ -138,8 +168,8 @@ static void nlo_progress_end_console_line(void)
         return;
     }
 
-    (void)fwrite("\n", 1u, 1u, stderr);
-    fflush(stderr);
+    nlo_progress_write_bytes("\n", 1u);
+    nlo_progress_flush();
     g_nlo_log_state.progress_line_visible = 0;
     g_nlo_log_state.progress_last_line_len = 0u;
 }
@@ -212,16 +242,16 @@ static void nlo_progress_render(
     }
 
     size_t line_len = strlen(line);
-    (void)fwrite("\r", 1u, 1u, stderr);
-    (void)fwrite(line, 1u, line_len, stderr);
+    nlo_progress_write_bytes("\r", 1u);
+    nlo_progress_write_bytes(line, line_len);
 
     if (g_nlo_log_state.progress_last_line_len > line_len) {
         const size_t extra = g_nlo_log_state.progress_last_line_len - line_len;
         for (size_t idx = 0u; idx < extra; ++idx) {
-            (void)fwrite(" ", 1u, 1u, stderr);
+            nlo_progress_write_bytes(" ", 1u);
         }
     }
-    fflush(stderr);
+    nlo_progress_flush();
 
     g_nlo_log_state.progress_last_line_len = line_len;
     g_nlo_log_state.progress_line_visible = 1;
@@ -418,6 +448,16 @@ int nlo_log_set_progress_options(int enabled, int milestone_percent, int emit_on
     g_nlo_log_state.progress_milestone_percent = milestone;
     g_nlo_log_state.progress_emit_on_step_adjust = (emit_on_step_adjust != 0) ? 1 : 0;
     g_nlo_log_state.progress_next_milestone_percent = milestone;
+    return NLO_LOG_STATUS_OK;
+}
+
+int nlo_log_set_progress_stream(int stream_mode)
+{
+    if (stream_mode < NLO_LOG_PROGRESS_STREAM_STDERR || stream_mode > NLO_LOG_PROGRESS_STREAM_BOTH) {
+        return NLO_LOG_STATUS_INVALID_ARGUMENT;
+    }
+
+    g_nlo_log_state.progress_stream_mode = stream_mode;
     return NLO_LOG_STATUS_OK;
 }
 

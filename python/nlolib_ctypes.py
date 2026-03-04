@@ -55,6 +55,9 @@ NLOLIB_LOG_LEVEL_ERROR = 0
 NLOLIB_LOG_LEVEL_WARN = 1
 NLOLIB_LOG_LEVEL_INFO = 2
 NLOLIB_LOG_LEVEL_DEBUG = 3
+NLOLIB_PROGRESS_STREAM_STDERR = 0
+NLOLIB_PROGRESS_STREAM_STDOUT = 1
+NLOLIB_PROGRESS_STREAM_BOTH = 2
 
 NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0
 NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
@@ -425,6 +428,12 @@ def load(path: str | None = None) -> ctypes.CDLL:
         lib._has_set_progress_options = True
     except AttributeError:
         lib._has_set_progress_options = False
+    try:
+        lib.nlolib_set_progress_stream.argtypes = [ctypes.c_int]
+        lib.nlolib_set_progress_stream.restype = ctypes.c_int
+        lib._has_set_progress_stream = True
+    except AttributeError:
+        lib._has_set_progress_stream = False
 
     lib._nlo_loaded_path = str(lib_path) if lib_path is not None else ""
     return lib
@@ -1274,6 +1283,16 @@ class NLolib:
         if status != NLOLIB_STATUS_OK:
             raise RuntimeError(f"nlolib_set_progress_options failed with status={status}")
 
+    def set_progress_stream(self, stream_mode: int = NLOLIB_PROGRESS_STREAM_STDERR) -> None:
+        """
+        Configure output stream selection for runtime progress TUI lines.
+        """
+        if not bool(getattr(self.lib, "_has_set_progress_stream", False)):
+            raise RuntimeError("nlolib_set_progress_stream is unavailable in the loaded nlolib build")
+        status = int(self.lib.nlolib_set_progress_stream(int(stream_mode)))
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_set_progress_stream failed with status={status}")
+
     def query_runtime_limits(
         self,
         config: PreparedSimConfig | NloSimulationConfig | None = None,
@@ -1752,6 +1771,9 @@ __all__ = [
     "NLOLIB_LOG_LEVEL_WARN",
     "NLOLIB_LOG_LEVEL_INFO",
     "NLOLIB_LOG_LEVEL_DEBUG",
+    "NLOLIB_PROGRESS_STREAM_STDERR",
+    "NLOLIB_PROGRESS_STREAM_STDOUT",
+    "NLOLIB_PROGRESS_STREAM_BOTH",
     "NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES",
     "NLO_STORAGE_DB_CAP_POLICY_FAIL",
     "NLO_PROPAGATE_OUTPUT_DENSE",

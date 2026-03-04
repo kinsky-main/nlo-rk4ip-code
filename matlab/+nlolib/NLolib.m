@@ -283,6 +283,8 @@ classdef NLolib < handle
 
             streamLogs = false;
             streamLogBufferBytes = uint64(262144);
+            requestedProgressStream = [];
+            requestedProgressStreamExplicit = false;
             if isstruct(execOptions) && isfield(execOptions, 'matlab_stream_logs')
                 streamLogs = logical(execOptions.matlab_stream_logs);
                 streamLogs = any(streamLogs(:));
@@ -290,11 +292,26 @@ classdef NLolib < handle
             if isstruct(execOptions) && isfield(execOptions, 'matlab_log_buffer_bytes')
                 streamLogBufferBytes = uint64(execOptions.matlab_log_buffer_bytes);
             end
+            if isstruct(execOptions) && isfield(execOptions, 'matlab_progress_stream') && ...
+                    ~isempty(execOptions.matlab_progress_stream)
+                requestedProgressStream = int32(execOptions.matlab_progress_stream);
+                requestedProgressStreamExplicit = true;
+            elseif nlolib.NLolib.running_in_batch_mode()
+                requestedProgressStream = int32(2); % NLOLIB_PROGRESS_STREAM_BOTH
+            end
             if streamLogs && ...
                     nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_log_buffer') && ...
                     nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_clear_log_buffer')
                 obj.set_log_buffer(streamLogBufferBytes);
                 obj.clear_log_buffer();
+            end
+            if ~isempty(requestedProgressStream)
+                if nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_progress_stream')
+                    obj.set_progress_stream(requestedProgressStream);
+                elseif requestedProgressStreamExplicit
+                    error('nlolib:logUnavailable', ...
+                          'nlolib_set_progress_stream is not available in this library build.');
+                end
             end
 
             captureStepHistory = false;
@@ -648,6 +665,30 @@ classdef NLolib < handle
                 else
                     error('nlolib:progressOptionsFailed', ...
                           'nlolib_set_progress_options failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+        end
+
+        function set_progress_stream(obj, streamMode)
+            %SET_PROGRESS_STREAM Configure runtime progress TUI output stream.
+            if nargin < 2 || isempty(streamMode)
+                streamMode = int32(0); % NLOLIB_PROGRESS_STREAM_STDERR
+            end
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_progress_stream')
+                error('nlolib:logUnavailable', ...
+                      'nlolib_set_progress_stream is not available in this library build.');
+            end
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_set_progress_stream', int32(streamMode));
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:progressStreamFailed', ...
+                          'nlolib_set_progress_stream failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:progressStreamFailed', ...
+                          'nlolib_set_progress_stream failed with status=%d (%s)', ...
                           statusCode, statusName);
                 end
             end
@@ -1014,6 +1055,15 @@ classdef NLolib < handle
             try
                 names = libfunctions(libName);
                 tf = any(strcmp(names, functionName));
+            catch
+                tf = false;
+            end
+        end
+
+        function tf = running_in_batch_mode()
+            tf = false;
+            try
+                tf = ~usejava('desktop');
             catch
                 tf = false;
             end

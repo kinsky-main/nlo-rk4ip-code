@@ -21,6 +21,19 @@ typedef enum
 } nlo_log_level;
 
 /**
+ * @brief Output stream selection for runtime progress TUI rendering.
+ */
+typedef enum
+{
+    /** Render progress updates to stderr only. */
+    NLO_LOG_PROGRESS_STREAM_STDERR = 0,
+    /** Render progress updates to stdout only. */
+    NLO_LOG_PROGRESS_STREAM_STDOUT = 1,
+    /** Render progress updates to both stderr and stdout. */
+    NLO_LOG_PROGRESS_STREAM_BOTH = 2
+} nlo_log_progress_stream_mode;
+
+/**
  * @brief Configure an optional file sink for nlolib logs.
  *
  * @param path_utf8 UTF-8 path to destination log file.
@@ -75,6 +88,14 @@ int nlo_log_set_level(int level);
  * @return int Zero on success; nonzero on error.
  */
 int nlo_log_set_progress_options(int enabled, int milestone_percent, int emit_on_step_adjust);
+
+/**
+ * @brief Configure output stream selection for runtime progress TUI lines.
+ *
+ * @param stream_mode Stream mode in @ref nlo_log_progress_stream_mode range.
+ * @return int Zero on success; nonzero on error.
+ */
+int nlo_log_set_progress_stream(int stream_mode);
 
 /**
  * @brief Emit a formatted log line through active sinks.

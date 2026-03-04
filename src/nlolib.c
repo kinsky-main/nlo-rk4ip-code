@@ -811,3 +811,8 @@ NLOLIB_API nlolib_status nlolib_set_progress_options(
     return nlo_map_log_status(
         nlo_log_set_progress_options(enabled, milestone_percent, emit_on_step_adjust));
 }
+
+NLOLIB_API nlolib_status nlolib_set_progress_stream(int stream_mode)
+{
+    return nlo_map_log_status(nlo_log_set_progress_stream(stream_mode));
+}
