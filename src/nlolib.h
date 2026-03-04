@@ -227,11 +227,12 @@ NLOLIB_API nlolib_status nlolib_read_log_buffer(
 NLOLIB_API nlolib_status nlolib_set_log_level(int level);
 
 /**
- * @brief Configure runtime progress logging behavior.
+ * @brief Configure runtime progress TUI behavior.
  *
- * @param enabled Nonzero enables progress logging.
- * @param milestone_percent Percent milestone cadence in [1, 100].
- * @param emit_on_step_adjust Nonzero emits step-adjustment entries.
+ * @param enabled Nonzero enables progress rendering.
+ * @param milestone_percent Refresh milestone cadence in [1, 100] percent.
+ * @param emit_on_step_adjust Nonzero forces immediate refresh on adaptive
+ *        step-size adjustment events.
  * @return nlolib_status status code.
  */
 NLOLIB_API nlolib_status nlolib_set_progress_options(

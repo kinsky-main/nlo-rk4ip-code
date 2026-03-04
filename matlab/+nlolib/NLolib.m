@@ -617,7 +617,7 @@ classdef NLolib < handle
         end
 
         function set_progress_options(obj, enabled, milestonePercent, emitOnStepAdjust)
-            %SET_PROGRESS_OPTIONS Configure runtime progress log behavior.
+            %SET_PROGRESS_OPTIONS Configure runtime progress TUI behavior.
             if nargin < 2 || isempty(enabled)
                 enabled = true;
             end

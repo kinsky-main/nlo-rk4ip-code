@@ -1177,7 +1177,7 @@ class NLolib:
         emit_on_step_adjust: bool = False,
     ) -> None:
         """
-        Configure runtime progress logging options.
+        Configure runtime progress TUI options.
         """
         if not bool(getattr(self.lib, "_has_set_progress_options", False)):
             raise RuntimeError("nlolib_set_progress_options is unavailable in the loaded nlolib build")

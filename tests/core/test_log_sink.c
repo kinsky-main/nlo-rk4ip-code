@@ -84,9 +84,9 @@ static void test_progress_entries(void)
     size_t written = 0u;
     assert(nlo_log_read_buffer(out, sizeof(out), &written, 1) == 0);
     assert(written > 0u);
-    assert(strstr(out, "z_percent") != NULL);
-    assert(strstr(out, "step_adjustment") != NULL);
-    assert(strstr(out, "step_rejected") != NULL);
+    assert(strstr(out, "progress_summary") != NULL);
+    assert(strstr(out, "elapsed_seconds") != NULL);
+    assert(strstr(out, "state: complete") != NULL);
     printf("test_progress_entries: passed.\n");
 }
 

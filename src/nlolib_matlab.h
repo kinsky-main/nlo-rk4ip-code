@@ -442,7 +442,7 @@ nlolib_status nlolib_read_log_buffer(
 nlolib_status nlolib_set_log_level(int level);
 
 /**
- * @brief Configure runtime progress logging behavior.
+ * @brief Configure runtime progress TUI behavior.
  *
  * See `nlolib.h` for full parameter and return-value semantics.
  */

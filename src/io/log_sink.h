@@ -66,11 +66,12 @@ int nlo_log_read_buffer(char* dst, size_t dst_bytes, size_t* out_written, int co
 int nlo_log_set_level(int level);
 
 /**
- * @brief Configure progress log behavior.
+ * @brief Configure runtime progress TUI behavior.
  *
- * @param enabled Nonzero enables progress logs.
- * @param milestone_percent Percent milestone cadence in [1, 100].
- * @param emit_on_step_adjust Nonzero emits step-size adjustment entries.
+ * @param enabled Nonzero enables progress rendering.
+ * @param milestone_percent Refresh milestone cadence in [1, 100] percent.
+ * @param emit_on_step_adjust Nonzero forces immediate refresh on adaptive
+ *        step-size adjustment events.
  * @return int Zero on success; nonzero on error.
  */
 int nlo_log_set_progress_options(int enabled, int milestone_percent, int emit_on_step_adjust);
