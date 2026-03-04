@@ -328,9 +328,9 @@ def save_plots(
         accepted_z=telemetry_plot.accepted_z,
         accepted_step_sizes=telemetry_plot.accepted_step_sizes,
         proposed_step_sizes=telemetry_plot.next_step_sizes,
-        map_x_label="Normalized propagation z / Z0",
-        step_x_label="Normalized propagation z / Z0",
-        step_y_label="Normalized step size Delta z / Z0",
+        map_x_label="Soliton Period z / Z0",
+        step_x_label="Soliton Period z / Z0",
+        step_y_label="Normalized Step Size z / Z0",
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -340,8 +340,8 @@ def save_plots(
         U_true,
         U_num,
         output_dir / "soliton_final_re_im_comparison.png",
-        x_label="Dimensionless time t = T/T0",
-        title=f"Second-Order Soliton at z/Z0 = {z_final_norm:.3f} ({z_final:.3f} m): Re/Im Comparison",
+        x_label=r"Dimensionless time $\tau = T/T0$",
+        
         reference_label="Analytical",
         final_label="Numerical",
     )
@@ -354,7 +354,7 @@ def save_plots(
         U_num,
         output_dir / "soliton_final_intensity_comparison.png",
         x_label="Dimensionless time t = T/T0",
-        title=f"Second-Order Soliton at z/Z0 = {z_final_norm:.3f} ({z_final:.3f} m): Intensity Comparison",
+        
         reference_label="Analytical",
         final_label="Numerical",
     )
@@ -365,7 +365,7 @@ def save_plots(
         z_samples_norm,
         error_curve,
         output_dir / "soliton_total_error_over_propagation.png",
-        title="Second-Order Soliton: Total Error Over Normalized Propagation",
+        
         y_label="Mean pointwise abs-relative error (numerical vs analytical)",
         x_label="Normalized propagation z / Z0",
     )
@@ -615,10 +615,6 @@ def _run(args: argparse.Namespace) -> float:
             "next step_size range (solver proposal): "
             f"[{proposed_range[0]:.6e}, {proposed_range[1]:.6e}] m"
         )
-    if saved_paths:
-        print("saved plots:")
-        for path in saved_paths:
-            print(f"  {path}")
 
     return epsilon
 

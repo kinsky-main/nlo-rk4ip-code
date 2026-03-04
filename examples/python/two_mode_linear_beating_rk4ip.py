@@ -154,7 +154,7 @@ def _run(args: argparse.Namespace) -> float:
         z_axis,
         error_curve,
         output_dir / "error_over_propagation.png",
-        title="Two-Mode Linear Beating: Error Over Propagation",
+        
         y_label="Mean pointwise abs-relative error",
     )
     if p2 is not None:
@@ -164,10 +164,6 @@ def _run(args: argparse.Namespace) -> float:
     print(f"  max complex-field abs error  = {max_complex_error:.6e}")
     print(f"  max power-exchange abs error = {max_power_exchange_error:.6e}")
     print(f"  relative total-power drift   = {power_drift:.6e}")
-    if saved:
-        print("saved plots:")
-        for path in saved:
-            print(f"  {path}")
 
     return max_complex_error
 

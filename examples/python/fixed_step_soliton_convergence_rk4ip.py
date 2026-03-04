@@ -314,8 +314,6 @@ def _run(args) -> float:
     if fitted_order < 3.5:
         print("warning: observed order is below 4th-order expectation for this coupled soliton benchmark.")
         print("         this suggests a coupled-case integrator limitation rather than a plotting issue.")
-    if plot_path is not None:
-        print(f"saved plot: {plot_path}")
 
     return fitted_order
 

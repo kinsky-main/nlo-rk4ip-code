@@ -288,7 +288,7 @@ class FullCoupledGrinApp:
             min_marker_size=2.0,
             max_marker_size=36.0,
             normalization_peak=spatial_peak,
-            title="Full coupled GRIN: spatial intensity integrated over time",
+            
             input_is_intensity=True,
         )
         if p1 is not None:
@@ -305,7 +305,7 @@ class FullCoupledGrinApp:
             min_marker_size=2.0,
             max_marker_size=36.0,
             normalization_peak=spatial_peak,
-            title="Linear baseline: spatial intensity integrated over time",
+            
             input_is_intensity=True,
         )
         if p2 is not None:
@@ -318,7 +318,7 @@ class FullCoupledGrinApp:
             output_dir / "grin_temporal_center_colormap_full.png",
             x_label="Time t",
             y_label="Propagation distance z",
-            title="Full coupled GRIN: center-point temporal intensity vs z",
+            
             colorbar_label="Normalized intensity",
             normalization_peak=temporal_peak,
         )
@@ -332,7 +332,7 @@ class FullCoupledGrinApp:
             output_dir / "grin_transverse_centerline_colormap_full.png",
             x_label="Transverse x (t=t_mid, y=y_mid)",
             y_label="Propagation distance z",
-            title="Full coupled GRIN: transverse center-line intensity vs z",
+            
             colorbar_label="Normalized intensity",
             normalization_peak=transverse_peak,
         )
@@ -345,7 +345,7 @@ class FullCoupledGrinApp:
             full_records[-1, :, cfg.ny // 2, cfg.nx // 2],
             output_dir / "grin_final_temporal_center_re_im_comparison.png",
             x_label="Time t",
-            title="Final center-point temporal field (linear baseline vs full GRIN)",
+            
             reference_label="Linear baseline",
             final_label="Full coupled GRIN",
         )
@@ -358,7 +358,7 @@ class FullCoupledGrinApp:
             full_records[-1, cfg.nt // 2, cfg.ny // 2, :],
             output_dir / "grin_final_transverse_centerline_intensity_comparison.png",
             x_label="Transverse coordinate x",
-            title="Final transverse center-line intensity (linear baseline vs full GRIN)",
+            
             reference_label="Linear baseline",
             final_label="Full coupled GRIN",
         )
@@ -369,7 +369,7 @@ class FullCoupledGrinApp:
             z_records,
             error_curve,
             output_dir / "grin_full_vs_linear_relative_error_over_propagation.png",
-            title="Full coupled GRIN vs linear baseline: mean pointwise abs-relative error over z",
+            
             y_label="Mean pointwise abs-relative error",
         )
         if p7 is not None:
@@ -383,13 +383,9 @@ class FullCoupledGrinApp:
             label_a="Full coupled GRIN",
             label_b="Linear baseline",
             y_label="Total power sum(|A|^2)",
-            title="Power trend over propagation",
+            
         )
         if p8 is not None:
             saved_paths.append(p8)
 
-        if saved_paths:
-            print("saved plots:")
-            for path in saved_paths:
-                print(f"  {path}")
         return run_group, saved_paths

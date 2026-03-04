@@ -306,7 +306,7 @@ def _run(args: argparse.Namespace) -> None:
         xy_stride=4,
         min_marker_size=2.0,
         max_marker_size=36.0,
-        title="Full coupled case: spatial intensity integrated over time",
+        
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -321,7 +321,7 @@ def _run(args: argparse.Namespace) -> None:
         xy_stride=4,
         min_marker_size=2.0,
         max_marker_size=36.0,
-        title="Linear baseline: spatial intensity integrated over time",
+        
     )
     if p2 is not None:
         saved_paths.append(p2)
@@ -333,7 +333,7 @@ def _run(args: argparse.Namespace) -> None:
         output_dir / "temporal_center_colormap_full.png",
         x_label="Time t",
         y_label="Propagation distance z",
-        title="Full coupled case: center-point temporal intensity vs z",
+        
         colorbar_label="Normalized intensity",
     )
     if p3 is not None:
@@ -346,7 +346,7 @@ def _run(args: argparse.Namespace) -> None:
         output_dir / "transverse_centerline_colormap_full.png",
         x_label="Transverse x (t = t_mid, y = y_mid)",
         y_label="Propagation distance z",
-        title="Full coupled case: transverse center-line intensity vs z",
+        
         colorbar_label="Normalized intensity",
     )
     if p4 is not None:
@@ -358,7 +358,7 @@ def _run(args: argparse.Namespace) -> None:
         full_records[-1, :, ny // 2, nx // 2],
         output_dir / "final_temporal_center_re_im_comparison.png",
         x_label="Time t",
-        title="Final center-point temporal field (linear baseline vs full)",
+        
         reference_label="Linear baseline",
         final_label="Full coupled",
     )
@@ -371,7 +371,7 @@ def _run(args: argparse.Namespace) -> None:
         full_records[-1, nt // 2, ny // 2, :],
         output_dir / "final_transverse_centerline_intensity_comparison.png",
         x_label="Transverse coordinate x",
-        title="Final transverse center-line intensity (linear baseline vs full)",
+        
         reference_label="Linear baseline",
         final_label="Full coupled",
     )
@@ -382,7 +382,7 @@ def _run(args: argparse.Namespace) -> None:
         z_records,
         error_curve,
         output_dir / "full_vs_linear_relative_error_over_propagation.png",
-        title="Full coupled vs linear baseline: mean pointwise abs-relative error over z",
+        
         y_label="Mean pointwise abs-relative error",
     )
     if p7 is not None:
@@ -396,15 +396,10 @@ def _run(args: argparse.Namespace) -> None:
         label_a="Full coupled",
         label_b="Linear baseline",
         y_label="Total power sum(|A|^2)",
-        title="Power trend over propagation",
+        
     )
     if p8 is not None:
         saved_paths.append(p8)
-
-    if saved_paths:
-        print("saved plots:")
-        for path in saved_paths:
-            print(f"  {path}")
 
 
 class CoupledDispersionNonlinearityDiffractionApp(ExampleAppBase):

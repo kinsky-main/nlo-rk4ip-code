@@ -83,7 +83,7 @@ def _run(args: argparse.Namespace) -> None:
         output_root / "summary_final_error_vs_grin_strength.png",
         x_label="GRIN coefficient g",
         y_label="Final mean pointwise abs-relative error",
-        title="GRIN phase-only analytical validation: error vs GRIN strength",
+        
     )
     p2 = plot_summary_curve(
         grin_strengths,
@@ -91,7 +91,7 @@ def _run(args: argparse.Namespace) -> None:
         output_root / "summary_power_drift_vs_grin_strength.png",
         x_label="GRIN coefficient g",
         y_label="Relative power drift",
-        title="GRIN phase-only analytical validation: power drift vs GRIN strength",
+        
     )
 
     print(f"analytical GRIN sweep completed (run_group={run_group}).")

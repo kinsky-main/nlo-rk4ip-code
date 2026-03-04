@@ -171,7 +171,7 @@ def _run(args: argparse.Namespace) -> float:
         time_intensity_map,
         output_dir / "spm_time_intensity_propagation.png",
         x_label="Time t",
-        title="SPM: Temporal Intensity Propagation",
+        
         colorbar_label="Normalized intensity",
     )
     if p2 is not None:
@@ -182,7 +182,7 @@ def _run(args: argparse.Namespace) -> float:
         freq_intensity_map,
         output_dir / "spm_frequency_intensity_propagation.png",
         x_label="Frequency detuning (1/time)",
-        title="SPM: Spectral Intensity Propagation",
+        
         colorbar_label="Normalized spectral intensity",
     )
     if p3 is not None:
@@ -191,7 +191,7 @@ def _run(args: argparse.Namespace) -> float:
         z_axis,
         error_curve,
         output_dir / "spm_error_over_propagation.png",
-        title="SPM: Relative Error Over Propagation",
+        
         y_label="Mean pointwise abs-relative error",
     )
     if p4 is not None:
@@ -203,10 +203,6 @@ def _run(args: argparse.Namespace) -> float:
     print(f"  max wrapped phase error (all samples)     = {max_wrapped_phase_error:.6e}")
     print(f"  max wrapped phase error (pulse support)   = {max_wrapped_phase_error_support:.6e}")
     print(f"  rms wrapped phase error (pulse support)   = {rms_wrapped_phase_error_support:.6e}")
-    if saved:
-        print("saved plots:")
-        for path in saved:
-            print(f"  {path}")
 
     return final_error
 

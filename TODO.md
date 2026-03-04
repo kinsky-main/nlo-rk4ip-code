@@ -5,6 +5,7 @@
 - [ ] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
 - [ ] Fix MATLAB output for installed packages where progress is not printed.
 - [ ] Improve printout for progress of solver, showing estimated time of completion.
+- [ ] Remove working buffers by keeping one k_tmp and k_tot buffer then summing k values as each stage is computed.
 
 ## Potentially Required Tasks
 
@@ -14,6 +15,7 @@
 - [ ] Loading bar with estimated time remaining for long-running simulations.
 - [ ] Refactor state.c into respective init files.
 - [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.
+- [ ] Utilise OS level shared memory for GPU backend to allow for larger problem sizes.
 
 ## Extensions
 

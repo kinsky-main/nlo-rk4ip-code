@@ -345,7 +345,7 @@ class GrinSolitonApp:
                 out_dir / "center_temporal_intensity_colormap.png",
                 x_label="Time t",
                 y_label=z_axis_label,
-                title="Center-point temporal intensity (numerical)",
+                
                 colorbar_label="Normalized intensity",
             )
         )
@@ -356,7 +356,7 @@ class GrinSolitonApp:
                 temporal_num[-1],
                 out_dir / "final_center_temporal_intensity_comparison.png",
                 x_label="Time t",
-                title="Final temporal intensity at GRIN center (analytical vs numerical)",
+                
                 reference_label="Analytical",
                 final_label="Numerical",
             )
@@ -368,7 +368,7 @@ class GrinSolitonApp:
                 xline_num,
                 out_dir / "final_xline_re_im_comparison_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
-                title="Final transverse line field (t=t_mid, y=y_mid)",
+                
                 reference_label="Analytical",
                 final_label="Numerical",
             )
@@ -378,7 +378,7 @@ class GrinSolitonApp:
                 z_axis_norm,
                 error_curve,
                 out_dir / "relative_error_over_propagation.png",
-                title="GRIN potential + soliton: mean pointwise abs-relative error over z",
+                
                 y_label="Mean pointwise abs-relative error",
                 x_label=z_axis_label,
             )
@@ -404,7 +404,7 @@ class GrinSolitonApp:
                 dpi=400,
                 input_is_intensity=True,
                 normalization_peak=spatial_peak,
-                title="GRIN+Soliton: spatial intensity integrated over time (numerical, uniform expected)",
+                
                 z_label=z_axis_label_3d,
             ),
             allow_uniform=True,
@@ -426,7 +426,7 @@ class GrinSolitonApp:
                 dpi=400,
                 input_is_intensity=True,
                 normalization_peak=spatial_peak,
-                title="GRIN+Soliton: spatial intensity integrated over time (expected, uniform)",
+                
                 z_label=z_axis_label_3d,
             ),
             allow_uniform=True,
@@ -443,7 +443,7 @@ class GrinSolitonApp:
                 out_dir / "frequency_profile_numerical.png",
                 x_label="Frequency detuning (1/time)",
                 y_label=z_axis_label,
-                title="Frequency propagation profile (numerical)",
+                
                 colorbar_label="Normalized spectral intensity",
                 normalization_peak=spec_peak,
             )
@@ -456,7 +456,7 @@ class GrinSolitonApp:
                 out_dir / "frequency_profile_expected.png",
                 x_label="Frequency detuning (1/time)",
                 y_label=z_axis_label,
-                title="Frequency propagation profile (expected)",
+                
                 colorbar_label="Normalized spectral intensity",
                 normalization_peak=spec_peak,
             )
@@ -482,7 +482,7 @@ class GrinSolitonApp:
                 out_dir / "wavelength_profile_numerical.png",
                 x_label="Wavelength (nm)",
                 y_label=z_axis_label,
-                title="Wavelength propagation profile (numerical)",
+                
                 colorbar_label="Normalized spectral intensity",
                 normalization_peak=wl_peak,
             )
@@ -495,7 +495,7 @@ class GrinSolitonApp:
                 out_dir / "wavelength_profile_expected.png",
                 x_label="Wavelength (nm)",
                 y_label=z_axis_label,
-                title="Wavelength propagation profile (expected)",
+                
                 colorbar_label="Normalized spectral intensity",
                 normalization_peak=wl_peak,
             )
@@ -510,7 +510,7 @@ class GrinSolitonApp:
                 out_dir / "x_profile_vs_z_numerical_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
                 y_label=z_axis_label,
-                title="X-profile intensity propagation (numerical, t=t_mid, y=y_mid)",
+                
                 colorbar_label="Normalized intensity",
                 normalization_peak=xz_peak,
             ),
@@ -524,7 +524,7 @@ class GrinSolitonApp:
                 out_dir / "x_profile_vs_z_expected_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
                 y_label=z_axis_label,
-                title="X-profile intensity propagation (expected, t=t_mid, y=y_mid)",
+                
                 colorbar_label="Normalized intensity",
                 normalization_peak=xz_peak,
             ),
@@ -539,7 +539,7 @@ class GrinSolitonApp:
                 out_dir / "y_profile_vs_z_numerical_tmid_xcenter.png",
                 x_label="Transverse coordinate y",
                 y_label=z_axis_label,
-                title="Y-profile intensity propagation (numerical, t=t_mid, x=x_mid)",
+                
                 colorbar_label="Normalized intensity",
                 normalization_peak=yz_peak,
             ),
@@ -553,7 +553,7 @@ class GrinSolitonApp:
                 out_dir / "y_profile_vs_z_expected_tmid_xcenter.png",
                 x_label="Transverse coordinate y",
                 y_label=z_axis_label,
-                title="Y-profile intensity propagation (expected, t=t_mid, x=x_mid)",
+                
                 colorbar_label="Normalized intensity",
                 normalization_peak=yz_peak,
             ),
@@ -569,7 +569,7 @@ class GrinSolitonApp:
                 label_b="Y-profile mean pointwise abs-relative error",
                 x_label=z_axis_label,
                 y_label="Mean pointwise abs-relative error",
-                title="X/Y profile intensity error over propagation",
+                
             ),
             allow_uniform=True,
         )
@@ -735,7 +735,7 @@ class GrinSolitonApp:
                 z_axis_norm,
                 error_curve,
                 out_dir / "relative_error_over_propagation.png",
-                title="GRIN diffraction: mean pointwise abs-relative error over z",
+                
                 y_label="Mean pointwise abs-relative error",
                 x_label=z_axis_label,
             )
@@ -750,7 +750,7 @@ class GrinSolitonApp:
                 out_dir / "x_profile_vs_z_numerical_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
                 y_label=z_axis_label,
-                title="X-profile intensity propagation (numerical, diffraction)",
+                
                 colorbar_label="Normalized intensity",
                 normalization_peak=xz_peak,
             )
@@ -763,7 +763,7 @@ class GrinSolitonApp:
                 out_dir / "x_profile_vs_z_expected_tmid_ycenter.png",
                 x_label="Transverse coordinate x",
                 y_label=z_axis_label,
-                title="X-profile intensity propagation (expected, diffraction)",
+                
                 colorbar_label="Normalized intensity",
                 normalization_peak=xz_peak,
             )
@@ -776,7 +776,7 @@ class GrinSolitonApp:
                 out_dir / "y_profile_vs_z_numerical_tmid_xcenter.png",
                 x_label="Transverse coordinate y",
                 y_label=z_axis_label,
-                title="Y-profile intensity propagation (numerical, diffraction)",
+                
                 colorbar_label="Normalized intensity",
                 normalization_peak=yz_peak,
             )
@@ -789,7 +789,7 @@ class GrinSolitonApp:
                 out_dir / "y_profile_vs_z_expected_tmid_xcenter.png",
                 x_label="Transverse coordinate y",
                 y_label=z_axis_label,
-                title="Y-profile intensity propagation (expected, diffraction)",
+                
                 colorbar_label="Normalized intensity",
                 normalization_peak=yz_peak,
             )
@@ -815,7 +815,7 @@ class GrinSolitonApp:
                 dpi=320,
                 input_is_intensity=True,
                 normalization_peak=spatial_peak,
-                title="GRIN diffraction: spatial integrated intensity (numerical)",
+                
                 z_label=z_axis_label_3d,
             )
         )
@@ -836,7 +836,7 @@ class GrinSolitonApp:
                 dpi=320,
                 input_is_intensity=True,
                 normalization_peak=spatial_peak,
-                title="GRIN diffraction: spatial integrated intensity (expected)",
+                
                 z_label=z_axis_label_3d,
             )
         )
@@ -914,10 +914,7 @@ class GrinSolitonApp:
                 continue
             threshold_txt = f" <= {check.threshold:.6e}" if check.threshold is not None else ""
             print(f"  {check.name}: value={check.value:.6e}{threshold_txt} {'PASS' if check.passed else 'FAIL'}")
-        print("saved plots:")
-        for artifact in artifacts:
-            print(f"  {artifact.path}")
-        print(f"plot validation report: {self.report_path}")
+
 
         has_failures = report.fail_count() > 0
         has_warnings = report.warn_count() > 0

@@ -171,7 +171,7 @@ def _run(args: argparse.Namespace) -> float:
         np.abs(records) ** 2,
         output_dir / "linear_drift_intensity_propagation_map.png",
         x_label="Time t",
-        title="Linear Drift: Temporal Intensity Propagation",
+        
         colorbar_label="Normalized intensity",
     )
     if saved is not None:
@@ -183,7 +183,7 @@ def _run(args: argparse.Namespace) -> float:
         records[-1],
         output_dir / "linear_drift_final_re_im_comparison.png",
         x_label="Time t",
-        title="Linear Drift: Final Re/Im Comparison",
+        
         reference_label="Initial",
         final_label="Final",
     )
@@ -196,7 +196,7 @@ def _run(args: argparse.Namespace) -> float:
         records[-1],
         output_dir / "linear_drift_final_intensity_comparison.png",
         x_label="Time t",
-        title="Linear Drift: Final Intensity Comparison",
+        
         reference_label="Initial",
         final_label="Final",
     )
@@ -207,7 +207,7 @@ def _run(args: argparse.Namespace) -> float:
         z_records,
         error_curve,
         output_dir / "linear_drift_total_error_over_propagation.png",
-        title="Linear Drift: Mean Pointwise Abs-Relative Error Over Propagation",
+        
         y_label="Mean pointwise abs-relative error (numerical vs analytical)",
     )
     if saved is not None:
@@ -219,10 +219,6 @@ def _run(args: argparse.Namespace) -> float:
     print(f"slope (signed): measured={measured_slope:.6e}, predicted={predicted_slope:.6e}")
     print(f"slope relative error: {slope_rel_error:.6e}")
     print(f"centroid theory final shift: {theory_shift[-1]:.6e}")
-    if saved_paths:
-        print("saved plots:")
-        for path in saved_paths:
-            print(f"  {path}")
 
     return slope_rel_error
 

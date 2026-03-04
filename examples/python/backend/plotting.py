@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,16 @@ _SELECTED_PLOT_KEYS: set[str] | None = None
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+
+def _plot_debug_enabled() -> bool:
+    raw = os.environ.get("NLOLIB_PLOT_DEBUG_SAVE", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on", "debug"}
+
+
+def _plot_debug(message: str) -> None:
+    if _plot_debug_enabled():
+        print(f"[plotting-debug] {message}")
 
 
 def _default_colormap():
@@ -73,11 +84,15 @@ def configure_plot_saving(
         if primary_output_dir is not None
         else None
     )
+    if _PRIMARY_OUTPUT_DIR is not None:
+        print(f"Configured primary plot output directory: {_PRIMARY_OUTPUT_DIR}")
     _REPORT_OUTPUT_DIR = (
         Path(report_dir).resolve()
         if report_dir is not None
         else None
     )
+    if _REPORT_OUTPUT_DIR is not None:
+        print(f"Configured report plot output directory: {_REPORT_OUTPUT_DIR}")
     _SELECTED_PLOT_KEYS = (
         {str(key).strip().lower() for key in selected_plot_keys}
         if selected_plot_keys is not None
@@ -110,15 +125,52 @@ def _resolve_report_output_path(output_path: Path) -> Path | None:
 def _save_figure(fig: Any, output_path: Path, **kwargs: Any) -> Path | None:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, **kwargs)
-
+    selected = _plot_is_selected(output_path)
     report_output_path = _resolve_report_output_path(output_path)
-    if report_output_path is not None and _plot_is_selected(output_path):
-        report_output_path = Path(report_output_path)
-        if report_output_path.resolve() != output_path.resolve():
-            report_output_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.savefig(report_output_path, **kwargs)
+    _plot_debug(
+        "save start "
+        f"primary='{output_path}' selected={selected} report='{report_output_path}' kwargs={kwargs}"
+    )
 
+    try:
+        fig.savefig(output_path, **kwargs)
+    except Exception as exc:
+        raise RuntimeError(
+            "primary figure save failed: "
+            f"path='{output_path}', cwd='{Path.cwd()}', kwargs={kwargs}"
+        ) from exc
+
+    _plot_debug(
+        "primary save done "
+        f"exists={output_path.exists()} size={output_path.stat().st_size if output_path.exists() else -1}"
+    )
+
+    if report_output_path is None:
+        _plot_debug("report save skipped: report_dir is not configured")
+        return output_path
+    if not selected:
+        _plot_debug("report save skipped: plot key filtered by --save-plots")
+        return output_path
+
+    report_output_path = Path(report_output_path)
+    if report_output_path.resolve() == output_path.resolve():
+        _plot_debug("report save skipped: report path resolves to same file as primary output")
+        return output_path
+
+    report_output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fig.savefig(report_output_path, **kwargs)
+    except Exception as exc:
+        raise RuntimeError(
+            "report figure save failed: "
+            f"path='{report_output_path}', cwd='{Path.cwd()}', kwargs={kwargs}"
+        ) from exc
+
+    _plot_debug(
+        "report save done "
+        f"path='{report_output_path}' exists={report_output_path.exists()} "
+        f"size={report_output_path.stat().st_size if report_output_path.exists() else -1}"
+    )
     return output_path
 
 
@@ -130,7 +182,6 @@ def plot_intensity_colormap_vs_propagation(
     *,
     x_label: str,
     y_label: str = "Propagation distance z",
-    title: str = "Intensity vs Propagation",
     colorbar_label: str = "Normalized intensity",
     normalization_peak: float | None = None,
     cmap="nlolib_hdr",
@@ -159,7 +210,6 @@ def plot_intensity_colormap_vs_propagation(
     )
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    ax.set_title(title)
     cbar = fig.colorbar(mesh, ax=ax)
     cbar.set_label(colorbar_label)
     saved = _save_figure(fig, output_path)
@@ -174,7 +224,6 @@ def plot_final_re_im_comparison(
     output_path: Path,
     *,
     x_label: str,
-    title: str = "Final Re/Im Comparison",
     reference_label: str = "Reference",
     final_label: str = "Final",
 ) -> Path | None:
@@ -190,7 +239,6 @@ def plot_final_re_im_comparison(
     ax.plot(x_axis, np.imag(out), lw=1.5, color="C1", ls="--", label=f"{final_label} Im")
     ax.set_xlabel(x_label)
     ax.set_ylabel("Field amplitude")
-    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path)
@@ -208,7 +256,6 @@ def plot_two_curve_comparison(
     label_b: str,
     x_label: str = "Propagation distance z",
     y_label: str,
-    title: str,
 ) -> Path | None:
 
 
@@ -217,7 +264,6 @@ def plot_two_curve_comparison(
     ax.plot(x_axis, curve_b, lw=1.5, ls="--", label=label_b)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path)
@@ -237,7 +283,6 @@ def plot_three_curve_drift(
     label_c: str,
     x_label: str = "Propagation distance z",
     y_label: str = "Relative drift",
-    title: str = "Conservation Checks: Relative Drift Over Propagation",
 ) -> Path | None:
 
 
@@ -247,7 +292,6 @@ def plot_three_curve_drift(
     ax.plot(x_axis, curve_c, lw=1.8, label=label_c)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path)
@@ -272,7 +316,6 @@ def plot_mode_power_exchange(
     ax.plot(z_axis, mode2_num, "--", lw=1.5, color="C1", label="|A2|^2 numerical")
     ax.set_xlabel("Propagation distance z")
     ax.set_ylabel("Mode power")
-    ax.set_title("Two-Mode Linear Beating: Power Exchange")
     ax.grid(True, alpha=0.3)
     ax.legend(ncol=2)
     saved = _save_figure(fig, output_path)
@@ -286,8 +329,6 @@ def plot_phase_shift_comparison(
     phase_ref: np.ndarray,
     phase_mask: np.ndarray,
     output_path: Path,
-    *,
-    title: str = "SPM Final Phase Shift (Masked by Pulse Support)",
 ) -> Path | None:
 
 
@@ -299,7 +340,6 @@ def plot_phase_shift_comparison(
     ax.plot(t_axis, phase_num_plot, "--", lw=1.5, label="Numerical phase shift")
     ax.set_xlabel("Time t")
     ax.set_ylabel("Phase shift (rad)")
-    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path)
@@ -316,8 +356,7 @@ def plot_convergence_loglog(
     output_path: Path,
     *,
     x_label: str = "Step size Delta z (m)",
-    y_label: str = "Mean pointwise abs-relative error",
-    title: str | None = None,
+    y_label: str = "Mean pointwise abs-relative error"
 ) -> Path | None:
 
 
@@ -337,12 +376,6 @@ def plot_convergence_loglog(
     ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^4)$")
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    resolved_title = (
-        f"Fixed-Step Soliton Convergence (fitted order p = {fitted_order:.3f})"
-        if title is None
-        else title
-    )
-    ax.set_title(resolved_title)
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path, bbox_inches="tight")
@@ -357,7 +390,6 @@ def plot_summary_curve(
     *,
     x_label: str,
     y_label: str,
-    title: str,
 ) -> Path | None:
 
 
@@ -365,7 +397,6 @@ def plot_summary_curve(
     ax.plot(x_values, y_values, marker="o", lw=1.8)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -413,7 +444,6 @@ def plot_wavelength_step_history(
     )
     ax_map.set_xlabel(map_x_label)
     ax_map.set_ylabel("Wavelength (nm)")
-    ax_map.set_title("")
     ax_map.set_box_aspect(1.0)
     cbar = fig.colorbar(mesh, ax=ax_map, pad=0.02)
     cbar.set_label("Normalized spectral intensity")
@@ -456,7 +486,6 @@ def plot_wavelength_step_history(
     if has_series:
         ax_step.set_xlabel(step_x_label)
         ax_step.set_ylabel(step_y_label)
-        ax_step.set_title("Adaptive RK4IP Step Sizes")
         ax_step.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3), useOffset=False)
         ax_step.grid(True, alpha=0.3)
         ax_step.legend()
@@ -471,7 +500,6 @@ def plot_wavelength_step_history(
         )
         ax_step.set_xticks([])
         ax_step.set_yticks([])
-        ax_step.set_title("Adaptive RK4IP Step Sizes")
 
     map_pos = ax_map.get_position()
     step_pos = ax_step.get_position()
@@ -489,7 +517,6 @@ def plot_final_intensity_comparison(
     output_path: Path,
     *,
     x_label: str,
-    title: str = "Final Intensity Comparison",
     reference_label: str = "Reference",
     final_label: str = "Final",
 ) -> Path | None:
@@ -503,7 +530,6 @@ def plot_final_intensity_comparison(
     ax.plot(x_axis, out_intensity, lw=1.5, ls="--", color="C1", label=f"{final_label} |A|^2")
     ax.set_xlabel(x_label)
     ax.set_ylabel("Intensity |A|^2")
-    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
@@ -516,7 +542,6 @@ def plot_total_error_over_propagation(
     error_curve: np.ndarray,
     output_path: Path,
     *,
-    title: str = "Total Error Over Propagation",
     y_label: str = "Mean pointwise abs-relative error",
     x_label: str = "Propagation distance z",
 ) -> Path | None:
@@ -530,7 +555,6 @@ def plot_total_error_over_propagation(
     ax.plot(z_axis, errors, lw=1.8, color="C3")
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     saved = _save_figure(fig, output_path, bbox_inches="tight")
     plt.close(fig)
@@ -554,7 +578,6 @@ def plot_3d_intensity_scatter_propagation(
     dpi: int = 320,
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
-    title: str = "3D Propagation Intensity Scatter",
     z_label: str = "z",
 ) -> Path | None:
 
@@ -640,7 +663,6 @@ def plot_3d_intensity_scatter_propagation(
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel(z_label)
-    ax.set_title(title)
 
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize

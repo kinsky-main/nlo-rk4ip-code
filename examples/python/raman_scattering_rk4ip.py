@@ -399,7 +399,7 @@ def _run(args: argparse.Namespace) -> float:
         raman_spec_map,
         output_dir / "raman_spectral_intensity_propagation.png",
         x_label="Angular-frequency detuning (rad/time)",
-        title="Raman: Spectral Intensity Over Propagation",
+        
         colorbar_label="Normalized spectral intensity",
     )
     if p1 is not None:
@@ -413,7 +413,7 @@ def _run(args: argparse.Namespace) -> float:
         label_a="Numerical centroid shift",
         label_b="Analytical centroid shift",
         y_label="Delta spectral centroid (rad/time)",
-        title="Raman Analytical Validation: Centroid Shift",
+        
     )
     if p2 is not None:
         saved_paths.append(p2)
@@ -424,7 +424,7 @@ def _run(args: argparse.Namespace) -> float:
         wavelength_map,
         output_dir / "raman_wavelength_intensity_propagation.png",
         x_label="Wavelength (nm)",
-        title="Raman: Wavelength Intensity Over Propagation",
+        
         colorbar_label="Normalized spectral intensity",
     )
     if p3 is not None:
@@ -440,7 +440,7 @@ def _run(args: argparse.Namespace) -> float:
         label_b="Kerr+Raman",
         label_c="Moment-theorem prediction",
         y_label="Delta centroid wavelength (nm)",
-        title="Raman Analytical Validation: Wavelength Centroid Shift",
+        
     )
     if p4 is not None:
         saved_paths.append(p4)
@@ -454,7 +454,7 @@ def _run(args: argparse.Namespace) -> float:
         label_b="Kerr+Raman final",
         x_label="Angular-frequency detuning (rad/time)",
         y_label="Normalized spectral intensity",
-        title="Final Spectrum: Kerr-only vs Raman",
+        
     )
     if p5 is not None:
         saved_paths.append(p5)
@@ -467,7 +467,7 @@ def _run(args: argparse.Namespace) -> float:
         label_a="Numerical d(centroid)/dz",
         label_b="Analytical moment RHS",
         y_label="Centroid derivative (rad/time/m)",
-        title="Raman Analytical Validation: Centroid Derivative",
+        
     )
     if p6 is not None:
         saved_paths.append(p6)
@@ -476,7 +476,7 @@ def _run(args: argparse.Namespace) -> float:
         z_axis,
         centroid_pointwise_rel_error,
         output_dir / "raman_spectral_centroid_shift_relative_error.png",
-        title="Raman Analytical Validation: Pointwise Relative Error",
+        
         y_label="Pointwise abs-relative error of centroid shift",
     )
     if p8 is not None:
@@ -492,10 +492,6 @@ def _run(args: argparse.Namespace) -> float:
     print(f"  max pointwise rel. error         = {float(np.max(centroid_pointwise_rel_error)):.6e}")
     print(f"  final centroid shift (raman-kerr)= {centroid_delta_final:.6e}")
     print(f"  predicted centroid shift         = {predicted_delta_final:.6e}")
-    if saved_paths:
-        print("saved plots:")
-        for path in saved_paths:
-            print(f"  {path}")
     return centroid_curve_rel_error
 
 

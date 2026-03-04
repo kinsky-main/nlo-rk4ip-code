@@ -170,8 +170,6 @@ def _run(args: argparse.Namespace) -> tuple[float, float, float]:
     print(f"  max |energy drift|      = {max_energy_drift:.6e}")
     print(f"  max |momentum drift|    = {max_momentum_drift:.6e}")
     print(f"  max |hamiltonian drift| = {max_hamiltonian_drift:.6e}")
-    if saved is not None:
-        print(f"saved plot: {saved}")
 
     return max_energy_drift, max_momentum_drift, max_hamiltonian_drift
 

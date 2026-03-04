@@ -162,7 +162,7 @@ def run_phase_validation(
         out_dir / "centerline_intensity_colormap.png",
         x_label="Transverse coordinate x",
         y_label="Propagation distance z",
-        title=f"{scenario_name}: center-line intensity vs propagation",
+        
         colorbar_label="Normalized center-line intensity",
     )
     if p1 is not None:
@@ -173,7 +173,7 @@ def run_phase_validation(
         profile_records[-1],
         out_dir / "final_re_im_profile_comparison.png",
         x_label="Transverse coordinate x",
-        title=f"{scenario_name}: final Re/Im profile (analytical vs numerical)",
+        
         reference_label="Analytical final",
         final_label="Numerical final",
     )
@@ -185,7 +185,7 @@ def run_phase_validation(
         profile_records[-1],
         out_dir / "final_intensity_profile_comparison.png",
         x_label="Transverse coordinate x",
-        title=f"{scenario_name}: final intensity profile (analytical vs numerical)",
+        
         reference_label="Analytical final",
         final_label="Numerical final",
     )
@@ -195,7 +195,7 @@ def run_phase_validation(
         z_records,
         full_error,
         out_dir / "full_field_relative_error_over_propagation.png",
-        title=f"{scenario_name}: full-field error over propagation",
+        
         y_label="Mean pointwise abs-relative error (full field)",
     )
     if p4 is not None:
@@ -217,7 +217,7 @@ def run_phase_validation(
         alpha_max=0.92,
         dpi=360,
         normalization_peak=peak,
-        title=f"{scenario_name}: numerical propagation (3D scatter)",
+        
     )
     if p5 is not None:
         saved_paths.append(p5)
@@ -236,7 +236,7 @@ def run_phase_validation(
         alpha_max=0.92,
         dpi=360,
         normalization_peak=peak,
-        title=f"{scenario_name}: analytical propagation (3D scatter)",
+        
     )
     if p6 is not None:
         saved_paths.append(p6)
@@ -393,7 +393,7 @@ class GrinFiberApp:
             z_records,
             error_curve,
             out_dir / "tensor_diffraction_operator_error_vs_fft2_reference.png",
-            title="GRIN diffraction proof check: tensor operator vs FFT2 reference",
+            
             y_label="Mean pointwise abs-relative error (tensor vs FFT2 reference)",
         )
         print(
@@ -467,7 +467,7 @@ class GrinFiberApp:
                         out_dir / "centerline_intensity_colormap.png",
                         x_label="Transverse coordinate x",
                         y_label="Propagation distance z",
-                        title=f"{scenario_name}: center-line intensity vs propagation",
+                        
                         colorbar_label="Normalized center-line intensity",
                     ),
                     plot_final_re_im_comparison(
@@ -476,7 +476,7 @@ class GrinFiberApp:
                         profile_records[-1],
                         out_dir / "final_re_im_profile_comparison.png",
                         x_label="Transverse coordinate x",
-                        title=f"{scenario_name}: final Re/Im profile (analytical vs numerical)",
+                        
                         reference_label="Analytical final",
                         final_label="Numerical final",
                     ),
@@ -486,7 +486,7 @@ class GrinFiberApp:
                         profile_records[-1],
                         out_dir / "final_intensity_profile_comparison.png",
                         x_label="Transverse coordinate x",
-                        title=f"{scenario_name}: final intensity profile (analytical vs numerical)",
+                        
                         reference_label="Analytical final",
                         final_label="Numerical final",
                     ),
@@ -494,7 +494,7 @@ class GrinFiberApp:
                         loaded.z_axis,
                         full_error,
                         out_dir / "full_field_relative_error_over_propagation.png",
-                        title=f"{scenario_name}: full-field error over propagation",
+                        
                         y_label="Mean pointwise abs-relative error (full field)",
                     ),
                     plot_3d_intensity_scatter_propagation(
@@ -512,7 +512,7 @@ class GrinFiberApp:
                         alpha_max=0.92,
                         dpi=360,
                         normalization_peak=peak,
-                        title=f"{scenario_name}: numerical propagation (3D scatter)",
+                        
                     ),
                     plot_3d_intensity_scatter_propagation(
                         x,
@@ -529,7 +529,7 @@ class GrinFiberApp:
                         alpha_max=0.92,
                         dpi=360,
                         normalization_peak=peak,
-                        title=f"{scenario_name}: analytical propagation (3D scatter)",
+                        
                     ),
                 ):
                     if maybe_path is not None:
@@ -585,11 +585,6 @@ class GrinFiberApp:
         self.report_path = write_report(report, report_name)
 
         print(f"grin_fiber_xy run_group={run_group}")
-        if all_saved:
-            print("saved plots:")
-            for path in all_saved:
-                print(f"  {path}")
-        print(f"plot validation report: {self.report_path}")
 
         has_failures = report.fail_count() > 0
         has_warnings = report.warn_count() > 0
