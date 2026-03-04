@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
 from backend.runner import centered_time_grid
 from backend.storage import ExampleRunDB
 
@@ -29,12 +29,7 @@ from nlolib_ctypes import (  # noqa: E402
     default_execution_options,
 )
 
-def main() -> None:
-    parser = build_example_parser(
-        example_slug="runtime_temporal_demo",
-        description="Runtime temporal demo with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
+def _run(args: argparse.Namespace) -> None:
     db = ExampleRunDB(args.db_path)
     example_name = "runtime_temporal_demo"
     case_key = "default"
@@ -116,6 +111,18 @@ def main() -> None:
     print(f"initial power={np.sum(np.abs(field0) ** 2):.6e} final power={np.sum(np.abs(final_field) ** 2):.6e}")
     if runtime_logs:
         print(runtime_logs, end="" if runtime_logs.endswith("\n") else "\n")
+
+
+class RuntimeTemporalDemoApp(ExampleAppBase):
+    example_slug = "runtime_temporal_demo"
+    description = "Runtime temporal demo with DB-backed run/replot."
+
+    def run(self) -> None:
+        _run(self.args)
+
+
+def main() -> None:
+    RuntimeTemporalDemoApp.from_cli().run()
 
 
 if __name__ == "__main__":

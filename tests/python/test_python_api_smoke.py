@@ -62,9 +62,10 @@ def main():
     print("test_python_api_smoke: CPU 1D propagation returned expected record-major shape.")
 
     auto_opts = default_execution_options(NLO_VECTOR_BACKEND_AUTO)
+    identity_distance = 0.02
     identity_cfg = prepare_sim_config(
         n,
-        propagation_distance=0.02,
+        propagation_distance=identity_distance,
         starting_step_size=1e-3,
         max_step_size=2e-3,
         min_step_size=1e-5,
@@ -233,6 +234,53 @@ def main():
     assert len(coupled_result.records[0]) == n_c
     assert coupled_result.meta["coupled"] is True
     print("test_python_api_smoke: coupled tensor propagate returned expected shape.")
+
+    dense_record_count = 257
+    dense_history_result = api.propagate(
+        identity_cfg,
+        gaussian,
+        dense_record_count,
+        cpu_opts,
+        capture_step_history=True,
+        step_history_capacity=20000,
+    )
+    dense_history = dense_history_result.meta.get("step_history")
+    assert isinstance(dense_history, dict)
+    dense_steps = [float(v) for v in dense_history.get("step_size", [])]
+    assert len(dense_steps) > 0
+    dense_spacing = float(identity_distance) / float(dense_record_count - 1)
+    assert max(dense_steps) > (4.0 * dense_spacing)
+    assert len(dense_history.get("z", [])) < dense_record_count
+    assert len(dense_history_result.records) == dense_record_count
+    print("test_python_api_smoke: adaptive step sizes are no longer capped by record spacing.")
+
+    fixed_identity_cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.01,
+        starting_step_size=1e-3,
+        max_step_size=1e-3,
+        min_step_size=1e-3,
+        error_tolerance=1e-7,
+        pulse_period=1.0,
+        delta_time=0.001,
+        frequency_grid=[0j] * n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="0",
+            constants=[0.0, 0.0, 0.0, 0.0],
+        ),
+    )
+    fixed_aligned = api.propagate(fixed_identity_cfg, gaussian, 11, cpu_opts)
+    assert len(fixed_aligned.records) == 11
+    assert len(fixed_aligned.z_axis) == 11
+    assert int(fixed_aligned.meta.get("records_written", -1)) == 11
+
+    fixed_oversubscribed = api.propagate(fixed_identity_cfg, gaussian, 64, cpu_opts)
+    assert len(fixed_oversubscribed.records) == 11
+    assert len(fixed_oversubscribed.z_axis) == 11
+    assert int(fixed_oversubscribed.meta.get("records_requested", -1)) == 64
+    assert int(fixed_oversubscribed.meta.get("records_written", -1)) == 11
+    print("test_python_api_smoke: fixed-step oversubscribed records are clamped to step-aligned samples.")
 
     try:
         api.propagate(

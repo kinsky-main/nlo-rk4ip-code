@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from backend.metrics import mean_pointwise_abs_relative_error_curve
 from backend.plotting import (
     plot_3d_intensity_scatter_propagation,
     plot_final_intensity_comparison,
@@ -30,15 +31,11 @@ def unflatten_xy_tfast(flat_tfast: np.ndarray, ny: int, nx: int) -> np.ndarray:
 
 
 def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
-    if records.shape != reference_records.shape:
-        raise ValueError("records and reference_records must have the same shape.")
-    out = np.empty(records.shape[0], dtype=np.float64)
-    for i in range(records.shape[0]):
-        ref = np.asarray(reference_records[i], dtype=np.complex128)
-        ref_norm = float(np.linalg.norm(ref))
-        safe_ref_norm = ref_norm if ref_norm > 0.0 else 1.0
-        out[i] = float(np.linalg.norm(np.asarray(records[i], dtype=np.complex128) - ref) / safe_ref_norm)
-    return out
+    return mean_pointwise_abs_relative_error_curve(
+        records,
+        reference_records,
+        context="grin_fiber:record_error",
+    )
 
 
 @dataclass(frozen=True)
@@ -199,7 +196,7 @@ def run_phase_validation(
         full_error,
         out_dir / "full_field_relative_error_over_propagation.png",
         title=f"{scenario_name}: full-field error over propagation",
-        y_label="Relative L2 error (full field)",
+        y_label="Mean pointwise abs-relative error (full field)",
     )
     if p4 is not None:
         saved_paths.append(p4)
@@ -397,7 +394,7 @@ class GrinFiberApp:
             error_curve,
             out_dir / "tensor_diffraction_operator_error_vs_fft2_reference.png",
             title="GRIN diffraction proof check: tensor operator vs FFT2 reference",
-            y_label="Relative L2 error (tensor vs FFT2 reference)",
+            y_label="Mean pointwise abs-relative error (tensor vs FFT2 reference)",
         )
         print(
             "diffraction_operator_proof_check: "
@@ -498,7 +495,7 @@ class GrinFiberApp:
                         full_error,
                         out_dir / "full_field_relative_error_over_propagation.png",
                         title=f"{scenario_name}: full-field error over propagation",
-                        y_label="Relative L2 error (full field)",
+                        y_label="Mean pointwise abs-relative error (full field)",
                     ),
                     plot_3d_intensity_scatter_propagation(
                         x,

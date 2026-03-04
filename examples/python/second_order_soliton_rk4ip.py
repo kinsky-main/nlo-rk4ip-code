@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
+from backend.metrics import (
+    mean_pointwise_abs_relative_error,
+    mean_pointwise_abs_relative_error_curve,
+)
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
@@ -29,6 +33,7 @@ from backend.runner import (
     TemporalSimulationConfig,
     centered_time_grid,
 )
+from backend.spectral import omega_detuning_to_wavelength_nm
 from backend.storage import ExampleRunDB
 
 
@@ -36,9 +41,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON_API_DIR = REPO_ROOT / "python"
 if str(PYTHON_API_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_API_DIR))
-
-C_NM_PER_PS = 299792.458
-
 
 @dataclass(frozen=True)
 class StepTelemetry:
@@ -101,16 +103,13 @@ def second_order_soliton_normalized_envelope(
 
 
 def average_relative_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
-    intensity_num = np.abs(A_num) ** 2
-    intensity_true = np.abs(A_true) ** 2
-    finite = np.isfinite(intensity_num) & np.isfinite(intensity_true)
-    if not np.any(finite):
-        return float("nan")
-    numerator = np.mean(np.abs(intensity_num[finite] - intensity_true[finite]))
-    denominator = float(np.max(intensity_true[finite]))
-    if denominator <= 0.0 or not np.isfinite(denominator):
-        return float("nan")
-    return float(numerator / denominator)
+    intensity_num = np.abs(np.asarray(A_num, dtype=np.complex128)) ** 2
+    intensity_true = np.abs(np.asarray(A_true, dtype=np.complex128)) ** 2
+    return mean_pointwise_abs_relative_error(
+        intensity_num,
+        intensity_true,
+        context="second_order_soliton:final_intensity_error",
+    )
 
 
 def analytical_initial_condition_error(
@@ -137,12 +136,12 @@ def compute_wavelength_spectral_map_from_records(
 
     n = int(A_records.shape[1])
     n_fft = int(n if fft_size_visual is None else max(int(fft_size_visual), n))
-    freq_shifted = np.fft.fftshift(np.fft.fftfreq(n_fft, d=dt))
-
-    nu0 = C_NM_PER_PS / lambda0_nm
-    nu = nu0 + freq_shifted
-    valid = nu > 0.0
-    lambda_nm = C_NM_PER_PS / nu[valid]
+    omega_shifted = 2.0 * np.pi * np.fft.fftshift(np.fft.fftfreq(n_fft, d=dt))
+    lambda_nm, valid = omega_detuning_to_wavelength_nm(
+        omega_shifted,
+        lambda0_nm,
+        time_unit_seconds=1.0e-12,
+    )
 
     field_records = np.asarray(A_records, dtype=np.complex128)
     spectra = np.fft.fftshift(np.fft.fft(field_records, n=n_fft, axis=1), axes=1)
@@ -181,19 +180,11 @@ def compute_wavelength_spectral_map_from_records(
 
 
 def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
-    if records.shape != reference_records.shape:
-        raise ValueError("records and reference_records must have the same shape.")
-
-    ref_norms = np.linalg.norm(np.asarray(reference_records, dtype=np.complex128), axis=1)
-    norm_floor = max(float(np.max(ref_norms)) * 1e-12, 1e-15)
-    out = np.empty(records.shape[0], dtype=np.float64)
-    for i in range(records.shape[0]):
-        ref = np.asarray(reference_records[i], dtype=np.complex128)
-        num = np.asarray(records[i], dtype=np.complex128)
-        ref_norm = float(np.linalg.norm(ref))
-        safe_ref_norm = max(ref_norm, norm_floor)
-        out[i] = float(np.linalg.norm(num - ref) / safe_ref_norm)
-    return out
+    return mean_pointwise_abs_relative_error_curve(
+        records,
+        reference_records,
+        context="second_order_soliton:record_error",
+    )
 
 
 def step_telemetry_from_meta(meta: dict[str, object] | None) -> StepTelemetry:
@@ -314,7 +305,7 @@ def save_plots(
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
-    telemetry_plot = select_step_telemetry_for_plot(telemetry, z_samples)
+    telemetry_plot = telemetry
     p1 = plot_wavelength_step_history(
         z_samples,
         lambda_nm,
@@ -358,7 +349,7 @@ def save_plots(
         error_curve,
         output_dir / "soliton_total_error_over_propagation.png",
         title="Second-Order Soliton: Total Error Over Propagation",
-        y_label="Relative L2 error (numerical vs analytical)",
+        y_label="Mean pointwise abs-relative error (numerical vs analytical)",
     )
     if p4 is not None:
         saved_paths.append(p4)
@@ -404,12 +395,7 @@ def ensure_finite_records_or_raise(
     )
 
 
-def main() -> float:
-    parser = build_example_parser(
-        example_slug="second_order_soliton",
-        description="Second-order soliton validation with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
+def _run(args: argparse.Namespace) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "second_order_soliton_rk4ip"
     case_key = "default"
@@ -576,7 +562,7 @@ def main() -> float:
         f"exp(-alpha*z_final)/LNL={math.exp(-alpha * z_final) / lnl:.6e} 1/m."
     )
     print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
-    print(f"epsilon = {epsilon:.6e}")
+    print(f"epsilon (mean pointwise abs-relative intensity error) = {epsilon:.6e}")
     if configured_start_step is not None:
         print(
             "configured solver controls: "
@@ -603,32 +589,24 @@ def main() -> float:
             "next step_size range (solver proposal): "
             f"[{proposed_range[0]:.6e}, {proposed_range[1]:.6e}] m"
         )
-    if telemetry.accepted_step_sizes.size > 0 and z_records.size > 1:
-        record_spacing = float((z_records[-1] - z_records[0]) / float(z_records.size - 1))
-        if record_spacing > 0.0 and np.isfinite(record_spacing):
-            accepted = np.asarray(telemetry.accepted_step_sizes, dtype=np.float64)
-            near_spacing = np.isclose(
-                accepted,
-                record_spacing,
-                rtol=1e-6,
-                atol=max(1e-15, abs(record_spacing) * 1e-12),
-            )
-            clipped_ratio = float(np.count_nonzero(near_spacing)) / float(accepted.size)
-            if clipped_ratio >= 0.50:
-                print(
-                    "note: accepted step sizes are frequently record-spacing limited "
-                    f"(record spacing ~ {record_spacing:.6e} m, near-spacing fraction={clipped_ratio:.3f})."
-                )
-                print(
-                    "      The dashed trace ('Next candidate step size') shows the solver's "
-                    "proposed step before this record-spacing cap."
-                )
     if saved_paths:
         print("saved plots:")
         for path in saved_paths:
             print(f"  {path}")
 
     return epsilon
+
+
+class SecondOrderSolitonApp(ExampleAppBase):
+    example_slug = "second_order_soliton"
+    description = "Second-order soliton validation with DB-backed run/replot."
+
+    def run(self) -> float:
+        return _run(self.args)
+
+
+def main() -> float:
+    return SecondOrderSolitonApp.from_cli().run()
 
 
 if __name__ == "__main__":

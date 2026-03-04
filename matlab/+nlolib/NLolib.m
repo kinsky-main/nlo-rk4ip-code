@@ -128,18 +128,20 @@ classdef NLolib < handle
                     storageOptions = options.storage;
                 end
 
-                [records, storageResult, storageEnabled, stepHistory] = obj.execute_propagate_request( ...
+                [records, storageResult, storageEnabled, stepHistory, recordsWritten] = obj.execute_propagate_request( ...
                     cfg, inputField, numRecordedSamples, execOptions, storageOptions);
                 meta.storage_enabled = logical(storageEnabled);
                 if storageEnabled
                     meta.storage_result = storageResult;
                 end
+                meta.records_requested = double(numRecordedSamples);
+                meta.records_written = double(recordsWritten);
                 meta.records_returned = size(records, 1) > 0;
                 meta.step_history_dropped = double(stepHistory.dropped);
 
                 result = struct();
                 result.records = records;
-                result.z_axis = zAxis;
+                result.z_axis = nlolib.NLolib.make_z_axis(zAxis(end), size(records, 1));
                 if size(records, 1) > 0
                     result.final = records(end, :);
                 else
@@ -181,7 +183,7 @@ classdef NLolib < handle
             end
 
             distance = nlolib.NLolib.resolve_propagation_distance(config);
-            [records, storageResult, storageEnabled, stepHistory] = obj.execute_propagate_request( ...
+            [records, storageResult, storageEnabled, stepHistory, recordsWritten] = obj.execute_propagate_request( ...
                 config, inputField, numRecordedSamples, execOptions, storageOptions);
 
             result = struct();
@@ -191,7 +193,7 @@ classdef NLolib < handle
             else
                 result.final = [];
             end
-            result.z_axis = nlolib.NLolib.make_z_axis(distance, double(numRecordedSamples));
+            result.z_axis = nlolib.NLolib.make_z_axis(distance, size(records, 1));
             result.step_history = stepHistory;
             result.meta = struct();
             result.meta.output = char("dense");
@@ -199,6 +201,8 @@ classdef NLolib < handle
                 result.meta.output = char("final");
             end
             result.meta.records = double(numRecordedSamples);
+            result.meta.records_requested = double(numRecordedSamples);
+            result.meta.records_written = double(recordsWritten);
             result.meta.storage_enabled = logical(storageEnabled);
             result.meta.records_returned = size(records, 1) > 0;
             if isstruct(execOptions) && isfield(execOptions, 'backend_type')
@@ -213,7 +217,7 @@ classdef NLolib < handle
             end
         end
 
-        function [records, storageResult, storageEnabled, stepHistory] = execute_propagate_request( ...
+        function [records, storageResult, storageEnabled, stepHistory, recordsWritten] = execute_propagate_request( ...
                 obj, config, inputField, numRecordedSamples, execOptions, storageOptions)
             %EXECUTE_PROPAGATE_REQUEST Internal call path for all propagate forms.
             if nargin < 5 || isempty(execOptions)
@@ -721,6 +725,10 @@ classdef NLolib < handle
         end
 
         function zAxis = make_z_axis(distance, numRecords)
+            if numRecords <= 0
+                zAxis = zeros(0, 1);
+                return;
+            end
             if numRecords <= 1
                 zAxis = distance;
                 return;

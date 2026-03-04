@@ -467,6 +467,18 @@ nlo_vec_status simulation_state_download_current_field(const simulation_state* s
 nlo_vec_status simulation_state_capture_snapshot(simulation_state* state);
 
 /**
+ * @brief Capture one snapshot record from a specific backend vector.
+ *
+ * @param state Active simulation state.
+ * @param source_vec Backend vector used as snapshot source.
+ * @return nlo_vec_status Capture status.
+ */
+nlo_vec_status simulation_state_capture_snapshot_from_vec(
+    simulation_state* state,
+    const nlo_vec_buffer* source_vec
+);
+
+/**
  * @brief Flush any pending snapshot data to host/storage sinks.
  *
  * @param state Active simulation state.

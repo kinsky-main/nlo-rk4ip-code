@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
 from backend.runner import centered_time_grid
 from backend.storage import ExampleRunDB
 from nlolib_ctypes import (
@@ -20,12 +20,7 @@ from nlolib_ctypes import (
 )
 
 
-def main() -> None:
-    parser = build_example_parser(
-        example_slug="runtime_callable_operator",
-        description="Runtime callable operator example with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
+def _run(args: argparse.Namespace) -> None:
     db = ExampleRunDB(args.db_path)
     example_name = "runtime_callable_operator_rk4ip"
     case_key = "default"
@@ -95,6 +90,18 @@ def main() -> None:
     print(f"z records: {z_records}")
     print(f"initial power={np.sum(np.abs(records[0]) ** 2):.6e}")
     print(f"final power={np.sum(np.abs(records[-1]) ** 2):.6e}")
+
+
+class RuntimeCallableOperatorApp(ExampleAppBase):
+    example_slug = "runtime_callable_operator"
+    description = "Runtime callable operator example with DB-backed run/replot."
+
+    def run(self) -> None:
+        _run(self.args)
+
+
+def main() -> None:
+    RuntimeCallableOperatorApp.from_cli().run()
 
 
 if __name__ == "__main__":

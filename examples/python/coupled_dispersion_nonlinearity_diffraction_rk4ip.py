@@ -14,7 +14,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
+from backend.metrics import mean_pointwise_abs_relative_error_curve
 from backend.plotting import (
     plot_3d_intensity_scatter_propagation,
     plot_final_intensity_comparison,
@@ -28,16 +29,11 @@ from backend.storage import ExampleRunDB
 
 
 def _relative_l2_error_curve(records_a: np.ndarray, records_b: np.ndarray) -> np.ndarray:
-    if records_a.shape != records_b.shape:
-        raise ValueError("records_a and records_b must have the same shape.")
-
-    out = np.empty(records_a.shape[0], dtype=np.float64)
-    for i in range(records_a.shape[0]):
-        a = np.asarray(records_a[i], dtype=np.complex128).reshape(-1)
-        b = np.asarray(records_b[i], dtype=np.complex128).reshape(-1)
-        denom = max(float(np.linalg.norm(b)), 1e-12)
-        out[i] = float(np.linalg.norm(a - b) / denom)
-    return out
+    return mean_pointwise_abs_relative_error_curve(
+        records_a,
+        records_b,
+        context="coupled_dispersion_nonlinearity_diffraction:full_vs_linear",
+    )
 
 
 def _omega_grid(nt: int, dt: float) -> np.ndarray:
@@ -137,12 +133,7 @@ def _run_case(
     return t, x, y, z_records, field0, records, dict(result.meta)
 
 
-def main() -> None:
-    parser = build_example_parser(
-        example_slug="coupled_dispersion_nonlinearity_diffraction",
-        description="Coupled dispersion/nonlinearity/diffraction with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
+def _run(args: argparse.Namespace) -> None:
     db = ExampleRunDB(args.db_path)
     example_name = "coupled_dispersion_nonlinearity_diffraction_rk4ip"
     full_case_key = "full"
@@ -391,8 +382,8 @@ def main() -> None:
         z_records,
         error_curve,
         output_dir / "full_vs_linear_relative_error_over_propagation.png",
-        title="Full coupled vs linear baseline: relative L2 error over z",
-        y_label="Relative L2 error",
+        title="Full coupled vs linear baseline: mean pointwise abs-relative error over z",
+        y_label="Mean pointwise abs-relative error",
     )
     if p7 is not None:
         saved_paths.append(p7)
@@ -414,6 +405,18 @@ def main() -> None:
         print("saved plots:")
         for path in saved_paths:
             print(f"  {path}")
+
+
+class CoupledDispersionNonlinearityDiffractionApp(ExampleAppBase):
+    example_slug = "coupled_dispersion_nonlinearity_diffraction"
+    description = "Coupled dispersion/nonlinearity/diffraction with DB-backed run/replot."
+
+    def run(self) -> None:
+        _run(self.args)
+
+
+def main() -> None:
+    CoupledDispersionNonlinearityDiffractionApp.from_cli().run()
 
 
 if __name__ == "__main__":

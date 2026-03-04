@@ -97,6 +97,101 @@ static double nlo_record_capture_tolerance(double z_end)
     return 64.0 * DBL_EPSILON * scale;
 }
 
+static int nlo_rk4_exact_fixed_step_requested(const sim_config* config)
+{
+    if (config == NULL) {
+        return 0;
+    }
+
+    const double start_step = config->propagation.starting_step_size;
+    const double min_step = config->propagation.min_step_size;
+    const double max_step = config->propagation.max_step_size;
+    if (!(start_step > 0.0) || !(min_step > 0.0) || !(max_step > 0.0)) {
+        return 0;
+    }
+
+    const double scale = fmax(1.0, fmax(fabs(start_step), fmax(fabs(min_step), fabs(max_step))));
+    const double eps = 64.0 * DBL_EPSILON * scale;
+    return (fabs(start_step - min_step) <= eps && fabs(start_step - max_step) <= eps) ? 1 : 0;
+}
+
+static nlo_vec_status nlo_rk4_capture_interpolated_record(
+    simulation_state* state,
+    double step_start_z,
+    double step_end_z,
+    double record_z
+)
+{
+    if (state == NULL || state->backend == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    simulation_working_vectors* work = &state->working_vectors;
+    if (work->previous_field_vec == NULL ||
+        work->field_working_vec == NULL ||
+        work->field_magnitude_vec == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    const double dz = step_end_z - step_start_z;
+    const double scale = fmax(1.0, fmax(fabs(step_start_z), fabs(step_end_z)));
+    const double alpha_eps = 64.0 * DBL_EPSILON * scale;
+    double alpha = 1.0;
+    if (dz > 0.0) {
+        alpha = (record_z - step_start_z) / dz;
+    }
+
+    if (alpha <= alpha_eps) {
+        return simulation_state_capture_snapshot_from_vec(state, work->previous_field_vec);
+    }
+    if (alpha >= (1.0 - alpha_eps)) {
+        return simulation_state_capture_snapshot_from_vec(state, state->current_field_vec);
+    }
+
+    if (alpha < 0.0) {
+        alpha = 0.0;
+    } else if (alpha > 1.0) {
+        alpha = 1.0;
+    }
+
+    nlo_vec_status status = nlo_vec_complex_copy(state->backend,
+                                                 work->field_working_vec,
+                                                 work->previous_field_vec);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_scalar_mul_inplace(state->backend,
+                                                work->field_working_vec,
+                                                nlo_make(1.0 - alpha, 0.0));
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_copy(state->backend,
+                                  work->field_magnitude_vec,
+                                  state->current_field_vec);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_scalar_mul_inplace(state->backend,
+                                                work->field_magnitude_vec,
+                                                nlo_make(alpha, 0.0));
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    status = nlo_vec_complex_add_inplace(state->backend,
+                                         work->field_working_vec,
+                                         work->field_magnitude_vec);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    return simulation_state_capture_snapshot_from_vec(state, work->field_working_vec);
+}
+
 static void nlo_rk4_emit_step_event(
     simulation_state* state,
     size_t step_index,
@@ -330,6 +425,7 @@ void solve_rk4(simulation_state *state)
     const double tol = (state->config->propagation.error_tolerance > 0.0)
                            ? state->config->propagation.error_tolerance
                            : NLO_RK4_ERROR_TOL;
+    const int disable_record_interpolation = nlo_rk4_exact_fixed_step_requested(state->config);
 
     if (state->current_step_size <= 0.0)
     {
@@ -381,17 +477,6 @@ void solve_rk4(simulation_state *state)
         if (step > remaining)
         {
             step = remaining;
-        }
-
-        if (record_spacing > 0.0 &&
-            state->current_record_index < state->num_recorded_samples &&
-            next_record_z > state->current_z)
-        {
-            const double to_next_record = next_record_z - state->current_z;
-            if (to_next_record > 0.0 && step > to_next_record)
-            {
-                step = to_next_record;
-            }
         }
 
         if (step <= 0.0)
@@ -464,14 +549,6 @@ void solve_rk4(simulation_state *state)
             if (retry_step > remaining_retry) {
                 retry_step = remaining_retry;
             }
-            if (record_spacing > 0.0 &&
-                state->current_record_index < state->num_recorded_samples &&
-                next_record_z > state->current_z) {
-                const double to_next_record = next_record_z - state->current_z;
-                if (to_next_record > 0.0 && retry_step > to_next_record) {
-                    retry_step = to_next_record;
-                }
-            }
             if (retry_step <= 0.0) {
                 step_accepted = -1;
                 break;
@@ -505,15 +582,30 @@ void solve_rk4(simulation_state *state)
                                         scale,
                                         state->current_step_size);
 
+        const double step_end_z = state->current_z;
+        const double step_start_z = step_end_z - step;
         while (record_spacing > 0.0 &&
                state->current_record_index < state->num_recorded_samples &&
-               state->current_z + record_capture_eps >= next_record_z)
+               step_end_z + record_capture_eps >= next_record_z)
         {
-            if (simulation_state_capture_snapshot(state) != NLO_VEC_STATUS_OK)
+            nlo_vec_status capture_status = NLO_VEC_STATUS_OK;
+            if (disable_record_interpolation) {
+                capture_status = simulation_state_capture_snapshot(state);
+            } else {
+                capture_status = nlo_rk4_capture_interpolated_record(state,
+                                                                     step_start_z,
+                                                                     step_end_z,
+                                                                     next_record_z);
+            }
+            if (capture_status != NLO_VEC_STATUS_OK)
             {
+                terminated_early = 1;
                 break;
             }
             next_record_z = record_spacing * (double)state->current_record_index;
+        }
+        if (terminated_early != 0) {
+            break;
         }
 
         rk4_step_index += 1u;

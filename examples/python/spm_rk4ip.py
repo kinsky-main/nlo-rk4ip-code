@@ -11,7 +11,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
+from backend.metrics import mean_pointwise_abs_relative_error
 from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
     plot_phase_shift_comparison,
@@ -38,16 +39,14 @@ def _configure_runtime_logging(runner: NloExampleRunner) -> None:
 
 
 def _relative_l2_error(num: np.ndarray, ref: np.ndarray) -> float:
-    ref_norm = float(np.linalg.norm(ref))
-    denom = max(ref_norm, 1e-15)
-    return float(np.linalg.norm(num - ref) / denom)
-
-def main() -> float:
-    parser = build_example_parser(
-        example_slug="spm",
-        description="Self-phase modulation validation with DB-backed run/replot.",
+    return mean_pointwise_abs_relative_error(
+        num,
+        ref,
+        context="spm:record_error",
     )
-    args = parser.parse_args()
+
+
+def _run(args: argparse.Namespace) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "spm_rk4ip"
     case_key = "default"
@@ -193,13 +192,13 @@ def main() -> float:
         error_curve,
         output_dir / "spm_error_over_propagation.png",
         title="SPM: Relative Error Over Propagation",
-        y_label="Relative L2 error",
+        y_label="Mean pointwise abs-relative error",
     )
     if p4 is not None:
         saved.append(p4)
 
     print(f"SPM analytical validation summary (run_group={run_group}):")
-    print(f"  final relative L2 error = {final_error:.6e}")
+    print(f"  final mean pointwise abs-relative error = {final_error:.6e}")
     print(f"  relative power drift    = {power_drift:.6e}")
     print(f"  max wrapped phase error (all samples)     = {max_wrapped_phase_error:.6e}")
     print(f"  max wrapped phase error (pulse support)   = {max_wrapped_phase_error_support:.6e}")
@@ -210,6 +209,18 @@ def main() -> float:
             print(f"  {path}")
 
     return final_error
+
+
+class SpmApp(ExampleAppBase):
+    example_slug = "spm"
+    description = "Self-phase modulation validation with DB-backed run/replot."
+
+    def run(self) -> float:
+        return _run(self.args)
+
+
+def main() -> float:
+    return SpmApp.from_cli().run()
 
 
 if __name__ == "__main__":

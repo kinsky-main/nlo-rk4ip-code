@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from backend.metrics import mean_pointwise_abs_relative_error
 from matplotlib.image import imread
 
 from .models import PlotArtifact, ValidationCheck, ValidationReport
@@ -130,13 +131,11 @@ class PlotImageValidator:
 
 
 def relative_l2_error(numerical: np.ndarray, reference: np.ndarray) -> float:
-    num = np.asarray(numerical, dtype=np.complex128).reshape(-1)
-    ref = np.asarray(reference, dtype=np.complex128).reshape(-1)
-    if num.size != ref.size:
-        raise ValueError("arrays must have equal size for relative L2 error.")
-    denom = np.sqrt(max(float(np.vdot(ref, ref).real), 1e-30))
-    diff = num - ref
-    return float(np.sqrt(max(float(np.vdot(diff, diff).real), 0.0)) / denom)
+    return mean_pointwise_abs_relative_error(
+        numerical,
+        reference,
+        context="grin_validation:relative_error",
+    )
 
 
 def profile_correlation(curve_a: np.ndarray, curve_b: np.ndarray) -> float:

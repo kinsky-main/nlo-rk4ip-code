@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
+from backend.metrics import mean_pointwise_abs_relative_error_curve
 from backend.plotting import plot_mode_power_exchange, plot_total_error_over_propagation
 from backend.storage import ExampleRunDB
 
@@ -36,15 +37,9 @@ def _configure_runtime_logging(api: nlo.NLolib) -> None:
     except Exception:
         pass
 
-def main() -> float:
+def _run(args: argparse.Namespace) -> float:
     api = nlo.NLolib()
     _configure_runtime_logging(api)
-
-    parser = build_example_parser(
-        example_slug="two_mode_linear_beating",
-        description="Two-mode linear beating with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
     db = ExampleRunDB(args.db_path)
     example_name = "two_mode_linear_beating_rk4ip"
     case_key = "default"
@@ -119,9 +114,11 @@ def main() -> float:
         a_ref[i, 0] = math.cos(theta)
         a_ref[i, 1] = 1j * math.sin(theta)
 
-    ref_norm = np.linalg.norm(a_ref, axis=1)
-    denom = np.maximum(ref_norm, 1e-15)
-    error_curve = np.linalg.norm(records - a_ref, axis=1) / denom
+    error_curve = mean_pointwise_abs_relative_error_curve(
+        records,
+        a_ref,
+        context="two_mode_linear_beating:mode_error",
+    )
 
     mode1_num = np.abs(records[:, 0]) ** 2
     mode2_num = np.abs(records[:, 1]) ** 2
@@ -158,7 +155,7 @@ def main() -> float:
         error_curve,
         output_dir / "error_over_propagation.png",
         title="Two-Mode Linear Beating: Error Over Propagation",
-        y_label="Relative L2 error",
+        y_label="Mean pointwise abs-relative error",
     )
     if p2 is not None:
         saved.append(p2)
@@ -173,6 +170,18 @@ def main() -> float:
             print(f"  {path}")
 
     return max_complex_error
+
+
+class TwoModeLinearBeatingApp(ExampleAppBase):
+    example_slug = "two_mode_linear_beating"
+    description = "Two-mode linear beating with DB-backed run/replot."
+
+    def run(self) -> float:
+        return _run(self.args)
+
+
+def main() -> float:
+    return TwoModeLinearBeatingApp.from_cli().run()
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from backend.metrics import mean_pointwise_abs_relative_error_curve
 from backend.plotting import (
     plot_3d_intensity_scatter_propagation,
     plot_final_intensity_comparison,
@@ -16,6 +17,7 @@ from backend.plotting import (
     plot_total_error_over_propagation,
 )
 from backend.runner import NloExampleRunner, SimulationOptions
+from backend.spectral import omega_detuning_to_wavelength_nm
 from backend.storage import ExampleRunDB
 
 from .models import PlotArtifact, ValidationCheck, ValidationReport
@@ -23,7 +25,6 @@ from .validation import (
     PlotImageValidator,
     WavelengthWindowSelector,
     profile_correlation,
-    relative_l2_error,
     write_report,
 )
 
@@ -41,14 +42,11 @@ def _unflatten_record_tfast(record_flat: np.ndarray, nt: int, ny: int, nx: int) 
 
 
 def _relative_l2_error_curve(records_num: np.ndarray, records_ref: np.ndarray) -> np.ndarray:
-    if records_num.shape != records_ref.shape:
-        raise ValueError("records_num and records_ref must have the same shape")
-
-    num_records = int(records_num.shape[0])
-    out = np.empty(num_records, dtype=np.float64)
-    for i in range(num_records):
-        out[i] = relative_l2_error(records_num[i], records_ref[i])
-    return out
+    return mean_pointwise_abs_relative_error_curve(
+        records_num,
+        records_ref,
+        context="grin_soliton:record_error",
+    )
 
 
 @dataclass(frozen=True)
@@ -364,8 +362,8 @@ class GrinSolitonApp:
                 z_axis,
                 error_curve,
                 out_dir / "relative_error_over_propagation.png",
-                title="GRIN potential + soliton: relative L2 error over z",
-                y_label="Relative L2 error",
+                title="GRIN potential + soliton: mean pointwise abs-relative error over z",
+                y_label="Mean pointwise abs-relative error",
             )
         )
 
@@ -445,11 +443,11 @@ class GrinSolitonApp:
             )
         )
 
-        c_m_per_s = 299792458.0
-        f0_hz = c_m_per_s / (cfg.lambda0_nm * 1e-9)
-        freq_abs_hz = f0_hz + (freq_axis * 1e12)
-        valid = freq_abs_hz > 0.0
-        wavelength_nm = (c_m_per_s / freq_abs_hz[valid]) * 1e9
+        wavelength_nm, valid = omega_detuning_to_wavelength_nm(
+            2.0 * np.pi * freq_axis,
+            cfg.lambda0_nm,
+            time_unit_seconds=1.0e-12,
+        )
         order = np.argsort(wavelength_nm)
         wl_axis = wavelength_nm[order]
         wl_num = np.abs(spec_num[:, valid][:, order]) ** 2
@@ -548,10 +546,10 @@ class GrinSolitonApp:
                 xz_error_curve,
                 yz_error_curve,
                 out_dir / "xy_profile_error_over_propagation.png",
-                label_a="X-profile relative L2 error",
-                label_b="Y-profile relative L2 error",
+                label_a="X-profile mean pointwise abs-relative error",
+                label_b="Y-profile mean pointwise abs-relative error",
                 x_label="Propagation distance z",
-                y_label="Relative L2 error",
+                y_label="Mean pointwise abs-relative error",
                 title="X/Y profile intensity error over propagation",
             ),
             allow_uniform=True,
@@ -715,8 +713,8 @@ class GrinSolitonApp:
                 z_axis,
                 error_curve,
                 out_dir / "relative_error_over_propagation.png",
-                title="GRIN diffraction: relative L2 error over z",
-                y_label="Relative L2 error",
+                title="GRIN diffraction: mean pointwise abs-relative error over z",
+                y_label="Mean pointwise abs-relative error",
             )
         )
         xz_peak = float(max(np.max(xz_num), np.max(xz_ref)))

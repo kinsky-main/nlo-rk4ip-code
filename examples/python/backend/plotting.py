@@ -31,10 +31,9 @@ def _default_colormap():
         _DEFAULT_CMAP_NAME,
         [
             (0.00, "#ffffff"),
-            (0.05, "#7ee3ed"),
-            (0.25, "#4e8ec3"),
-            (0.50, "#002b56"),
-            (0.75, "#4d2d99"),
+            (0.03, "#7ee3ed"),
+            (0.30, "#4e8ec3"),
+            (0.70, "#4d2d99"),
             (0.95, "#fd5ddd"),
             (1.00, "#ff207d"),
         ],
@@ -108,7 +107,6 @@ def _resolve_report_output_path(output_path: Path) -> Path | None:
             relative_path = Path(output_path.name)
     return _REPORT_OUTPUT_DIR / relative_path
 
-# TODO: Fix double save in examples and ensure default output dirs are always saved to
 def _save_figure(fig: Any, output_path: Path, **kwargs: Any) -> Path | None:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -334,7 +332,7 @@ def plot_convergence_loglog(
     ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="C3", label="Fitted power law")
     ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^4)$")
     ax.set_xlabel("Step size Delta z (m)")
-    ax.set_ylabel("Total relative L2 error")
+    ax.set_ylabel("Mean pointwise abs-relative error")
     ax.set_title(f"Fixed-Step Soliton Convergence (fitted order p = {fitted_order:.3f})")
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
@@ -507,7 +505,7 @@ def plot_total_error_over_propagation(
     output_path: Path,
     *,
     title: str = "Total Error Over Propagation",
-    y_label: str = "Relative L2 error",
+    y_label: str = "Mean pointwise abs-relative error",
 ) -> Path | None:
 
 

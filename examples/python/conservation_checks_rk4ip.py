@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
 from backend.plotting import plot_three_curve_drift
 from backend.runner import (
     NloExampleRunner,
@@ -51,7 +51,7 @@ def _compute_invariants(
     )
     return energy, momentum, hamiltonian
 
-def main() -> tuple[float, float, float]:
+def _run(args: argparse.Namespace) -> tuple[float, float, float]:
     beta2 = -0.01
     gamma = 0.01
     alpha = 0.0
@@ -61,11 +61,6 @@ def main() -> tuple[float, float, float]:
     ld = (t0 * t0) / abs(beta2)
     z_final = 0.2 * ld
 
-    parser = build_example_parser(
-        example_slug="conservation_checks",
-        description="Conservation checks with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
     db = ExampleRunDB(args.db_path)
     example_name = "conservation_checks_rk4ip"
     case_key = "default"
@@ -175,6 +170,18 @@ def main() -> tuple[float, float, float]:
         print(f"saved plot: {saved}")
 
     return max_energy_drift, max_momentum_drift, max_hamiltonian_drift
+
+
+class ConservationChecksApp(ExampleAppBase):
+    example_slug = "conservation_checks"
+    description = "Conservation checks with DB-backed run/replot."
+
+    def run(self) -> tuple[float, float, float]:
+        return _run(self.args)
+
+
+def main() -> tuple[float, float, float]:
+    return ConservationChecksApp.from_cli().run()
 
 
 if __name__ == "__main__":

@@ -1646,10 +1646,11 @@ class NLolib:
         if status != NLOLIB_STATUS_OK:
             raise RuntimeError(f"nlolib_propagate failed with status={status}")
 
+        records_written_count = int(records_written.value)
         if out_arr is None:
             out_records: list[list[complex]] = []
         else:
-            out_records = self._records_from_complex_array(out_arr, n, int(records_written.value))
+            out_records = self._records_from_complex_array(out_arr, n, records_written_count)
         storage_result_meta = (
             _storage_result_to_meta(storage_result)
             if request.sqlite_path is not None
@@ -1657,11 +1658,13 @@ class NLolib:
         )
 
         distance = float(request.sim_cfg.propagation.propagation_distance)
-        z_axis = self._build_z_axis(distance, request.num_records)
+        z_axis = self._build_z_axis(distance, records_written_count)
         final = list(out_records[-1]) if out_records else []
         meta: dict[str, Any] = {
             "output": request.output_label,
             "records": request.num_records,
+            "records_requested": request.num_records,
+            "records_written": records_written_count,
             "storage_enabled": bool(request.sqlite_path is not None),
             "records_returned": bool(len(out_records) > 0),
             "backend_requested": (
@@ -1721,6 +1724,8 @@ class NLolib:
 
     @staticmethod
     def _build_z_axis(distance: float, num_records: int) -> list[float]:
+        if num_records <= 0:
+            return []
         if num_records == 1:
             return [distance]
         return [

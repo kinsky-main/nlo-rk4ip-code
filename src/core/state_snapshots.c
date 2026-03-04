@@ -147,9 +147,12 @@ static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state*
     return NLO_VEC_STATUS_OK;
 }
 
-nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
+nlo_vec_status simulation_state_capture_snapshot_from_vec(
+    simulation_state* state,
+    const nlo_vec_buffer* source_vec
+)
 {
-    if (state == NULL || state->backend == NULL || state->current_field_vec == NULL) {
+    if (state == NULL || state->backend == NULL || source_vec == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
@@ -160,7 +163,7 @@ nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
     if (nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_CPU) {
         const void* host_src = NULL;
         nlo_vec_status status = nlo_vec_get_const_host_ptr(state->backend,
-                                                           state->current_field_vec,
+                                                           source_vec,
                                                            &host_src);
         if (status != NLO_VEC_STATUS_OK || host_src == NULL) {
             return (status == NLO_VEC_STATUS_OK) ? NLO_VEC_STATUS_BACKEND_UNAVAILABLE : status;
@@ -196,7 +199,7 @@ nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
         }
 
         nlo_vec_status status = nlo_vec_download(state->backend,
-                                                 state->current_field_vec,
+                                                 source_vec,
                                                  download_target,
                                                  state->num_time_samples * sizeof(nlo_complex));
 
@@ -234,7 +237,7 @@ nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    nlo_vec_status copy_status = nlo_vec_complex_copy(state->backend, ring_dst, state->current_field_vec);
+    nlo_vec_status copy_status = nlo_vec_complex_copy(state->backend, ring_dst, source_vec);
     if (copy_status != NLO_VEC_STATUS_OK) {
         return copy_status;
     }
@@ -242,6 +245,15 @@ nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
     state->record_ring_size += 1u;
     state->current_record_index += 1u;
     return NLO_VEC_STATUS_OK;
+}
+
+nlo_vec_status simulation_state_capture_snapshot(simulation_state* state)
+{
+    if (state == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    return simulation_state_capture_snapshot_from_vec(state, state->current_field_vec);
 }
 
 nlo_vec_status simulation_state_flush_snapshots(simulation_state* state)

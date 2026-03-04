@@ -10,19 +10,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
 from backend.plotting import plot_summary_curve
 from backend.runner import NloExampleRunner, SimulationOptions
 from backend.storage import ExampleRunDB
-from grin_fiber_xy_rk4ip import run_phase_validation
+from grin.fiber import run_phase_validation
 
 
-def main() -> None:
-    parser = build_example_parser(
-        example_slug="grin_fiber_analytic_sweep",
-        description="Analytical GRIN sweep with DB-backed run/replot.",
-    )
-    args = parser.parse_args()
+def _run(args: argparse.Namespace) -> None:
     db = ExampleRunDB(args.db_path)
     example_name = "grin_fiber_analytic_validations"
 
@@ -87,7 +82,7 @@ def main() -> None:
         final_errors,
         output_root / "summary_final_error_vs_grin_strength.png",
         x_label="GRIN coefficient g",
-        y_label="Final relative L2 error",
+        y_label="Final mean pointwise abs-relative error",
         title="GRIN phase-only analytical validation: error vs GRIN strength",
     )
     p2 = plot_summary_curve(
@@ -106,6 +101,18 @@ def main() -> None:
         print(f"  {p1}")
     if p2 is not None:
         print(f"  {p2}")
+
+
+class GrinFiberAnalyticSweepApp(ExampleAppBase):
+    example_slug = "grin_fiber_analytic_sweep"
+    description = "Analytical GRIN sweep with DB-backed run/replot."
+
+    def run(self) -> None:
+        _run(self.args)
+
+
+def main() -> None:
+    GrinFiberAnalyticSweepApp.from_cli().run()
 
 
 if __name__ == "__main__":

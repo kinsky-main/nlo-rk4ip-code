@@ -12,7 +12,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-from backend.cli import build_example_parser
+from backend.app_base import ExampleAppBase
+from backend.metrics import mean_pointwise_abs_relative_error_curve
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
@@ -71,27 +72,14 @@ def linear_reference_records(
 
 
 def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
-    if records.shape != reference_records.shape:
-        raise ValueError("records and reference_records must have the same shape.")
-
-    ref_norms = np.linalg.norm(np.asarray(reference_records, dtype=np.complex128), axis=1)
-    norm_floor = max(float(np.max(ref_norms)) * 1e-12, 1e-15)
-    out = np.empty(records.shape[0], dtype=np.float64)
-    for i in range(records.shape[0]):
-        ref = np.asarray(reference_records[i], dtype=np.complex128)
-        num = np.asarray(records[i], dtype=np.complex128)
-        ref_norm = float(np.linalg.norm(ref))
-        safe_ref_norm = max(ref_norm, norm_floor)
-        out[i] = float(np.linalg.norm(num - ref) / safe_ref_norm)
-    return out
-
-
-def main() -> float:
-    parser = build_example_parser(
-        example_slug="linear_drift",
-        description="Linear dispersive drift with DB-backed run/replot.",
+    return mean_pointwise_abs_relative_error_curve(
+        records,
+        reference_records,
+        context="linear_drift:record_error",
     )
-    args = parser.parse_args()
+
+
+def _run(args: argparse.Namespace) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "linear_drift_rk4ip"
     case_key = "default"
@@ -219,8 +207,8 @@ def main() -> float:
         z_records,
         error_curve,
         output_dir / "linear_drift_total_error_over_propagation.png",
-        title="Linear Drift: Full-Window Relative L2 Error Over Propagation",
-        y_label="Relative L2 error (numerical vs analytical)",
+        title="Linear Drift: Mean Pointwise Abs-Relative Error Over Propagation",
+        y_label="Mean pointwise abs-relative error (numerical vs analytical)",
     )
     if saved is not None:
         saved_paths.append(saved)
@@ -237,6 +225,18 @@ def main() -> float:
             print(f"  {path}")
 
     return slope_rel_error
+
+
+class LinearDriftApp(ExampleAppBase):
+    example_slug = "linear_drift"
+    description = "Linear dispersive drift with DB-backed run/replot."
+
+    def run(self) -> float:
+        return _run(self.args)
+
+
+def main() -> float:
+    return LinearDriftApp.from_cli().run()
 
 
 if __name__ == "__main__":
