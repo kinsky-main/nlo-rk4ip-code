@@ -30,7 +30,7 @@ from backend.spectral import (
     omega_detuning_to_wavelength_nm,
 )
 from backend.storage import ExampleRunDB
-from nlolib_ctypes import (
+from nlolib import (
     NLO_NONLINEAR_MODEL_EXPR,
     NLO_NONLINEAR_MODEL_KERR_RAMAN,
     RuntimeOperators,

@@ -18,7 +18,7 @@ PYTHON_API_DIR = REPO_ROOT / "python"
 if str(PYTHON_API_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_API_DIR))
 
-from nlolib_ctypes import NLolib, OperatorSpec, PulseSpec
+from nlolib import NLolib, OperatorSpec, PulseSpec
 
 
 def _run(args: argparse.Namespace) -> None:

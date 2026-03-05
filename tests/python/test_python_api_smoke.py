@@ -1,6 +1,6 @@
 import math
 
-from nlolib_ctypes import (
+from nlolib import (
     NLOLIB_PROGRESS_STREAM_BOTH,
     NLOLIB_PROGRESS_STREAM_STDERR,
     NLO_VECTOR_BACKEND_AUTO,

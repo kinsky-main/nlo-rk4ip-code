@@ -6,6 +6,8 @@
 - [ ] Fix MATLAB output for installed packages where progress is not printed.
 - [ ] Improve printout for progress of solver, showing estimated time of completion.
 - [ ] Remove working buffers by keeping one k_tmp and k_tot buffer then summing k values as each stage is computed.
+- [ ] Step size appears to cap at 1e-4 for some reason, investigate and fix.
+- [ ] Numerical error is exceptionally high even when cropping to 1e-6 floating max amplitude, investigate and fix.
 
 ## Potentially Required Tasks
 

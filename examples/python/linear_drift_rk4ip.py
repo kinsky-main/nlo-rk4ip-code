@@ -70,15 +70,6 @@ def linear_reference_records(
         references[i] = np.fft.ifft(spectrum_z)
     return references
 
-
-def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
-    return mean_pointwise_abs_relative_error_curve(
-        records,
-        reference_records,
-        context="linear_drift:record_error",
-    )
-
-
 def _run(args: argparse.Namespace) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "linear_drift_rk4ip"
@@ -159,7 +150,7 @@ def _run(args: argparse.Namespace) -> float:
     theory_shift = predicted_slope * z_records
     slope_rel_error = abs(measured_slope - predicted_slope) / max(abs(predicted_slope), 1e-12)
     reference_records = linear_reference_records(field0, z_records, beta2, dt)
-    error_curve = relative_l2_error_curve(records, reference_records)
+    error_curve = mean_pointwise_abs_relative_error_curve(records, reference_records, context="linear_drift:record_error_curve")
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)

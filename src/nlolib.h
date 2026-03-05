@@ -108,6 +108,10 @@ typedef enum {
  * @param return_records Nonzero to write records to output buffer.
  * @param exec_options Optional runtime backend selection/options.
  * @param storage_options Optional storage configuration.
+ * @param explicit_record_z Optional monotonic z-sample locations for exact
+ *        record capture. When provided with explicit_record_z_count > 0, these
+ *        override uniform record spacing.
+ * @param explicit_record_z_count Number of entries in explicit_record_z.
  */
 typedef struct {
     size_t num_recorded_samples;
@@ -115,6 +119,8 @@ typedef struct {
     int return_records;
     const nlo_execution_options* exec_options;
     const nlo_storage_options* storage_options;
+    const double* explicit_record_z;
+    size_t explicit_record_z_count;
 } nlo_propagate_options;
 
 /**

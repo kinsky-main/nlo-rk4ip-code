@@ -192,6 +192,36 @@ static int nlo_storage_log_final_output_enabled(const nlo_storage_options* stora
     return (storage_options != NULL && storage_options->log_final_output_field_to_db != 0);
 }
 
+static int nlo_validate_explicit_record_schedule(
+    const double* z_values,
+    size_t count,
+    double z_end
+)
+{
+    if (z_values == NULL) {
+        return (count == 0u) ? 0 : -1;
+    }
+    if (count == 0u) {
+        return 0;
+    }
+
+    double prev = z_values[0];
+    if (!isfinite(prev) || prev < 0.0 || prev > z_end) {
+        return -1;
+    }
+    for (size_t i = 1u; i < count; ++i) {
+        const double current = z_values[i];
+        if (!isfinite(current) || current < 0.0 || current > z_end) {
+            return -1;
+        }
+        if (current < prev) {
+            return -1;
+        }
+        prev = current;
+    }
+    return 0;
+}
+
 static sim_config nlo_merge_simulation_and_physics(
     const nlo_simulation_config* simulation_config,
     const nlo_physics_config* physics_config
@@ -410,6 +440,8 @@ NLOLIB_API nlo_propagate_options nlolib_propagate_options_default(void)
     options.return_records = 1;
     options.exec_options = NULL;
     options.storage_options = NULL;
+    options.explicit_record_z = NULL;
+    options.explicit_record_z_count = 0u;
     return options;
 }
 
@@ -446,9 +478,19 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (local_options.output_mode == NLO_PROPAGATE_OUTPUT_FINAL_ONLY) {
         num_recorded_samples = 1u;
     }
+    if (local_options.explicit_record_z != NULL && local_options.explicit_record_z_count > 0u) {
+        num_recorded_samples = local_options.explicit_record_z_count;
+    }
     num_recorded_samples = nlo_resolve_effective_record_count(config, num_recorded_samples);
     if (num_recorded_samples == 0u) {
         return nlo_propagate_fail("validate.num_recorded_samples", NLOLIB_STATUS_INVALID_ARGUMENT);
+    }
+    if (local_options.explicit_record_z != NULL && local_options.explicit_record_z_count > 0u) {
+        if (nlo_validate_explicit_record_schedule(local_options.explicit_record_z,
+                                                  local_options.explicit_record_z_count,
+                                                  config->propagation.propagation_distance) != 0) {
+            return nlo_propagate_fail("validate.explicit_record_z", NLOLIB_STATUS_INVALID_ARGUMENT);
+        }
     }
 
     if (local_options.return_records == 0) {
@@ -552,6 +594,10 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (init_status != 0 || state == NULL) {
         return nlo_propagate_fail("init_simulation_state", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
+    state->explicit_record_z = local_options.explicit_record_z;
+    state->explicit_record_z_count = local_options.explicit_record_z_count;
+    state->explicit_record_schedule_active =
+        (local_options.explicit_record_z != NULL && local_options.explicit_record_z_count > 0u) ? 1 : 0;
 
     nlo_log_emit(NLO_LOG_LEVEL_INFO,
                  "[nlolib] backend resolved:\n"
@@ -607,7 +653,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
     size_t records_available = num_recorded_samples;
     if (num_recorded_samples > 1u) {
-        if (nlo_fixed_step_requested(config, NULL)) {
+        if (state->explicit_record_schedule_active != 0 || nlo_fixed_step_requested(config, NULL)) {
             records_available = state->current_record_index;
             if (records_available > num_recorded_samples) {
                 records_available = num_recorded_samples;
@@ -764,6 +810,12 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (local_output.step_events_dropped != NULL) {
         *local_output.step_events_dropped = step_events_dropped;
     }
+    nlo_log_emit(NLO_LOG_LEVEL_INFO,
+                 "[nlolib] solver_status:\n"
+                 "  - status: %d\n"
+                 "  - message: %s",
+                 (int)NLOLIB_STATUS_OK,
+                 "propagate completed");
     return NLOLIB_STATUS_OK;
 }
 

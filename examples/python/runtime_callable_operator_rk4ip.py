@@ -10,7 +10,7 @@ import numpy as np
 from backend.app_base import ExampleAppBase
 from backend.runner import centered_time_grid
 from backend.storage import ExampleRunDB
-from nlolib_ctypes import (
+from nlolib import (
     NLO_FFT_BACKEND_VKFFT,
     NLO_VECTOR_BACKEND_AUTO,
     NLolib,

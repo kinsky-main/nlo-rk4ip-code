@@ -3,7 +3,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from nlolib_ctypes import (
+from nlolib import (
     NLO_VECTOR_BACKEND_CPU,
     NLolib,
     OperatorSpec,

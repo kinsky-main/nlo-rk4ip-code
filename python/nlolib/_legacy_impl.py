@@ -12,26 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-try:
-    from .runtime_expr import (  # type: ignore[attr-defined]
-        RUNTIME_CONTEXT_DISPERSION_FACTOR,
-        RUNTIME_CONTEXT_DISPERSION,
-        RUNTIME_CONTEXT_LINEAR_FACTOR,
-        RUNTIME_CONTEXT_LINEAR,
-        RUNTIME_CONTEXT_POTENTIAL,
-        RUNTIME_CONTEXT_NONLINEAR,
-        translate_callable,
-    )
-except ImportError:
-    from nlolib.translate.runtime_expr import (
-        RUNTIME_CONTEXT_DISPERSION_FACTOR,
-        RUNTIME_CONTEXT_DISPERSION,
-        RUNTIME_CONTEXT_LINEAR_FACTOR,
-        RUNTIME_CONTEXT_LINEAR,
-        RUNTIME_CONTEXT_POTENTIAL,
-        RUNTIME_CONTEXT_NONLINEAR,
-        translate_callable,
-    )
+from .translate.runtime_expr import (
+    RUNTIME_CONTEXT_DISPERSION_FACTOR,
+    RUNTIME_CONTEXT_DISPERSION,
+    RUNTIME_CONTEXT_LINEAR_FACTOR,
+    RUNTIME_CONTEXT_LINEAR,
+    RUNTIME_CONTEXT_POTENTIAL,
+    RUNTIME_CONTEXT_NONLINEAR,
+    translate_callable,
+)
 
 NT_MAX = ctypes.c_size_t(-1).value  # Unbounded sentinel; prefer query_runtime_limits().
 LEGACY_NT_MAX = 1 << 20
@@ -232,6 +221,8 @@ class NloPropagateOptions(ctypes.Structure):
         ("return_records", ctypes.c_int),
         ("exec_options", ctypes.POINTER(NloExecutionOptions)),
         ("storage_options", ctypes.POINTER(NloStorageOptions)),
+        ("explicit_record_z", ctypes.POINTER(ctypes.c_double)),
+        ("explicit_record_z_count", ctypes.c_size_t),
     ]
 
 
@@ -254,9 +245,9 @@ def _candidate_library_paths() -> list[str]:
     if env_path:
         candidates.append(env_path)
 
-    here = Path(__file__).resolve().parent
-    package_dir = here / "nlolib"
-    root = here.parent
+    package_dir = Path(__file__).resolve().parent
+    here = package_dir
+    root = package_dir.parent
     if os.name == "nt":
         candidates.extend(
             [
@@ -597,6 +588,7 @@ class _NormalizedPropagateRequest:
     capture_step_history: bool
     step_history_capacity: int
     output_label: str
+    explicit_record_z: list[float] | None
     meta_overrides: dict[str, Any]
 
 
@@ -836,6 +828,21 @@ def _step_events_to_meta(step_events: ctypes.Array, count: int) -> dict[str, obj
         "next_step_size": next_step_size,
         "error": error,
     }
+
+
+def _validate_explicit_record_z(z_values: Sequence[float], distance: float) -> None:
+    if len(z_values) <= 0:
+        raise ValueError("t_eval must be non-empty")
+    prev = float(z_values[0])
+    if prev < 0.0 or prev > float(distance):
+        raise ValueError("t_eval values must be within [0, propagation_distance]")
+    for i in range(1, len(z_values)):
+        current = float(z_values[i])
+        if current < prev:
+            raise ValueError("t_eval must be monotonic nondecreasing")
+        if current < 0.0 or current > float(distance):
+            raise ValueError("t_eval values must be within [0, propagation_distance]")
+        prev = current
 
 
 def _shift_constant_indices(expression: str, offset: int) -> str:
@@ -1376,6 +1383,7 @@ class NLolib:
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
+        t_eval_raw = kwargs.pop("t_eval", None)
         if kwargs:
             raise TypeError(f"unexpected propagate kwargs: {sorted(kwargs.keys())}")
 
@@ -1391,6 +1399,12 @@ class NLolib:
             raise ValueError("step_history_capacity must be >= 0")
         if capture_step_history and step_history_capacity <= 0:
             raise ValueError("step_history_capacity must be > 0 when capture_step_history=True")
+        explicit_record_z: list[float] | None = None
+        if t_eval_raw is not None:
+            explicit_record_z = [float(v) for v in t_eval_raw]
+            if len(explicit_record_z) <= 0:
+                raise ValueError("t_eval must be non-empty when provided")
+            num_records = len(explicit_record_z)
 
         if isinstance(config, PreparedSimConfig):
             sim_cfg = config.simulation_config
@@ -1417,6 +1431,7 @@ class NLolib:
             capture_step_history=capture_step_history,
             step_history_capacity=step_history_capacity,
             output_label=("final" if num_records == 1 else "dense"),
+            explicit_record_z=explicit_record_z,
             meta_overrides={},
         )
 
@@ -1445,6 +1460,10 @@ class NLolib:
         output = kwargs.pop("output", "dense")
         preset = kwargs.pop("preset", "balanced")
         records = kwargs.pop("records", None)
+        starting_step_size_override = kwargs.pop("starting_step_size", None)
+        max_step_size_override = kwargs.pop("max_step_size", None)
+        min_step_size_override = kwargs.pop("min_step_size", None)
+        error_tolerance_override = kwargs.pop("error_tolerance", None)
         exec_options = kwargs.pop("exec_options", None)
         sqlite_path = kwargs.pop("sqlite_path", None)
         run_id = kwargs.pop("run_id", None)
@@ -1455,6 +1474,7 @@ class NLolib:
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
+        t_eval_raw = kwargs.pop("t_eval", None)
         if kwargs:
             raise TypeError(f"unexpected high-level propagate kwargs: {sorted(kwargs.keys())}")
         if propagation_distance is None:
@@ -1466,6 +1486,14 @@ class NLolib:
 
         pulse_spec = _normalize_pulse_spec(pulse)
         profile = _solver_profile_defaults(preset, float(propagation_distance))
+        if starting_step_size_override is not None:
+            profile["starting_step_size"] = float(starting_step_size_override)
+        if max_step_size_override is not None:
+            profile["max_step_size"] = float(max_step_size_override)
+        if min_step_size_override is not None:
+            profile["min_step_size"] = float(min_step_size_override)
+        if error_tolerance_override is not None:
+            profile["error_tolerance"] = float(error_tolerance_override)
         num_records = int(records) if records is not None else int(profile["records"])
         if output == "final":
             num_records = 1
@@ -1473,6 +1501,12 @@ class NLolib:
             raise ValueError("output must be 'dense' or 'final'")
         if num_records <= 0:
             raise ValueError("records must be > 0")
+        explicit_record_z: list[float] | None = None
+        if t_eval_raw is not None:
+            explicit_record_z = [float(v) for v in t_eval_raw]
+            if len(explicit_record_z) <= 0:
+                raise ValueError("t_eval must be non-empty when provided")
+            num_records = len(explicit_record_z)
 
         linear_expr, linear_fn, linear_constants, linear_bindings = _resolve_operator_spec(
             "linear", linear_operator, 0
@@ -1563,6 +1597,7 @@ class NLolib:
             capture_step_history=capture_step_history,
             step_history_capacity=step_history_capacity,
             output_label=output,
+            explicit_record_z=explicit_record_z,
             meta_overrides={
                 "preset": preset,
                 "output": output,
@@ -1584,6 +1619,7 @@ class NLolib:
         in_arr = make_complex_array(request.input_seq)
         n = len(request.input_seq)
         out_arr = make_complex_array(n * request.num_records) if request.return_records else None
+        explicit_record_z_arr = None
 
         storage_opts = None
         storage_keepalive: list[bytes] = []
@@ -1597,6 +1633,12 @@ class NLolib:
                 log_final_output_field_to_db=request.log_final_output_field_to_db,
             )
         _ = storage_keepalive
+        if request.explicit_record_z is not None:
+            distance = float(request.sim_cfg.propagation.propagation_distance)
+            _validate_explicit_record_z(request.explicit_record_z, distance)
+            explicit_record_z_arr = (ctypes.c_double * len(request.explicit_record_z))(
+                *[float(v) for v in request.explicit_record_z]
+            )
 
         propagate_options = (
             self.lib.nlolib_propagate_options_default()
@@ -1619,6 +1661,16 @@ class NLolib:
             ctypes.pointer(storage_opts)
             if storage_opts is not None
             else None
+        )
+        propagate_options.explicit_record_z = (
+            ctypes.cast(explicit_record_z_arr, ctypes.POINTER(ctypes.c_double))
+            if explicit_record_z_arr is not None
+            else None
+        )
+        propagate_options.explicit_record_z_count = (
+            len(request.explicit_record_z)
+            if request.explicit_record_z is not None
+            else 0
         )
 
         storage_result = NloStorageResult()
@@ -1681,7 +1733,10 @@ class NLolib:
         )
 
         distance = float(request.sim_cfg.propagation.propagation_distance)
-        z_axis = self._build_z_axis(distance, records_written_count)
+        if request.explicit_record_z is not None:
+            z_axis = [float(v) for v in request.explicit_record_z[:records_written_count]]
+        else:
+            z_axis = self._build_z_axis(distance, records_written_count)
         final = list(out_records[-1]) if out_records else []
         meta: dict[str, Any] = {
             "output": request.output_label,
@@ -1698,6 +1753,8 @@ class NLolib:
             "coupled": bool(
                 int(request.sim_cfg.spatial.nx) > 1 or int(request.sim_cfg.spatial.ny) > 1
             ),
+            "status": int(NLOLIB_STATUS_OK),
+            "message": "propagate completed",
         }
         if storage_result_meta is not None:
             meta["storage_result"] = storage_result_meta

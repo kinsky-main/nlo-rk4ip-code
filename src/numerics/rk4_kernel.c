@@ -564,7 +564,11 @@ void solve_rk4(simulation_state *state)
                            ? state->config->propagation.error_tolerance
                            : NLO_RK4_ERROR_TOL;
     const int fixed_step_mode = nlo_rk4_exact_fixed_step_requested(state->config);
-    const int disable_record_interpolation = fixed_step_mode;
+    const int has_explicit_schedule =
+        (state->explicit_record_schedule_active != 0 &&
+         state->explicit_record_z != NULL &&
+         state->explicit_record_z_count > 0u);
+    const int disable_record_interpolation = (fixed_step_mode && !has_explicit_schedule) ? 1 : 0;
     const double error_dt_weight = nlo_rk4_error_dt_weight(state);
     const int nonlinear_depends_on_h = nlo_rk4_nonlinear_depends_on_h(state);
 
@@ -581,7 +585,9 @@ void solve_rk4(simulation_state *state)
         return;
     }
 
-    if (state->current_record_index == 0u && state->num_recorded_samples > 1u)
+    if (!has_explicit_schedule &&
+        state->current_record_index == 0u &&
+        state->num_recorded_samples > 1u)
     {
         if (simulation_state_capture_snapshot(state) != NLO_VEC_STATUS_OK)
         {
@@ -597,8 +603,16 @@ void solve_rk4(simulation_state *state)
     const double record_capture_eps = nlo_record_capture_tolerance(z_end);
     if (state->num_recorded_samples > 1u)
     {
-        record_spacing = z_end / (double)(state->num_recorded_samples - 1u);
-        next_record_z = record_spacing * (double)state->current_record_index;
+        if (has_explicit_schedule) {
+            if (state->current_record_index < state->explicit_record_z_count) {
+                next_record_z = state->explicit_record_z[state->current_record_index];
+            } else {
+                next_record_z = z_end;
+            }
+        } else {
+            record_spacing = z_end / (double)(state->num_recorded_samples - 1u);
+            next_record_z = record_spacing * (double)state->current_record_index;
+        }
     }
 
     size_t rk4_step_index = 0u;
@@ -772,7 +786,7 @@ void solve_rk4(simulation_state *state)
 
         const double step_end_z = state->current_z;
         const double step_start_z = step_end_z - step;
-        while (record_spacing > 0.0 &&
+        while ((has_explicit_schedule || record_spacing > 0.0) &&
                state->current_record_index < state->num_recorded_samples &&
                step_end_z + record_capture_eps >= next_record_z)
         {
@@ -790,7 +804,15 @@ void solve_rk4(simulation_state *state)
                 terminated_early = 1;
                 break;
             }
-            next_record_z = record_spacing * (double)state->current_record_index;
+            if (has_explicit_schedule) {
+                if (state->current_record_index < state->explicit_record_z_count) {
+                    next_record_z = state->explicit_record_z[state->current_record_index];
+                } else {
+                    next_record_z = z_end;
+                }
+            } else {
+                next_record_z = record_spacing * (double)state->current_record_index;
+            }
         }
         if (terminated_early != 0) {
             break;
@@ -799,7 +821,7 @@ void solve_rk4(simulation_state *state)
         rk4_step_index += 1u;
     }
 
-    while (record_spacing > 0.0 &&
+    while ((has_explicit_schedule || record_spacing > 0.0) &&
            state->current_record_index < state->num_recorded_samples &&
            state->current_z + record_capture_eps >= next_record_z)
     {
@@ -807,7 +829,15 @@ void solve_rk4(simulation_state *state)
         {
             break;
         }
-        next_record_z = record_spacing * (double)state->current_record_index;
+        if (has_explicit_schedule) {
+            if (state->current_record_index < state->explicit_record_z_count) {
+                next_record_z = state->explicit_record_z[state->current_record_index];
+            } else {
+                next_record_z = z_end;
+            }
+        } else {
+            next_record_z = record_spacing * (double)state->current_record_index;
+        }
     }
 
     (void)nlo_vec_end_simulation(state->backend);

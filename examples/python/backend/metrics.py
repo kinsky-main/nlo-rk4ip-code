@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 
-DEFAULT_RELATIVE_ERROR_EPS = 1.0e-12
+DEFAULT_RELATIVE_ERROR_EPS = 1.0e-6
 
 
 def _validate_shapes(prediction: np.ndarray, reference: np.ndarray) -> None:

@@ -23,14 +23,28 @@ nlo_vec_status simulation_state_upload_initial_field(simulation_state* state, co
         return status;
     }
 
+    int captured_initial_record = 0;
     if (state->num_recorded_samples > 1u) {
-        status = nlo_snapshot_emit_record(state, 0u, field);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
+        int should_capture_initial = 1;
+        if (state->explicit_record_schedule_active != 0) {
+            should_capture_initial = 0;
+            if (state->explicit_record_z != NULL && state->explicit_record_z_count > 0u) {
+                const double z0 = state->explicit_record_z[0];
+                if (z0 == 0.0) {
+                    should_capture_initial = 1;
+                }
+            }
+        }
+        if (should_capture_initial != 0) {
+            status = nlo_snapshot_emit_record(state, 0u, field);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            captured_initial_record = 1;
         }
     }
 
-    state->current_record_index = (state->num_recorded_samples > 1u) ? 1u : 0u;
+    state->current_record_index = (captured_initial_record != 0) ? 1u : 0u;
     state->record_ring_flushed_count = state->current_record_index;
 
     return NLO_VEC_STATUS_OK;

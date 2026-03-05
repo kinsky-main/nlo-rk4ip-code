@@ -2,7 +2,7 @@ import cmath
 import math
 import random
 
-from nlolib_ctypes import (
+from nlolib import (
     NLO_NONLINEAR_MODEL_EXPR,
     NLO_NONLINEAR_MODEL_KERR_RAMAN,
     NLO_VECTOR_BACKEND_CPU,

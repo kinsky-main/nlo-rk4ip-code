@@ -20,6 +20,7 @@ from backend.runner import (
     centered_time_grid,
 )
 from backend.storage import ExampleRunDB
+from backend.metrics import mean_pointwise_abs_relative_error
 
 
 def _configure_runtime_logging(runner: NloExampleRunner) -> None:
@@ -31,34 +32,6 @@ def _configure_runtime_logging(runner: NloExampleRunner) -> None:
         runner.api.set_progress_options(enabled=False, milestone_percent=5, emit_on_step_adjust=False)
     except Exception:
         pass
-
-
-def _trajectory_relative_l2_error(num: np.ndarray, ref: np.ndarray) -> float:
-    num_flat = np.asarray(num, dtype=np.complex128).reshape(-1)
-    ref_flat = np.asarray(ref, dtype=np.complex128).reshape(-1)
-    if num_flat.shape != ref_flat.shape or num_flat.size <= 0:
-        return float("nan")
-    if not bool(np.all(np.isfinite(num_flat))) or not bool(np.all(np.isfinite(ref_flat))):
-        return float("nan")
-
-    diff_norm = float(np.linalg.norm(num_flat - ref_flat))
-    ref_norm = float(np.linalg.norm(ref_flat))
-    if (not math.isfinite(diff_norm)) or (not math.isfinite(ref_norm)) or ref_norm <= 0.0:
-        return float("nan")
-    return diff_norm / ref_norm
-
-
-def _total_trajectory_error(
-    records: np.ndarray,
-    reference_records: np.ndarray,
-    num_records_common: int,
-) -> float:
-    m = min(int(num_records_common), int(records.shape[0]), int(reference_records.shape[0]))
-    if m <= 0:
-        return float("nan")
-    num = np.asarray(records[:m], dtype=np.complex128)
-    ref = np.asarray(reference_records[:m], dtype=np.complex128)
-    return _trajectory_relative_l2_error(num, ref)
 
 
 def _step_count_from_key(case_key: str) -> int:
@@ -221,14 +194,14 @@ def _run(args) -> float:
     ref_idx = int(finite_indices[-1])
     reference_records = np.asarray(run_data[ref_idx][2][:min_records_common], dtype=np.complex128)
     errors = np.asarray(
-        [_total_trajectory_error(records, reference_records, min_records_common) for _, _, records in run_data],
+        [mean_pointwise_abs_relative_error(records, reference_records, context="fixed_step_soliton_convergence:record_error") for _, _, records in run_data],
         dtype=np.float64,
     )
 
     fitted_order, fitted_intercept, fit_mask_valid = _fit_loglog_slope(step_sizes_norm, errors, fit_mask)
 
     output_dir = args.output_dir
-    plot_path = plot_convergence_loglog(
+    plot_convergence_loglog(
         step_sizes_norm,
         errors,
         fit_mask_valid,

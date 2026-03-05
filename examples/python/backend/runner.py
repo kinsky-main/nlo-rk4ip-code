@@ -157,10 +157,10 @@ class TemporalSimulationConfig:
 class NloExampleRunner:
     def __init__(self, library_path: str | None = None):
         try:
-            import nlolib_ctypes as nlo
+            import nlolib as nlo
         except ModuleNotFoundError as exc:
             raise ModuleNotFoundError(
-                "nlolib_ctypes is not available. Ensure "
+                "nlolib is not available. Ensure "
                 "PYTHONPATH includes the repo's python/ directory."
             ) from exc
 

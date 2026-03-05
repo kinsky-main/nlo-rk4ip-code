@@ -324,6 +324,9 @@ typedef struct {
     size_t record_ring_head;
     size_t record_ring_size;
     size_t record_ring_flushed_count;
+    const double* explicit_record_z;
+    size_t explicit_record_z_count;
+    int explicit_record_schedule_active;
 
     nlo_fft_plan* fft_plan;
 

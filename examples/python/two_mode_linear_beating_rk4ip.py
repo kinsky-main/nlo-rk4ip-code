@@ -24,7 +24,7 @@ PYTHON_API_DIR = REPO_ROOT / "python"
 if str(PYTHON_API_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_API_DIR))
 
-import nlolib_ctypes as nlo
+import nlolib as nlo
 
 
 def _configure_runtime_logging(api: nlo.NLolib) -> None:
