@@ -27,6 +27,10 @@
 #define NLO_RK4_STEP_SCALE_MAX 2.0
 #endif
 
+#ifndef NLO_RK4_REL_ERROR_ATOL_FLOOR
+#define NLO_RK4_REL_ERROR_ATOL_FLOOR 1e-14
+#endif
+
 #ifndef NLO_RK4_MAX_REJECTION_ATTEMPTS
 #define NLO_RK4_MAX_REJECTION_ATTEMPTS 32u
 #endif
@@ -108,27 +112,6 @@ static int nlo_rk4_scalars_near(double lhs, double rhs)
     const double scale = fmax(1.0, fmax(fabs(lhs), fabs(rhs)));
     const double eps = 64.0 * DBL_EPSILON * scale;
     return (fabs(lhs - rhs) <= eps) ? 1 : 0;
-}
-
-static double nlo_rk4_error_dt_weight(const simulation_state* state)
-{
-    if (state == NULL || state->config == NULL) {
-        return 1.0;
-    }
-
-    const sim_config* config = state->config;
-    if (config->time.delta_time > 0.0) {
-        return config->time.delta_time;
-    }
-
-    if (config->time.pulse_period > 0.0) {
-        const size_t samples = (state->nt > 0u) ? state->nt : state->num_time_samples;
-        if (samples > 0u) {
-            return config->time.pulse_period / (double)samples;
-        }
-    }
-
-    return 1.0;
 }
 
 static int nlo_rk4_nonlinear_depends_on_h(const simulation_state* state)
@@ -379,7 +362,6 @@ static nlo_vec_status nlo_rk4_attempt_embedded_erk43(
     simulation_state* state,
     double step,
     size_t step_index,
-    double error_dt_weight,
     int reuse_cached_k5_nonlinear,
     double* out_error
 )
@@ -512,14 +494,14 @@ static nlo_vec_status nlo_rk4_attempt_embedded_erk43(
                                                     nlo_make(step / 10.0, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_magnitude_vec, work->field_working_vec));
 
-    // L^[3] = sqrt(dt * sum |A^[4] - A^[3]|^2), computed via RMS reduction.
-    const double safe_dt = (isfinite(error_dt_weight) && error_dt_weight > 0.0) ? error_dt_weight : 1.0;
-    const double l2_scale = sqrt(safe_dt * (double)state->num_time_samples);
+    // Relative ERK4(3)-IP defect:
+    //   delta_rel = sqrt(sum(|A^[4]-A^[3]|^2) / sum((a_floor + |A^[4]|)^2))
+    // This aligns solver tolerance with Python/MATLAB rtol semantics.
     status = nlo_vec_complex_weighted_rms_error(backend,
                                                 state->current_field_vec,
                                                 work->field_magnitude_vec,
+                                                NLO_RK4_REL_ERROR_ATOL_FLOOR,
                                                 1.0,
-                                                0.0,
                                                 out_error);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
@@ -527,8 +509,6 @@ static nlo_vec_status nlo_rk4_attempt_embedded_erk43(
 
     if (!isfinite(*out_error) || *out_error < 0.0) {
         *out_error = DBL_MAX;
-    } else {
-        *out_error *= l2_scale;
     }
 
     nlo_rk4_debug_log_vec_stats(state,
@@ -569,7 +549,6 @@ void solve_rk4(simulation_state *state)
          state->explicit_record_z != NULL &&
          state->explicit_record_z_count > 0u);
     const int disable_record_interpolation = (fixed_step_mode && !has_explicit_schedule) ? 1 : 0;
-    const double error_dt_weight = nlo_rk4_error_dt_weight(state);
     const int nonlinear_depends_on_h = nlo_rk4_nonlinear_depends_on_h(state);
 
     if (state->current_step_size <= 0.0)
@@ -619,6 +598,7 @@ void solve_rk4(simulation_state *state)
     int terminated_early = 0;
     int cached_k5_valid = 0;
     double cached_k5_half_step = 0.0;
+    int min_step_tol_warning_emitted = 0;
     while (state->current_z < z_end)
     {
         double step = nlo_clamp_step(state->current_step_size, min_step, max_step);
@@ -690,7 +670,6 @@ void solve_rk4(simulation_state *state)
                 nlo_vec_status status = nlo_rk4_attempt_embedded_erk43(state,
                                                                         step,
                                                                         rk4_step_index,
-                                                                        error_dt_weight,
                                                                         reuse_cached_k5,
                                                                         &error);
                 if (status != NLO_VEC_STATUS_OK) {
@@ -716,11 +695,23 @@ void solve_rk4(simulation_state *state)
                     scale = NLO_RK4_STEP_SCALE_MAX;
                 }
 
+                const int min_step_forced_accept = ((step <= (min_step * (1.0 + 1e-12)) && error > tol) ? 1 : 0);
                 if (error <= tol || step <= (min_step * (1.0 + 1e-12))) {
                     state->current_z += step;
                     state->current_step_size = nlo_clamp_step(step * scale, min_step, max_step);
                     cached_k5_valid = 1;
                     cached_k5_half_step = 0.5 * step;
+                    if (min_step_forced_accept && min_step_tol_warning_emitted == 0) {
+                        nlo_log_emit(NLO_LOG_LEVEL_WARN,
+                                     "[nlolib] adaptive solver reached min_step_size while local relative error "
+                                     "remains above tolerance; continuing with constrained steps. "
+                                     "z=%.9e step=%.9e error=%.9e tol=%.9e",
+                                     state->current_z,
+                                     step,
+                                     error,
+                                     tol);
+                        min_step_tol_warning_emitted = 1;
+                    }
                     nlo_rk4_emit_step_event(state,
                                             rk4_step_index,
                                             state->current_z,

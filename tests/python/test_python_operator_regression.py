@@ -5,6 +5,7 @@ import random
 from nlolib import (
     NLO_NONLINEAR_MODEL_EXPR,
     NLO_NONLINEAR_MODEL_KERR_RAMAN,
+    NLOLIB_LOG_LEVEL_WARN,
     NLO_VECTOR_BACKEND_CPU,
     NLolib,
     RuntimeOperators,
@@ -855,6 +856,215 @@ def test_adaptive_embedded_error_estimator_remains_stable(api, opts):
     assert rel_err <= 0.15, f"adaptive h-dependent nonlinear run deviated too much: {rel_err}"
 
 
+def test_adaptive_relative_error_is_amplitude_scale_invariant(api, opts):
+    n = 160
+    dt = 0.005
+    z_final = 0.06
+    t = _centered_time_grid(n, dt)
+    omega = _omega_grid_unshifted(n, dt)
+    base_field = [complex(math.exp(-((ti / 0.11) ** 2)), 0.0) for ti in t]
+    scaled_field = [complex(1.0e3 * v.real, 1.0e3 * v.imag) for v in base_field]
+
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=z_final,
+        starting_step_size=1e-3,
+        max_step_size=8e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-6,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*c0*A",
+            constants=[12.0, 0.0, 0.0, 0.0],
+        ),
+    )
+
+    base_result = api.propagate(
+        cfg,
+        base_field,
+        2,
+        opts,
+        capture_step_history=True,
+        step_history_capacity=4096,
+    )
+    scaled_result = api.propagate(
+        cfg,
+        scaled_field,
+        2,
+        opts,
+        capture_step_history=True,
+        step_history_capacity=4096,
+    )
+
+    base_history = base_result.meta.get("step_history")
+    scaled_history = scaled_result.meta.get("step_history")
+    assert isinstance(base_history, dict)
+    assert isinstance(scaled_history, dict)
+
+    base_steps = [float(v) for v in base_history.get("step_size", [])]
+    scaled_steps = [float(v) for v in scaled_history.get("step_size", [])]
+    base_errors = [float(v) for v in base_history.get("error", [])]
+    scaled_errors = [float(v) for v in scaled_history.get("error", [])]
+    assert len(base_steps) > 0
+    assert len(base_errors) > 0
+    assert len(scaled_steps) > 0
+    assert len(scaled_errors) > 0
+    assert all(math.isfinite(v) and v >= 0.0 for v in base_errors)
+    assert all(math.isfinite(v) and v >= 0.0 for v in scaled_errors)
+
+    base_errors_sorted = sorted(base_errors)
+    scaled_errors_sorted = sorted(scaled_errors)
+    base_med = base_errors_sorted[len(base_errors_sorted) // 2]
+    scaled_med = scaled_errors_sorted[len(scaled_errors_sorted) // 2]
+    med_ratio = scaled_med / max(base_med, 1e-20)
+    assert 0.10 <= med_ratio <= 10.0, (
+        f"relative adaptive error changed by more than one order of magnitude under amplitude scaling: "
+        f"median ratio={med_ratio}"
+    )
+    steps_ratio = float(len(scaled_steps)) / float(len(base_steps))
+    assert 0.25 <= steps_ratio <= 4.0, (
+        f"adaptive step-count change under amplitude scaling is unexpectedly large: ratio={steps_ratio}"
+    )
+
+
+def test_adaptive_tighter_tolerance_reduces_final_error(api, opts):
+    n = 192
+    dt = 0.004
+    z_final = 0.06
+    t = _centered_time_grid(n, dt)
+    omega = _omega_grid_unshifted(n, dt)
+    a0 = [complex(math.exp(-((ti / 0.10) ** 2)), 0.0) for ti in t]
+
+    common = dict(
+        propagation_distance=z_final,
+        starting_step_size=1e-3,
+        max_step_size=8e-3,
+        min_step_size=1e-5,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*c0*A*I",
+            constants=[6.0, 0.0, 0.0, 0.0],
+        ),
+    )
+
+    loose_cfg = prepare_sim_config(n, error_tolerance=1e-5, **common)
+    tight_cfg = prepare_sim_config(n, error_tolerance=1e-7, **common)
+    reference_cfg = prepare_sim_config(
+        n,
+        propagation_distance=z_final,
+        starting_step_size=2.5e-4,
+        max_step_size=2.5e-4,
+        min_step_size=2.5e-4,
+        error_tolerance=1e-7,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*c0*A*I",
+            constants=[6.0, 0.0, 0.0, 0.0],
+        ),
+    )
+
+    loose_result = api.propagate(
+        loose_cfg,
+        a0,
+        2,
+        opts,
+        capture_step_history=True,
+        step_history_capacity=4096,
+    )
+    tight_result = api.propagate(
+        tight_cfg,
+        a0,
+        2,
+        opts,
+        capture_step_history=True,
+        step_history_capacity=4096,
+    )
+    reference_final = api.propagate(reference_cfg, a0, 2, opts).records[1]
+
+    loose_final = loose_result.records[1]
+    tight_final = tight_result.records[1]
+    loose_rel_err = _relative_l2_error(loose_final, reference_final)
+    tight_rel_err = _relative_l2_error(tight_final, reference_final)
+    assert tight_rel_err <= loose_rel_err, (
+        f"tight tolerance should not worsen final error: loose={loose_rel_err}, tight={tight_rel_err}"
+    )
+
+    loose_history = loose_result.meta.get("step_history")
+    tight_history = tight_result.meta.get("step_history")
+    assert isinstance(loose_history, dict)
+    assert isinstance(tight_history, dict)
+    loose_steps = [float(v) for v in loose_history.get("step_size", [])]
+    tight_steps = [float(v) for v in tight_history.get("step_size", [])]
+    assert len(loose_steps) > 0
+    assert len(tight_steps) > 0
+    assert len(tight_steps) >= len(loose_steps), (
+        f"tight tolerance should require at least as many accepted steps: loose={len(loose_steps)}, "
+        f"tight={len(tight_steps)}"
+    )
+
+
+def test_adaptive_min_step_out_of_tolerance_emits_warning(api, opts):
+    n = 96
+    dt = 0.01
+    z_final = 0.04
+    min_step_size = 1e-4
+    t = _centered_time_grid(n, dt)
+    omega = _omega_grid_unshifted(n, dt)
+    a0 = [complex(math.exp(-((ti / 0.09) ** 2)), 0.0) for ti in t]
+    tol = 1e-30
+
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=z_final,
+        starting_step_size=1e-3,
+        max_step_size=2e-3,
+        min_step_size=min_step_size,
+        error_tolerance=tol,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*c0*A*I",
+            constants=[20.0, 0.0, 0.0, 0.0],
+        ),
+    )
+
+    api.set_log_level(NLOLIB_LOG_LEVEL_WARN)
+    api.set_log_buffer(256 * 1024)
+    api.clear_log_buffer()
+    result = api.propagate(
+        cfg,
+        a0,
+        2,
+        opts,
+        capture_step_history=True,
+        step_history_capacity=4096,
+    )
+    logs = api.read_log_buffer(consume=True, max_bytes=256 * 1024)
+
+    history = result.meta.get("step_history")
+    assert isinstance(history, dict)
+    step_sizes = [float(v) for v in history.get("step_size", [])]
+    errors = [float(v) for v in history.get("error", [])]
+    assert len(step_sizes) > 0
+    assert len(errors) > 0
+
+    hit_min_step = any(v <= (min_step_size * (1.0 + 1e-12)) for v in step_sizes)
+    exceeded_tol = any(v > tol for v in errors)
+    assert hit_min_step and exceeded_tol, "test setup did not reach min-step out-of-tolerance regime"
+    assert "adaptive solver reached min_step_size while local relative error remains above tolerance" in logs
+
+
 def test_second_order_soliton_intensity_error(api, opts):
     beta2 = -0.01
     gamma = 0.01
@@ -975,6 +1185,9 @@ def main():
     test_kerr_raman_rejects_coupled_mode(api, opts)
     test_linear_drift_signed_prediction(api, opts)
     test_adaptive_embedded_error_estimator_remains_stable(api, opts)
+    test_adaptive_relative_error_is_amplitude_scale_invariant(api, opts)
+    test_adaptive_tighter_tolerance_reduces_final_error(api, opts)
+    test_adaptive_min_step_out_of_tolerance_emits_warning(api, opts)
     test_second_order_soliton_intensity_error(api, opts)
     test_fixed_step_fundamental_soliton_order(api, opts)
     print("test_python_operator_regression: runtime-operator propagation regressions validated.")

@@ -141,6 +141,19 @@ Common migration examples:
 - `i*gamma*I` -> `i*gamma*A*I`
 - `i*gamma*I + i*V` -> `i*A*(gamma*I + V)`
 
+## Adaptive Error Control Semantics
+
+- Reference formulation: Balac-Mahé embedded ERK4(3)-IP local-defect control.
+- Solver keeps the embedded pair construction in RK4IP form (`A^[4]`, `A^[3]`) and controls steps with:
+  - `delta_rel = sqrt(sum(|A^[4]-A^[3]|^2) / sum((a_floor + |A^[4]|)^2))`
+  - accepted when `delta_rel <= error_tolerance`
+  - adaptive update uses `h_next = clamp(h * (error_tolerance / delta_rel)^(1/4), h_min, h_max)`
+- Default defect floor is `a_floor = 1e-14`.
+- Python `rtol` is an alias for `error_tolerance`; both now map to this relative defect threshold.
+- `step_history.error` stores the same relative defect (`delta_rel`) for each accepted adaptive step.
+- Previous behavior (removed): absolute L2-like defect scaling `sqrt(dt * sum |A^[4]-A^[3]|^2)` compared directly to `error_tolerance`, which made tolerance behavior depend strongly on signal scale and grid size.
+- Min-step safeguard: if `h_min` is reached while `delta_rel > error_tolerance`, the run continues with constrained steps and emits a warning.
+
 ## Build Targets and Usage
 
 Build the shared library:
