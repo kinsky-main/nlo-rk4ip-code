@@ -27,19 +27,18 @@ if str(PYTHON_API_DIR) not in sys.path:
 import nlolib as nlo
 
 
-def _configure_runtime_logging(api: nlo.NLolib) -> None:
+def _configure_runtime_logging() -> None:
     try:
-        api.set_log_level(nlo.NLOLIB_LOG_LEVEL_ERROR)
+        nlo.set_log_level(nlo.NLOLIB_LOG_LEVEL_ERROR)
     except Exception:
         pass
     try:
-        api.set_progress_options(enabled=False, milestone_percent=5, emit_on_step_adjust=False)
+        nlo.set_progress_options(enabled=False, milestone_percent=5, emit_on_step_adjust=False)
     except Exception:
         pass
 
 def _run(args: argparse.Namespace) -> float:
-    api = nlo.NLolib()
-    _configure_runtime_logging(api)
+    _configure_runtime_logging()
     db = ExampleRunDB(args.db_path)
     example_name = "two_mode_linear_beating_rk4ip"
     case_key = "default"
@@ -56,15 +55,10 @@ def _run(args: argparse.Namespace) -> float:
         kappa = 2.0
         z_final = 1.0
         num_records = 200
-        sim_cfg = nlo.prepare_sim_config(
-            2,
-            propagation_distance=z_final,
-            starting_step_size=1e-3,
-            max_step_size=1e-3,
-            min_step_size=1e-3,
-            error_tolerance=1e-6,
-            pulse_period=2.0,
+        pulse = nlo.PulseSpec(
+            samples=[complex(1.0, 0.0), complex(0.0, 0.0)],
             delta_time=1.0,
+            pulse_period=2.0,
             tensor_nt=2,
             tensor_nx=1,
             tensor_ny=1,
@@ -72,11 +66,9 @@ def _run(args: argparse.Namespace) -> float:
             frequency_grid=[complex(1.0, 0.0), complex(-1.0, 0.0)],
             delta_x=1.0,
             delta_y=1.0,
-            runtime=nlo.RuntimeOperators(
-                linear_factor_fn=lambda A, w: (1.0j * kappa) * w,
-                nonlinear_fn=lambda A, I: 0.0,
-            ),
         )
+        linear_operator = nlo.OperatorSpec(fn=lambda A, w: (1.0j * kappa) * w)
+        nonlinear_operator = nlo.OperatorSpec(fn=lambda A, I: 0.0)
         exec_options = nlo.default_execution_options(
             backend_type=nlo.NLO_VECTOR_BACKEND_AUTO,
             fft_backend=nlo.NLO_FFT_BACKEND_AUTO,
@@ -87,11 +79,18 @@ def _run(args: argparse.Namespace) -> float:
             case_key=case_key,
             chunk_records=32,
         )
-        result = api.propagate(
-            sim_cfg,
-            [complex(1.0, 0.0), complex(0.0, 0.0)],
-            num_records,
-            exec_options,
+        t_eval = np.linspace(0.0, float(z_final), int(num_records)).tolist()
+        result = nlo.propagate(
+            pulse,
+            linear_operator,
+            nonlinear_operator,
+            propagation_distance=float(z_final),
+            t_eval=t_eval,
+            first_step=1e-3,
+            max_step=1e-3,
+            min_step=1e-3,
+            rtol=1e-6,
+            exec_options=exec_options,
             sqlite_path=storage_kwargs["sqlite_path"],
             run_id=storage_kwargs["run_id"],
             chunk_records=storage_kwargs["chunk_records"],

@@ -10,6 +10,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import numpy as np
 from backend.app_base import ExampleAppBase
 from backend.storage import ExampleRunDB
 
@@ -18,7 +19,7 @@ PYTHON_API_DIR = REPO_ROOT / "python"
 if str(PYTHON_API_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_API_DIR))
 
-from nlolib import NLolib, OperatorSpec, PulseSpec
+import nlolib
 
 
 def _run(args: argparse.Namespace) -> None:
@@ -26,8 +27,7 @@ def _run(args: argparse.Namespace) -> None:
     example_name = "sqlite_snapshot_chunking_demo"
     case_key = "default"
 
-    api = NLolib()
-    if not api.storage_is_available():
+    if not nlolib.storage_is_available():
         raise RuntimeError(
             "This nlolib build does not include SQLite storage support. "
             "Reconfigure/build with SQLite available."
@@ -39,14 +39,14 @@ def _run(args: argparse.Namespace) -> None:
     field0 = [complex(math.exp(-(u * u)), 0.0) for u in t]
     freq = [complex(i, 0.0) for i in range(nt)]
 
-    pulse = PulseSpec(
+    pulse = nlolib.PulseSpec(
         samples=field0,
         delta_time=1.0 / nt,
         pulse_period=1.0,
         frequency_grid=freq,
     )
-    linear = OperatorSpec(fn=lambda A, w: 0.0)
-    nonlinear = OperatorSpec(fn=lambda A, I: 0.0)
+    linear = nlolib.OperatorSpec(fn=lambda A, w: 0.0)
+    nonlinear = nlolib.OperatorSpec(fn=lambda A, I: 0.0)
 
     if args.replot:
         run_group = db.resolve_replot_group(example_name, args.run_group)
@@ -64,14 +64,13 @@ def _run(args: argparse.Namespace) -> None:
             chunk_records=6,
             sqlite_max_bytes=50 * 1024 * 1024 * 1024,
         )
-        result = api.propagate(
+        t_eval = [0.2] if int(num_records) == 1 else [float(v) for v in np.linspace(0.0, 0.2, int(num_records))]
+        result = nlolib.propagate(
             pulse,
             linear,
             nonlinear,
             propagation_distance=0.2,
-            records=num_records,
-            output="dense",
-            preset="balanced",
+            t_eval=t_eval,
             sqlite_path=storage_kwargs["sqlite_path"],
             run_id=storage_kwargs["run_id"],
             chunk_records=storage_kwargs["chunk_records"],

@@ -243,35 +243,27 @@ class GrinSolitonApp:
                 linear_fn=lambda A, D, h: np.exp(h * D),
                 nonlinear_fn=lambda A, I, V: (1.0j * A) * (cfg.gamma * I + V),
             )
-            sim_cfg = self.nlo.prepare_sim_config(
-                cfg.nt * cfg.nx * cfg.ny,
+            z_axis, records_flat = self.runner.propagate_tensor3d_records(
+                _flatten_tfast(field0),
+                nt=int(cfg.nt),
+                nx=int(cfg.nx),
+                ny=int(cfg.ny),
+                num_records=int(cfg.num_records),
                 propagation_distance=float(cfg.z_final),
                 starting_step_size=float(cfg.step_size),
                 max_step_size=0.01,
                 min_step_size=0.00001,
                 error_tolerance=1e-6,
+                delta_x=float(cfg.dx),
+                delta_y=float(cfg.dy),
+                delta_time=float(cfg.dt),
                 pulse_period=float(cfg.nt) * cfg.dt,
-                delta_time=cfg.dt,
-                tensor_nt=cfg.nt,
-                tensor_nx=cfg.nx,
-                tensor_ny=cfg.ny,
-                tensor_layout=int(self.nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
-                frequency_grid=[complex(float(w), 0.0) for w in omega],
-                delta_x=cfg.dx,
-                delta_y=cfg.dy,
-                potential_grid=_flatten_xy_tfast(potential_xy).tolist(),
+                frequency_grid=omega,
+                potential_grid=_flatten_xy_tfast(potential_xy),
                 runtime=runtime,
-            )
-            result = self.runner.api.propagate(
-                sim_cfg,
-                _flatten_tfast(field0).tolist(),
-                int(cfg.num_records),
-                exec_options=self.exec_options.to_ctypes(self.nlo),
+                exec_options=self.exec_options,
                 **storage_kwargs,
             )
-            self.runner.last_meta = dict(result.meta)
-            z_axis = np.asarray(result.z_axis, dtype=np.float64)
-            records_flat = np.asarray(result.records, dtype=np.complex128).reshape(cfg.num_records, cfg.nt * cfg.ny * cfg.nx)
             self.db.save_case_from_solver_meta(
                 example_name=self.example_name,
                 run_group=run_group,
@@ -645,35 +637,27 @@ class GrinSolitonApp:
                 case_key=case_key,
                 chunk_records=2,
             )
-            sim_cfg = self.nlo.prepare_sim_config(
-                cfg.nt * cfg.nx * cfg.ny,
+            z_axis, records_flat = self.runner.propagate_tensor3d_records(
+                _flatten_tfast(field0),
+                nt=int(cfg.nt),
+                nx=int(cfg.nx),
+                ny=int(cfg.ny),
+                num_records=int(cfg.num_records),
                 propagation_distance=float(cfg.z_final),
                 starting_step_size=float(cfg.step_size),
                 max_step_size=0.005,
                 min_step_size=1.0e-5,
                 error_tolerance=1e-7,
+                delta_x=float(cfg.dx),
+                delta_y=float(cfg.dy),
+                delta_time=float(cfg.dt),
                 pulse_period=float(cfg.nt) * cfg.dt,
-                delta_time=cfg.dt,
-                tensor_nt=cfg.nt,
-                tensor_nx=cfg.nx,
-                tensor_ny=cfg.ny,
-                tensor_layout=int(self.nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
-                frequency_grid=[complex(float(w), 0.0) for w in omega],
-                delta_x=cfg.dx,
-                delta_y=cfg.dy,
-                potential_grid=[0.0 + 0.0j] * (cfg.nt * cfg.nx * cfg.ny),
+                frequency_grid=omega,
+                potential_grid=np.zeros(cfg.nt * cfg.nx * cfg.ny, dtype=np.complex128),
                 runtime=runtime,
-            )
-            result = self.runner.api.propagate(
-                sim_cfg,
-                _flatten_tfast(field0).tolist(),
-                int(cfg.num_records),
-                exec_options=self.exec_options.to_ctypes(self.nlo),
+                exec_options=self.exec_options,
                 **storage_kwargs,
             )
-            self.runner.last_meta = dict(result.meta)
-            z_axis = np.asarray(result.z_axis, dtype=np.float64)
-            records_flat = np.asarray(result.records, dtype=np.complex128).reshape(cfg.num_records, cfg.nt * cfg.ny * cfg.nx)
             records = np.asarray([_unflatten_record_tfast(row, cfg.nt, cfg.ny, cfg.nx) for row in records_flat], dtype=np.complex128)
             self.db.save_case_from_solver_meta(
                 example_name=self.example_name,

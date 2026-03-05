@@ -68,7 +68,6 @@ def _run_case(
     storage_kwargs: dict[str, object] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, object]]:
     nlo = runner.nlo
-    api = runner.api
 
     t = (np.arange(cfg.nt, dtype=np.float64) - 0.5 * (cfg.nt - 1)) * cfg.dt
     x = (np.arange(cfg.nx, dtype=np.float64) - 0.5 * (cfg.nx - 1)) * cfg.dx
@@ -89,27 +88,6 @@ def _run_case(
         linear_fn=lambda A, D, h: np.exp(h * D),
         nonlinear_fn=lambda A, I, V: (1.0j * A) * (gamma * I + V),
     )
-    sim_cfg = nlo.prepare_sim_config(
-        cfg.nt * cfg.nx * cfg.ny,
-        propagation_distance=float(cfg.z_final),
-        starting_step_size=8.0e-4,
-        max_step_size=2.0e-3,
-        min_step_size=1.0e-8,
-        error_tolerance=2.0e-6,
-        pulse_period=float(cfg.nt) * cfg.dt,
-        delta_time=cfg.dt,
-        tensor_nt=cfg.nt,
-        tensor_nx=cfg.nx,
-        tensor_ny=cfg.ny,
-        tensor_layout=int(nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
-        frequency_grid=[complex(float(w), 0.0) for w in omega],
-        delta_x=cfg.dx,
-        delta_y=cfg.dy,
-        potential_grid=potential_tfast.tolist(),
-        runtime=runtime,
-    )
-
-    exec_options_ctypes = exec_options.to_ctypes(nlo)
     propagate_kwargs: dict[str, object] = {}
     if storage_kwargs is not None:
         propagate_kwargs = {
@@ -119,10 +97,29 @@ def _run_case(
             "sqlite_max_bytes": storage_kwargs["sqlite_max_bytes"],
             "log_final_output_field_to_db": storage_kwargs["log_final_output_field_to_db"],
         }
-    result = api.propagate(sim_cfg, _flatten_tfast(field0).tolist(), cfg.num_records, exec_options_ctypes, **propagate_kwargs)
-    records = _unflatten_records_tfast(result.records, int(cfg.num_records), int(cfg.nt), int(cfg.ny), int(cfg.nx))
-    z_records = np.asarray(result.z_axis, dtype=np.float64)
-    return t, x, y, z_records, field0, records, dict(result.meta)
+    z_records, records_flat = runner.propagate_tensor3d_records(
+        _flatten_tfast(field0),
+        nt=int(cfg.nt),
+        nx=int(cfg.nx),
+        ny=int(cfg.ny),
+        num_records=int(cfg.num_records),
+        propagation_distance=float(cfg.z_final),
+        starting_step_size=8.0e-4,
+        max_step_size=2.0e-3,
+        min_step_size=1.0e-8,
+        error_tolerance=2.0e-6,
+        delta_x=float(cfg.dx),
+        delta_y=float(cfg.dy),
+        delta_time=float(cfg.dt),
+        pulse_period=float(cfg.nt) * cfg.dt,
+        frequency_grid=omega,
+        potential_grid=potential_tfast,
+        runtime=runtime,
+        exec_options=exec_options,
+        **propagate_kwargs,
+    )
+    records = _unflatten_records_tfast(records_flat, int(cfg.num_records), int(cfg.nt), int(cfg.ny), int(cfg.nx))
+    return t, x, y, z_records, field0, records, dict(runner.last_meta)
 
 
 class FullCoupledGrinApp:

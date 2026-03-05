@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import sys
 import ctypes
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -165,7 +166,9 @@ class NloExampleRunner:
             ) from exc
 
         self.nlo = nlo
-        self.api = nlo.NLolib(path=library_path)
+        if library_path is not None:
+            os.environ["NLOLIB_LIBRARY"] = str(library_path)
+        self.api = nlo
         self.last_meta: dict[str, Any] = {}
 
     @staticmethod
@@ -189,14 +192,27 @@ class NloExampleRunner:
             forced_device_budget_bytes=options.forced_device_budget_bytes,
         )
 
-    @staticmethod
-    def _preset_from_error_tolerance(error_tolerance: float) -> str:
-        tol = float(error_tolerance)
-        if tol <= 1e-7:
-            return "accuracy"
-        if tol <= 5e-6:
-            return "balanced"
-        return "fast"
+    def _runtime_overrides(self, runtime_cfg: Any) -> dict[str, Any]:
+        if runtime_cfg is None:
+            return {}
+        overrides: dict[str, Any] = {}
+        for name in (
+            "nonlinear_model",
+            "nonlinear_gamma",
+            "raman_fraction",
+            "raman_tau1",
+            "raman_tau2",
+            "shock_omega0",
+            "raman_response_time",
+            "constants",
+            "constant_bindings",
+            "auto_capture_constants",
+        ):
+            if hasattr(runtime_cfg, name):
+                value = getattr(runtime_cfg, name)
+                if value is not None:
+                    overrides[name] = value
+        return overrides
 
     def propagate_temporal_records(
         self,
@@ -232,82 +248,51 @@ class NloExampleRunner:
         effective_options = self._effective_options(options, int(num_records))
         opts = effective_options.to_ctypes(self.nlo)
 
-        if runtime_cfg is not None or bool(sim_cfg.honor_solver_controls):
-            if runtime_cfg is None:
-                beta2_scale = 0.5 * float(sim_cfg.beta2)
-                loss = 0.5 * float(sim_cfg.alpha)
-                gamma = float(sim_cfg.gamma)
-                runtime_cfg = self.nlo.RuntimeOperators(
-                    linear_factor_fn=lambda A, w: ((1.0j * beta2_scale) * (w * w) - loss),
-                    nonlinear_fn=lambda A, I, V: (1.0j * A) * (gamma * I + V),
-                )
-            prepared = self.nlo.prepare_sim_config(
-                n,
-                propagation_distance=float(sim_cfg.z_final),
-                starting_step_size=float(sim_cfg.starting_step_size),
-                max_step_size=float(sim_cfg.max_step_size),
-                min_step_size=float(sim_cfg.min_step_size),
-                error_tolerance=float(sim_cfg.error_tolerance),
-                pulse_period=float(sim_cfg.resolved_pulse_period()),
-                delta_time=float(sim_cfg.dt),
-                frequency_grid=[complex(float(om), 0.0) for om in omega],
-                delta_x=1.0,
-                delta_y=1.0,
-                runtime=runtime_cfg,
-            )
-            low_result = self.api.propagate(
-                prepared,
-                field.tolist(),
-                int(num_records),
-                opts,
-                capture_step_history=bool(capture_step_history),
-                step_history_capacity=int(step_history_capacity),
-                sqlite_path=sqlite_path,
-                run_id=run_id,
-                sqlite_max_bytes=int(sqlite_max_bytes),
-                chunk_records=int(chunk_records),
-                log_final_output_field_to_db=bool(log_final_output_field_to_db),
-            )
-            self.last_meta = dict(low_result.meta)
-            records = np.asarray(
-                low_result.records,
-                dtype=np.complex128,
-            ).reshape(int(num_records), n)
-            if int(num_records) == 1:
-                z_records = np.asarray([float(sim_cfg.z_final)], dtype=np.float64)
-            else:
-                z_records = np.linspace(0.0, float(sim_cfg.z_final), int(num_records))
-            return z_records, records
-
         pulse = self.nlo.PulseSpec(
             samples=field.tolist(),
             delta_time=float(sim_cfg.dt),
             pulse_period=float(sim_cfg.resolved_pulse_period()),
             frequency_grid=[complex(float(om), 0.0) for om in omega],
         )
-        beta2_scale = 0.5 * float(sim_cfg.beta2)
-        loss = 0.5 * float(sim_cfg.alpha)
-        gamma = float(sim_cfg.gamma)
-        linear_operator = self.nlo.OperatorSpec(fn=lambda A, w: ((1.0j * beta2_scale) * (w * w) - loss))
-        nonlinear_operator = self.nlo.OperatorSpec(
-            fn=lambda A, I, V: (1.0j * A) * (gamma * I + V),
-        )
+        if runtime_cfg is not None and getattr(runtime_cfg, "linear_factor_fn", None) is not None:
+            linear_fn = runtime_cfg.linear_factor_fn
+        else:
+            beta2_scale = 0.5 * float(sim_cfg.beta2)
+            loss = 0.5 * float(sim_cfg.alpha)
+            linear_fn = lambda A, w: ((1.0j * beta2_scale) * (w * w) - loss)  # noqa: E731
+        if runtime_cfg is not None and getattr(runtime_cfg, "nonlinear_fn", None) is not None:
+            nonlinear_fn = runtime_cfg.nonlinear_fn
+        else:
+            gamma = float(sim_cfg.gamma)
+            nonlinear_fn = lambda A, I, V: (1.0j * A) * (gamma * I + V)  # noqa: E731
+        linear_operator = self.nlo.OperatorSpec(fn=linear_fn)
+        nonlinear_operator = self.nlo.OperatorSpec(fn=nonlinear_fn)
+        if int(num_records) == 1:
+            t_eval = [float(sim_cfg.z_final)]
+        else:
+            t_eval = np.linspace(0.0, float(sim_cfg.z_final), int(num_records)).tolist()
+        kwargs: dict[str, Any] = {
+            "propagation_distance": float(sim_cfg.z_final),
+            "t_eval": t_eval,
+            "exec_options": opts,
+            "first_step": float(sim_cfg.starting_step_size),
+            "max_step": float(sim_cfg.max_step_size),
+            "min_step": float(sim_cfg.min_step_size),
+            "rtol": float(sim_cfg.error_tolerance),
+            "capture_step_history": bool(capture_step_history),
+            "step_history_capacity": int(step_history_capacity),
+            "sqlite_path": sqlite_path,
+            "run_id": run_id,
+            "sqlite_max_bytes": int(sqlite_max_bytes),
+            "chunk_records": int(chunk_records),
+            "log_final_output_field_to_db": bool(log_final_output_field_to_db),
+        }
+        kwargs.update(self._runtime_overrides(runtime_cfg))
         result = self.api.propagate(
             pulse,
             linear_operator,
             nonlinear_operator,
-            propagation_distance=float(sim_cfg.z_final),
-            output=("final" if int(num_records) == 1 else "dense"),
-            preset=self._preset_from_error_tolerance(sim_cfg.error_tolerance),
-            records=int(num_records),
-            exec_options=opts,
-            capture_step_history=bool(capture_step_history),
-            step_history_capacity=int(step_history_capacity),
-            sqlite_path=sqlite_path,
-            run_id=run_id,
-            sqlite_max_bytes=int(sqlite_max_bytes),
-            chunk_records=int(chunk_records),
-            log_final_output_field_to_db=bool(log_final_output_field_to_db),
+            **kwargs,
         )
         self.last_meta = dict(result.meta)
         z_records = np.asarray(result.z_axis, dtype=np.float64)
@@ -372,15 +357,10 @@ class NloExampleRunner:
         effective_options = self._effective_options(options, int(num_records))
         opts = effective_options.to_ctypes(self.nlo)
 
-        prepared = self.nlo.prepare_sim_config(
-            n_total,
-            propagation_distance=float(propagation_distance),
-            starting_step_size=float(starting_step_size),
-            max_step_size=float(max_step_size),
-            min_step_size=float(min_step_size),
-            error_tolerance=float(error_tolerance),
-            pulse_period=float(pulse_period) if pulse_period is not None else float(nt_resolved) * float(delta_time),
+        pulse = self.nlo.PulseSpec(
+            samples=field.tolist(),
             delta_time=float(delta_time),
+            pulse_period=float(pulse_period) if pulse_period is not None else float(nt_resolved) * float(delta_time),
             tensor_nt=nt_resolved,
             tensor_nx=nx_resolved,
             tensor_ny=ny_resolved,
@@ -389,26 +369,46 @@ class NloExampleRunner:
             delta_x=float(delta_x),
             delta_y=float(delta_y),
             potential_grid=(None if potential_values is None else potential_values.tolist()),
-            runtime=runtime,
         )
-        low_result = self.api.propagate(
-            prepared,
-            field.tolist(),
-            int(num_records),
-            opts,
-            sqlite_path=sqlite_path,
-            run_id=run_id,
-            sqlite_max_bytes=int(sqlite_max_bytes),
-            chunk_records=int(chunk_records),
-            log_final_output_field_to_db=bool(log_final_output_field_to_db),
+        if runtime is not None and getattr(runtime, "linear_factor_fn", None) is not None:
+            linear_fn = runtime.linear_factor_fn
+        else:
+            linear_fn = lambda A, wt, kx, ky: 0.0  # noqa: E731
+        if runtime is not None and getattr(runtime, "nonlinear_fn", None) is not None:
+            nonlinear_fn = runtime.nonlinear_fn
+        else:
+            nonlinear_fn = lambda A, I, V: 0.0  # noqa: E731
+        linear_operator = self.nlo.OperatorSpec(fn=linear_fn)
+        nonlinear_operator = self.nlo.OperatorSpec(fn=nonlinear_fn)
+        if int(num_records) == 1:
+            t_eval = [float(propagation_distance)]
+        else:
+            t_eval = np.linspace(0.0, float(propagation_distance), int(num_records)).tolist()
+        kwargs: dict[str, Any] = {
+            "propagation_distance": float(propagation_distance),
+            "t_eval": t_eval,
+            "first_step": float(starting_step_size),
+            "max_step": float(max_step_size),
+            "min_step": float(min_step_size),
+            "rtol": float(error_tolerance),
+            "exec_options": opts,
+            "sqlite_path": sqlite_path,
+            "run_id": run_id,
+            "sqlite_max_bytes": int(sqlite_max_bytes),
+            "chunk_records": int(chunk_records),
+            "log_final_output_field_to_db": bool(log_final_output_field_to_db),
+        }
+        kwargs.update(self._runtime_overrides(runtime))
+        result = self.api.propagate(
+            pulse,
+            linear_operator,
+            nonlinear_operator,
+            **kwargs,
         )
-        self.last_meta = dict(low_result.meta)
+        self.last_meta = dict(result.meta)
         records = np.asarray(
-            low_result.records,
+            result.records,
             dtype=np.complex128,
         ).reshape(int(num_records), n_total)
-        if int(num_records) == 1:
-            z_records = np.asarray([float(propagation_distance)], dtype=np.float64)
-        else:
-            z_records = np.linspace(0.0, float(propagation_distance), int(num_records))
+        z_records = np.asarray(result.z_axis, dtype=np.float64)
         return z_records, records

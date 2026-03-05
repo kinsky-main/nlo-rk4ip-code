@@ -1457,6 +1457,16 @@ class NLolib:
                 "with tensor descriptors (tensor_nt/tensor_nx/tensor_ny)"
             )
         propagation_distance = kwargs.pop("propagation_distance", None)
+        pulse_period_override = kwargs.pop("pulse_period", None)
+        frequency_grid_override = kwargs.pop("frequency_grid", None)
+        tensor_nt_override = kwargs.pop("tensor_nt", None)
+        tensor_nx_override = kwargs.pop("tensor_nx", None)
+        tensor_ny_override = kwargs.pop("tensor_ny", None)
+        tensor_layout_override = kwargs.pop("tensor_layout", None)
+        delta_x_override = kwargs.pop("delta_x", None)
+        delta_y_override = kwargs.pop("delta_y", None)
+        spatial_frequency_grid_override = kwargs.pop("spatial_frequency_grid", None)
+        potential_grid_override = kwargs.pop("potential_grid", None)
         output = kwargs.pop("output", "dense")
         preset = kwargs.pop("preset", "balanced")
         records = kwargs.pop("records", None)
@@ -1475,6 +1485,16 @@ class NLolib:
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
         t_eval_raw = kwargs.pop("t_eval", None)
+        nonlinear_model_override = kwargs.pop("nonlinear_model", None)
+        nonlinear_gamma_override = kwargs.pop("nonlinear_gamma", None)
+        raman_fraction_override = kwargs.pop("raman_fraction", None)
+        raman_tau1_override = kwargs.pop("raman_tau1", None)
+        raman_tau2_override = kwargs.pop("raman_tau2", None)
+        shock_omega0_override = kwargs.pop("shock_omega0", None)
+        raman_response_time_override = kwargs.pop("raman_response_time", None)
+        constants_override = kwargs.pop("constants", None)
+        constant_bindings_override = kwargs.pop("constant_bindings", None)
+        auto_capture_constants_override = kwargs.pop("auto_capture_constants", None)
         if kwargs:
             raise TypeError(f"unexpected high-level propagate kwargs: {sorted(kwargs.keys())}")
         if propagation_distance is None:
@@ -1485,6 +1505,27 @@ class NLolib:
             raise ValueError("step_history_capacity must be > 0 when capture_step_history=True")
 
         pulse_spec = _normalize_pulse_spec(pulse)
+        if pulse_period_override is not None:
+            pulse_spec.pulse_period = float(pulse_period_override)
+        if frequency_grid_override is not None:
+            pulse_spec.frequency_grid = frequency_grid_override  # type: ignore[assignment]
+        if tensor_nt_override is not None:
+            pulse_spec.tensor_nt = int(tensor_nt_override)
+        if tensor_nx_override is not None:
+            pulse_spec.tensor_nx = int(tensor_nx_override)
+        if tensor_ny_override is not None:
+            pulse_spec.tensor_ny = int(tensor_ny_override)
+        if tensor_layout_override is not None:
+            pulse_spec.tensor_layout = int(tensor_layout_override)
+        if delta_x_override is not None:
+            pulse_spec.delta_x = float(delta_x_override)
+        if delta_y_override is not None:
+            pulse_spec.delta_y = float(delta_y_override)
+        if spatial_frequency_grid_override is not None:
+            pulse_spec.spatial_frequency_grid = spatial_frequency_grid_override  # type: ignore[assignment]
+        if potential_grid_override is not None:
+            pulse_spec.potential_grid = potential_grid_override  # type: ignore[assignment]
+
         profile = _solver_profile_defaults(preset, float(propagation_distance))
         if starting_step_size_override is not None:
             profile["starting_step_size"] = float(starting_step_size_override)
@@ -1558,6 +1599,26 @@ class NLolib:
             constant_bindings=binding_map if binding_map else None,
             auto_capture_constants=(not binding_map),
         )
+        if nonlinear_model_override is not None:
+            runtime.nonlinear_model = int(nonlinear_model_override)
+        if nonlinear_gamma_override is not None:
+            runtime.nonlinear_gamma = float(nonlinear_gamma_override)
+        if raman_fraction_override is not None:
+            runtime.raman_fraction = float(raman_fraction_override)
+        if raman_tau1_override is not None:
+            runtime.raman_tau1 = float(raman_tau1_override)
+        if raman_tau2_override is not None:
+            runtime.raman_tau2 = float(raman_tau2_override)
+        if shock_omega0_override is not None:
+            runtime.shock_omega0 = float(shock_omega0_override)
+        if raman_response_time_override is not None:
+            runtime.raman_response_time = raman_response_time_override  # type: ignore[assignment]
+        if constants_override is not None:
+            runtime.constants = constants_override  # type: ignore[assignment]
+        if constant_bindings_override is not None:
+            runtime.constant_bindings = constant_bindings_override  # type: ignore[assignment]
+        if auto_capture_constants_override is not None:
+            runtime.auto_capture_constants = bool(auto_capture_constants_override)
 
         config = prepare_sim_config(
             num_time_samples,

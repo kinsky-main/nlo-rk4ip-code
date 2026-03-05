@@ -10,14 +10,7 @@ import numpy as np
 from backend.app_base import ExampleAppBase
 from backend.runner import centered_time_grid
 from backend.storage import ExampleRunDB
-from nlolib import (
-    NLO_FFT_BACKEND_VKFFT,
-    NLO_VECTOR_BACKEND_AUTO,
-    NLolib,
-    OperatorSpec,
-    PulseSpec,
-    default_execution_options,
-)
+import nlolib
 
 
 def _run(args: argparse.Namespace) -> None:
@@ -39,36 +32,35 @@ def _run(args: argparse.Namespace) -> None:
         z_final = 1.0
         t = centered_time_grid(n, dt)
         field0 = np.exp(-((t / 0.20) ** 2)) * np.exp((-1.0j) * 12.0 * t)
-        pulse = PulseSpec(
+        pulse = nlolib.PulseSpec(
             samples=field0.astype(np.complex128).tolist(),
             delta_time=dt,
             pulse_period=n * dt,
         )
-        linear_operator = OperatorSpec(
+        linear_operator = nlolib.OperatorSpec(
             fn=lambda A, w: (1.0j * scale) * (w * w),
         )
-        nonlinear_operator = OperatorSpec(
+        nonlinear_operator = nlolib.OperatorSpec(
             fn=lambda A, I: (1.0j * 0.0) * I,
         )
-        exec_options = default_execution_options(
-            backend_type=NLO_VECTOR_BACKEND_AUTO,
-            fft_backend=NLO_FFT_BACKEND_VKFFT,
+        exec_options = nlolib.default_execution_options(
+            backend_type=nlolib.NLO_VECTOR_BACKEND_AUTO,
+            fft_backend=nlolib.NLO_FFT_BACKEND_VKFFT,
         )
-        api = NLolib()
         storage_kwargs = db.storage_kwargs(
             example_name=example_name,
             run_group=run_group,
             case_key=case_key,
             chunk_records=2,
         )
-        result = api.propagate(
+        t_eval = [float(v) for v in np.linspace(0.0, float(z_final), 2)]
+        result = nlolib.propagate(
             pulse,
             linear_operator,
             nonlinear_operator,
             propagation_distance=z_final,
-            output="dense",
-            preset="accuracy",
-            records=2,
+            t_eval=t_eval,
+            rtol=1e-7,
             exec_options=exec_options,
             sqlite_path=storage_kwargs["sqlite_path"],
             run_id=storage_kwargs["run_id"],
