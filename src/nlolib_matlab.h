@@ -310,6 +310,16 @@ typedef enum
 } nlolib_log_level;
 
 /**
+ * @brief Output stream selection for runtime progress TUI rendering.
+ */
+typedef enum
+{
+    NLOLIB_PROGRESS_STREAM_STDERR = 0,
+    NLOLIB_PROGRESS_STREAM_STDOUT = 1,
+    NLOLIB_PROGRESS_STREAM_BOTH = 2
+} nlolib_progress_stream_mode;
+
+/**
  * @brief Database size-limit behavior when snapshot storage reaches its cap.
  */
 typedef enum
@@ -467,7 +477,7 @@ nlolib_status nlolib_read_log_buffer(
 nlolib_status nlolib_set_log_level(int level);
 
 /**
- * @brief Configure runtime progress logging behavior.
+ * @brief Configure runtime progress TUI behavior.
  *
  * See `nlolib.h` for full parameter and return-value semantics.
  */
@@ -475,5 +485,12 @@ nlolib_status nlolib_set_progress_options(
     int enabled,
     int milestone_percent,
     int emit_on_step_adjust);
+
+/**
+ * @brief Configure output stream selection for runtime progress TUI lines.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_set_progress_stream(int stream_mode);
 
 #endif /* NLOLIB_MATLAB_H */
