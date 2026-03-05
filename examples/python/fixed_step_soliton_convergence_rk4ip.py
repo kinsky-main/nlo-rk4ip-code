@@ -1,19 +1,17 @@
 """
-Fixed-step soliton convergence sweep with analytical benchmark.
+Fixed-step soliton convergence sweep with internal numerical reference.
 
 Runs full solver propagations for a set of fixed step sizes and plots the
-total trajectory error against step size on log-log axes. The fitted slope is
-computed on a coarse-to-mid step window to avoid roundoff-floor contamination.
+total trajectory relative L2 error against step size on log-log axes. The
+finest finite step case is used as the internal reference trajectory.
 """
 
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import numpy as np
 from backend.app_base import ExampleAppBase
-from backend.metrics import mean_pointwise_abs_relative_error
 from backend.plotting import plot_convergence_loglog
 from backend.runner import (
     NloExampleRunner,
@@ -35,42 +33,41 @@ def _configure_runtime_logging(runner: NloExampleRunner) -> None:
         pass
 
 
-def _relative_l2_error(num: np.ndarray, ref: np.ndarray) -> float:
-    return mean_pointwise_abs_relative_error(
-        num,
-        ref,
-        context="fixed_step_soliton_convergence:trajectory_error",
-    )
+def _trajectory_relative_l2_error(num: np.ndarray, ref: np.ndarray) -> float:
+    num_flat = np.asarray(num, dtype=np.complex128).reshape(-1)
+    ref_flat = np.asarray(ref, dtype=np.complex128).reshape(-1)
+    if num_flat.shape != ref_flat.shape or num_flat.size <= 0:
+        return float("nan")
+    if not bool(np.all(np.isfinite(num_flat))) or not bool(np.all(np.isfinite(ref_flat))):
+        return float("nan")
+
+    diff_norm = float(np.linalg.norm(num_flat - ref_flat))
+    ref_norm = float(np.linalg.norm(ref_flat))
+    if (not math.isfinite(diff_norm)) or (not math.isfinite(ref_norm)) or ref_norm <= 0.0:
+        return float("nan")
+    return diff_norm / ref_norm
 
 
 def _total_trajectory_error(
     records: np.ndarray,
-    z_axis: np.ndarray,
-    tau: np.ndarray,
-    p0: float,
-    ld: float,
+    reference_records: np.ndarray,
     num_records_common: int,
 ) -> float:
-    m = min(int(num_records_common), int(records.shape[0]), int(z_axis.size))
+    m = min(int(num_records_common), int(records.shape[0]), int(reference_records.shape[0]))
     if m <= 0:
         return float("nan")
-    amp0 = (math.sqrt(p0) / np.cosh(tau)).astype(np.complex128)
-    z = np.asarray(z_axis[:m], dtype=np.float64)
-    ref = amp0[None, :] * np.exp(0.5j * (z[:, None] / float(ld)))
     num = np.asarray(records[:m], dtype=np.complex128)
-    return _relative_l2_error(num.reshape(-1), ref.reshape(-1))
+    ref = np.asarray(reference_records[:m], dtype=np.complex128)
+    return _trajectory_relative_l2_error(num, ref)
 
 
-def _step_count_from_case(case_key: str, meta: dict[str, object]) -> int:
-    meta_steps = int(meta.get("step_count", 0))
-    if meta_steps > 0:
-        return meta_steps
-    if case_key.startswith("steps_"):
-        try:
-            return int(case_key.split("_", 1)[1])
-        except Exception:
-            return 0
-    return 0
+def _step_count_from_key(case_key: str) -> int:
+    if not case_key.startswith("steps_"):
+        return 0
+    try:
+        return int(case_key.split("_", 1)[1])
+    except Exception:
+        return 0
 
 
 def _fit_loglog_slope(
@@ -93,58 +90,12 @@ def _fit_loglog_slope(
             "Check for diverged runs (non-finite errors) or zero/negative fit values."
         )
 
-    log_x = np.log(step_sizes[valid_mask])
-    log_y = np.log(errors[valid_mask])
-    mean_x = float(np.mean(log_x))
-    mean_y = float(np.mean(log_y))
-    dx = log_x - mean_x
-    dy = log_y - mean_y
-    var_x = float(np.dot(dx, dx))
-    if var_x <= 0.0:
-        raise RuntimeError("cannot fit convergence slope: zero variance in log(step_sizes).")
-    slope = float(np.dot(dx, dy) / var_x)
-    intercept = mean_y - (slope * mean_x)
+    log_x = np.asarray(np.log(step_sizes[valid_mask]), dtype=np.float64)
+    log_y = np.asarray(np.log(errors[valid_mask]), dtype=np.float64)
+    slope, intercept = np.polyfit(log_x, log_y, deg=1)
+    slope = float(slope)
+    intercept = float(intercept)
     return slope, intercept, valid_mask
-
-
-def _aligned_step_counts(
-    *,
-    min_steps: int,
-    max_steps: int,
-    count: int,
-    alignment: int,
-) -> np.ndarray:
-    if min_steps <= 0 or max_steps < min_steps:
-        raise ValueError("invalid min/max step bounds.")
-    if count <= 0:
-        raise ValueError("count must be positive.")
-    if alignment <= 0:
-        raise ValueError("alignment must be positive.")
-
-    lo_mult = max(1, int(math.ceil(float(min_steps) / float(alignment))))
-    hi_mult = max(lo_mult, int(math.floor(float(max_steps) / float(alignment))))
-    multipliers = np.round(np.geomspace(lo_mult, hi_mult, count), decimals=0).astype(int)
-    multipliers = np.clip(multipliers, lo_mult, hi_mult)
-    multipliers = np.unique(multipliers)
-    steps = multipliers * int(alignment)
-
-    if int(steps[0]) != min_steps:
-        steps = np.unique(np.concatenate((np.asarray([int(min_steps)]), steps)))
-    if int(steps[-1]) != max_steps:
-        steps = np.unique(np.concatenate((steps, np.asarray([int(max_steps)]))))
-    return np.asarray(steps, dtype=int)
-
-
-def _step_history_range(step_history: dict[str, object] | None) -> tuple[float, float] | None:
-    if not isinstance(step_history, dict):
-        return None
-    values = np.asarray(step_history.get("step_size", []), dtype=np.float64).reshape(-1)
-    if values.size <= 0:
-        return None
-    finite = values[np.isfinite(values)]
-    if finite.size <= 0:
-        return None
-    return float(np.min(finite)), float(np.max(finite))
 
 
 def _run(args) -> float:
@@ -153,34 +104,29 @@ def _run(args) -> float:
     alpha = 0.0
     tfwhm = 100e-3
     t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
-    p0 = abs(beta2) / (gamma * t0 * t0)
     ld = (t0 * t0) / abs(beta2)
-    z_final = 10.0
+    z0 = 0.5 * math.pi * ld
+    z_final = z0
 
     n = 2**9
     dt = (16.0 * t0) / n
-    t_axis = centered_time_grid(n, dt)
-    tau = t_axis / t0
     omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
+    tau = centered_time_grid(n, dt) / t0
+    p0 = abs(beta2) / (gamma * t0 * t0)
     a0 = (math.sqrt(p0) / np.cosh(tau)).astype(np.complex128)
 
     db = ExampleRunDB(args.db_path)
     example_name = "fixed_step_soliton_convergence_rk4ip"
 
     base_record_intervals = 16
-    step_counts_base = _aligned_step_counts(
-        min_steps=base_record_intervals,
-        max_steps=1024,
-        count=32,
-        alignment=base_record_intervals,
-    )
+    step_counts_base = np.geomspace(base_record_intervals, 1024 + 1, base_record_intervals, dtype=int)
     target_records = base_record_intervals + 1
 
     runner = NloExampleRunner()
     _configure_runtime_logging(runner)
     exec_options = SimulationOptions(backend="auto", fft_backend="auto")
 
-    run_data: list[tuple[int, float, np.ndarray, np.ndarray]] = []
+    run_data: list[tuple[int, float, np.ndarray]] = []
     if args.replot:
         run_group = db.resolve_replot_group(example_name, args.run_group)
         cases = db.list_cases(example_name=example_name, run_group=run_group)
@@ -188,24 +134,16 @@ def _run(args) -> float:
             raise RuntimeError(f"no cases found in run_group '{run_group}'.")
         for case in cases:
             loaded = db.load_case(example_name=example_name, run_group=run_group, case_key=case.case_key)
-            case_steps = _step_count_from_case(case.case_key, loaded.meta)
-            case_dz = float(loaded.meta.get("step_size", 0.0))
-            if case_dz <= 0.0 and case_steps > 0:
-                case_dz = z_final / float(case_steps)
+            case_steps = int(loaded.meta.get("step_count", 0))
+            if case_steps <= 0:
+                case_steps = _step_count_from_key(case.case_key)
+            case_dz = (float(loaded.z_end) / float(case_steps)) if case_steps > 0 else 0.0
             if case_steps <= 0 or case_dz <= 0.0:
                 continue
-            step_history = db.load_step_history(run_id=loaded.run_id)
-            step_range = _step_history_range(step_history)
-            if step_range is not None:
-                print(
-                    f"[replot] steps={case_steps:4d} requested_dz={case_dz:.6e} "
-                    f"applied_step_range=[{step_range[0]:.6e},{step_range[1]:.6e}]"
-                )
             run_data.append(
                 (
                     int(case_steps),
                     float(case_dz),
-                    np.asarray(loaded.z_axis, dtype=np.float64),
                     np.asarray(loaded.records, dtype=np.complex128),
                 )
             )
@@ -237,21 +175,13 @@ def _run(args) -> float:
                 case_key=case_key,
                 chunk_records=2,
             )
-            z_records, a_records = runner.propagate_temporal_records(
+            _, a_records = runner.propagate_temporal_records(
                 a0,
                 sim_cfg,
                 num_records=target_records,
                 exec_options=exec_options,
-                capture_step_history=True,
-                step_history_capacity=max(2048, int(step_count) + 256),
                 **storage_kwargs,
             )
-            step_range = _step_history_range(runner.last_meta.get("step_history"))
-            if step_range is not None:
-                print(
-                    f"[run] steps={int(step_count):4d} requested_dz={float(dz):.6e} "
-                    f"applied_step_range=[{step_range[0]:.6e},{step_range[1]:.6e}]"
-                )
             db.save_case_from_solver_meta(
                 example_name=example_name,
                 run_group=run_group,
@@ -262,13 +192,12 @@ def _run(args) -> float:
                     "step_size": float(dz),
                     "target_records": int(target_records),
                 },
-                save_step_history=True,
+                save_step_history=False,
             )
             run_data.append(
                 (
                     int(step_count),
                     float(dz),
-                    np.asarray(z_records, dtype=np.float64),
                     np.asarray(a_records, dtype=np.complex128),
                 )
             )
@@ -276,16 +205,23 @@ def _run(args) -> float:
     if len(run_data) < 2:
         raise RuntimeError("insufficient runs to compute convergence.")
 
-    min_records_common = min(int(records.shape[0]) for _, _, _, records in run_data)
+    run_data.sort(key=lambda row: int(row[0]))
+    min_records_common = min(int(records.shape[0]) for _, _, records in run_data)
     step_counts = np.asarray([entry[0] for entry in run_data], dtype=int)
     step_sizes = np.asarray([entry[1] for entry in run_data], dtype=np.float64)
-    step_sizes_norm = step_sizes / float(ld)
+    step_sizes_norm = step_sizes / float(z0)
     fit_mask = step_counts <= 128
+    records_finite = np.asarray(
+        [bool(np.all(np.isfinite(records[: min_records_common]))) for _, _, records in run_data],
+        dtype=bool,
+    )
+    finite_indices = np.flatnonzero(records_finite)
+    if finite_indices.size <= 0:
+        raise RuntimeError("all runs diverged; cannot compute convergence error.")
+    ref_idx = int(finite_indices[-1])
+    reference_records = np.asarray(run_data[ref_idx][2][:min_records_common], dtype=np.complex128)
     errors = np.asarray(
-        [
-            _total_trajectory_error(records, z_axis, tau, p0, ld, min_records_common)
-            for _, _, z_axis, records in run_data
-        ],
+        [_total_trajectory_error(records, reference_records, min_records_common) for _, _, records in run_data],
         dtype=np.float64,
     )
 
@@ -299,18 +235,30 @@ def _run(args) -> float:
         fitted_order,
         fitted_intercept,
         output_dir / "error_vs_fixed_step_size.png",
-        x_label="Normalized step size Delta z / L_D",
+        x_label="Normalized step size Delta z / Z0",
     )
 
     print(f"fixed-step soliton convergence summary (run_group={run_group}):")
     print(f"  total-error samples per run used = {min_records_common}")
-    for k, dz, err in zip(step_counts.tolist(), step_sizes, errors):
-        print(f"  steps={k:4d}  dz={dz:.6e}  total_error={err:.6e}")
+    print(f"  reference case (internal) = steps_{step_counts[ref_idx]}")
+    for k, dz, dz_norm, finite_records, err in zip(
+        step_counts.tolist(),
+        step_sizes,
+        step_sizes_norm,
+        records_finite.tolist(),
+        errors.tolist(),
+    ):
+        status = "finite" if finite_records else "diverged"
+        err_text = f"{err:.6e}" if math.isfinite(err) else "nan"
+        print(
+            f"  steps={k:4d}  dz={dz:.6e}  dz_over_z0={dz_norm:.6e}  "
+            f"status={status}  total_error={err_text}"
+        )
     fit_counts = step_counts[fit_mask_valid].tolist()
     print(f"fit window step counts = {fit_counts}")
     print(f"fitted order p = {fitted_order:.6f}")
-    print(f"fitted line: error ~= exp({fitted_intercept:.6f}) * (Delta z / L_D)^{fitted_order:.6f}")
-    print("expected RK4 scaling reference: O((Delta z / L_D)^4)")
+    print(f"fitted line: error ~= exp({fitted_intercept:.6f}) * (Delta z / Z0)^{fitted_order:.6f}")
+    print("expected RK4 scaling reference: O((Delta z / Z0)^4)")
     if fitted_order < 3.5:
         print("warning: observed order is below 4th-order expectation for this coupled soliton benchmark.")
         print("         this suggests a coupled-case integrator limitation rather than a plotting issue.")

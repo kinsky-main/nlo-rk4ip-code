@@ -413,6 +413,7 @@ def plot_wavelength_step_history(
     accepted_step_sizes: np.ndarray | None = None,
     proposed_step_sizes: np.ndarray | None = None,
     map_x_label: str = "Propagation distance z (m)",
+    map_y_label: str = "Wavelength (nm)",
     step_x_label: str = "Propagation distance z (m)",
     step_y_label: str = "Step size (m)",
 ) -> Path | None:
@@ -443,7 +444,7 @@ def plot_wavelength_step_history(
         vmax=1.0,
     )
     ax_map.set_xlabel(map_x_label)
-    ax_map.set_ylabel("Wavelength (nm)")
+    ax_map.set_ylabel(map_y_label)
     ax_map.set_box_aspect(1.0)
     cbar = fig.colorbar(mesh, ax=ax_map, pad=0.02)
     cbar.set_label("Normalized spectral intensity")

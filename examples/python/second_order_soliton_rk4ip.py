@@ -2,8 +2,8 @@
 Second-order soliton propagation check using the Python ctypes API.
 
 This example compares the numerical solver output against the known analytical
-breather solution at one soliton period and reports the average relative
-intensity error epsilon. The comparison is performed in normalized variables
+breather solution at one soliton period and reports a relative L2 intensity
+error epsilon. The comparison is performed in normalized variables
 using t = T / T0 and A(z, t) = sqrt(P0) * exp(-alpha * z / 2) * U(z, t).
 """
 
@@ -17,10 +17,6 @@ from pathlib import Path
 
 import numpy as np
 from backend.app_base import ExampleAppBase
-from backend.metrics import (
-    mean_pointwise_abs_relative_error,
-    mean_pointwise_abs_relative_error_curve,
-)
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
@@ -33,8 +29,11 @@ from backend.runner import (
     TemporalSimulationConfig,
     centered_time_grid,
 )
-from backend.spectral import omega_detuning_to_wavelength_nm
+from backend.spectral import (
+    SPEED_OF_LIGHT_M_PER_S,
+)
 from backend.storage import ExampleRunDB
+from backend.metrics import mean_pointwise_abs_relative_error, mean_pointwise_abs_relative_error_curve
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -102,14 +101,14 @@ def second_order_soliton_normalized_envelope(
     return numerator / denominator
 
 
-def average_relative_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
+def relative_l2_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
     intensity_num = np.abs(np.asarray(A_num, dtype=np.complex128)) ** 2
     intensity_true = np.abs(np.asarray(A_true, dtype=np.complex128)) ** 2
-    return mean_pointwise_abs_relative_error(
-        intensity_num,
-        intensity_true,
-        context="second_order_soliton:final_intensity_error",
-    )
+    diff_norm = float(np.linalg.norm(intensity_num - intensity_true))
+    ref_norm = float(np.linalg.norm(intensity_true))
+    if not np.isfinite(diff_norm) or not np.isfinite(ref_norm) or ref_norm <= 0.0:
+        return float("nan")
+    return diff_norm / ref_norm
 
 
 def analytical_initial_condition_error(
@@ -136,56 +135,49 @@ def compute_wavelength_spectral_map_from_records(
 
     n = int(A_records.shape[1])
     n_fft = int(n if fft_size_visual is None else max(int(fft_size_visual), n))
-    omega_shifted = 2.0 * np.pi * np.fft.fftshift(np.fft.fftfreq(n_fft, d=dt))
-    lambda_nm, valid = omega_detuning_to_wavelength_nm(
-        omega_shifted,
-        lambda0_nm,
-        time_unit_seconds=1.0e-12,
-    )
-
     field_records = np.asarray(A_records, dtype=np.complex128)
+    omega_shifted = 2.0 * np.pi * np.fft.fftshift(np.fft.fftfreq(n_fft, d=dt))
     spectra = np.fft.fftshift(np.fft.fft(field_records, n=n_fft, axis=1), axes=1)
-    spec_map = np.abs(spectra[:, valid]) ** 2
+    spec_omega = np.abs(spectra) ** 2
+    spec_omega = np.nan_to_num(spec_omega, nan=0.0, posinf=0.0, neginf=0.0)
+    spec_omega = np.clip(spec_omega, 0.0, None)
+
+    # Select a symmetric occupied detuning window first; this avoids nonlinear
+    # reciprocal-mapping skew from dominating the plotted support.
+    profile_omega = np.max(spec_omega, axis=0)
+    if profile_omega.size > 0:
+        threshold = max(float(np.max(profile_omega)) * 1e-3, 1.0e-18)
+        support_idx = np.flatnonzero(profile_omega >= threshold)
+        if support_idx.size >= 8:
+            omega_half_span = float(np.max(np.abs(omega_shifted[support_idx])))
+            if np.isfinite(omega_half_span) and omega_half_span > 0.0:
+                omega_limit = 1.02 * omega_half_span
+                band = np.abs(omega_shifted) <= omega_limit
+                if int(np.count_nonzero(band)) >= 8:
+                    omega_shifted = omega_shifted[band]
+                    spec_omega = spec_omega[:, band]
+
+    # Use a linearized wavelength axis around lambda0 for symmetric visualization:
+    # d(lambda)/d(omega) = -lambda0^2 / (2*pi*c).
+    c_nm_per_ps = SPEED_OF_LIGHT_M_PER_S * 1.0e-3
+    slope_nm_per_rad_ps = -((float(lambda0_nm) ** 2) / (2.0 * math.pi * c_nm_per_ps))
+    lambda_nm = float(lambda0_nm) + (slope_nm_per_rad_ps * omega_shifted)
+
+    valid = np.isfinite(lambda_nm) & (lambda_nm > 0.0)
+    if int(np.count_nonzero(valid)) < 8:
+        raise RuntimeError("linearized wavelength axis produced insufficient valid bins.")
+    lambda_nm = lambda_nm[valid]
+    spec_map = spec_omega[:, valid]
 
     order = np.argsort(lambda_nm)
     lambda_nm = lambda_nm[order]
     spec_map = spec_map[:, order]
-    spec_map = np.nan_to_num(spec_map, nan=0.0, posinf=0.0, neginf=0.0)
-    spec_map = np.clip(spec_map, 0.0, None)
 
     max_value = float(np.max(spec_map))
     if max_value > 0.0:
-        spec_map /= max_value
-
-    # Keep only the visibly occupied spectral band; this avoids an effectively
-    # blank map when tiny near-zero-frequency bins stretch lambda to huge values.
-    spectral_profile = np.max(spec_map, axis=0)
-    if spectral_profile.size > 0:
-        support_threshold = max(float(np.max(spectral_profile)) * 1e-3, 1e-12)
-        support_idx = np.flatnonzero(spectral_profile >= support_threshold)
-        if support_idx.size >= 8:
-            support_min = float(lambda_nm[int(support_idx[0])])
-            support_max = float(lambda_nm[int(support_idx[-1])])
-            half_span = max(abs(support_min - float(lambda0_nm)), abs(support_max - float(lambda0_nm)))
-            if half_span > 0.0:
-                half_span *= 1.02
-                lower = float(lambda0_nm) - half_span
-                upper = float(lambda0_nm) + half_span
-                band = (lambda_nm >= lower) & (lambda_nm <= upper)
-                if int(np.count_nonzero(band)) >= 8:
-                    lambda_nm = lambda_nm[band]
-                    spec_map = spec_map[:, band]
+        spec_map = spec_map / max_value
 
     return z_samples, lambda_nm, spec_map
-
-
-def relative_l2_error_curve(records: np.ndarray, reference_records: np.ndarray) -> np.ndarray:
-    return mean_pointwise_abs_relative_error_curve(
-        records,
-        reference_records,
-        context="second_order_soliton:record_error",
-    )
-
 
 def step_telemetry_from_meta(meta: dict[str, object] | None) -> StepTelemetry:
     if not meta:
@@ -308,8 +300,6 @@ def save_plots(
     U_num: np.ndarray,
     U_true: np.ndarray,
     error_curve: np.ndarray,
-    z_final: float,
-    z_final_norm: float,
     z_samples_norm: np.ndarray,
     lambda_nm: np.ndarray,
     spectral_map: np.ndarray,
@@ -329,6 +319,7 @@ def save_plots(
         accepted_step_sizes=telemetry_plot.accepted_step_sizes,
         proposed_step_sizes=telemetry_plot.next_step_sizes,
         map_x_label="Soliton Period z / Z0",
+        map_y_label=r"Linearized wavelength $\lambda_{lin}$ (nm)",
         step_x_label="Soliton Period z / Z0",
         step_y_label="Normalized Step Size z / Z0",
     )
@@ -365,8 +356,7 @@ def save_plots(
         z_samples_norm,
         error_curve,
         output_dir / "soliton_total_error_over_propagation.png",
-        
-        y_label="Mean pointwise abs-relative error (numerical vs analytical)",
+        y_label="Relative L2 intensity error (numerical vs analytical)",
         x_label="Normalized propagation z / Z0",
     )
     if p4 is not None:
@@ -463,8 +453,8 @@ def _run(args: argparse.Namespace) -> float:
         ld_tmp = (t0 * t0) / abs(beta2)
         z_final = 0.5 * math.pi * ld_tmp
 
-        n = 2**10
-        dt = (16.0 * t0) / n
+        n = 2**12
+        dt = (40.0 * t0) / n
         T = centered_time_grid(n, dt)
         t = to_dimensionless_time(T, t0)
         omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
@@ -544,8 +534,8 @@ def _run(args: argparse.Namespace) -> float:
 
     U_num = U_num_records[-1]
     U_true = U_true_records[-1]
-    epsilon = average_relative_intensity_error(U_num, U_true)
-    error_curve = relative_l2_error_curve(U_num_records, U_true_records)
+    epsilon = mean_pointwise_abs_relative_error(U_num, U_true, context="second_order_soliton:record_error")
+    error_curve = mean_pointwise_abs_relative_error_curve(U_num_records, U_true_records, context="second_order_soliton:error_curve")
     z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):
         raise RuntimeError("final epsilon is non-finite; numerical output is invalid.")
@@ -563,16 +553,13 @@ def _run(args: argparse.Namespace) -> float:
 
     z_map_norm = np.asarray(z_map, dtype=np.float64) / z0
     telemetry_plot = normalize_step_telemetry(telemetry, z0)
-    z_final_norm = float(z_final) / z0
 
     output_dir = args.output_dir
-    saved_paths = save_plots(
+    save_plots(
         t,
         U_num,
         U_true,
         error_curve,
-        z_final,
-        z_final_norm,
         z_map_norm,
         lambda_nm,
         spectral_map,
@@ -588,7 +575,7 @@ def _run(args: argparse.Namespace) -> float:
         f"exp(-alpha*z_final)/LNL={math.exp(-alpha * z_final) / lnl:.6e} 1/m."
     )
     print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
-    print(f"epsilon (mean pointwise abs-relative intensity error) = {epsilon:.6e}")
+    print(f"epsilon (relative L2 intensity error) = {epsilon:.6e}")
     if configured_start_step is not None:
         print(
             "configured solver controls: "

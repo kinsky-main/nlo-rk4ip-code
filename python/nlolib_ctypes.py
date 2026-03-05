@@ -730,7 +730,11 @@ def _parameterize_expression(
         return rewritten, constants
 
     constants = [float(value) for value in params]
-    return expression, constants
+    if not constants:
+        return expression, constants
+    # Sequence params map positionally to c0, c1, ... in the provided
+    # expression. Apply offset so chained operator specs do not rebind c-indices.
+    return _shift_constant_indices(expression, offset), constants
 
 
 def _coerce_operator_spec(operator: str | OperatorSpec | Mapping[str, object]) -> OperatorSpec:

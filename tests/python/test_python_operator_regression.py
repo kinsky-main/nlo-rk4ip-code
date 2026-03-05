@@ -866,9 +866,9 @@ def test_second_order_soliton_intensity_error(api, opts):
 
     n = 224
     tmax = 8.0 * t0
-    times = [(-tmax) + (2.0 * tmax) * float(i) / float(n - 1) for i in range(n)]
+    dt = (2.0 * tmax) / float(n)
+    times = _centered_time_grid(n, dt)
     t_dimless = [ti / t0 for ti in times]
-    dt = times[1] - times[0]
     omega = _omega_grid_unshifted(n, dt)
 
     u0 = [2.0 * _sech(ti) for ti in t_dimless]
