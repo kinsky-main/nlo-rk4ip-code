@@ -254,10 +254,8 @@ typedef struct {
     nlo_vec_buffer* field_working_vec;
     nlo_vec_buffer* field_freq_vec;
     nlo_vec_buffer* omega_power_vec;
-    nlo_vec_buffer* k_1_vec;
-    nlo_vec_buffer* k_2_vec;
-    nlo_vec_buffer* k_3_vec;
-    nlo_vec_buffer* k_4_vec;
+    nlo_vec_buffer* k_final_vec;
+    nlo_vec_buffer* k_temp_vec;
     nlo_vec_buffer* dispersion_factor_vec;
     nlo_vec_buffer* dispersion_operator_vec;
     nlo_vec_buffer* potential_vec;

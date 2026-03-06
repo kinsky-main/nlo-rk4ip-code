@@ -43,16 +43,10 @@ static size_t nlo_count_working_full_volume_vectors(const simulation_state* stat
     if (state->working_vectors.omega_power_vec != NULL) {
         count += 1u;
     }
-    if (state->working_vectors.k_1_vec != NULL) {
+    if (state->working_vectors.k_final_vec != NULL) {
         count += 1u;
     }
-    if (state->working_vectors.k_2_vec != NULL) {
-        count += 1u;
-    }
-    if (state->working_vectors.k_3_vec != NULL) {
-        count += 1u;
-    }
-    if (state->working_vectors.k_4_vec != NULL) {
+    if (state->working_vectors.k_temp_vec != NULL) {
         count += 1u;
     }
     if (state->working_vectors.dispersion_factor_vec != NULL) {

@@ -471,10 +471,10 @@ def _run(args: argparse.Namespace) -> float:
             num_time_samples=n,
             pulse_period=n * dt,
             omega=omega,
-            starting_step_size=0.001,
+            starting_step_size=1e-4,
             max_step_size=0.01,
-            min_step_size=0.00005,
-            error_tolerance=1e-9,
+            min_step_size=1e-9,
+            error_tolerance=1e-12,
             honor_solver_controls=True,
         )
         configured_start_step = float(sim_cfg.starting_step_size)

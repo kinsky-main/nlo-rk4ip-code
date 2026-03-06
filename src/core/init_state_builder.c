@@ -441,16 +441,10 @@ static size_t nlo_count_full_volume_vectors(const simulation_state* state)
     if (state->working_vectors.omega_power_vec != NULL) {
         count += 1u;
     }
-    if (state->working_vectors.k_1_vec != NULL) {
+    if (state->working_vectors.k_final_vec != NULL) {
         count += 1u;
     }
-    if (state->working_vectors.k_2_vec != NULL) {
-        count += 1u;
-    }
-    if (state->working_vectors.k_3_vec != NULL) {
-        count += 1u;
-    }
-    if (state->working_vectors.k_4_vec != NULL) {
+    if (state->working_vectors.k_temp_vec != NULL) {
         count += 1u;
     }
     if (state->working_vectors.dispersion_factor_vec != NULL) {
@@ -945,10 +939,8 @@ simulation_state* create_simulation_state_with_storage(
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.field_working_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.field_freq_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.omega_power_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_1_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_2_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_3_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_4_vec) != NLO_VEC_STATUS_OK ||
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_final_vec) != NLO_VEC_STATUS_OK ||
+        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_temp_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.dispersion_factor_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.dispersion_operator_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.potential_vec) != NLO_VEC_STATUS_OK ||
