@@ -552,7 +552,6 @@ void nlo_log_progress_begin(double z_start, double z_end)
     g_nlo_log_state.progress_last_step_index = 0u;
     g_nlo_log_state.progress_last_line_len = 0u;
     g_nlo_log_state.progress_line_visible = 0;
-    nlo_progress_render(0u, 0.0, g_nlo_log_state.progress_start_seconds, "start", 0u);
 }
 
 void nlo_log_progress_step_accepted(

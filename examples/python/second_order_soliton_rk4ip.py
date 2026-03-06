@@ -474,7 +474,7 @@ def _run(args: argparse.Namespace) -> float:
             starting_step_size=1e-4,
             max_step_size=0.01,
             min_step_size=1e-9,
-            error_tolerance=1e-12,
+            error_tolerance=1e-10,
             honor_solver_controls=True,
         )
         configured_start_step = float(sim_cfg.starting_step_size)

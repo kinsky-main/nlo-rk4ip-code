@@ -40,9 +40,6 @@ static size_t nlo_count_working_full_volume_vectors(const simulation_state* stat
     if (state->working_vectors.field_freq_vec != NULL) {
         count += 1u;
     }
-    if (state->working_vectors.omega_power_vec != NULL) {
-        count += 1u;
-    }
     if (state->working_vectors.k_final_vec != NULL) {
         count += 1u;
     }

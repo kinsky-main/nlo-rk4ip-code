@@ -21,7 +21,7 @@
  * @brief Number of persistent work vectors reserved by the solver state.
  */
 #ifndef NLO_WORK_VECTOR_COUNT
-#define NLO_WORK_VECTOR_COUNT 21u
+#define NLO_WORK_VECTOR_COUNT 20u
 #endif
 
 /**
@@ -253,7 +253,6 @@ typedef struct {
     nlo_vec_buffer* field_magnitude_vec;
     nlo_vec_buffer* field_working_vec;
     nlo_vec_buffer* field_freq_vec;
-    nlo_vec_buffer* omega_power_vec;
     nlo_vec_buffer* k_final_vec;
     nlo_vec_buffer* k_temp_vec;
     nlo_vec_buffer* dispersion_factor_vec;

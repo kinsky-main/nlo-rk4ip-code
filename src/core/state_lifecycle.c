@@ -36,7 +36,6 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_magnitude_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_working_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_freq_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.omega_power_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_final_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_temp_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.dispersion_factor_vec);
