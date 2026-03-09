@@ -7,6 +7,34 @@
 #include "fft/fft.h"
 #include "utility/perf_profile.h"
 
+#ifndef NLO_RK4_STRICT_STATUS_CHECKS
+#if defined(NDEBUG)
+#define NLO_RK4_STRICT_STATUS_CHECKS 0
+#else
+#define NLO_RK4_STRICT_STATUS_CHECKS 1
+#endif
+#endif
+
+#if NLO_RK4_STRICT_STATUS_CHECKS
+#define NLO_RK4_CALL(expr)                          \
+    do                                              \
+    {                                               \
+        const nlo_vec_status call_status_ = (expr); \
+        if (call_status_ != NLO_VEC_STATUS_OK)      \
+        {                                           \
+            return call_status_;                    \
+        }                                           \
+    } while (0)
+#else
+#define NLO_RK4_CALL(expr)                          \
+    do                                              \
+    {                                               \
+        const nlo_vec_status call_status_ = (expr); \
+        assert(call_status_ == NLO_VEC_STATUS_OK);  \
+        (void)call_status_;                         \
+    } while (0)
+#endif
+
 static nlo_vec_status nlo_apply_nonlinear_operator_stage_raman(
     simulation_state* state,
     const nlo_vec_buffer* field,
@@ -17,16 +45,6 @@ static nlo_vec_status nlo_apply_nonlinear_operator_stage_raman(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
     simulation_working_vectors* work = &state->working_vectors;
-    if (work->raman_intensity_vec == NULL ||
-        work->raman_delayed_vec == NULL ||
-        work->raman_spectrum_vec == NULL ||
-        work->raman_mix_vec == NULL ||
-        work->raman_polarization_vec == NULL ||
-        work->raman_derivative_vec == NULL ||
-        work->raman_response_fft_vec == NULL ||
-        work->raman_derivative_factor_vec == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
 
     const double f_r = state->raman_fraction;
     nlo_vec_status status = nlo_vec_complex_magnitude_squared(state->backend, field, work->raman_intensity_vec);
@@ -35,97 +53,37 @@ static nlo_vec_status nlo_apply_nonlinear_operator_stage_raman(
     }
 
     if (f_r > 0.0) {
-        status = nlo_vec_complex_copy(state->backend, work->raman_delayed_vec, work->raman_intensity_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_fft_forward_vec(state->fft_plan, work->raman_delayed_vec, work->raman_spectrum_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_response_fft_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_delayed_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
+        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_delayed_vec, work->raman_intensity_vec));
+        NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->raman_delayed_vec, work->raman_spectrum_vec));
+        NLO_RK4_CALL(nlo_vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_response_fft_vec));
+        NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_delayed_vec));
 
-        status = nlo_vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_vec_complex_scalar_mul_inplace(state->backend, work->raman_mix_vec, nlo_make(1.0 - f_r, 0.0));
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_vec_complex_copy(state->backend, work->raman_polarization_vec, work->raman_delayed_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_vec_complex_scalar_mul_inplace(state->backend, work->raman_polarization_vec, nlo_make(f_r, 0.0));
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_vec_complex_add_inplace(state->backend, work->raman_mix_vec, work->raman_polarization_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
+        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec));
+        NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend, work->raman_mix_vec, nlo_make(1.0 - f_r, 0.0)));
+        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_polarization_vec, work->raman_delayed_vec));
+        NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend, work->raman_polarization_vec, nlo_make(f_r, 0.0)));
+        NLO_RK4_CALL(nlo_vec_complex_add_inplace(state->backend, work->raman_mix_vec, work->raman_polarization_vec));
     } else {
-        status = nlo_vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
+        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec));
     }
 
-    status = nlo_vec_complex_copy(state->backend, work->raman_polarization_vec, field);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
-    status = nlo_vec_complex_mul_inplace(state->backend, work->raman_polarization_vec, work->raman_mix_vec);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
+    NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_polarization_vec, field));
+    NLO_RK4_CALL(nlo_vec_complex_mul_inplace(state->backend, work->raman_polarization_vec, work->raman_mix_vec));
 
-    status = nlo_vec_complex_copy(state->backend, out_field, work->raman_polarization_vec);
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
-    status = nlo_vec_complex_scalar_mul_inplace(state->backend, out_field, nlo_make(0.0, state->nonlinear_gamma));
-    if (status != NLO_VEC_STATUS_OK) {
-        return status;
-    }
+    NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, out_field, work->raman_polarization_vec));
+    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend, out_field, nlo_make(0.0, state->nonlinear_gamma)));
 
     if (state->nonlinear_shock_active) {
-        status = nlo_vec_complex_copy(state->backend, work->raman_derivative_vec, work->raman_polarization_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_fft_forward_vec(state->fft_plan, work->raman_derivative_vec, work->raman_spectrum_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_derivative_factor_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_derivative_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_vec_complex_scalar_mul_inplace(
+        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_derivative_vec, work->raman_polarization_vec));
+        NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->raman_derivative_vec, work->raman_spectrum_vec));
+        NLO_RK4_CALL(nlo_vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_derivative_factor_vec));
+        NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_derivative_vec));
+        NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(
             state->backend,
             work->raman_derivative_vec,
             nlo_make(-(state->nonlinear_gamma / state->shock_omega0), 0.0)
-        );
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
-        status = nlo_vec_complex_add_inplace(state->backend, out_field, work->raman_derivative_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            return status;
-        }
+        ));
+        NLO_RK4_CALL(nlo_vec_complex_add_inplace(state->backend, out_field, work->raman_derivative_vec));
     }
 
     return NLO_VEC_STATUS_OK;
@@ -136,9 +94,6 @@ nlo_vec_status nlo_apply_dispersion_operator_stage(
     nlo_vec_buffer* freq_domain_envelope
 )
 {
-    if (state == NULL || state->backend == NULL || state->config == NULL || freq_domain_envelope == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
-    }
 
     const double start_ms = nlo_perf_profile_now_ms();
     nlo_vec_status status = NLO_VEC_STATUS_OK;

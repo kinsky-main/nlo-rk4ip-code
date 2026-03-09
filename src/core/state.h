@@ -18,10 +18,10 @@
 #endif
 
 /**
- * @brief Number of persistent work vectors reserved by the solver state.
+ * @brief Number of steady-state full-volume work vectors used during propagation.
  */
 #ifndef NLO_WORK_VECTOR_COUNT
-#define NLO_WORK_VECTOR_COUNT 20u
+#define NLO_WORK_VECTOR_COUNT 17u
 #endif
 
 /**

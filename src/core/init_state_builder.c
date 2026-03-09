@@ -559,34 +559,6 @@ static int nlo_estimate_active_device_bytes(
     }
     active_bytes += full_volume_bytes;
 
-    if (state->tensor_mode_active) {
-        size_t axis_nt = 0u;
-        size_t axis_nx = 0u;
-        size_t axis_ny = 0u;
-        if (nlo_checked_mul_size_t(state->nt, 2u, &axis_nt) != 0 ||
-            nlo_checked_mul_size_t(state->nx, 2u, &axis_nx) != 0 ||
-            nlo_checked_mul_size_t(state->ny, 2u, &axis_ny) != 0) {
-            return -1;
-        }
-        if (axis_nt > SIZE_MAX - axis_nx) {
-            return -1;
-        }
-        size_t axis_elements = axis_nt + axis_nx;
-        if (axis_elements > SIZE_MAX - axis_ny) {
-            return -1;
-        }
-        axis_elements += axis_ny;
-
-        size_t axis_bytes = 0u;
-        if (nlo_checked_mul_size_t(axis_elements, sizeof(nlo_complex), &axis_bytes) != 0) {
-            return -1;
-        }
-        if (axis_bytes > SIZE_MAX - active_bytes) {
-            return -1;
-        }
-        active_bytes += axis_bytes;
-    }
-
     *out_active_bytes = active_bytes;
     return 0;
 }
@@ -638,24 +610,6 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     }
 
     size_t conservative_vec_count = 2u + NLO_WORK_VECTOR_COUNT;
-    if (state->init_vectors.wt_axis_vec != NULL) {
-        conservative_vec_count += 1u;
-    }
-    if (state->init_vectors.kx_axis_vec != NULL) {
-        conservative_vec_count += 1u;
-    }
-    if (state->init_vectors.ky_axis_vec != NULL) {
-        conservative_vec_count += 1u;
-    }
-    if (state->init_vectors.t_axis_vec != NULL) {
-        conservative_vec_count += 1u;
-    }
-    if (state->init_vectors.x_axis_vec != NULL) {
-        conservative_vec_count += 1u;
-    }
-    if (state->init_vectors.y_axis_vec != NULL) {
-        conservative_vec_count += 1u;
-    }
     if (state->working_vectors.wt_mesh_vec != NULL) {
         conservative_vec_count += 1u;
     }
@@ -824,7 +778,7 @@ simulation_state* create_simulation_state_with_storage(
     state->num_points_xy = spatial_nx * spatial_ny;
     state->num_recorded_samples = num_recorded_samples;
     const int coupled_mode = (spatial_nx > 1u || spatial_ny > 1u);
-    state->num_host_records = nlo_compute_host_record_capacity(num_time_samples, num_recorded_samples);
+    state->num_host_records = nlo_compute_host_record_capacity(config, num_time_samples, num_recorded_samples);
     const int storage_enabled = nlo_storage_options_enabled(storage_options);
     if (state->num_host_records == 0u && !storage_enabled) {
         nlo_state_debug_log_failure("host_record_capacity", NLO_VEC_STATUS_ALLOCATION_FAILED);

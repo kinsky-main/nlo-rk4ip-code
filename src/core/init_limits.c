@@ -31,6 +31,9 @@
 #ifndef NLO_DEVICE_RING_BUDGET_HEADROOM_DEN
 #define NLO_DEVICE_RING_BUDGET_HEADROOM_DEN 10u
 #endif
+
+static size_t nlo_estimate_active_vector_count(const sim_config* config);
+
 int nlo_checked_mul_size_t(size_t a, size_t b, size_t* out)
 {
     if (out == NULL) {
@@ -103,7 +106,11 @@ size_t nlo_apply_memory_headroom(size_t available_bytes)
     return (available_bytes / NLO_MEMORY_HEADROOM_DEN) * NLO_MEMORY_HEADROOM_NUM;
 }
 
-size_t nlo_compute_host_record_capacity(size_t num_time_samples, size_t requested_records)
+size_t nlo_compute_host_record_capacity(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t requested_records
+)
 {
     size_t available_bytes = nlo_query_available_system_memory_bytes();
     if (available_bytes == 0u) {
@@ -120,8 +127,10 @@ size_t nlo_compute_host_record_capacity(size_t num_time_samples, size_t requeste
         return 0u;
     }
 
+    const size_t active_vec_count = nlo_estimate_active_vector_count(config);
     size_t working_bytes = 0u;
-    if (nlo_checked_mul_size_t(per_record_bytes, NLO_WORK_VECTOR_COUNT, &working_bytes) != 0) {
+    if (active_vec_count == SIZE_MAX ||
+        nlo_checked_mul_size_t(per_record_bytes, active_vec_count, &working_bytes) != 0) {
         return 0u;
     }
 
@@ -245,7 +254,7 @@ int nlo_query_runtime_limits_internal(
                                  bytes_per_sample,
                                  &out_limits->estimated_required_working_set_bytes);
         out_limits->max_num_recorded_samples_in_memory =
-            nlo_compute_host_record_capacity(requested_num_time_samples, SIZE_MAX);
+            nlo_compute_host_record_capacity(config, requested_num_time_samples, SIZE_MAX);
     }
 
     size_t runtime_limit = max_samples_by_element_size;

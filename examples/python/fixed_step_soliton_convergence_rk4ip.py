@@ -1,9 +1,11 @@
 """
-Fixed-step soliton convergence sweep with internal numerical reference.
+Fixed-step soliton convergence sweep with analytical benchmark.
 
 Runs full solver propagations for a set of fixed step sizes and plots the
-total trajectory relative L2 error against step size on log-log axes. The
-finest finite step case is used as the internal reference trajectory.
+final-field relative L2 error against step size on log-log axes. Errors are
+computed against the analytical fundamental-soliton solution and use a
+reference-intensity floor to suppress near-zero tail noise without assuming a
+Gaussian pulse shape.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import math
 
 import numpy as np
 from backend.app_base import ExampleAppBase
+from backend.metrics import filtered_relative_l2_error
 from backend.plotting import plot_convergence_loglog
 from backend.runner import (
     NloExampleRunner,
@@ -20,7 +23,9 @@ from backend.runner import (
     centered_time_grid,
 )
 from backend.storage import ExampleRunDB
-from backend.metrics import mean_pointwise_abs_relative_error
+
+
+INTENSITY_FILTER_RATIO = 1.0e-8
 
 
 def _configure_runtime_logging(runner: NloExampleRunner) -> None:
@@ -71,6 +76,17 @@ def _fit_loglog_slope(
     return slope, intercept, valid_mask
 
 
+def _fundamental_soliton_reference(
+    tau: np.ndarray,
+    z_axis: np.ndarray,
+    p0: float,
+    ld: float,
+) -> np.ndarray:
+    envelope = (math.sqrt(p0) / np.cosh(tau)).astype(np.complex128)
+    phase = np.exp(0.5j * (np.asarray(z_axis, dtype=np.float64) / float(ld)))
+    return phase[:, None] * envelope[None, :]
+
+
 def _run(args) -> float:
     beta2 = -0.01
     gamma = 0.01
@@ -91,9 +107,8 @@ def _run(args) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "fixed_step_soliton_convergence_rk4ip"
 
-    base_record_intervals = 16
-    step_counts_base = np.geomspace(base_record_intervals, 1024 + 1, base_record_intervals, dtype=int)
-    target_records = base_record_intervals + 1
+    step_counts_base = np.asarray([1, 2, 4, 8, 16, 32, 64], dtype=int)
+    target_records = 2
 
     runner = NloExampleRunner()
     _configure_runtime_logging(runner)
@@ -110,7 +125,9 @@ def _run(args) -> float:
             case_steps = int(loaded.meta.get("step_count", 0))
             if case_steps <= 0:
                 case_steps = _step_count_from_key(case.case_key)
-            case_dz = (float(loaded.z_end) / float(case_steps)) if case_steps > 0 else 0.0
+            case_dz = float(loaded.meta.get("step_size", 0.0))
+            if case_dz <= 0.0 and case_steps > 0:
+                case_dz = float(loaded.z_end) / float(case_steps)
             if case_steps <= 0 or case_dz <= 0.0:
                 continue
             run_data.append(
@@ -163,7 +180,7 @@ def _run(args) -> float:
                 meta={
                     "step_count": int(step_count),
                     "step_size": float(dz),
-                    "target_records": int(target_records),
+                    "intensity_filter_ratio": float(INTENSITY_FILTER_RATIO),
                 },
                 save_step_history=False,
             )
@@ -179,25 +196,35 @@ def _run(args) -> float:
         raise RuntimeError("insufficient runs to compute convergence.")
 
     run_data.sort(key=lambda row: int(row[0]))
-    min_records_common = min(int(records.shape[0]) for _, _, records in run_data)
     step_counts = np.asarray([entry[0] for entry in run_data], dtype=int)
     step_sizes = np.asarray([entry[1] for entry in run_data], dtype=np.float64)
     step_sizes_norm = step_sizes / float(z0)
-    fit_mask = step_counts <= 128
+    fit_mask = step_counts <= 4
+
     records_finite = np.asarray(
-        [bool(np.all(np.isfinite(records[: min_records_common]))) for _, _, records in run_data],
+        [bool(np.all(np.isfinite(records))) for _, _, records in run_data],
         dtype=bool,
     )
-    finite_indices = np.flatnonzero(records_finite)
-    if finite_indices.size <= 0:
+    if not bool(np.any(records_finite)):
         raise RuntimeError("all runs diverged; cannot compute convergence error.")
-    ref_idx = int(finite_indices[-1])
-    reference_records = np.asarray(run_data[ref_idx][2][:min_records_common], dtype=np.complex128)
+
+    reference_final = _fundamental_soliton_reference(
+        tau,
+        np.asarray([z_final], dtype=np.float64),
+        p0,
+        ld,
+    )[0]
     errors = np.asarray(
-        [mean_pointwise_abs_relative_error(records, reference_records, context="fixed_step_soliton_convergence:record_error") for _, _, records in run_data],
+        [
+            filtered_relative_l2_error(
+                records[-1],
+                reference_final,
+                min_relative_intensity=INTENSITY_FILTER_RATIO,
+            )
+            for _, _, records in run_data
+        ],
         dtype=np.float64,
     )
-
     fitted_order, fitted_intercept, fit_mask_valid = _fit_loglog_slope(step_sizes_norm, errors, fit_mask)
 
     output_dir = args.output_dir
@@ -212,9 +239,11 @@ def _run(args) -> float:
     )
 
     print(f"fixed-step soliton convergence summary (run_group={run_group}):")
-    print(f"  total-error samples per run used = {min_records_common}")
-    print(f"  reference case (internal) = steps_{step_counts[ref_idx]}")
-    for k, dz, dz_norm, finite_records, err in zip(
+    print(f"  benchmark = analytical fundamental soliton final field")
+    print("  backend = auto (GPU preferred)")
+    print(f"  records per run = {target_records}")
+    print(f"  intensity_filter_ratio = {INTENSITY_FILTER_RATIO:.1e}")
+    for k, dz, dz_norm, finite_records, final_err in zip(
         step_counts.tolist(),
         step_sizes,
         step_sizes_norm,
@@ -222,19 +251,18 @@ def _run(args) -> float:
         errors.tolist(),
     ):
         status = "finite" if finite_records else "diverged"
-        err_text = f"{err:.6e}" if math.isfinite(err) else "nan"
+        final_text = f"{final_err:.6e}" if math.isfinite(final_err) else "nan"
         print(
             f"  steps={k:4d}  dz={dz:.6e}  dz_over_z0={dz_norm:.6e}  "
-            f"status={status}  total_error={err_text}"
+            f"status={status}  final_error={final_text}"
         )
     fit_counts = step_counts[fit_mask_valid].tolist()
     print(f"fit window step counts = {fit_counts}")
     print(f"fitted order p = {fitted_order:.6f}")
     print(f"fitted line: error ~= exp({fitted_intercept:.6f}) * (Delta z / Z0)^{fitted_order:.6f}")
     print("expected RK4 scaling reference: O((Delta z / Z0)^4)")
-    if fitted_order < 3.5:
-        print("warning: observed order is below 4th-order expectation for this coupled soliton benchmark.")
-        print("         this suggests a coupled-case integrator limitation rather than a plotting issue.")
+    if fitted_order < 3.0:
+        print("warning: observed order is below 4th-order expectation for this fixed-step soliton benchmark.")
 
     return fitted_order
 

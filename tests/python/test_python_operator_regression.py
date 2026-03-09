@@ -6,6 +6,7 @@ from nlolib import (
     NLO_NONLINEAR_MODEL_EXPR,
     NLO_NONLINEAR_MODEL_KERR_RAMAN,
     NLOLIB_LOG_LEVEL_WARN,
+    NLO_VECTOR_BACKEND_AUTO,
     NLO_VECTOR_BACKEND_CPU,
     NLolib,
     RuntimeOperators,
@@ -52,6 +53,29 @@ def _relative_l2_error(a, b):
     diff = [x - y for x, y in zip(a, b)]
     denom = max(_l2_norm(b), 1e-15)
     return _l2_norm(diff) / denom
+
+
+def _filtered_relative_l2_error(a, b, min_relative_intensity=1.0e-8):
+    if len(a) != len(b):
+        raise ValueError("a and b must have the same length.")
+    if min_relative_intensity < 0.0:
+        raise ValueError("min_relative_intensity must be >= 0.")
+
+    intensities = [(v.real * v.real) + (v.imag * v.imag) for v in b]
+    peak_intensity = max(intensities) if intensities else 0.0
+    if not (peak_intensity > 0.0):
+        return _relative_l2_error(a, b)
+
+    threshold = peak_intensity * float(min_relative_intensity)
+    filtered_a = []
+    filtered_b = []
+    for av, bv, intensity in zip(a, b, intensities):
+        if intensity >= threshold:
+            filtered_a.append(av)
+            filtered_b.append(bv)
+    if len(filtered_b) <= 0:
+        return _relative_l2_error(a, b)
+    return _relative_l2_error(filtered_a, filtered_b)
 
 
 def _fit_loglog_slope(x_values, y_values):
@@ -1111,13 +1135,19 @@ def test_second_order_soliton_intensity_error(api, opts):
 
 
 def test_fixed_step_fundamental_soliton_order(api, opts):
+    slope, errors = _fixed_step_fundamental_soliton_order_stats(api, opts)
+    assert slope >= 2.5, f"fixed-step fundamental soliton slope unexpectedly low: {slope}"
+    assert errors[0] > errors[-1], f"fixed-step refinement did not reduce final error: {errors}"
+
+
+def _fixed_step_fundamental_soliton_order_stats(api, opts):
     beta2 = -0.01
     gamma = 0.01
     tfwhm = 100e-3
     t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
     p0 = abs(beta2) / (gamma * t0 * t0)
     ld = (t0 * t0) / abs(beta2)
-    z_final = 0.5 * ld
+    z_final = 0.5 * math.pi * ld
 
     n = 512
     dt = (16.0 * t0) / float(n)
@@ -1126,7 +1156,7 @@ def test_fixed_step_fundamental_soliton_order(api, opts):
     omega = _omega_grid_unshifted(n, dt)
     a0 = [complex(math.sqrt(p0) / math.cosh(xi), 0.0) for xi in tau]
 
-    step_counts = [4, 8, 16, 32, 64]
+    step_counts = [1, 2, 4, 8]
     step_sizes = []
     errors = []
     for step_count in step_counts:
@@ -1152,18 +1182,53 @@ def test_fixed_step_fundamental_soliton_order(api, opts):
                     (math.sqrt(p0) / math.cosh(xi)) * math.sin(0.5 * (z_final / ld)))
             for xi in tau
         ]
-        errors.append(_relative_l2_error(final_field, a_true))
+        errors.append(_filtered_relative_l2_error(final_field, a_true))
         step_sizes.append(dz)
 
-    min_error = min(errors)
-    max_error = max(errors)
-    spread = max_error / max(min_error, 1e-15)
-    if spread <= 1.05:
-        assert max_error <= 5e-4, f"fixed-step fundamental soliton error floor too high: {max_error}"
+    slope = _fit_loglog_slope(step_sizes, errors)
+    return slope, errors
+
+
+def _auto_backend_resolves_to_vulkan(api):
+    n = 32
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.0,
+        starting_step_size=0.01,
+        max_step_size=0.01,
+        min_step_size=0.01,
+        error_tolerance=1e-6,
+        pulse_period=1.0,
+        delta_time=1.0 / float(n),
+        frequency_grid=[0j] * n,
+        runtime=RuntimeOperators(constants=[0.0, 0.0, 0.0]),
+    )
+    api.set_log_level(2)
+    api.set_log_buffer(64 * 1024)
+    api.clear_log_buffer()
+    api.propagate(cfg, [0j] * n, 1, default_execution_options(NLO_VECTOR_BACKEND_AUTO))
+    logs = api.read_log_buffer(consume=True, max_bytes=64 * 1024)
+    return "actual: VULKAN" in logs
+
+
+def test_fixed_step_fundamental_soliton_order_auto_gpu(api, opts):
+    if not _auto_backend_resolves_to_vulkan(api):
+        print("test_fixed_step_fundamental_soliton_order_auto_gpu: AUTO did not resolve to Vulkan, skipping.")
         return
 
-    slope = _fit_loglog_slope(step_sizes, errors)
-    assert slope >= 0.5, f"fixed-step fundamental soliton slope unexpectedly low: {slope}"
+    cpu_slope, cpu_errors = _fixed_step_fundamental_soliton_order_stats(
+        api,
+        default_execution_options(NLO_VECTOR_BACKEND_CPU),
+    )
+    auto_slope, auto_errors = _fixed_step_fundamental_soliton_order_stats(
+        api,
+        default_execution_options(NLO_VECTOR_BACKEND_AUTO),
+    )
+    assert auto_slope >= 2.5, f"fixed-step AUTO/Vulkan soliton slope unexpectedly low: {auto_slope}"
+    assert abs(auto_slope - cpu_slope) <= 0.2, (
+        f"AUTO/Vulkan slope drifted too far from CPU: cpu={cpu_slope}, auto={auto_slope}"
+    )
+    assert auto_errors[0] > auto_errors[-1], f"AUTO/Vulkan refinement did not reduce final error: {auto_errors}"
 
 
 def main():
@@ -1190,6 +1255,7 @@ def main():
     test_adaptive_min_step_out_of_tolerance_emits_warning(api, opts)
     test_second_order_soliton_intensity_error(api, opts)
     test_fixed_step_fundamental_soliton_order(api, opts)
+    test_fixed_step_fundamental_soliton_order_auto_gpu(api, opts)
     print("test_python_operator_regression: runtime-operator propagation regressions validated.")
 
 
