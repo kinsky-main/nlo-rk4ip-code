@@ -6,6 +6,7 @@
 #include "physics/operators.h"
 #include "fft/fft.h"
 #include "utility/perf_profile.h"
+#include <assert.h>
 
 #ifndef NLO_RK4_STRICT_STATUS_CHECKS
 #if defined(NDEBUG)
@@ -194,4 +195,3 @@ nlo_vec_status nlo_apply_nonlinear_operator_stage(
     }
     return status;
 }
-
