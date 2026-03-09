@@ -33,7 +33,6 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->frequency_grid_vec);
 
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.ip_field_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_magnitude_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_working_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.field_freq_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.k_final_vec);
@@ -50,18 +49,18 @@ void free_simulation_state(simulation_state* state)
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_derivative_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_response_fft_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.raman_derivative_factor_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.wt_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.kx_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.ky_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.t_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.x_axis_vec);
-        nlo_destroy_vec_if_set(state->backend, &state->working_vectors.y_axis_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.wt_mesh_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.kx_mesh_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.ky_mesh_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.t_mesh_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.x_mesh_vec);
         nlo_destroy_vec_if_set(state->backend, &state->working_vectors.y_mesh_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->init_vectors.wt_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->init_vectors.kx_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->init_vectors.ky_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->init_vectors.t_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->init_vectors.x_axis_vec);
+        nlo_destroy_vec_if_set(state->backend, &state->init_vectors.y_axis_vec);
         for (size_t i = 0u; i < NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS; ++i) {
             nlo_destroy_vec_if_set(state->backend, &state->runtime_operator_stack_vec[i]);
         }

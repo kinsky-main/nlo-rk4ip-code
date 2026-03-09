@@ -80,7 +80,7 @@ static void test_init_state_success(void)
     assert(info.allocated_records == state->num_recorded_samples);
     assert(info.per_record_bytes == num_time_samples * sizeof(nlo_complex));
     assert(info.host_snapshot_bytes == info.per_record_bytes * state->num_recorded_samples);
-    assert(info.working_vector_bytes >= info.per_record_bytes * 15u);
+    assert(info.working_vector_bytes >= info.per_record_bytes * 12u);
     assert(info.backend_type == NLO_VECTOR_BACKEND_CPU);
 
     free_simulation_state(state);
@@ -364,6 +364,12 @@ static void test_tensor_mode_frequency_mesh_generation(void)
     assert(state->nt == nt);
     assert(state->nx == nx);
     assert(state->ny == ny);
+    assert(state->init_vectors.wt_axis_vec == NULL);
+    assert(state->init_vectors.kx_axis_vec == NULL);
+    assert(state->init_vectors.ky_axis_vec == NULL);
+    assert(state->init_vectors.t_axis_vec == NULL);
+    assert(state->init_vectors.x_axis_vec == NULL);
+    assert(state->init_vectors.y_axis_vec == NULL);
 
     nlo_complex expected_axis[3] = {0};
     test_fill_expected_omega_grid(expected_axis, nt, delta_time);

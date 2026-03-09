@@ -31,9 +31,6 @@ static size_t nlo_count_working_full_volume_vectors(const simulation_state* stat
     if (state->working_vectors.ip_field_vec != NULL) {
         count += 1u;
     }
-    if (state->working_vectors.field_magnitude_vec != NULL) {
-        count += 1u;
-    }
     if (state->working_vectors.field_working_vec != NULL) {
         count += 1u;
     }
@@ -140,34 +137,6 @@ static int nlo_estimate_working_vector_bytes(
         return -1;
     }
     working_bytes += full_bytes;
-
-    if (state->tensor_mode_active) {
-        size_t axis_nt = 0u;
-        size_t axis_nx = 0u;
-        size_t axis_ny = 0u;
-        if (nlo_checked_mul_size_t(state->nt, 2u, &axis_nt) != 0 ||
-            nlo_checked_mul_size_t(state->nx, 2u, &axis_nx) != 0 ||
-            nlo_checked_mul_size_t(state->ny, 2u, &axis_ny) != 0) {
-            return -1;
-        }
-        if (axis_nt > SIZE_MAX - axis_nx) {
-            return -1;
-        }
-        size_t axis_elements = axis_nt + axis_nx;
-        if (axis_elements > SIZE_MAX - axis_ny) {
-            return -1;
-        }
-        axis_elements += axis_ny;
-
-        size_t axis_bytes = 0u;
-        if (nlo_checked_mul_size_t(axis_elements, sizeof(nlo_complex), &axis_bytes) != 0) {
-            return -1;
-        }
-        if (axis_bytes > SIZE_MAX - working_bytes) {
-            return -1;
-        }
-        working_bytes += axis_bytes;
-    }
 
     *out_working_bytes = working_bytes;
     return 0;

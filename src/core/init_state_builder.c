@@ -80,6 +80,30 @@
 #define NLO_DEFAULT_C2 1.0
 #endif
 
+static void nlo_destroy_init_vec_if_set(nlo_vector_backend* backend, nlo_vec_buffer** vec)
+{
+    if (backend == NULL || vec == NULL || *vec == NULL) {
+        return;
+    }
+
+    nlo_vec_destroy(backend, *vec);
+    *vec = NULL;
+}
+
+static void nlo_release_init_vectors(simulation_state* state)
+{
+    if (state == NULL || state->backend == NULL) {
+        return;
+    }
+
+    nlo_destroy_init_vec_if_set(state->backend, &state->init_vectors.wt_axis_vec);
+    nlo_destroy_init_vec_if_set(state->backend, &state->init_vectors.kx_axis_vec);
+    nlo_destroy_init_vec_if_set(state->backend, &state->init_vectors.ky_axis_vec);
+    nlo_destroy_init_vec_if_set(state->backend, &state->init_vectors.t_axis_vec);
+    nlo_destroy_init_vec_if_set(state->backend, &state->init_vectors.x_axis_vec);
+    nlo_destroy_init_vec_if_set(state->backend, &state->init_vectors.y_axis_vec);
+}
+
 #ifndef NLO_DEFAULT_C3
 #define NLO_DEFAULT_C3 0.0
 #endif
@@ -429,9 +453,6 @@ static size_t nlo_count_full_volume_vectors(const simulation_state* state)
     if (state->working_vectors.ip_field_vec != NULL) {
         count += 1u;
     }
-    if (state->working_vectors.field_magnitude_vec != NULL) {
-        count += 1u;
-    }
     if (state->working_vectors.field_working_vec != NULL) {
         count += 1u;
     }
@@ -617,22 +638,22 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
     }
 
     size_t conservative_vec_count = 2u + NLO_WORK_VECTOR_COUNT;
-    if (state->working_vectors.wt_axis_vec != NULL) {
+    if (state->init_vectors.wt_axis_vec != NULL) {
         conservative_vec_count += 1u;
     }
-    if (state->working_vectors.kx_axis_vec != NULL) {
+    if (state->init_vectors.kx_axis_vec != NULL) {
         conservative_vec_count += 1u;
     }
-    if (state->working_vectors.ky_axis_vec != NULL) {
+    if (state->init_vectors.ky_axis_vec != NULL) {
         conservative_vec_count += 1u;
     }
-    if (state->working_vectors.t_axis_vec != NULL) {
+    if (state->init_vectors.t_axis_vec != NULL) {
         conservative_vec_count += 1u;
     }
-    if (state->working_vectors.x_axis_vec != NULL) {
+    if (state->init_vectors.x_axis_vec != NULL) {
         conservative_vec_count += 1u;
     }
-    if (state->working_vectors.y_axis_vec != NULL) {
+    if (state->init_vectors.y_axis_vec != NULL) {
         conservative_vec_count += 1u;
     }
     if (state->working_vectors.wt_mesh_vec != NULL) {
@@ -932,7 +953,6 @@ simulation_state* create_simulation_state_with_storage(
     if (nlo_create_complex_vec(state->backend, num_time_samples, &state->current_field_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->frequency_grid_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.ip_field_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.field_magnitude_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.field_working_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.field_freq_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.k_final_vec) != NLO_VEC_STATUS_OK ||
@@ -963,12 +983,12 @@ simulation_state* create_simulation_state_with_storage(
     }
 
     if (state->tensor_mode_active) {
-        if (nlo_create_complex_vec(state->backend, state->nt, &state->working_vectors.wt_axis_vec) != NLO_VEC_STATUS_OK ||
-            nlo_create_complex_vec(state->backend, state->nx, &state->working_vectors.kx_axis_vec) != NLO_VEC_STATUS_OK ||
-            nlo_create_complex_vec(state->backend, state->ny, &state->working_vectors.ky_axis_vec) != NLO_VEC_STATUS_OK ||
-            nlo_create_complex_vec(state->backend, state->nt, &state->working_vectors.t_axis_vec) != NLO_VEC_STATUS_OK ||
-            nlo_create_complex_vec(state->backend, state->nx, &state->working_vectors.x_axis_vec) != NLO_VEC_STATUS_OK ||
-            nlo_create_complex_vec(state->backend, state->ny, &state->working_vectors.y_axis_vec) != NLO_VEC_STATUS_OK ||
+        if (nlo_create_complex_vec(state->backend, state->nt, &state->init_vectors.wt_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->nx, &state->init_vectors.kx_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->ny, &state->init_vectors.ky_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->nt, &state->init_vectors.t_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->nx, &state->init_vectors.x_axis_vec) != NLO_VEC_STATUS_OK ||
+            nlo_create_complex_vec(state->backend, state->ny, &state->init_vectors.y_axis_vec) != NLO_VEC_STATUS_OK ||
             nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.wt_mesh_vec) != NLO_VEC_STATUS_OK ||
             nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.kx_mesh_vec) != NLO_VEC_STATUS_OK ||
             nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.ky_mesh_vec) != NLO_VEC_STATUS_OK ||
@@ -997,12 +1017,12 @@ simulation_state* create_simulation_state_with_storage(
 
         if (config->time.wt_axis != NULL) {
             status = nlo_vec_upload(state->backend,
-                                    state->working_vectors.wt_axis_vec,
+                                    state->init_vectors.wt_axis_vec,
                                     config->time.wt_axis,
                                     state->nt * sizeof(nlo_complex));
         } else {
             status = nlo_vec_complex_axis_unshifted_from_delta(state->backend,
-                                                               state->working_vectors.wt_axis_vec,
+                                                               state->init_vectors.wt_axis_vec,
                                                                safe_dt);
         }
         if (status != NLO_VEC_STATUS_OK) {
@@ -1013,12 +1033,12 @@ simulation_state* create_simulation_state_with_storage(
 
         if (config->spatial.kx_axis != NULL) {
             status = nlo_vec_upload(state->backend,
-                                    state->working_vectors.kx_axis_vec,
+                                    state->init_vectors.kx_axis_vec,
                                     config->spatial.kx_axis,
                                     state->nx * sizeof(nlo_complex));
         } else {
             status = nlo_vec_complex_axis_unshifted_from_delta(state->backend,
-                                                               state->working_vectors.kx_axis_vec,
+                                                               state->init_vectors.kx_axis_vec,
                                                                safe_dx);
         }
         if (status != NLO_VEC_STATUS_OK) {
@@ -1029,12 +1049,12 @@ simulation_state* create_simulation_state_with_storage(
 
         if (config->spatial.ky_axis != NULL) {
             status = nlo_vec_upload(state->backend,
-                                    state->working_vectors.ky_axis_vec,
+                                    state->init_vectors.ky_axis_vec,
                                     config->spatial.ky_axis,
                                     state->ny * sizeof(nlo_complex));
         } else {
             status = nlo_vec_complex_axis_unshifted_from_delta(state->backend,
-                                                               state->working_vectors.ky_axis_vec,
+                                                               state->init_vectors.ky_axis_vec,
                                                                safe_dy);
         }
         if (status != NLO_VEC_STATUS_OK) {
@@ -1044,16 +1064,16 @@ simulation_state* create_simulation_state_with_storage(
         }
 
         status = nlo_vec_complex_axis_centered_from_delta(state->backend,
-                                                          state->working_vectors.t_axis_vec,
+                                                          state->init_vectors.t_axis_vec,
                                                           safe_dt);
         if (status == NLO_VEC_STATUS_OK) {
             status = nlo_vec_complex_axis_centered_from_delta(state->backend,
-                                                              state->working_vectors.x_axis_vec,
+                                                              state->init_vectors.x_axis_vec,
                                                               safe_dx);
         }
         if (status == NLO_VEC_STATUS_OK) {
             status = nlo_vec_complex_axis_centered_from_delta(state->backend,
-                                                              state->working_vectors.y_axis_vec,
+                                                              state->init_vectors.y_axis_vec,
                                                               safe_dy);
         }
         if (status != NLO_VEC_STATUS_OK) {
@@ -1064,14 +1084,14 @@ simulation_state* create_simulation_state_with_storage(
 
         status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
                                                       state->working_vectors.wt_mesh_vec,
-                                                      state->working_vectors.wt_axis_vec,
+                                                      state->init_vectors.wt_axis_vec,
                                                       state->nt,
                                                       state->ny,
                                                       NLO_VEC_MESH_AXIS_T);
         if (status == NLO_VEC_STATUS_OK) {
             status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
                                                           state->working_vectors.kx_mesh_vec,
-                                                          state->working_vectors.kx_axis_vec,
+                                                          state->init_vectors.kx_axis_vec,
                                                           state->nt,
                                                           state->ny,
                                                           NLO_VEC_MESH_AXIS_X);
@@ -1079,7 +1099,7 @@ simulation_state* create_simulation_state_with_storage(
         if (status == NLO_VEC_STATUS_OK) {
             status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
                                                           state->working_vectors.ky_mesh_vec,
-                                                          state->working_vectors.ky_axis_vec,
+                                                          state->init_vectors.ky_axis_vec,
                                                           state->nt,
                                                           state->ny,
                                                           NLO_VEC_MESH_AXIS_Y);
@@ -1087,7 +1107,7 @@ simulation_state* create_simulation_state_with_storage(
         if (status == NLO_VEC_STATUS_OK) {
             status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
                                                           state->working_vectors.t_mesh_vec,
-                                                          state->working_vectors.t_axis_vec,
+                                                          state->init_vectors.t_axis_vec,
                                                           state->nt,
                                                           state->ny,
                                                           NLO_VEC_MESH_AXIS_T);
@@ -1095,7 +1115,7 @@ simulation_state* create_simulation_state_with_storage(
         if (status == NLO_VEC_STATUS_OK) {
             status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
                                                           state->working_vectors.x_mesh_vec,
-                                                          state->working_vectors.x_axis_vec,
+                                                          state->init_vectors.x_axis_vec,
                                                           state->nt,
                                                           state->ny,
                                                           NLO_VEC_MESH_AXIS_X);
@@ -1103,7 +1123,7 @@ simulation_state* create_simulation_state_with_storage(
         if (status == NLO_VEC_STATUS_OK) {
             status = nlo_vec_complex_mesh_from_axis_tfast(state->backend,
                                                           state->working_vectors.y_mesh_vec,
-                                                          state->working_vectors.y_axis_vec,
+                                                          state->init_vectors.y_axis_vec,
                                                           state->nt,
                                                           state->ny,
                                                           NLO_VEC_MESH_AXIS_Y);
@@ -1113,6 +1133,8 @@ simulation_state* create_simulation_state_with_storage(
             free_simulation_state(state);
             return NULL;
         }
+
+        nlo_release_init_vectors(state);
 
         status = nlo_vec_complex_copy(state->backend,
                                       state->frequency_grid_vec,

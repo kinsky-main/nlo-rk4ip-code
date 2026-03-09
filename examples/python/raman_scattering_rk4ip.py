@@ -190,7 +190,7 @@ def _run(args: argparse.Namespace) -> float:
 
     n = 2**11
     dt = 0.002
-    beta2 = -0.01
+    beta2 = 0.01
     gamma = 1.40
     z_final = 0.40
     pulse_width = 0.08

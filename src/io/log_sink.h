@@ -7,6 +7,7 @@
 #pragma once
 
 #include <stddef.h>
+#include "nlo_progress.h"
 
 typedef enum
 {
@@ -96,6 +97,22 @@ int nlo_log_set_progress_options(int enabled, int milestone_percent, int emit_on
  * @return int Zero on success; nonzero on error.
  */
 int nlo_log_set_progress_stream(int stream_mode);
+
+/**
+ * @brief Register an optional per-propagation progress callback.
+ *
+ * @param callback Callback to invoke during progress updates, or NULL to disable.
+ * @param user_data Caller-owned opaque context pointer.
+ * @return int Zero on success; nonzero on error.
+ */
+int nlo_log_set_progress_callback(nlo_progress_callback callback, void* user_data);
+
+/**
+ * @brief Return whether the active progress callback has requested abort.
+ *
+ * @return int Nonzero when abort has been requested.
+ */
+int nlo_log_progress_abort_requested(void);
 
 /**
  * @brief Emit a formatted log line through active sinks.

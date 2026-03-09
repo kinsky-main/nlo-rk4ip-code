@@ -11,6 +11,30 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef NLO_LOG_DEFAULT_DISPERSION_FACTOR_EXPR
+#define NLO_LOG_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
+#endif
+
+#ifndef NLO_LOG_DEFAULT_LINEAR_FACTOR_EXPR
+#define NLO_LOG_DEFAULT_LINEAR_FACTOR_EXPR "i*c0*wt*wt-c1"
+#endif
+
+#ifndef NLO_LOG_DEFAULT_DISPERSION_EXPR
+#define NLO_LOG_DEFAULT_DISPERSION_EXPR "exp(h*D)"
+#endif
+
+#ifndef NLO_LOG_DEFAULT_LINEAR_EXPR
+#define NLO_LOG_DEFAULT_LINEAR_EXPR "exp(h*D)"
+#endif
+
+#ifndef NLO_LOG_DEFAULT_POTENTIAL_EXPR
+#define NLO_LOG_DEFAULT_POTENTIAL_EXPR "0"
+#endif
+
+#ifndef NLO_LOG_DEFAULT_NONLINEAR_EXPR
+#define NLO_LOG_DEFAULT_NONLINEAR_EXPR "i*A*(c2*I + V)"
+#endif
+
 static const char* nlo_backend_type_to_string(nlo_vector_backend_type backend_type)
 {
     if (backend_type == NLO_VECTOR_BACKEND_CPU) {
@@ -83,6 +107,7 @@ void nlo_log_propagate_request(
         frequency_grid_samples = nt;
     }
     const size_t frequency_grid_bytes = nlo_compute_input_bytes(frequency_grid_samples, sizeof(nlo_complex));
+    const int tensor_mode_active = (config != NULL && config->tensor.nt > 0u) ? 1 : 0;
 
     char num_time_samples_text[48];
     char num_recorded_samples_text[48];
@@ -145,18 +170,43 @@ void nlo_log_propagate_request(
     }
 
     char message[4096];
-    const char* linear_factor_op =
-        (config != NULL)
-            ? nlo_resolve_runtime_expr_alias(config->runtime.linear_factor_expr,
-                                             config->runtime.dispersion_factor_expr)
-            : NULL;
-    const char* linear_op =
-        (config != NULL)
-            ? nlo_resolve_runtime_expr_alias(config->runtime.linear_expr,
-                                             config->runtime.dispersion_expr)
-            : NULL;
-    const char* potential_op = (config != NULL) ? config->runtime.potential_expr : NULL;
-    const char* nonlinear_op = (config != NULL) ? config->runtime.nonlinear_expr : NULL;
+    const char* linear_factor_op = NULL;
+    const char* linear_op = NULL;
+    const char* potential_op = NULL;
+    const char* nonlinear_op = NULL;
+    if (config != NULL) {
+        linear_factor_op = tensor_mode_active
+                               ? nlo_resolve_runtime_expr_alias(config->runtime.linear_factor_expr,
+                                                                config->runtime.dispersion_factor_expr)
+                               : nlo_resolve_runtime_expr_alias(config->runtime.dispersion_factor_expr,
+                                                                config->runtime.linear_factor_expr);
+        if (linear_factor_op == NULL || linear_factor_op[0] == '\0') {
+            linear_factor_op = tensor_mode_active
+                                   ? NLO_LOG_DEFAULT_LINEAR_FACTOR_EXPR
+                                   : NLO_LOG_DEFAULT_DISPERSION_FACTOR_EXPR;
+        }
+
+        linear_op = tensor_mode_active
+                        ? nlo_resolve_runtime_expr_alias(config->runtime.linear_expr,
+                                                         config->runtime.dispersion_expr)
+                        : nlo_resolve_runtime_expr_alias(config->runtime.dispersion_expr,
+                                                         config->runtime.linear_expr);
+        if (linear_op == NULL || linear_op[0] == '\0') {
+            linear_op = tensor_mode_active
+                            ? NLO_LOG_DEFAULT_LINEAR_EXPR
+                            : NLO_LOG_DEFAULT_DISPERSION_EXPR;
+        }
+
+        potential_op = config->runtime.potential_expr;
+        if (potential_op == NULL || potential_op[0] == '\0') {
+            potential_op = NLO_LOG_DEFAULT_POTENTIAL_EXPR;
+        }
+
+        nonlinear_op = config->runtime.nonlinear_expr;
+        if (nonlinear_op == NULL || nonlinear_op[0] == '\0') {
+            nonlinear_op = NLO_LOG_DEFAULT_NONLINEAR_EXPR;
+        }
+    }
 
     const int written = snprintf(
         message,
@@ -200,8 +250,8 @@ void nlo_log_propagate_request(
         (const void*)exec_options,
         (linear_factor_op != NULL) ? linear_factor_op : "(null)",
         (linear_op != NULL) ? linear_op : "(null)",
-        (potential_op != NULL && potential_op[0] != '\0') ? potential_op : "(null)",
-        (nonlinear_op != NULL && nonlinear_op[0] != '\0') ? nonlinear_op : "(null)",
+        (potential_op != NULL) ? potential_op : "(null)",
+        (nonlinear_op != NULL) ? nonlinear_op : "(null)",
         runtime_constants_text,
         constants_lines,
         (config != NULL) ? (const void*)config->frequency.frequency_grid : NULL,

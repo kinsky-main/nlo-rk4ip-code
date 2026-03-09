@@ -250,7 +250,6 @@ typedef struct nlo_snapshot_store nlo_snapshot_store;
  */
 typedef struct {
     nlo_vec_buffer* ip_field_vec;
-    nlo_vec_buffer* field_magnitude_vec;
     nlo_vec_buffer* field_working_vec;
     nlo_vec_buffer* field_freq_vec;
     nlo_vec_buffer* k_final_vec;
@@ -267,12 +266,6 @@ typedef struct {
     nlo_vec_buffer* raman_derivative_vec;
     nlo_vec_buffer* raman_response_fft_vec;
     nlo_vec_buffer* raman_derivative_factor_vec;
-    nlo_vec_buffer* wt_axis_vec;
-    nlo_vec_buffer* kx_axis_vec;
-    nlo_vec_buffer* ky_axis_vec;
-    nlo_vec_buffer* t_axis_vec;
-    nlo_vec_buffer* x_axis_vec;
-    nlo_vec_buffer* y_axis_vec;
     nlo_vec_buffer* wt_mesh_vec;
     nlo_vec_buffer* kx_mesh_vec;
     nlo_vec_buffer* ky_mesh_vec;
@@ -280,6 +273,18 @@ typedef struct {
     nlo_vec_buffer* x_mesh_vec;
     nlo_vec_buffer* y_mesh_vec;
 } simulation_working_vectors;
+
+/**
+ * @brief Init-only scratch buffers used to construct tensor axes and meshes.
+ */
+typedef struct {
+    nlo_vec_buffer* wt_axis_vec;
+    nlo_vec_buffer* kx_axis_vec;
+    nlo_vec_buffer* ky_axis_vec;
+    nlo_vec_buffer* t_axis_vec;
+    nlo_vec_buffer* x_axis_vec;
+    nlo_vec_buffer* y_axis_vec;
+} simulation_init_vectors;
 
 typedef struct nlo_fft_plan nlo_fft_plan;
 
@@ -315,6 +320,7 @@ typedef struct {
     nlo_vec_buffer* current_field_vec;
     nlo_vec_buffer* frequency_grid_vec;
     simulation_working_vectors working_vectors;
+    simulation_init_vectors init_vectors;
 
     nlo_vec_buffer** record_ring_vec;
     size_t record_ring_capacity;

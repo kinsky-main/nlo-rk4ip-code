@@ -155,8 +155,8 @@ static size_t nlo_estimate_active_vector_count(const sim_config* config)
             }
         }
         if (config->tensor.nt > 0u) {
-            if (active_vec_count <= SIZE_MAX - 12u) {
-                active_vec_count += 12u;
+            if (active_vec_count <= SIZE_MAX - 6u) {
+                active_vec_count += 6u;
             } else {
                 return SIZE_MAX;
             }
