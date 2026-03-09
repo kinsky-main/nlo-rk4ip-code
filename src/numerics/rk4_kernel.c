@@ -140,7 +140,7 @@ static nlo_vec_status nlo_rk4_capture_interpolated_record(
 
     simulation_working_vectors* work = &state->working_vectors;
     if (work->previous_field_vec == NULL ||
-        work->field_magnitude_vec == NULL ||
+        work->field_freq_vec == NULL ||
         work->k_temp_vec == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
@@ -166,17 +166,17 @@ static nlo_vec_status nlo_rk4_capture_interpolated_record(
         alpha = 1.0;
     }
 
-    NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->field_magnitude_vec, work->previous_field_vec));
+    NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->field_freq_vec, work->previous_field_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend,
-                                                    work->field_magnitude_vec,
+                                                    work->field_freq_vec,
                                                     nlo_make(1.0 - alpha, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->k_temp_vec, state->current_field_vec));
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend,
                                                     work->k_temp_vec,
                                                     nlo_make(alpha, 0.0)));
-    NLO_RK4_CALL(nlo_vec_complex_add_inplace(state->backend, work->field_magnitude_vec, work->k_temp_vec));
+    NLO_RK4_CALL(nlo_vec_complex_add_inplace(state->backend, work->field_freq_vec, work->k_temp_vec));
 
-    return simulation_state_capture_snapshot_from_vec(state, work->field_magnitude_vec);
+    return simulation_state_capture_snapshot_from_vec(state, work->field_freq_vec);
 }
 
 static void nlo_rk4_emit_step_event(
@@ -266,9 +266,9 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_final_vec));
     nlo_rk4_debug_log_vec_stats(state, work->k_final_vec, "k1", step_index, state->current_z, step);
     
-    // k2 = N(A_I + k1/2)
+    // k2 = N(A_I + h*k1/2)
     NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->field_working_vec, work->k_final_vec));
-    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(0.5, 0.0)));
+    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(step * 0.5, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
 
     NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state,
@@ -282,8 +282,8 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, nlo_make(1.0 / 3.0, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
     
-    // k3 = N(A_I + k2/2)
-    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(0.5, 0.0)));
+    // k3 = N(A_I + h*k2/2)
+    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(step * 0.5, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
 
     NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state,
@@ -301,7 +301,8 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     NLO_RK4_CALL(nlo_apply_dispersion_operator_stage(state, work->field_freq_vec));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_final_vec));
 
-    // k4 = N(exp(D*h/2) * (A_I + k3))
+    // k4 = N(exp(D*h/2) * (A_I + h*k3))
+    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(step, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
     NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->field_working_vec, work->field_freq_vec));
     NLO_RK4_CALL(nlo_apply_dispersion_operator_stage(state, work->field_freq_vec));
@@ -379,9 +380,9 @@ static nlo_vec_status nlo_rk4_attempt_embedded_erk43(
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_final_vec));
     nlo_rk4_debug_log_vec_stats(state, work->k_final_vec, "k1", step_index, state->current_z, step);
     
-    // k2 = N(A_I + k1/2)
+    // k2 = N(A_I + h*k1/2)
     NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->field_working_vec, work->k_final_vec));
-    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(0.5, 0.0)));
+    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(step * 0.5, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
 
     NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state,
@@ -395,8 +396,8 @@ static nlo_vec_status nlo_rk4_attempt_embedded_erk43(
     NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, nlo_make(1.0 / 3.0, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
 
-    // k3 = N(A_I + k2/2)
-    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(0.5, 0.0)));
+    // k3 = N(A_I + h*k2/2)
+    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(step * 0.5, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
 
     NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state,
@@ -414,7 +415,8 @@ static nlo_vec_status nlo_rk4_attempt_embedded_erk43(
     NLO_RK4_CALL(nlo_apply_dispersion_operator_stage(state, work->field_freq_vec));
     NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_final_vec));
 
-    // k4 = N(exp(D*h/2) * (A_I + k3))
+    // k4 = N(exp(D*h/2) * (A_I + h*k3))
+    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(backend, work->field_working_vec, nlo_make(step, 0.0)));
     NLO_RK4_CALL(nlo_vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
     NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->field_working_vec, work->field_freq_vec));
     NLO_RK4_CALL(nlo_apply_dispersion_operator_stage(state, work->field_freq_vec));
@@ -593,6 +595,9 @@ void solve_rk4(simulation_state *state)
                                                 step,
                                                 error,
                                                 state->current_step_size);
+                if (nlo_log_progress_abort_requested() != 0) {
+                    terminated_early = 1;
+                }
                 step_accepted = 1;
             }
         } else {
@@ -664,6 +669,9 @@ void solve_rk4(simulation_state *state)
                                                    step,
                                                    error,
                                                    state->current_step_size);
+                    if (nlo_log_progress_abort_requested() != 0) {
+                        terminated_early = 1;
+                    }
                     step_accepted = 1;
                     break;
                 }
@@ -695,6 +703,10 @@ void solve_rk4(simulation_state *state)
                                                error,
                                                retry_step,
                                                reject_attempt);
+                if (nlo_log_progress_abort_requested() != 0) {
+                    step_accepted = -1;
+                    break;
+                }
 
                 step = retry_step;
                 if (reject_attempt >= NLO_RK4_MAX_REJECTION_ATTEMPTS) {
@@ -747,6 +759,10 @@ void solve_rk4(simulation_state *state)
             }
         }
         if (terminated_early != 0) {
+            break;
+        }
+        if (nlo_log_progress_abort_requested() != 0) {
+            terminated_early = 1;
             break;
         }
 
