@@ -8,7 +8,7 @@ import ctypes
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -223,6 +223,7 @@ class NloExampleRunner:
         *,
         capture_step_history: bool = False,
         step_history_capacity: int = 0,
+        progress_callback: Callable[[Any], bool | int | None] | None = None,
         sqlite_path: str | None = None,
         run_id: str | None = None,
         sqlite_max_bytes: int = 0,
@@ -281,6 +282,7 @@ class NloExampleRunner:
             "rtol": float(sim_cfg.error_tolerance),
             "capture_step_history": bool(capture_step_history),
             "step_history_capacity": int(step_history_capacity),
+            "progress_callback": progress_callback,
             "sqlite_path": sqlite_path,
             "run_id": run_id,
             "sqlite_max_bytes": int(sqlite_max_bytes),
@@ -288,12 +290,16 @@ class NloExampleRunner:
             "log_final_output_field_to_db": bool(log_final_output_field_to_db),
         }
         kwargs.update(self._runtime_overrides(runtime_cfg))
-        result = self.api.propagate(
-            pulse,
-            linear_operator,
-            nonlinear_operator,
-            **kwargs,
-        )
+        try:
+            result = self.api.propagate(
+                pulse,
+                linear_operator,
+                nonlinear_operator,
+                **kwargs,
+            )
+        except self.api.PropagationAbortedError as exc:
+            self.last_meta = dict(exc.result.meta)
+            raise
         self.last_meta = dict(result.meta)
         z_records = np.asarray(result.z_axis, dtype=np.float64)
         records = np.asarray(result.records, dtype=np.complex128).reshape(int(num_records), n)

@@ -10,6 +10,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int g_progress_callback_calls = 0;
+
+static int test_progress_callback(const nlo_progress_info* info, void* user_data)
+{
+    int* abort_after_first = (int*)user_data;
+    assert(info != NULL);
+    g_progress_callback_calls += 1;
+    if (abort_after_first != NULL && *abort_after_first != 0) {
+        *abort_after_first = 0;
+        return 0;
+    }
+    return 1;
+}
+
 static void test_grouped_integer_format(void)
 {
     char text[64];
@@ -101,6 +115,24 @@ static void test_progress_entries(void)
     printf("test_progress_entries: passed.\n");
 }
 
+static void test_progress_callback_abort(void)
+{
+    int abort_after_first = 1;
+    g_progress_callback_calls = 0;
+
+    assert(nlo_log_set_progress_options(0, 25, 0) == 0);
+    assert(nlo_log_set_progress_callback(test_progress_callback, &abort_after_first) == 0);
+
+    nlo_log_progress_begin(0.0, 1.0);
+    nlo_log_progress_step_accepted(0u, 0.25, 1.0, 0.02, 0.0, 0.02);
+    assert(g_progress_callback_calls == 1);
+    assert(nlo_log_progress_abort_requested() != 0);
+    nlo_log_progress_finish(0.25, 1.0, 0);
+
+    assert(nlo_log_set_progress_callback(NULL, NULL) == 0);
+    printf("test_progress_callback_abort: passed.\n");
+}
+
 int main(void)
 {
     test_grouped_integer_format();
@@ -108,6 +140,7 @@ int main(void)
     test_log_buffer_roundtrip();
     test_progress_stream_options();
     test_progress_entries();
+    test_progress_callback_abort();
 
     (void)nlo_log_set_buffer(0u);
     (void)nlo_log_set_file(NULL, 0);

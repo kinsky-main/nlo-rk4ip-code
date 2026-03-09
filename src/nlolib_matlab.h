@@ -295,7 +295,8 @@ typedef enum
     NLOLIB_STATUS_OK = 0,
     NLOLIB_STATUS_INVALID_ARGUMENT = 1,
     NLOLIB_STATUS_ALLOCATION_FAILED = 2,
-    NLOLIB_STATUS_NOT_IMPLEMENTED = 3
+    NLOLIB_STATUS_NOT_IMPLEMENTED = 3,
+    NLOLIB_STATUS_ABORTED = 4
 } nlolib_status;
 
 /**
@@ -318,6 +319,39 @@ typedef enum
     NLOLIB_PROGRESS_STREAM_STDOUT = 1,
     NLOLIB_PROGRESS_STREAM_BOTH = 2
 } nlolib_progress_stream_mode;
+
+/**
+ * @brief Progress event class reported during propagation.
+ */
+typedef enum
+{
+    NLO_PROGRESS_EVENT_ACCEPTED = 0,
+    NLO_PROGRESS_EVENT_REJECTED = 1,
+    NLO_PROGRESS_EVENT_FINISH = 2
+} nlo_progress_event_type;
+
+/**
+ * @brief Per-event propagation progress payload for caller callbacks.
+ */
+typedef struct
+{
+    nlo_progress_event_type event_type;
+    size_t step_index;
+    size_t reject_attempt;
+    double z;
+    double z_end;
+    double percent;
+    double step_size;
+    double next_step_size;
+    double error;
+    double elapsed_seconds;
+    double eta_seconds;
+} nlo_progress_info;
+
+/**
+ * @brief Progress callback invoked during propagation.
+ */
+typedef int (*nlo_progress_callback)(const nlo_progress_info *info, void *user_data);
 
 /**
  * @brief Database size-limit behavior when snapshot storage reaches its cap.
@@ -385,6 +419,10 @@ typedef struct
     int return_records;
     const nlo_execution_options *exec_options;
     const nlo_storage_options *storage_options;
+    const double *explicit_record_z;
+    size_t explicit_record_z_count;
+    nlo_progress_callback progress_callback;
+    void *progress_user_data;
 } nlo_propagate_options;
 
 /**

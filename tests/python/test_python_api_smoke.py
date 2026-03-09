@@ -3,11 +3,13 @@ import math
 from nlolib import (
     NLOLIB_PROGRESS_STREAM_BOTH,
     NLOLIB_PROGRESS_STREAM_STDERR,
+    NLOLIB_STATUS_ABORTED,
     NLO_VECTOR_BACKEND_AUTO,
     NLO_VECTOR_BACKEND_CPU,
     NLO_TENSOR_LAYOUT_XYT_T_FAST,
     NLolib,
     OperatorSpec,
+    PropagationAbortedError,
     PulseSpec,
     RuntimeOperators,
     default_execution_options,
@@ -108,6 +110,29 @@ def main():
     assert len(step_history["z"]) > 0
     assert step_history["dropped"] >= 0
     print("test_python_api_smoke: optional step history capture returned structured telemetry.")
+
+    callback_calls = {"count": 0}
+
+    def abort_on_first_progress(info):
+        callback_calls["count"] += 1
+        return False
+
+    try:
+        api.propagate(
+            identity_cfg,
+            gaussian,
+            3,
+            auto_opts,
+            capture_step_history=True,
+            step_history_capacity=128,
+            progress_callback=abort_on_first_progress,
+        )
+        raise AssertionError("expected propagate to abort via progress callback")
+    except PropagationAbortedError as exc:
+        assert callback_calls["count"] > 0
+        assert int(exc.result.meta.get("status", -1)) == NLOLIB_STATUS_ABORTED
+        assert int(exc.result.meta.get("records_written", 0)) >= 0
+    print("test_python_api_smoke: progress callback can abort propagation cleanly.")
 
     nx = 16
     ny = 8

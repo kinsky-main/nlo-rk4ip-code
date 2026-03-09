@@ -39,6 +39,7 @@ NLOLIB_STATUS_OK = 0
 NLOLIB_STATUS_INVALID_ARGUMENT = 1
 NLOLIB_STATUS_ALLOCATION_FAILED = 2
 NLOLIB_STATUS_NOT_IMPLEMENTED = 3
+NLOLIB_STATUS_ABORTED = 4
 
 NLOLIB_LOG_LEVEL_ERROR = 0
 NLOLIB_LOG_LEVEL_WARN = 1
@@ -47,6 +48,9 @@ NLOLIB_LOG_LEVEL_DEBUG = 3
 NLOLIB_PROGRESS_STREAM_STDERR = 0
 NLOLIB_PROGRESS_STREAM_STDOUT = 1
 NLOLIB_PROGRESS_STREAM_BOTH = 2
+NLO_PROGRESS_EVENT_ACCEPTED = 0
+NLO_PROGRESS_EVENT_REJECTED = 1
+NLO_PROGRESS_EVENT_FINISH = 2
 
 NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0
 NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
@@ -214,6 +218,25 @@ class NloStepEvent(ctypes.Structure):
     ]
 
 
+class NloProgressInfo(ctypes.Structure):
+    _fields_ = [
+        ("event_type", ctypes.c_int),
+        ("step_index", ctypes.c_size_t),
+        ("reject_attempt", ctypes.c_size_t),
+        ("z", ctypes.c_double),
+        ("z_end", ctypes.c_double),
+        ("percent", ctypes.c_double),
+        ("step_size", ctypes.c_double),
+        ("next_step_size", ctypes.c_double),
+        ("error", ctypes.c_double),
+        ("elapsed_seconds", ctypes.c_double),
+        ("eta_seconds", ctypes.c_double),
+    ]
+
+
+NloProgressCallback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(NloProgressInfo), ctypes.c_void_p)
+
+
 class NloPropagateOptions(ctypes.Structure):
     _fields_ = [
         ("num_recorded_samples", ctypes.c_size_t),
@@ -223,6 +246,8 @@ class NloPropagateOptions(ctypes.Structure):
         ("storage_options", ctypes.POINTER(NloStorageOptions)),
         ("explicit_record_z", ctypes.POINTER(ctypes.c_double)),
         ("explicit_record_z_count", ctypes.c_size_t),
+        ("progress_callback", NloProgressCallback),
+        ("progress_user_data", ctypes.c_void_p),
     ]
 
 
@@ -571,6 +596,27 @@ class PropagationResult:
     meta: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ProgressInfo:
+    event_type: int
+    step_index: int
+    reject_attempt: int
+    z: float
+    z_end: float
+    percent: float
+    step_size: float
+    next_step_size: float
+    error: float
+    elapsed_seconds: float
+    eta_seconds: float
+
+
+class PropagationAbortedError(RuntimeError):
+    def __init__(self, result: PropagationResult):
+        super().__init__("nlolib_propagate aborted by progress callback")
+        self.result = result
+
+
 @dataclass
 class _NormalizedPropagateRequest:
     sim_cfg: NloSimulationConfig
@@ -589,6 +635,7 @@ class _NormalizedPropagateRequest:
     step_history_capacity: int
     output_label: str
     explicit_record_z: list[float] | None
+    progress_callback: Callable[[ProgressInfo], bool | int | None] | None
     meta_overrides: dict[str, Any]
 
 
@@ -828,6 +875,22 @@ def _step_events_to_meta(step_events: ctypes.Array, count: int) -> dict[str, obj
         "next_step_size": next_step_size,
         "error": error,
     }
+
+
+def _progress_info_from_struct(info: NloProgressInfo) -> ProgressInfo:
+    return ProgressInfo(
+        event_type=int(info.event_type),
+        step_index=int(info.step_index),
+        reject_attempt=int(info.reject_attempt),
+        z=float(info.z),
+        z_end=float(info.z_end),
+        percent=float(info.percent),
+        step_size=float(info.step_size),
+        next_step_size=float(info.next_step_size),
+        error=float(info.error),
+        elapsed_seconds=float(info.elapsed_seconds),
+        eta_seconds=float(info.eta_seconds),
+    )
 
 
 def _validate_explicit_record_z(z_values: Sequence[float], distance: float) -> None:
@@ -1383,6 +1446,7 @@ class NLolib:
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
+        progress_callback = kwargs.pop("progress_callback", None)
         t_eval_raw = kwargs.pop("t_eval", None)
         if kwargs:
             raise TypeError(f"unexpected propagate kwargs: {sorted(kwargs.keys())}")
@@ -1432,6 +1496,7 @@ class NLolib:
             step_history_capacity=step_history_capacity,
             output_label=("final" if num_records == 1 else "dense"),
             explicit_record_z=explicit_record_z,
+            progress_callback=progress_callback,
             meta_overrides={},
         )
 
@@ -1484,6 +1549,7 @@ class NLolib:
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
+        progress_callback = kwargs.pop("progress_callback", None)
         t_eval_raw = kwargs.pop("t_eval", None)
         nonlinear_model_override = kwargs.pop("nonlinear_model", None)
         nonlinear_gamma_override = kwargs.pop("nonlinear_gamma", None)
@@ -1659,6 +1725,7 @@ class NLolib:
             step_history_capacity=step_history_capacity,
             output_label=output,
             explicit_record_z=explicit_record_z,
+            progress_callback=progress_callback,
             meta_overrides={
                 "preset": preset,
                 "output": output,
@@ -1681,6 +1748,9 @@ class NLolib:
         n = len(request.input_seq)
         out_arr = make_complex_array(n * request.num_records) if request.return_records else None
         explicit_record_z_arr = None
+        progress_callback_ref = None
+        progress_callback_context = None
+        progress_callback_error: list[BaseException | None] = [None]
 
         storage_opts = None
         storage_keepalive: list[bytes] = []
@@ -1733,6 +1803,31 @@ class NLolib:
             if request.explicit_record_z is not None
             else 0
         )
+        if request.progress_callback is not None:
+            progress_callback_context = ctypes.py_object(request.progress_callback)
+
+            def _progress_trampoline(info_ptr, user_data):
+                callback = ctypes.cast(user_data, ctypes.POINTER(ctypes.py_object)).contents.value
+                assert info_ptr
+                progress_info = _progress_info_from_struct(info_ptr.contents)
+                try:
+                    result = callback(progress_info)
+                except BaseException as exc:  # pragma: no cover - surfaced after propagate returns
+                    progress_callback_error[0] = exc
+                    return 0
+                if result is None:
+                    return 1
+                return 1 if bool(result) else 0
+
+            progress_callback_ref = NloProgressCallback(_progress_trampoline)
+            propagate_options.progress_callback = progress_callback_ref
+            propagate_options.progress_user_data = ctypes.cast(
+                ctypes.pointer(progress_callback_context),
+                ctypes.c_void_p,
+            )
+        else:
+            propagate_options.progress_callback = NloProgressCallback()
+            propagate_options.progress_user_data = None
 
         storage_result = NloStorageResult()
         records_written = ctypes.c_size_t(0)
@@ -1779,7 +1874,7 @@ class NLolib:
                 ctypes.pointer(propagate_output),
             )
         )
-        if status != NLOLIB_STATUS_OK:
+        if status not in {NLOLIB_STATUS_OK, NLOLIB_STATUS_ABORTED}:
             raise RuntimeError(f"nlolib_propagate failed with status={status}")
 
         records_written_count = int(records_written.value)
@@ -1814,8 +1909,12 @@ class NLolib:
             "coupled": bool(
                 int(request.sim_cfg.spatial.nx) > 1 or int(request.sim_cfg.spatial.ny) > 1
             ),
-            "status": int(NLOLIB_STATUS_OK),
-            "message": "propagate completed",
+            "status": int(status),
+            "message": (
+                "propagate aborted by progress callback"
+                if status == NLOLIB_STATUS_ABORTED
+                else "propagate completed"
+            ),
         }
         if storage_result_meta is not None:
             meta["storage_result"] = storage_result_meta
@@ -1825,7 +1924,12 @@ class NLolib:
             step_history["capacity"] = int(request.step_history_capacity)
             meta["step_history"] = step_history
         meta.update(request.meta_overrides)
-        return PropagationResult(records=out_records, z_axis=z_axis, final=final, meta=meta)
+        result = PropagationResult(records=out_records, z_axis=z_axis, final=final, meta=meta)
+        if progress_callback_error[0] is not None:
+            raise progress_callback_error[0]
+        if status == NLOLIB_STATUS_ABORTED:
+            raise PropagationAbortedError(result)
+        return result
 
     def propagate(self, primary: Any, *args: Any, **kwargs: Any) -> PropagationResult:
         """
@@ -1889,6 +1993,7 @@ __all__ = [
     "NLOLIB_STATUS_INVALID_ARGUMENT",
     "NLOLIB_STATUS_ALLOCATION_FAILED",
     "NLOLIB_STATUS_NOT_IMPLEMENTED",
+    "NLOLIB_STATUS_ABORTED",
     "NLOLIB_LOG_LEVEL_ERROR",
     "NLOLIB_LOG_LEVEL_WARN",
     "NLOLIB_LOG_LEVEL_INFO",
@@ -1896,6 +2001,9 @@ __all__ = [
     "NLOLIB_PROGRESS_STREAM_STDERR",
     "NLOLIB_PROGRESS_STREAM_STDOUT",
     "NLOLIB_PROGRESS_STREAM_BOTH",
+    "NLO_PROGRESS_EVENT_ACCEPTED",
+    "NLO_PROGRESS_EVENT_REJECTED",
+    "NLO_PROGRESS_EVENT_FINISH",
     "NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES",
     "NLO_STORAGE_DB_CAP_POLICY_FAIL",
     "NLO_PROPAGATE_OUTPUT_DENSE",
@@ -1911,11 +2019,14 @@ __all__ = [
     "NloRuntimeLimits",
     "NloPropagateOptions",
     "NloPropagateOutput",
+    "NloProgressInfo",
     "NloStepEvent",
     "NloStorageOptions",
     "NloStorageResult",
     "NloVkBackendConfig",
     "OperatorSpec",
+    "ProgressInfo",
+    "PropagationAbortedError",
     "PropagationResult",
     "PulseSpec",
     "PreparedSimConfig",

@@ -40,6 +40,9 @@ static nlolib_status nlo_map_log_status(int status)
     if (status == 2) {
         return NLOLIB_STATUS_ALLOCATION_FAILED;
     }
+    if (status == 3) {
+        return NLOLIB_STATUS_NOT_IMPLEMENTED;
+    }
 
     return NLOLIB_STATUS_INVALID_ARGUMENT;
 }
@@ -243,6 +246,8 @@ NLOLIB_API nlo_propagate_options nlolib_propagate_options_default(void)
     options.storage_options = NULL;
     options.explicit_record_z = NULL;
     options.explicit_record_z_count = 0u;
+    options.progress_callback = NULL;
+    options.progress_user_data = NULL;
     return options;
 }
 
@@ -417,7 +422,10 @@ NLOLIB_API nlolib_status nlolib_propagate(
     state->step_events_written = 0u;
     state->step_events_dropped = 0u;
 
+    (void)nlo_log_set_progress_callback(local_options.progress_callback, local_options.progress_user_data);
     solve_rk4(state);
+    const int progress_aborted = nlo_log_progress_abort_requested();
+    (void)nlo_log_set_progress_callback(NULL, NULL);
 
     if (state->snapshot_status != NLO_VEC_STATUS_OK) {
         free_simulation_state(state);
@@ -426,12 +434,14 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
     size_t records_available = num_recorded_samples;
     if (num_recorded_samples > 1u) {
-        if (state->explicit_record_schedule_active != 0 || nlo_fixed_step_requested(config, NULL)) {
+        if (progress_aborted != 0 ||
+            state->explicit_record_schedule_active != 0 ||
+            nlo_fixed_step_requested(config, NULL)) {
             records_available = state->current_record_index;
             if (records_available > num_recorded_samples) {
                 records_available = num_recorded_samples;
             }
-            if (records_available < num_recorded_samples) {
+            if (progress_aborted == 0 && records_available < num_recorded_samples) {
                 nlo_log_emit(
                     NLO_LOG_LEVEL_WARN,
                     "[nlolib] record capture completed with %zu/%zu records.",
@@ -583,13 +593,16 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (local_output.step_events_dropped != NULL) {
         *local_output.step_events_dropped = step_events_dropped;
     }
+    const nlolib_status final_status = (progress_aborted != 0) ? NLOLIB_STATUS_ABORTED : NLOLIB_STATUS_OK;
+    const char* final_message = (progress_aborted != 0) ? "propagate aborted by progress callback"
+                                                        : "propagate completed";
     nlo_log_emit(NLO_LOG_LEVEL_INFO,
                  "[nlolib] solver_status:\n"
                  "  - status: %d\n"
                  "  - message: %s",
-                 (int)NLOLIB_STATUS_OK,
-                 "propagate completed");
-    return NLOLIB_STATUS_OK;
+                 (int)final_status,
+                 final_message);
+    return final_status;
 }
 
 NLOLIB_API int nlolib_storage_is_available(void)

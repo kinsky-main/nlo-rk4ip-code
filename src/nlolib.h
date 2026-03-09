@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 
+#include "nlo_progress.h"
 #include "core/state.h"
 #include "core/init.h"
 #include "backend/nlo_complex.h"
@@ -45,7 +46,9 @@ typedef enum {
     /** Required allocation failed. */
     NLOLIB_STATUS_ALLOCATION_FAILED = 2,
     /** Requested behavior is not available in current build/runtime. */
-    NLOLIB_STATUS_NOT_IMPLEMENTED = 3
+    NLOLIB_STATUS_NOT_IMPLEMENTED = 3,
+    /** Operation was aborted by a caller-provided progress callback. */
+    NLOLIB_STATUS_ABORTED = 4
 } nlolib_status;
 
 /**
@@ -112,6 +115,10 @@ typedef enum {
  *        record capture. When provided with explicit_record_z_count > 0, these
  *        override uniform record spacing.
  * @param explicit_record_z_count Number of entries in explicit_record_z.
+ * @param progress_callback Optional per-event progress callback.
+ *        Returning zero aborts propagation.
+ * @param progress_user_data Caller-owned opaque pointer passed to
+ *        progress_callback.
  */
 typedef struct {
     size_t num_recorded_samples;
@@ -121,6 +128,8 @@ typedef struct {
     const nlo_storage_options* storage_options;
     const double* explicit_record_z;
     size_t explicit_record_z_count;
+    nlo_progress_callback progress_callback;
+    void* progress_user_data;
 } nlo_propagate_options;
 
 /**
