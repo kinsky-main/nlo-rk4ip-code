@@ -33,7 +33,11 @@ from backend.spectral import (
     SPEED_OF_LIGHT_M_PER_S,
 )
 from backend.storage import ExampleRunDB
-from backend.metrics import mean_pointwise_abs_relative_error, mean_pointwise_abs_relative_error_curve
+from backend.metrics import (
+    mean_pointwise_abs_relative_error,
+    relative_l2_intensity_error,
+    relative_l2_intensity_error_curve,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -99,16 +103,6 @@ def second_order_soliton_normalized_envelope(
     ) * np.exp(0.5j * xi)
     denominator = np.cosh(4.0 * t) + 4.0 * np.cosh(2.0 * t) + 3.0 * np.cos(4.0 * xi)
     return numerator / denominator
-
-
-def relative_l2_intensity_error(A_num: np.ndarray, A_true: np.ndarray) -> float:
-    intensity_num = np.abs(np.asarray(A_num, dtype=np.complex128)) ** 2
-    intensity_true = np.abs(np.asarray(A_true, dtype=np.complex128)) ** 2
-    diff_norm = float(np.linalg.norm(intensity_num - intensity_true))
-    ref_norm = float(np.linalg.norm(intensity_true))
-    if not np.isfinite(diff_norm) or not np.isfinite(ref_norm) or ref_norm <= 0.0:
-        return float("nan")
-    return diff_norm / ref_norm
 
 
 def analytical_initial_condition_error(
@@ -403,6 +397,41 @@ def ensure_finite_records_or_raise(
     )
 
 
+def make_eta_abort_progress_callback(
+    nlo_module,
+    eta_threshold_seconds: float = 1800.0,
+):
+    prompted = False
+    warned_noninteractive = False
+
+    def _callback(info) -> int:
+        nonlocal prompted, warned_noninteractive
+
+        if int(info.event_type) == int(nlo_module.NLO_PROGRESS_EVENT_FINISH):
+            return 1
+        if prompted:
+            return 1
+        if not np.isfinite(float(info.eta_seconds)) or float(info.eta_seconds) <= float(eta_threshold_seconds):
+            return 1
+
+        prompted = True
+        if not sys.stdin.isatty():
+            if not warned_noninteractive:
+                print(
+                    "[nlolib] ETA exceeds 30 minutes but stdin is non-interactive; continuing without prompt."
+                )
+                warned_noninteractive = True
+            return 1
+
+        try:
+            response = input("ETA exceeds 30 minutes. Abort propagation? [y/N]: ").strip().lower()
+        except EOFError:
+            return 1
+        return 0 if response in {"y", "yes"} else 1
+
+    return _callback
+
+
 def _run(args: argparse.Namespace) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "second_order_soliton_rk4ip"
@@ -483,21 +512,32 @@ def _run(args: argparse.Namespace) -> float:
         configured_error_tolerance = float(sim_cfg.error_tolerance)
         exec_options = SimulationOptions(backend="auto", fft_backend="auto")
         runner = NloExampleRunner()
+        progress_callback = make_eta_abort_progress_callback(runner.api)
         storage_kwargs = db.storage_kwargs(
             example_name=example_name,
             run_group=run_group,
             case_key=case_key,
             chunk_records=8,
         )
-        z_records, A_records = runner.propagate_temporal_records(
-            np.asarray(A0, dtype=np.complex128),
-            sim_cfg,
-            num_recorded_samples,
-            exec_options,
-            capture_step_history=True,
-            step_history_capacity=200000,
-            **storage_kwargs,
-        )
+        try:
+            z_records, A_records = runner.propagate_temporal_records(
+                np.asarray(A0, dtype=np.complex128),
+                sim_cfg,
+                num_recorded_samples,
+                exec_options,
+                capture_step_history=True,
+                step_history_capacity=200000,
+                progress_callback=progress_callback,
+                **storage_kwargs,
+            )
+        except runner.api.PropagationAbortedError as exc:
+            meta = getattr(exc.result, "meta", {})
+            print(
+                "[nlolib] propagation aborted by user "
+                f"(records_written={int(meta.get('records_written', 0))}, "
+                f"status={int(meta.get('status', runner.api.NLOLIB_STATUS_ABORTED))})."
+            )
+            return float("nan")
         telemetry = step_telemetry_from_meta(runner.last_meta)
         db.save_case_from_solver_meta(
             example_name=example_name,
@@ -534,8 +574,13 @@ def _run(args: argparse.Namespace) -> float:
 
     U_num = U_num_records[-1]
     U_true = U_true_records[-1]
-    epsilon = mean_pointwise_abs_relative_error(U_num, U_true, context="second_order_soliton:record_error")
-    error_curve = mean_pointwise_abs_relative_error_curve(U_num_records, U_true_records, context="second_order_soliton:error_curve")
+    epsilon = relative_l2_intensity_error(U_num, U_true)
+    error_curve = relative_l2_intensity_error_curve(U_num_records, U_true_records)
+    envelope_rel_error = mean_pointwise_abs_relative_error(
+        U_num,
+        U_true,
+        context="second_order_soliton:envelope_relative_error",
+    )
     z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):
         raise RuntimeError("final epsilon is non-finite; numerical output is invalid.")
@@ -576,6 +621,7 @@ def _run(args: argparse.Namespace) -> float:
     )
     print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
     print(f"epsilon (relative L2 intensity error) = {epsilon:.6e}")
+    print(f"diagnostic mean abs-relative envelope error = {envelope_rel_error:.6e}")
     if configured_start_step is not None:
         print(
             "configured solver controls: "

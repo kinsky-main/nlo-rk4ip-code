@@ -100,3 +100,42 @@ def mean_pointwise_abs_relative_error_curve(
         return rel.astype(np.float64, copy=False)
     reduce_axes = tuple(range(1, rel.ndim))
     return np.mean(rel, axis=reduce_axes, dtype=np.float64)
+
+
+def relative_l2_intensity_error(
+    prediction: np.ndarray | Any,
+    reference: np.ndarray | Any,
+) -> float:
+    """Return ``|| |pred|^2 - |ref|^2 ||_2 / || |ref|^2 ||_2``."""
+    pred = np.asarray(prediction)
+    ref = np.asarray(reference)
+    _validate_shapes(pred, ref)
+
+    pred_intensity = np.abs(pred) ** 2
+    ref_intensity = np.abs(ref) ** 2
+    diff_norm = float(np.linalg.norm(pred_intensity - ref_intensity))
+    ref_norm = float(np.linalg.norm(ref_intensity))
+    if not np.isfinite(diff_norm) or not np.isfinite(ref_norm) or ref_norm <= 0.0:
+        return float("nan")
+    return diff_norm / ref_norm
+
+
+def relative_l2_intensity_error_curve(
+    prediction_records: np.ndarray | Any,
+    reference_records: np.ndarray | Any,
+) -> np.ndarray:
+    """Return per-record relative L2 intensity error along axis 0."""
+    pred = np.asarray(prediction_records)
+    ref = np.asarray(reference_records)
+    _validate_shapes(pred, ref)
+
+    if pred.ndim == 0:
+        return np.asarray([relative_l2_intensity_error(pred, ref)], dtype=np.float64)
+    if pred.ndim == 1:
+        return np.asarray([relative_l2_intensity_error(pred, ref)], dtype=np.float64)
+
+    values = [
+        relative_l2_intensity_error(pred[idx], ref[idx])
+        for idx in range(int(pred.shape[0]))
+    ]
+    return np.asarray(values, dtype=np.float64)
