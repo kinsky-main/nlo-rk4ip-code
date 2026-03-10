@@ -98,6 +98,7 @@ static void test_nlo_complex_copy_add_axpy_scalar_mul(void)
         nlo_make(0.0, -1.0)
     };
     nlo_complex copy[3] = {0};
+    nlo_complex scaled[3] = {0};
     nlo_complex increment[3] = {
         nlo_make(0.5, 1.0),
         nlo_make(-1.5, 2.0),
@@ -120,6 +121,11 @@ static void test_nlo_complex_copy_add_axpy_scalar_mul(void)
     assert_complex_close(copy[0], nlo_make(0.5, 2.0), NLO_TEST_EPS);
     assert_complex_close(copy[1], nlo_make(-4.5, 5.0), NLO_TEST_EPS);
     assert_complex_close(copy[2], nlo_make(2.75, -4.25), NLO_TEST_EPS);
+
+    nlo_complex_scalar_mul(scaled, copy, nlo_make(2.0, -1.0), 3);
+    assert_complex_close(scaled[0], nlo_make(3.0, 3.5), NLO_TEST_EPS);
+    assert_complex_close(scaled[1], nlo_make(-4.0, 14.5), NLO_TEST_EPS);
+    assert_complex_close(scaled[2], nlo_make(1.25, -11.25), NLO_TEST_EPS);
 
     nlo_complex_scalar_mul_inplace(copy, nlo_make(0.0, 2.0), 3);
     assert_complex_close(copy[0], nlo_make(-4.0, 1.0), NLO_TEST_EPS);

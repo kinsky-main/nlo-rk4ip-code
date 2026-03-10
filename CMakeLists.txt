@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 nlo_configure_build_configurations()
 
-project(nlolib VERSION 1.10.22 LANGUAGES C)
+project(nlolib VERSION 1.10.23 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -37,16 +37,26 @@ set(NLO_SQLITE_AMALGAMATION_URL
 set(NLO_FFTW_GIT_TAG
   "fftw-3.3.10"
   CACHE STRING "FFTW git tag used for in-tree static FFTW builds")
-set(NLO_CPU_SIMD_LEVEL "AUTO" CACHE STRING "CPU SIMD level: AUTO, AVX2, AVX, or SCALAR")
-set_property(CACHE NLO_CPU_SIMD_LEVEL PROPERTY STRINGS AUTO AVX2 AVX SCALAR)
+if(WIN32)
+  set(_NLO_CBLAS_PREFER_SYSTEM_DEFAULT OFF)
+else()
+  set(_NLO_CBLAS_PREFER_SYSTEM_DEFAULT ON)
+endif()
+option(NLO_CBLAS_PREFER_SYSTEM
+  "Prefer a system-provided OpenBLAS/CBLAS before fetching OpenBLAS"
+  ${_NLO_CBLAS_PREFER_SYSTEM_DEFAULT})
+set(NLO_OPENBLAS_URL
+  "https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.30/OpenBLAS-0.3.30.tar.gz"
+  CACHE STRING "URL used to fetch OpenBLAS source for in-tree static CBLAS builds")
+set(NLO_OPENBLAS_WINDOWS_URL
+  "https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.30/OpenBLAS-0.3.30-x64.zip"
+  CACHE STRING "URL used to fetch the prebuilt OpenBLAS package used on Windows")
 
 include(NLOVersioning)
 include(NLODocs)
 if(NLO_INSTALL_GIT_HOOKS)
   nlo_install_minor_version_hook(VERSION_FILE "${CMAKE_CURRENT_LIST_FILE}")
 endif()
-
-include(simd)
 
 add_subdirectory(src)
 add_subdirectory(python)

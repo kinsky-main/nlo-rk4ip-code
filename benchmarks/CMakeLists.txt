@@ -33,13 +33,15 @@ add_executable(bench_solver_backend
 
 include(ResolveVulkan)
 nlo_resolve_vulkan(_nlo_vk_headers_available _nlo_vk_loader_available)
+include(NLOCblas)
+nlo_configure_cblas(_nlo_cblas_target _nlo_cblas_include_dirs)
 
 target_include_directories(bench_solver_backend PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_CURRENT_LIST_DIR}
 )
 
-target_link_libraries(bench_solver_backend PRIVATE simd::simd)
+target_link_libraries(bench_solver_backend PRIVATE ${_nlo_cblas_target})
 include(NLOSQLite)
 nlo_configure_sqlite(bench_solver_backend)
 

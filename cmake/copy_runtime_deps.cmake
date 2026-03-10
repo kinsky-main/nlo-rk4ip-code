@@ -7,9 +7,23 @@ endif()
 
 file(MAKE_DIRECTORY "${NLO_RUNTIME_DEST}")
 
+set(_nlo_runtime_directories "")
+if(DEFINED NLO_RUNTIME_HINTS AND NOT NLO_RUNTIME_HINTS STREQUAL "")
+  foreach(_nlo_hint IN LISTS NLO_RUNTIME_HINTS)
+    if(EXISTS "${_nlo_hint}")
+      get_filename_component(_nlo_hint_dir "${_nlo_hint}" DIRECTORY)
+      if(EXISTS "${_nlo_hint_dir}")
+        list(APPEND _nlo_runtime_directories "${_nlo_hint_dir}")
+      endif()
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES _nlo_runtime_directories)
+endif()
+
 file(GET_RUNTIME_DEPENDENCIES
   RESOLVED_DEPENDENCIES_VAR _nlo_runtime_deps
   UNRESOLVED_DEPENDENCIES_VAR _nlo_unresolved_runtime_deps
+  DIRECTORIES ${_nlo_runtime_directories}
   POST_EXCLUDE_REGEXES
     "^api-ms-win-.*"
     "^ext-ms-.*"

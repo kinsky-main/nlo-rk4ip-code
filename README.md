@@ -1,6 +1,6 @@
 # nlolib
 
-`nlolib` is a C99 nonlinear optics library with CPU SIMD and Vulkan compute backends, plus Python and MATLAB bindings.
+`nlolib` is a C99 nonlinear optics library with CPU CBLAS and Vulkan compute backends, plus Python and MATLAB bindings.
 
 Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-code/.
 
@@ -11,6 +11,7 @@ Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-c
 - CMake `3.28.3+`
 - C99 compiler toolchain
 - FFTW build prerequisites (handled by CMake fetch/in-tree build)
+- OpenBLAS/CBLAS dependency (auto-resolved by CMake from system install, fetched source, or fetched Windows binary)
 - Vulkan toolchain only when `NLO_ENABLE_VULKAN_BACKEND=ON`:
   - Vulkan loader library (runtime + link-time)
   - Vulkan headers (auto-discovered or fetched by CMake)
@@ -22,7 +23,7 @@ Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-c
 - Python 3 (required if `BUILD_TESTING=ON` because Python tests are added)
 - Doxygen (for docs target)
 - Graphviz (recommended for Doxygen call/directory graphs)
-- Network access for CMake to fetch the SQLite amalgamation archive
+- Network access for CMake to fetch the SQLite amalgamation archive and, when needed, OpenBLAS sources/binaries
 
 ## Quick Start (Windows)
 
@@ -50,6 +51,7 @@ Install toolchain and runtime prerequisites (Ubuntu/Debian example):
 sudo apt-get update
 sudo apt-get install -y \
   cmake ninja-build build-essential pkg-config \
+  libopenblas-dev \
   libvulkan-dev glslang-tools vulkan-tools spirv-tools \
   python3
 ```
@@ -94,7 +96,9 @@ Current top-level CMake options and cache variables:
 | `NLO_ENABLE_VKFFT` | `ON` | Enables VkFFT FFT path (auto-forced `OFF` when Vulkan backend is disabled). |
 | `NLO_BUMP_PATCH_ON_BUILD` | `ON` | Adds `nlo_patch_bump_on_build` target to patch-bump version on successful build. |
 | `NLO_SQLITE_USE_FETCHCONTENT` | `ON` | Deprecated compatibility toggle; SQLite amalgamation is always used. |
-| `NLO_CPU_SIMD_LEVEL` | `AUTO` | CPU SIMD mode: `AUTO`, `AVX2`, `AVX`, `SCALAR`. |
+| `NLO_CBLAS_PREFER_SYSTEM` | `ON` on Linux/macOS, `OFF` on Windows | Prefer a system OpenBLAS install before fetching OpenBLAS. |
+| `NLO_OPENBLAS_URL` | OpenBLAS `v0.3.30` tarball | OpenBLAS source archive used for in-tree static CBLAS builds on non-Windows platforms. |
+| `NLO_OPENBLAS_WINDOWS_URL` | OpenBLAS `v0.3.30` x64 zip | Prebuilt OpenBLAS package fetched for Windows builds. |
 | `NLO_VULKAN_HEADERS_URL` | Khronos main zip | Vulkan-Headers fetch URL fallback when headers are not local. |
 | `NLO_SQLITE_AMALGAMATION_URL` | sqlite.org zip | SQLite amalgamation fetch URL fallback. |
 | `NLO_FFTW_GIT_TAG` | `fftw-3.3.10` | FFTW tarball tag used in CMake fetch/build. |
@@ -113,6 +117,9 @@ Multi-config generators use `--config <type>` during build/test.
 ## Dependency Resolution Behavior
 
 - FFTW is resolved through CMake FetchContent and linked as static FFTW3 target.
+- CPU CBLAS is resolved through OpenBLAS:
+  - Linux/macOS prefer a system OpenBLAS install when `NLO_CBLAS_PREFER_SYSTEM=ON`, otherwise CMake fetches and builds a static OpenBLAS.
+  - Windows fetches a pinned prebuilt OpenBLAS package, links the provided import library, and copies the matching DLL beside built binaries.
 - When `NLO_ENABLE_VKFFT=ON`, VkFFT is fetched via CMake FetchContent for Vulkan FFT integration.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan headers are found via `find_package(Vulkan)` or fetched from `NLO_VULKAN_HEADERS_URL`.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan loader must be present locally (`vulkan`/`vulkan-1` library).
@@ -243,7 +250,7 @@ Current test groups:
 
 - FFT tests: `test_nlo_complex`, `test_fft`
 - Core tests: `test_core_state_alloc`
-- Numerics/backend tests: `test_nlo_numerics`, `test_nlo_vector_backend`, `test_nlo_simd_wrapper`, `test_nlo_vector_backend_vulkan`
+- Numerics/backend tests: `test_nlo_numerics`, `test_nlo_vector_backend`, `test_nlo_vector_backend_vulkan`
 - Python tests: `test_python_api_smoke`, `test_python_operator_regression`, `test_python_storage_chunking`
 - Python translation test: `test_python_runtime_expr_translation`
 - MATLAB tests (optional): `test_matlab_runtime_handle_parser` when `NLOLIB_BUILD_MATLAB_TESTS=ON` and MATLAB is found

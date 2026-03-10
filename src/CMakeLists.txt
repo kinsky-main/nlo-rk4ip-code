@@ -56,7 +56,9 @@ if(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS)
 endif()
 
 add_subdirectory(fft)
-target_link_libraries(nlolib PUBLIC nlo_fft_backend simd::simd)
+include(NLOCblas)
+nlo_configure_cblas(_nlo_cblas_target _nlo_cblas_include_dirs)
+target_link_libraries(nlolib PUBLIC nlo_fft_backend ${_nlo_cblas_target})
 include(NLOSQLite)
 nlo_configure_sqlite(nlolib)
 
@@ -70,6 +72,20 @@ if(NLO_ENABLE_VULKAN_BACKEND)
     nlolib
     "${CMAKE_CURRENT_LIST_DIR}"
     "${CMAKE_CURRENT_BINARY_DIR}"
+  )
+endif()
+
+if(WIN32)
+  set(_nlo_runtime_hints "${NLO_SQLITE_RUNTIME_HINTS}")
+  if(NLO_CBLAS_RUNTIME_HINTS)
+    list(APPEND _nlo_runtime_hints "${NLO_CBLAS_RUNTIME_HINTS}")
+  endif()
+  add_custom_command(TARGET nlolib POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
+            -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:nlolib>"
+            -DNLO_RUNTIME_HINTS="${_nlo_runtime_hints}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
   )
 endif()
 

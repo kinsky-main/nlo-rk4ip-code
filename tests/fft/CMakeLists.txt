@@ -11,29 +11,57 @@ add_executable(test_fft
   ${CMAKE_CURRENT_LIST_DIR}/test_fft.c
   ${CMAKE_SOURCE_DIR}/src/fft/fft.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
-  ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_resources.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_phase.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_dispatch.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
-  ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
 )
+if(NLO_ENABLE_VULKAN_BACKEND)
+  target_sources(test_fft PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
+    ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_resources.c
+    ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_phase.c
+    ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_dispatch.c
+    ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
+    ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
+  )
+else()
+  target_sources(test_fft PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/vulkan_stubs.c
+  )
+endif()
 
 include(ResolveVulkan)
 nlo_resolve_vulkan(_nlo_vk_headers_available _nlo_vk_loader_available)
+include(NLOCblas)
+nlo_configure_cblas(_nlo_cblas_target _nlo_cblas_include_dirs)
 
 target_include_directories(test_fft PRIVATE
   ${CMAKE_SOURCE_DIR}/src
-  ${CMAKE_BINARY_DIR}/src/generated
 )
-target_link_libraries(test_fft PRIVATE nlo_fft_backend simd::simd Vulkan::Vulkan)
+if(NLO_ENABLE_VULKAN_BACKEND)
+  target_include_directories(test_fft PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
+endif()
+target_link_libraries(test_fft PRIVATE nlo_fft_backend ${_nlo_cblas_target})
+target_compile_definitions(test_fft PRIVATE
+  NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
+  NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+)
+if(NLO_ENABLE_VULKAN_BACKEND)
+  target_link_libraries(test_fft PRIVATE Vulkan::Vulkan)
+endif()
 if(TARGET nlo_vk_shaders)
   add_dependencies(test_fft nlo_vk_shaders)
 endif()
 if(UNIX)
   target_link_libraries(test_fft PRIVATE m)
+endif()
+if(WIN32)
+  add_custom_command(TARGET test_fft POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_fft>"
+            -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_fft>"
+            -DNLO_RUNTIME_HINTS="${NLO_CBLAS_RUNTIME_HINTS}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
+  )
 endif()
 
 add_test(NAME test_fft COMMAND test_fft)

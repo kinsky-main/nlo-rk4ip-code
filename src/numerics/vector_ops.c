@@ -1,114 +1,86 @@
 /**
  * @file vector_ops.c
  * @dir src/numerics
- * @brief Vector operations for numerical kernels (SIMD-accelerated).
+ * @brief Vector operations for numerical kernels (CBLAS-backed where available).
  * @author Wenzel Kinsky
- * @date 2026-01-29
+ * @date 2026-03-10
  */
 
 #include "numerics/vector_ops.h"
-#include "backend/nlo_complex_simd.h"
+#include <cblas.h>
+#include <limits.h>
 #include <math.h>
-#include <simde/x86/avx.h>
+#include <string.h>
 
-// SIMD helpers
-static inline size_t nlo_simd_aligned_end(size_t n, size_t width)
+static int nlo_try_get_blas_length(size_t n, int* out_n)
 {
-    return n - (n % width);
+    if (out_n == NULL || n > (size_t)INT_MAX) {
+        return 0;
+    }
+
+    *out_n = (int)n;
+    return 1;
 }
 
-void nlo_real_fill(double *dst, size_t n, double value)
+void nlo_real_fill(double* dst, size_t n, double value)
 {
-    const simde__m256d v = simde_mm256_set1_pd(value);
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 4); i < simd_end; i += 4)
-    {
-        simde_mm256_storeu_pd(dst + i, v);
+    if (dst == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = value;
     }
 }
 
-void nlo_real_copy(double *dst, const double *src, size_t n)
+void nlo_real_copy(double* dst, const double* src, size_t n)
 {
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 4); i < simd_end; i += 4)
-    {
-        simde__m256d v = simde_mm256_loadu_pd(src + i);
-        simde_mm256_storeu_pd(dst + i, v);
+    if (dst == NULL || src == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
-        dst[i] = src[i];
+
+    int blas_n = 0;
+    if (nlo_try_get_blas_length(n, &blas_n)) {
+        cblas_dcopy(blas_n, src, 1, dst, 1);
+        return;
     }
+
+    memmove(dst, src, n * sizeof(*dst));
 }
 
-void nlo_real_mul_inplace(double *dst, const double *src, size_t n)
+void nlo_real_mul_inplace(double* dst, const double* src, size_t n)
 {
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 4); i < simd_end; i += 4)
-    {
-        const simde__m256d a = simde_mm256_loadu_pd(dst + i);
-        const simde__m256d b = simde_mm256_loadu_pd(src + i);
-        simde_mm256_storeu_pd(dst + i, simde_mm256_mul_pd(a, b));
+    if (dst == NULL || src == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] *= src[i];
     }
 }
 
-void nlo_real_pow_int(const double *base, double *out, size_t n, unsigned int power)
+void nlo_real_pow_int(const double* base, double* out, size_t n, unsigned int power)
 {
-    if (power == 0U)
-    {
+    if (base == NULL || out == NULL) {
+        return;
+    }
+
+    if (power == 0u) {
         nlo_real_fill(out, n, 1.0);
         return;
     }
 
-    const simde__m256d ones = simde_mm256_set1_pd(1.0);
-
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 4); i < simd_end; i += 4)
-    {
-        simde__m256d result = ones;
-        simde__m256d current = simde_mm256_loadu_pd(base + i);
-        unsigned int exp = power;
-
-        while (exp > 0U)
-        {
-            if ((exp & 1U) != 0U)
-            {
-                result = simde_mm256_mul_pd(result, current);
-            }
-            exp >>= 1U;
-            if (exp == 0U)
-            {
-                break;
-            }
-            current = simde_mm256_mul_pd(current, current);
-        }
-
-        simde_mm256_storeu_pd(out + i, result);
-    }
-
-    for (; i < n; ++i)
-    {
+    for (size_t i = 0u; i < n; ++i) {
         double result = 1.0;
         double current = base[i];
-        unsigned int exp = power;
+        unsigned int exponent = power;
 
-        while (exp > 0U)
-        {
-            if ((exp & 1U) != 0U)
-            {
+        while (exponent > 0u) {
+            if ((exponent & 1u) != 0u) {
                 result *= current;
             }
-            exp >>= 1U;
-            if (exp == 0U)
-            {
+            exponent >>= 1u;
+            if (exponent == 0u) {
                 break;
             }
             current *= current;
@@ -118,189 +90,149 @@ void nlo_real_pow_int(const double *base, double *out, size_t n, unsigned int po
     }
 }
 
-void nlo_complex_fill(nlo_complex *dst, size_t n, nlo_complex value)
+void nlo_complex_fill(nlo_complex* dst, size_t n, nlo_complex value)
 {
-    const nlo_cpack2d fill = nlo_cpack2d_set1(value);
-
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        nlo_cpack2d_storeu(dst + i, fill);
+    if (dst == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = value;
     }
 }
 
-void nlo_complex_copy(nlo_complex *dst, const nlo_complex *src, size_t n)
+void nlo_complex_copy(nlo_complex* dst, const nlo_complex* src, size_t n)
 {
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_loadu(src + i));
+    if (dst == NULL || src == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
-        dst[i] = src[i];
+
+    int blas_n = 0;
+    if (nlo_try_get_blas_length(n, &blas_n)) {
+        cblas_zcopy(blas_n, src, 1, dst, 1);
+        return;
     }
+
+    memmove(dst, src, n * sizeof(*dst));
 }
 
-void calculate_magnitude_squared(const nlo_complex *src, nlo_complex *dst, size_t n)
+void calculate_magnitude_squared(const nlo_complex* src, nlo_complex* dst, size_t n)
 {
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_mag2_to_complex(nlo_cpack2d_loadu(src + i)));
+    if (src == NULL || dst == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    for (size_t i = 0u; i < n; ++i) {
         const double re = NLO_RE(src[i]);
         const double im = NLO_IM(src[i]);
-        dst[i] = nlo_make(re * re + im * im, 0.0);
+        dst[i] = nlo_make((re * re) + (im * im), 0.0);
     }
 }
 
-void nlo_complex_axpy_real(nlo_complex *dst, const double *src, nlo_complex alpha, size_t n)
+void nlo_complex_axpy_real(nlo_complex* dst, const double* src, nlo_complex alpha, size_t n)
 {
-    const nlo_cpack2d alpha_pack = nlo_cpack2d_set1(alpha);
-
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        const nlo_cpack2d increment = nlo_cpack2d_scale_real2(alpha_pack, src[i], src[i + 1u]);
-        const nlo_cpack2d current = nlo_cpack2d_loadu(dst + i);
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_add(current, increment));
+    if (dst == NULL || src == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    int blas_n = 0;
+    if (nlo_try_get_blas_length(n, &blas_n)) {
+        double* dst_lanes = (double*)(void*)dst;
+        const double alpha_re = NLO_RE(alpha);
+        const double alpha_im = NLO_IM(alpha);
+        cblas_daxpy(blas_n, alpha_re, src, 1, dst_lanes, 2);
+        cblas_daxpy(blas_n, alpha_im, src, 1, dst_lanes + 1, 2);
+        return;
+    }
+
+    for (size_t i = 0u; i < n; ++i) {
         const double term = src[i];
-        dst[i] = nlo_make(NLO_RE(dst[i]) + NLO_RE(alpha) * term,
-                          NLO_IM(dst[i]) + NLO_IM(alpha) * term);
+        dst[i] = nlo_make(NLO_RE(dst[i]) + (NLO_RE(alpha) * term),
+                          NLO_IM(dst[i]) + (NLO_IM(alpha) * term));
     }
 }
 
-void nlo_complex_scalar_mul_inplace(nlo_complex *dst, nlo_complex alpha, size_t n)
+void nlo_complex_scalar_mul_inplace(nlo_complex* dst, nlo_complex alpha, size_t n)
 {
-    const nlo_cpack2d alpha_pack = nlo_cpack2d_set1(alpha);
-
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        const nlo_cpack2d values = nlo_cpack2d_loadu(dst + i);
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_mul(values, alpha_pack));
+    if (dst == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    int blas_n = 0;
+    if (nlo_try_get_blas_length(n, &blas_n)) {
+        const double alpha_lanes[2] = { NLO_RE(alpha), NLO_IM(alpha) };
+        cblas_zscal(blas_n, alpha_lanes, dst, 1);
+        return;
+    }
+
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = nlo_mul(dst[i], alpha);
     }
 }
 
-void nlo_complex_scalar_mul(nlo_complex *dst, const nlo_complex *src, nlo_complex alpha, size_t n)
+void nlo_complex_scalar_mul(nlo_complex* dst, const nlo_complex* src, nlo_complex alpha, size_t n)
 {
-    const nlo_cpack2d alpha_pack = nlo_cpack2d_set1(alpha);
-
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        const nlo_cpack2d values = nlo_cpack2d_loadu(src + i);
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_mul(values, alpha_pack));
+    if (dst == NULL || src == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    int blas_n = 0;
+    if (nlo_try_get_blas_length(n, &blas_n)) {
+        const double alpha_lanes[2] = { NLO_RE(alpha), NLO_IM(alpha) };
+        cblas_zcopy(blas_n, src, 1, dst, 1);
+        cblas_zscal(blas_n, alpha_lanes, dst, 1);
+        return;
+    }
+
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = nlo_mul(src[i], alpha);
     }
 }
 
-void nlo_complex_mul_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
+void nlo_complex_mul_inplace(nlo_complex* dst, const nlo_complex* src, size_t n)
 {
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        const nlo_cpack2d a_pack = nlo_cpack2d_loadu(dst + i);
-        const nlo_cpack2d b_pack = nlo_cpack2d_loadu(src + i);
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_mul(a_pack, b_pack));
+    if (dst == NULL || src == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = nlo_mul(dst[i], src[i]);
     }
 }
 
-void nlo_complex_mul_vec(nlo_complex *dst, const nlo_complex *a, const nlo_complex *b, size_t n)
+void nlo_complex_mul_vec(nlo_complex* dst, const nlo_complex* a, const nlo_complex* b, size_t n)
 {
-    if (dst == NULL || a == NULL || b == NULL)
-    {
+    if (dst == NULL || a == NULL || b == NULL) {
         return;
     }
 
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        const nlo_cpack2d va = nlo_cpack2d_loadu(a + i);
-        const nlo_cpack2d vb = nlo_cpack2d_loadu(b + i);
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_mul(va, vb));
-    }
-    for (; i < n; ++i)
-    {
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = nlo_mul(a[i], b[i]);
     }
 }
 
-void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsigned int exponent)
+void nlo_complex_pow(const nlo_complex* base, nlo_complex* out, size_t n, unsigned int exponent)
 {
-    if (base == NULL || out == NULL)
-    {
+    if (base == NULL || out == NULL) {
         return;
     }
 
-    if (exponent == 0U)
-    {
+    if (exponent == 0u) {
         nlo_complex_fill(out, n, nlo_make(1.0, 0.0));
         return;
     }
 
-    const nlo_cpack2d ones = nlo_cpack2d_ones();
-
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        nlo_cpack2d result = ones;
-        nlo_cpack2d current = nlo_cpack2d_loadu(base + i);
-        unsigned int exp = exponent;
-
-        while (exp > 0U)
-        {
-            if ((exp & 1U) != 0U)
-            {
-                result = nlo_cpack2d_mul(result, current);
-            }
-            exp >>= 1U;
-            if (exp == 0U)
-            {
-                break;
-            }
-            current = nlo_cpack2d_mul(current, current);
-        }
-
-        nlo_cpack2d_storeu(out + i, result);
-    }
-
-    for (; i < n; ++i)
-    {
+    for (size_t i = 0u; i < n; ++i) {
         nlo_complex result = nlo_make(1.0, 0.0);
         nlo_complex current = base[i];
-        unsigned int exp = exponent;
+        unsigned int power = exponent;
 
-        while (exp > 0U)
-        {
-            if ((exp & 1U) != 0U)
-            {
+        while (power > 0u) {
+            if ((power & 1u) != 0u) {
                 result = nlo_mul(result, current);
             }
-            exp >>= 1U;
-            if (exp == 0U)
-            {
+            power >>= 1u;
+            if (power == 0u) {
                 break;
             }
             current = nlo_mul(current, current);
@@ -310,42 +242,32 @@ void nlo_complex_pow(const nlo_complex *base, nlo_complex *out, size_t n, unsign
     }
 }
 
-void nlo_complex_pow_inplace(nlo_complex *dst, size_t n, unsigned int exponent)
+void nlo_complex_pow_inplace(nlo_complex* dst, size_t n, unsigned int exponent)
 {
     nlo_complex_pow(dst, dst, n, exponent);
 }
 
 void nlo_complex_pow_elementwise_inplace(
-    nlo_complex *dst,
-    const nlo_complex *exponent,
+    nlo_complex* dst,
+    const nlo_complex* exponent,
     size_t n
 )
 {
-    if (dst == NULL || exponent == NULL)
-    {
+    if (dst == NULL || exponent == NULL) {
         return;
     }
 
-    for (size_t i = 0; i < n; ++i)
-    {
+    for (size_t i = 0u; i < n; ++i) {
         const double base_re = NLO_RE(dst[i]);
         const double base_im = NLO_IM(dst[i]);
         const double exp_re = NLO_RE(exponent[i]);
         const double exp_im = NLO_IM(exponent[i]);
         const double radius = hypot(base_re, base_im);
 
-        if (radius == 0.0)
-        {
-            if (exp_re == 0.0 && exp_im == 0.0)
-            {
+        if (radius == 0.0) {
+            if (exp_re == 0.0 && exp_im == 0.0) {
                 dst[i] = nlo_make(1.0, 0.0);
-            }
-            else if (exp_im == 0.0 && exp_re > 0.0)
-            {
-                dst[i] = nlo_make(0.0, 0.0);
-            }
-            else
-            {
+            } else {
                 dst[i] = nlo_make(0.0, 0.0);
             }
             continue;
@@ -381,67 +303,64 @@ static inline nlo_complex nlo_complex_real_pow_scalar(nlo_complex value, double 
                     scaled_radius * sin(scaled_angle));
 }
 
-void nlo_complex_real_pow(const nlo_complex *base, nlo_complex *out, size_t n, double exponent)
+void nlo_complex_real_pow(const nlo_complex* base, nlo_complex* out, size_t n, double exponent)
 {
     if (base == NULL || out == NULL) {
         return;
     }
 
-    for (size_t i = 0; i < n; ++i) {
+    for (size_t i = 0u; i < n; ++i) {
         out[i] = nlo_complex_real_pow_scalar(base[i], exponent);
     }
 }
 
-void nlo_complex_real_pow_inplace(nlo_complex *dst, size_t n, double exponent)
+void nlo_complex_real_pow_inplace(nlo_complex* dst, size_t n, double exponent)
 {
     if (dst == NULL) {
         return;
     }
 
-    for (size_t i = 0; i < n; ++i) {
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = nlo_complex_real_pow_scalar(dst[i], exponent);
     }
 }
 
-void nlo_complex_add_inplace(nlo_complex *dst, const nlo_complex *src, size_t n)
+void nlo_complex_add_inplace(nlo_complex* dst, const nlo_complex* src, size_t n)
 {
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        const nlo_cpack2d a_pack = nlo_cpack2d_loadu(dst + i);
-        const nlo_cpack2d b_pack = nlo_cpack2d_loadu(src + i);
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_add(a_pack, b_pack));
+    if (dst == NULL || src == NULL) {
+        return;
     }
-    for (; i < n; ++i)
-    {
+
+    int blas_n = 0;
+    if (nlo_try_get_blas_length(n, &blas_n)) {
+        const double one[2] = { 1.0, 0.0 };
+        cblas_zaxpy(blas_n, one, src, 1, dst, 1);
+        return;
+    }
+
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = nlo_add(dst[i], src[i]);
     }
 }
 
-void nlo_complex_add_vec(nlo_complex *dst, const nlo_complex *a, const nlo_complex *b, size_t n)
+void nlo_complex_add_vec(nlo_complex* dst, const nlo_complex* a, const nlo_complex* b, size_t n)
 {
-    if (dst == NULL || a == NULL || b == NULL)
-    {
+    if (dst == NULL || a == NULL || b == NULL) {
         return;
     }
 
-    size_t i = 0;
-    for (size_t simd_end = nlo_simd_aligned_end(n, 2); i < simd_end; i += 2)
-    {
-        const nlo_cpack2d va = nlo_cpack2d_loadu(a + i);
-        const nlo_cpack2d vb = nlo_cpack2d_loadu(b + i);
-        nlo_cpack2d_storeu(dst + i, nlo_cpack2d_add(va, vb));
-    }
-    for (; i < n; ++i)
-    {
+    for (size_t i = 0u; i < n; ++i) {
         dst[i] = nlo_add(a[i], b[i]);
     }
 }
 
-void nlo_complex_exp_inplace(nlo_complex *dst, size_t n)
+void nlo_complex_exp_inplace(nlo_complex* dst, size_t n)
 {
-    for (size_t i = 0; i < n; ++i)
-    {
+    if (dst == NULL) {
+        return;
+    }
+
+    for (size_t i = 0u; i < n; ++i) {
         const double re = NLO_RE(dst[i]);
         const double im = NLO_IM(dst[i]);
         const double exp_re = exp(re);
@@ -449,10 +368,13 @@ void nlo_complex_exp_inplace(nlo_complex *dst, size_t n)
     }
 }
 
-void nlo_complex_log_inplace(nlo_complex *dst, size_t n)
+void nlo_complex_log_inplace(nlo_complex* dst, size_t n)
 {
-    for (size_t i = 0; i < n; ++i)
-    {
+    if (dst == NULL) {
+        return;
+    }
+
+    for (size_t i = 0u; i < n; ++i) {
         const double re = NLO_RE(dst[i]);
         const double im = NLO_IM(dst[i]);
         const double radius = hypot(re, im);
@@ -461,10 +383,13 @@ void nlo_complex_log_inplace(nlo_complex *dst, size_t n)
     }
 }
 
-void nlo_complex_sin_inplace(nlo_complex *dst, size_t n)
+void nlo_complex_sin_inplace(nlo_complex* dst, size_t n)
 {
-    for (size_t i = 0; i < n; ++i)
-    {
+    if (dst == NULL) {
+        return;
+    }
+
+    for (size_t i = 0u; i < n; ++i) {
         const double re = NLO_RE(dst[i]);
         const double im = NLO_IM(dst[i]);
         dst[i] = nlo_make(sin(re) * cosh(im),
@@ -472,10 +397,13 @@ void nlo_complex_sin_inplace(nlo_complex *dst, size_t n)
     }
 }
 
-void nlo_complex_cos_inplace(nlo_complex *dst, size_t n)
+void nlo_complex_cos_inplace(nlo_complex* dst, size_t n)
 {
-    for (size_t i = 0; i < n; ++i)
-    {
+    if (dst == NULL) {
+        return;
+    }
+
+    for (size_t i = 0u; i < n; ++i) {
         const double re = NLO_RE(dst[i]);
         const double im = NLO_IM(dst[i]);
         dst[i] = nlo_make(cos(re) * cosh(im),
