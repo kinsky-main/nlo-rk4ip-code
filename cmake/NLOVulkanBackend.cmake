@@ -66,6 +66,7 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
       DEPENDS
         "${_nlo_vk_kernel_src}"
         "${NLO_VK_KERNEL_SOURCE_DIR}/nlo_complex_device.glslinc"
+        "${NLO_VK_KERNEL_SOURCE_DIR}/nlo_double_math.glslinc"
       COMMENT "Compiling Vulkan compute shader ${_nlo_vk_kernel}.comp"
       VERBATIM
     )

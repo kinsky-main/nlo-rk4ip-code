@@ -604,7 +604,9 @@ void solve_rk4(simulation_state *state)
             while (!step_accepted)
             {
                 const int reuse_cached_k5 =
-                    (cached_k5_valid != 0 && reject_attempt == 0u && !nonlinear_depends_on_h) ? 1 : 0;
+                    (cached_k5_valid != 0 &&
+                     reject_attempt == 0u &&
+                     !nonlinear_depends_on_h) ? 1 : 0;
                 const nlo_vec_status status =
                     nlo_rk4_attempt_embedded_erk43(state,
                                                    step,

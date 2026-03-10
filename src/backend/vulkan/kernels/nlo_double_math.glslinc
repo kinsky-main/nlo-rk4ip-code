@@ -1,0 +1,192 @@
+#ifndef NLO_DOUBLE_MATH_GLSLINC
+#define NLO_DOUBLE_MATH_GLSLINC
+
+const double NLO_PI = 3.14159265358979323846264338327950288;
+const double NLO_HALF_PI = 1.57079632679489661923132169163975144;
+const double NLO_QUARTER_PI = 0.78539816339744830961566084581987572;
+const double NLO_TWO_PI = 6.28318530717958647692528676655900576;
+const double NLO_INV_HALF_PI = 0.63661977236758134307553505349005745;
+const double NLO_TAN_PI_8 = 0.41421356237309504880168872420969808;
+const double NLO_TAN_3PI_8 = 2.41421356237309504880168872420969808;
+const double NLO_LN2 = 0.69314718055994530941723212145817657;
+const double NLO_INV_LN2 = 1.44269504088896340735992468100189214;
+const double NLO_SQRT_HALF = 0.70710678118654752440084436210484904;
+const double NLO_SQRT_TWO = 1.41421356237309504880168872420969808;
+
+double nlo_abs_double(double x)
+{
+    return (x < 0.0) ? -x : x;
+}
+
+double nlo_pow2_int(int exponent)
+{
+    if (exponent == 0) {
+        return 1.0;
+    }
+
+    bool negative = (exponent < 0);
+    uint power = uint(negative ? -exponent : exponent);
+    double base = 2.0;
+    double result = 1.0;
+    while (power != 0u) {
+        if ((power & 1u) != 0u) {
+            result *= base;
+        }
+        power >>= 1u;
+        if (power != 0u) {
+            base *= base;
+        }
+    }
+    return negative ? (1.0 / result) : result;
+}
+
+double nlo_exp_double(double x)
+{
+    if (x > 709.0) {
+        x = 709.0;
+    } else if (x < -745.0) {
+        x = -745.0;
+    }
+
+    int k = int((x >= 0.0) ? (x * NLO_INV_LN2 + 0.5) : (x * NLO_INV_LN2 - 0.5));
+    double r = x - (double(k) * NLO_LN2);
+    double term = 1.0 / 39916800.0;
+    term = (term * r) + (1.0 / 3628800.0);
+    term = (term * r) + (1.0 / 362880.0);
+    term = (term * r) + (1.0 / 40320.0);
+    term = (term * r) + (1.0 / 5040.0);
+    term = (term * r) + (1.0 / 720.0);
+    term = (term * r) + (1.0 / 120.0);
+    term = (term * r) + (1.0 / 24.0);
+    term = (term * r) + (1.0 / 6.0);
+    term = (term * r) + 0.5;
+    term = (term * r) + 1.0;
+    term = (term * r) + 1.0;
+    return term * nlo_pow2_int(k);
+}
+
+double nlo_atan_small(double x)
+{
+    double x2 = x * x;
+    double poly = -1.0 / 13.0;
+    poly = (poly * x2) + (1.0 / 11.0);
+    poly = (poly * x2) - (1.0 / 9.0);
+    poly = (poly * x2) + (1.0 / 7.0);
+    poly = (poly * x2) - (1.0 / 5.0);
+    poly = (poly * x2) + (1.0 / 3.0);
+    poly = (poly * x2) - 1.0;
+    return x * poly * (-1.0);
+}
+
+double nlo_atan_double(double x)
+{
+    double ax = nlo_abs_double(x);
+    double angle = 0.0;
+    if (ax > NLO_TAN_3PI_8) {
+        angle = NLO_HALF_PI - nlo_atan_small(1.0 / ax);
+    } else if (ax > NLO_TAN_PI_8) {
+        angle = NLO_QUARTER_PI + nlo_atan_small((ax - 1.0) / (ax + 1.0));
+    } else {
+        angle = nlo_atan_small(ax);
+    }
+    return (x < 0.0) ? -angle : angle;
+}
+
+double nlo_atan2_double(double y, double x)
+{
+    if (x > 0.0) {
+        return nlo_atan_double(y / x);
+    }
+    if (x < 0.0) {
+        return (y >= 0.0) ? (nlo_atan_double(y / x) + NLO_PI)
+                          : (nlo_atan_double(y / x) - NLO_PI);
+    }
+    if (y > 0.0) {
+        return NLO_HALF_PI;
+    }
+    if (y < 0.0) {
+        return -NLO_HALF_PI;
+    }
+    return 0.0;
+}
+
+double nlo_log_double(double x)
+{
+    if (x <= 0.0) {
+        return -1.0 / 0.0;
+    }
+
+    int exponent = 0;
+    double m = x;
+    while (m > NLO_SQRT_TWO) {
+        m *= 0.5;
+        exponent += 1;
+    }
+    while (m < NLO_SQRT_HALF) {
+        m *= 2.0;
+        exponent -= 1;
+    }
+
+    double y = (m - 1.0) / (m + 1.0);
+    double y2 = y * y;
+    double series = 1.0 / 11.0;
+    series = (series * y2) + (1.0 / 9.0);
+    series = (series * y2) + (1.0 / 7.0);
+    series = (series * y2) + (1.0 / 5.0);
+    series = (series * y2) + (1.0 / 3.0);
+    series = (series * y2) + 1.0;
+    return (2.0 * y * series) + (double(exponent) * NLO_LN2);
+}
+
+void nlo_sincos_double(double angle, out double s, out double c)
+{
+    int quadrant = int((angle >= 0.0) ? (angle * NLO_INV_HALF_PI + 0.5)
+                                      : (angle * NLO_INV_HALF_PI - 0.5));
+    double reduced = angle - (double(quadrant) * NLO_HALF_PI);
+    double x2 = reduced * reduced;
+
+    double sin_poly = -1.0 / 6227020800.0;
+    sin_poly = (sin_poly * x2) + (1.0 / 39916800.0);
+    sin_poly = (sin_poly * x2) - (1.0 / 362880.0);
+    sin_poly = (sin_poly * x2) + (1.0 / 5040.0);
+    sin_poly = (sin_poly * x2) - (1.0 / 120.0);
+    sin_poly = (sin_poly * x2) + (1.0 / 6.0);
+    double sin_r = reduced * (((sin_poly * x2) - 1.0) * (-1.0));
+
+    double cos_poly = -1.0 / 479001600.0;
+    cos_poly = (cos_poly * x2) + (1.0 / 3628800.0);
+    cos_poly = (cos_poly * x2) - (1.0 / 40320.0);
+    cos_poly = (cos_poly * x2) + (1.0 / 720.0);
+    cos_poly = (cos_poly * x2) - (1.0 / 24.0);
+    cos_poly = (cos_poly * x2) + 0.5;
+    double cos_r = ((cos_poly * x2) - 1.0) * (-1.0);
+
+    int mod_quadrant = quadrant % 4;
+    if (mod_quadrant < 0) {
+        mod_quadrant += 4;
+    }
+
+    if (mod_quadrant == 0) {
+        s = sin_r;
+        c = cos_r;
+    } else if (mod_quadrant == 1) {
+        s = cos_r;
+        c = -sin_r;
+    } else if (mod_quadrant == 2) {
+        s = -sin_r;
+        c = -cos_r;
+    } else {
+        s = -cos_r;
+        c = sin_r;
+    }
+}
+
+double nlo_pow_double(double x, double exponent)
+{
+    if (x == 0.0) {
+        return (exponent == 0.0) ? 1.0 : 0.0;
+    }
+    return nlo_exp_double(exponent * nlo_log_double(x));
+}
+
+#endif

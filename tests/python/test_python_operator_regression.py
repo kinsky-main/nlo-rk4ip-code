@@ -1,10 +1,12 @@
 import cmath
 import math
 import random
+import numpy as np
 
 from nlolib import (
     NLO_NONLINEAR_MODEL_EXPR,
     NLO_NONLINEAR_MODEL_KERR_RAMAN,
+    NLOLIB_LOG_LEVEL_ERROR,
     NLOLIB_LOG_LEVEL_WARN,
     NLO_VECTOR_BACKEND_AUTO,
     NLO_VECTOR_BACKEND_CPU,
@@ -136,6 +138,63 @@ def _second_order_soliton_analytic(t_value, z, beta2, t0):
     ) * cmath.exp(0.5j * xi)
     denominator = math.cosh(4.0 * t_value) + 4.0 * math.cosh(2.0 * t_value) + 3.0 * math.cos(4.0 * xi)
     return numerator / denominator
+
+
+def _second_order_soliton_case(n, window_multiple_t0):
+    beta2 = -0.01
+    gamma = 0.01
+    tfwhm = 100e-3
+    t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
+    p0 = (2**2) * abs(beta2) / (gamma * t0 * t0)
+    ld = (t0 * t0) / abs(beta2)
+    z_final = 0.5 * math.pi * ld
+
+    dt = (float(window_multiple_t0) * t0) / float(n)
+    times = _centered_time_grid(n, dt)
+    tau = [ti / t0 for ti in times]
+    omega = _omega_grid_unshifted(n, dt)
+    a0 = [complex(math.sqrt(p0) * (2.0 * _sech(ti)), 0.0) for ti in tau]
+    u_true = [_second_order_soliton_analytic(ti, z_final, beta2, t0) for ti in tau]
+    return {
+        "beta2": beta2,
+        "gamma": gamma,
+        "t0": t0,
+        "p0": p0,
+        "ld": ld,
+        "z_final": z_final,
+        "dt": dt,
+        "tau": tau,
+        "omega": omega,
+        "a0": a0,
+        "u_true": u_true,
+    }
+
+
+def _second_order_intensity_error(final_field, p0, reference_u):
+    u_num = [val / math.sqrt(p0) for val in final_field]
+    intensity_num = [abs(v) ** 2 for v in u_num]
+    intensity_true = [abs(v) ** 2 for v in reference_u]
+    diff_sq = 0.0
+    ref_sq = 0.0
+    for a, b in zip(intensity_num, intensity_true):
+        d = a - b
+        diff_sq += d * d
+        ref_sq += b * b
+    if ref_sq <= 0.0:
+        return float("nan")
+    return math.sqrt(diff_sq / ref_sq)
+
+
+def _exact_linear_temporal_propagation(initial_field, omega, c0, c1, z):
+    spectrum = np.fft.fft(np.asarray(initial_field, dtype=np.complex128))
+    phase = np.exp(((1.0j * float(c0) * (np.asarray(omega, dtype=np.float64) ** 2)) - float(c1)) * float(z))
+    return np.fft.ifft(spectrum * phase)
+
+
+def _exact_nonlinear_phase_rotation(initial_field, gamma, z):
+    field = np.asarray(initial_field, dtype=np.complex128)
+    intensity = np.abs(field) ** 2
+    return field * np.exp(1.0j * float(gamma) * intensity * float(z))
 
 
 def _default_raman_response(n, dt, tau1, tau2):
@@ -1090,53 +1149,260 @@ def test_adaptive_min_step_out_of_tolerance_emits_warning(api, opts):
 
 
 def test_second_order_soliton_intensity_error(api, opts):
-    beta2 = -0.01
-    gamma = 0.01
-    alpha = 0.0
-    tfwhm = 100e-3
-    t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
-    p0 = (2**2) * abs(beta2) / (gamma * t0 * t0)
-    z_final = 0.506
-
-    n = 224
-    tmax = 8.0 * t0
-    dt = (2.0 * tmax) / float(n)
-    times = _centered_time_grid(n, dt)
-    t_dimless = [ti / t0 for ti in times]
-    omega = _omega_grid_unshifted(n, dt)
-
-    u0 = [2.0 * _sech(ti) for ti in t_dimless]
-    a0 = [complex(math.sqrt(p0) * ui, 0.0) for ui in u0]
+    case = _second_order_soliton_case(n=224, window_multiple_t0=16.0)
 
     cfg = prepare_sim_config(
-        n,
-        propagation_distance=z_final,
+        224,
+        propagation_distance=case["z_final"],
         starting_step_size=2e-4,
         max_step_size=1e-2,
         min_step_size=1e-7,
         error_tolerance=1e-5,
-        pulse_period=float(n) * dt,
-        delta_time=dt,
-        frequency_grid=[complex(om, 0.0) for om in omega],
-        runtime=RuntimeOperators(constants=[0.5 * beta2, 0.0, gamma]),
+        pulse_period=224.0 * case["dt"],
+        delta_time=case["dt"],
+        frequency_grid=[complex(om, 0.0) for om in case["omega"]],
+        runtime=RuntimeOperators(constants=[0.5 * case["beta2"], 0.0, case["gamma"]]),
     )
 
-    records = api.propagate(cfg, a0, 2, opts).records
+    records = api.propagate(cfg, case["a0"], 2, opts).records
     final_field = records[1]
     assert all(math.isfinite(v.real) and math.isfinite(v.imag) for v in final_field)
 
-    u_num = [val / math.sqrt(p0) for val in final_field]
-    u_true = [_second_order_soliton_analytic(ti, z_final, beta2, t0) for ti in t_dimless]
-    intensity_num = [abs(v) ** 2 for v in u_num]
-    intensity_true = [abs(v) ** 2 for v in u_true]
-    epsilon = sum(abs(a - b) for a, b in zip(intensity_num, intensity_true)) / float(len(intensity_num))
-    epsilon /= max(intensity_true)
+    epsilon = _second_order_intensity_error(final_field, case["p0"], case["u_true"])
     assert epsilon <= 1e-2, f"second-order soliton intensity error too high: {epsilon}"
+
+
+def test_second_order_soliton_adaptive_vs_fixed_reference_auto_gpu(api, opts):
+    if not _auto_backend_resolves_to_vulkan(api):
+        print("test_second_order_soliton_adaptive_vs_fixed_reference_auto_gpu: AUTO did not resolve to Vulkan, skipping.")
+        return
+
+    case = _second_order_soliton_case(n=1024, window_multiple_t0=40.0)
+    runtime = RuntimeOperators(constants=[0.5 * case["beta2"], 0.0, case["gamma"]])
+    gpu_opts = default_execution_options(NLO_VECTOR_BACKEND_AUTO)
+
+    adaptive_cfg = prepare_sim_config(
+        1024,
+        propagation_distance=case["z_final"],
+        starting_step_size=1e-4,
+        max_step_size=1e-2,
+        min_step_size=1e-9,
+        error_tolerance=1e-10,
+        pulse_period=1024.0 * case["dt"],
+        delta_time=case["dt"],
+        frequency_grid=[complex(om, 0.0) for om in case["omega"]],
+        runtime=runtime,
+    )
+    fixed_cfg = prepare_sim_config(
+        1024,
+        propagation_distance=case["z_final"],
+        starting_step_size=case["z_final"] / 1024.0,
+        max_step_size=case["z_final"] / 1024.0,
+        min_step_size=case["z_final"] / 1024.0,
+        error_tolerance=1e-10,
+        pulse_period=1024.0 * case["dt"],
+        delta_time=case["dt"],
+        frequency_grid=[complex(om, 0.0) for om in case["omega"]],
+        runtime=runtime,
+    )
+
+    api.set_log_level(NLOLIB_LOG_LEVEL_ERROR)
+    try:
+        adaptive_result = api.propagate(
+            adaptive_cfg,
+            case["a0"],
+            2,
+            gpu_opts,
+            capture_step_history=True,
+            step_history_capacity=32768,
+        )
+        fixed_result = api.propagate(fixed_cfg, case["a0"], 2, gpu_opts)
+    finally:
+        api.set_log_level(NLOLIB_LOG_LEVEL_WARN)
+
+    adaptive_final = adaptive_result.records[1]
+    fixed_final = fixed_result.records[1]
+    adaptive_error = _second_order_intensity_error(adaptive_final, case["p0"], case["u_true"])
+    fixed_error = _second_order_intensity_error(fixed_final, case["p0"], case["u_true"])
+
+    adaptive_history = adaptive_result.meta.get("step_history")
+    assert isinstance(adaptive_history, dict)
+    adaptive_steps = [float(v) for v in adaptive_history.get("step_size", [])]
+    assert len(adaptive_steps) > 0
+    assert all(math.isfinite(v) and v > 0.0 for v in adaptive_steps)
+    assert math.isfinite(adaptive_error)
+    assert math.isfinite(fixed_error)
+    assert fixed_error < adaptive_error, (
+        f"fixed-step reference should outperform adaptive second-order run on the same GPU path: "
+        f"fixed={fixed_error}, adaptive={adaptive_error}"
+    )
+    # Diagnostic guard: adaptive should stay in the same broad error band as a
+    # fine fixed-step reference, but current solver work still leaves a clear
+    # gap here for the second-order case.
+    assert adaptive_error <= (10.0 * fixed_error), (
+        f"adaptive second-order error drifted too far above fixed-step reference: "
+        f"fixed={fixed_error}, adaptive={adaptive_error}"
+    )
+
+
+def test_fixed_step_linear_only_exact_cpu_vs_auto_gpu(api, opts):
+    n = 512
+    dt = 0.02
+    z_final = 0.35
+    c0 = -0.5
+    c1 = 0.0
+    times = _centered_time_grid(n, dt)
+    omega = _omega_grid_unshifted(n, dt)
+    a0 = [complex(math.exp(-((ti / 0.7) ** 2)), 0.0) for ti in times]
+    exact = _exact_linear_temporal_propagation(a0, omega, c0, c1, z_final)
+    step_counts = [1, 2, 4, 8, 16]
+
+    cpu_errors = []
+    for step_count in step_counts:
+        step = z_final / float(step_count)
+        cfg = prepare_sim_config(
+            n,
+            propagation_distance=z_final,
+            starting_step_size=step,
+            max_step_size=step,
+            min_step_size=step,
+            error_tolerance=1e-12,
+            pulse_period=float(n) * dt,
+            delta_time=dt,
+            frequency_grid=[complex(om, 0.0) for om in omega],
+            runtime=RuntimeOperators(constants=[c0, c1, 0.0]),
+        )
+        cpu_final = api.propagate(cfg, a0, 2, default_execution_options(NLO_VECTOR_BACKEND_CPU)).records[1]
+        cpu_errors.append(_relative_l2_error(cpu_final, exact))
+
+    assert max(cpu_errors) <= 5e-12, f"CPU linear-only fixed-step propagation drifted from exact solution: {cpu_errors}"
+
+    if not _auto_backend_resolves_to_vulkan(api):
+        print("test_fixed_step_linear_only_exact_cpu_vs_auto_gpu: AUTO did not resolve to Vulkan, skipping.")
+        return
+
+    gpu_errors = []
+    for step_count in step_counts:
+        step = z_final / float(step_count)
+        cfg = prepare_sim_config(
+            n,
+            propagation_distance=z_final,
+            starting_step_size=step,
+            max_step_size=step,
+            min_step_size=step,
+            error_tolerance=1e-12,
+            pulse_period=float(n) * dt,
+            delta_time=dt,
+            frequency_grid=[complex(om, 0.0) for om in omega],
+            runtime=RuntimeOperators(constants=[c0, c1, 0.0]),
+        )
+        auto_final = api.propagate(cfg, a0, 2, default_execution_options(NLO_VECTOR_BACKEND_AUTO)).records[1]
+        gpu_errors.append(_relative_l2_error(auto_final, exact))
+
+    assert max(gpu_errors) <= 5e-6, f"AUTO/Vulkan linear-only fixed-step error exceeded diagnostic bound: {gpu_errors}"
+
+
+def test_fixed_step_nonlinear_only_order_auto_gpu(api, opts):
+    if not _auto_backend_resolves_to_vulkan(api):
+        print("test_fixed_step_nonlinear_only_order_auto_gpu: AUTO did not resolve to Vulkan, skipping.")
+        return
+
+    n = 256
+    dt = 0.05
+    z_final = 0.2
+    gamma = 1.3
+    times = _centered_time_grid(n, dt)
+    a0 = [complex(0.7 * math.exp(-((ti / 0.6) ** 2)), 0.0) for ti in times]
+    exact = _exact_nonlinear_phase_rotation(a0, gamma, z_final)
+    step_counts = [4, 8, 16, 32, 64]
+    errors = []
+
+    for step_count in step_counts:
+        step = z_final / float(step_count)
+        cfg = prepare_sim_config(
+            n,
+            propagation_distance=z_final,
+            starting_step_size=step,
+            max_step_size=step,
+            min_step_size=step,
+            error_tolerance=1e-12,
+            pulse_period=float(n) * dt,
+            delta_time=dt,
+            frequency_grid=[complex(0.0, 0.0) for _ in range(n)],
+            runtime=RuntimeOperators(
+                dispersion_factor_expr="0",
+                nonlinear_expr="i*c2*A*I",
+                constants=[0.0, 0.0, gamma],
+            ),
+        )
+        final_field = api.propagate(cfg, a0, 2, default_execution_options(NLO_VECTOR_BACKEND_AUTO)).records[1]
+        errors.append(_relative_l2_error(final_field, exact))
+
+    local_orders = [
+        math.log(errors[i - 1] / errors[i], 2.0)
+        for i in range(1, len(errors))
+        if errors[i] > 0.0
+    ]
+    assert min(local_orders) >= 3.8, (
+        f"nonlinear-only fixed-step path lost fourth-order convergence on AUTO/Vulkan: "
+        f"errors={errors}, local_orders={local_orders}"
+    )
+
+
+def test_expr_mode_ignores_raman_parameters(api, opts):
+    n = 160
+    dt = 0.01
+    z_final = 0.04
+    omega = _omega_grid_unshifted(n, dt)
+    t = _centered_time_grid(n, dt)
+    a0 = [complex(math.exp(-((ti / 0.11) ** 2)), 0.0) for ti in t]
+
+    common = dict(
+        propagation_distance=z_final,
+        starting_step_size=1e-3,
+        max_step_size=4e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[complex(om, 0.0) for om in omega],
+    )
+    expr_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="i*c0*w*w",
+            nonlinear_expr="i*c1*A*I",
+            constants=[0.01, 0.7, 0.0, 0.0],
+            nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
+        ),
+        **common,
+    )
+    expr_with_raman_params_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="i*c0*w*w",
+            nonlinear_expr="i*c1*A*I",
+            constants=[0.01, 0.7, 0.0, 0.0],
+            nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
+            nonlinear_gamma=123.0,
+            raman_fraction=0.35,
+            raman_tau1=0.02,
+            raman_tau2=0.05,
+            shock_omega0=17.0,
+            raman_response_time=[complex(1.0 if i == 0 else 0.0, 0.0) for i in range(n)],
+        ),
+        **common,
+    )
+
+    expr_final = api.propagate(expr_cfg, a0, 2, opts).records[1]
+    expr_with_raman_params_final = api.propagate(expr_with_raman_params_cfg, a0, 2, opts).records[1]
+    rel = _relative_l2_error(expr_final, expr_with_raman_params_final)
+    assert rel <= 2e-8, f"expr-mode propagation changed when Raman-only parameters were set: rel={rel}"
 
 
 def test_fixed_step_fundamental_soliton_order(api, opts):
     slope, errors = _fixed_step_fundamental_soliton_order_stats(api, opts)
-    assert slope >= 2.5, f"fixed-step fundamental soliton slope unexpectedly low: {slope}"
+    assert slope >= 3.0, f"fixed-step fundamental soliton slope unexpectedly low: {slope}"
     assert errors[0] > errors[-1], f"fixed-step refinement did not reduce final error: {errors}"
 
 
@@ -1149,14 +1415,14 @@ def _fixed_step_fundamental_soliton_order_stats(api, opts):
     ld = (t0 * t0) / abs(beta2)
     z_final = 0.5 * math.pi * ld
 
-    n = 512
-    dt = (16.0 * t0) / float(n)
+    n = 1024
+    dt = (32.0 * t0) / float(n)
     t = _centered_time_grid(n, dt)
     tau = [ti / t0 for ti in t]
     omega = _omega_grid_unshifted(n, dt)
     a0 = [complex(math.sqrt(p0) / math.cosh(xi), 0.0) for xi in tau]
 
-    step_counts = [1, 2, 4, 8]
+    step_counts = [1, 2, 4, 8, 16]
     step_sizes = []
     errors = []
     for step_count in step_counts:
@@ -1224,7 +1490,7 @@ def test_fixed_step_fundamental_soliton_order_auto_gpu(api, opts):
         api,
         default_execution_options(NLO_VECTOR_BACKEND_AUTO),
     )
-    assert auto_slope >= 2.5, f"fixed-step AUTO/Vulkan soliton slope unexpectedly low: {auto_slope}"
+    assert auto_slope >= 3.0, f"fixed-step AUTO/Vulkan soliton slope unexpectedly low: {auto_slope}"
     assert abs(auto_slope - cpu_slope) <= 0.2, (
         f"AUTO/Vulkan slope drifted too far from CPU: cpu={cpu_slope}, auto={auto_slope}"
     )
@@ -1254,6 +1520,10 @@ def main():
     test_adaptive_tighter_tolerance_reduces_final_error(api, opts)
     test_adaptive_min_step_out_of_tolerance_emits_warning(api, opts)
     test_second_order_soliton_intensity_error(api, opts)
+    test_second_order_soliton_adaptive_vs_fixed_reference_auto_gpu(api, opts)
+    test_fixed_step_linear_only_exact_cpu_vs_auto_gpu(api, opts)
+    test_fixed_step_nonlinear_only_order_auto_gpu(api, opts)
+    test_expr_mode_ignores_raman_parameters(api, opts)
     test_fixed_step_fundamental_soliton_order(api, opts)
     test_fixed_step_fundamental_soliton_order_auto_gpu(api, opts)
     print("test_python_operator_regression: runtime-operator propagation regressions validated.")

@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "nlo_complex_device.glslinc"
+#include "nlo_double_math.glslinc"
 
 layout(local_size_x = 64) in;
 
@@ -24,13 +25,13 @@ void main()
         return;
     }
 
-    float exponent_f = float(pc.scalar0);
-    float re_f = float(dst[idx].re);
-    float im_f = float(dst[idx].im);
-    float radius_f = length(vec2(re_f, im_f));
+    const double exponent = pc.scalar0;
+    const double re = dst[idx].re;
+    const double im = dst[idx].im;
+    const double radius = sqrt((re * re) + (im * im));
 
-    if (radius_f == 0.0f) {
-        if (exponent_f == 0.0f) {
+    if (radius == 0.0) {
+        if (exponent == 0.0) {
             dst[idx].re = 1.0;
             dst[idx].im = 0.0;
         } else {
@@ -40,10 +41,13 @@ void main()
         return;
     }
 
-    float angle_f = atan(im_f, re_f);
-    float scaled_angle_f = exponent_f * angle_f;
-    float scaled_radius_f = pow(radius_f, exponent_f);
+    const double angle = nlo_atan2_double(im, re);
+    const double scaled_angle = exponent * angle;
+    const double scaled_radius = nlo_pow_double(radius, exponent);
+    double sin_angle = 0.0;
+    double cos_angle = 0.0;
+    nlo_sincos_double(scaled_angle, sin_angle, cos_angle);
 
-    dst[idx].re = double(scaled_radius_f * cos(scaled_angle_f));
-    dst[idx].im = double(scaled_radius_f * sin(scaled_angle_f));
+    dst[idx].re = scaled_radius * cos_angle;
+    dst[idx].im = scaled_radius * sin_angle;
 }

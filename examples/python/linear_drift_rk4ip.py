@@ -13,13 +13,14 @@ from pathlib import Path
 
 import numpy as np
 from backend.app_base import ExampleAppBase
-from backend.metrics import mean_pointwise_abs_relative_error_curve
+from backend.metrics import relative_l2_error_curve
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
     plot_intensity_colormap_vs_propagation,
     plot_total_error_over_propagation,
 )
+from backend.reference import exact_linear_temporal_records
 from backend.runner import (
     NloExampleRunner,
     SimulationOptions,
@@ -41,35 +42,6 @@ def centroid_curve(t: np.ndarray, records: np.ndarray) -> np.ndarray:
     safe_norm = np.where(norm > 0.0, norm, 1.0)
     return weighted / safe_norm
 
-
-def linear_reference_records(
-    field0: np.ndarray,
-    z_records: np.ndarray,
-    beta2: float,
-    dt: float,
-) -> np.ndarray:
-    field = np.asarray(field0, dtype=np.complex128).reshape(-1)
-    z = np.asarray(z_records, dtype=np.float64).reshape(-1)
-    n = int(field.size)
-    if n == 0:
-        raise ValueError("field0 must be non-empty.")
-
-    omega = 2.0 * np.pi * np.fft.fftfreq(n, d=float(dt))
-    phase_coeff = 0.5 * float(beta2) * (omega**2)
-    spectrum0 = np.fft.fft(field)
-
-    references = np.empty((z.size, n), dtype=np.complex128)
-    phase_arg = np.empty(n, dtype=np.float64)
-    phase = np.empty(n, dtype=np.complex128)
-    spectrum_z = np.empty(n, dtype=np.complex128)
-    for i, z_i in enumerate(z):
-        np.multiply(phase_coeff, z_i, out=phase_arg)
-        np.multiply(phase_arg, 1.0j, out=phase)
-        np.exp(phase, out=phase)
-        np.multiply(spectrum0, phase, out=spectrum_z)
-        references[i] = np.fft.ifft(spectrum_z)
-    return references
-
 def _run(args: argparse.Namespace) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "linear_drift_rk4ip"
@@ -86,7 +58,7 @@ def _run(args: argparse.Namespace) -> float:
     t = centered_time_grid(num_samples, dt)
     field0 = gaussian_with_phase_ramp(t, sigma, chirp).astype(np.complex128)
 
-    exec_options = SimulationOptions(backend="auto", fft_backend="auto")
+    exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
     runner = NloExampleRunner()
     if args.replot:
         run_group = db.resolve_replot_group(example_name, args.run_group)
@@ -149,8 +121,14 @@ def _run(args: argparse.Namespace) -> float:
     predicted_slope = beta2 * chirp
     theory_shift = predicted_slope * z_records
     slope_rel_error = abs(measured_slope - predicted_slope) / max(abs(predicted_slope), 1e-12)
-    reference_records = linear_reference_records(field0, z_records, beta2, dt)
-    error_curve = mean_pointwise_abs_relative_error_curve(records, reference_records, context="linear_drift:record_error_curve")
+    reference_records = exact_linear_temporal_records(
+        field0,
+        z_records,
+        2.0 * np.pi * np.fft.fftfreq(num_samples, d=dt),
+        0.5 * beta2,
+        0.0,
+    )
+    error_curve = 100.0 * relative_l2_error_curve(records, reference_records)
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -198,8 +176,7 @@ def _run(args: argparse.Namespace) -> float:
         z_records,
         error_curve,
         output_dir / "linear_drift_total_error_over_propagation.png",
-        
-        y_label="Mean pointwise abs-relative error (numerical vs analytical)",
+        y_label="Relative L2 field error (%)",
     )
     if saved is not None:
         saved_paths.append(saved)

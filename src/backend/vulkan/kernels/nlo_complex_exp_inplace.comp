@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "nlo_complex_device.glslinc"
+#include "nlo_double_math.glslinc"
 
 layout(local_size_x = 64) in;
 
@@ -24,18 +25,12 @@ void main()
         return;
     }
 
-    const float max_log_float = 88.0f;
-    const float min_log_float = -88.0f;
-
-    float re_f = float(dst[idx].re);
-    float im_f = float(dst[idx].im);
-    if (re_f > max_log_float) {
-        re_f = max_log_float;
-    } else if (re_f < min_log_float) {
-        re_f = min_log_float;
-    }
-
-    float exp_re = exp(re_f);
-    dst[idx].re = double(exp_re * cos(im_f));
-    dst[idx].im = double(exp_re * sin(im_f));
+    const double re = dst[idx].re;
+    const double im = dst[idx].im;
+    const double exp_re = nlo_exp_double(re);
+    double sin_im = 0.0;
+    double cos_im = 0.0;
+    nlo_sincos_double(im, sin_im, cos_im);
+    dst[idx].re = exp_re * cos_im;
+    dst[idx].im = exp_re * sin_im;
 }
