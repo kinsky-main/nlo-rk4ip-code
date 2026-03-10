@@ -206,7 +206,7 @@ def _run(args: argparse.Namespace) -> float:
     omega = 2.0 * np.pi * np.fft.fftfreq(n, d=dt)
     p0 = abs(beta2) / (gamma * pulse_width * pulse_width)
     field0 = (np.sqrt(p0) / np.cosh(t / pulse_width)).astype(np.complex128)
-    exec_options = SimulationOptions(backend="auto", fft_backend="auto")
+    exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
     runner = NloExampleRunner()
 
     if args.replot:

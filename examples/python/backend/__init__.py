@@ -22,6 +22,13 @@ from .plotting import (
     plot_two_curve_comparison,
     plot_wavelength_step_history,
 )
+from .reference import (
+    exact_linear_temporal_final,
+    exact_linear_temporal_records,
+    scipy_available,
+    solve_temporal_nlse_scipy_final,
+    solve_temporal_nlse_scipy_records,
+)
 from .runner import (
     NloExampleRunner,
     SimulationOptions,
@@ -70,4 +77,9 @@ __all__ = [
     "plot_total_error_over_propagation",
     "plot_two_curve_comparison",
     "plot_wavelength_step_history",
+    "exact_linear_temporal_final",
+    "exact_linear_temporal_records",
+    "scipy_available",
+    "solve_temporal_nlse_scipy_final",
+    "solve_temporal_nlse_scipy_records",
 ]

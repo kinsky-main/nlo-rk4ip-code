@@ -20,7 +20,6 @@ from backend.app_base import ExampleAppBase
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
-    plot_total_error_over_propagation,
     plot_wavelength_step_history,
 )
 from backend.runner import (
@@ -36,7 +35,6 @@ from backend.storage import ExampleRunDB
 from backend.metrics import (
     mean_pointwise_abs_relative_error,
     relative_l2_intensity_error,
-    relative_l2_intensity_error_curve,
 )
 
 
@@ -293,7 +291,6 @@ def save_plots(
     t: np.ndarray,
     U_num: np.ndarray,
     U_true: np.ndarray,
-    error_curve_percent: np.ndarray,
     z_samples_norm: np.ndarray,
     lambda_nm: np.ndarray,
     spectral_map: np.ndarray,
@@ -345,16 +342,6 @@ def save_plots(
     )
     if p3 is not None:
         saved_paths.append(p3)
-
-    p4 = plot_total_error_over_propagation(
-        z_samples_norm,
-        error_curve_percent,
-        output_dir / "soliton_total_error_over_propagation.png",
-        y_label="Relative L2 intensity error (%)",
-        x_label="Normalized propagation z / Z0",
-    )
-    if p4 is not None:
-        saved_paths.append(p4)
 
     return saved_paths
 
@@ -510,7 +497,7 @@ def _run(args: argparse.Namespace) -> float:
         configured_max_step = float(sim_cfg.max_step_size)
         configured_min_step = float(sim_cfg.min_step_size)
         configured_error_tolerance = float(sim_cfg.error_tolerance)
-        exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
+        exec_options = SimulationOptions(backend="auto", fft_backend="auto")
         runner = NloExampleRunner()
         progress_callback = make_eta_abort_progress_callback(runner.api)
         storage_kwargs = db.storage_kwargs(
@@ -565,6 +552,8 @@ def _run(args: argparse.Namespace) -> float:
     z0 = 0.5 * math.pi * ld
     if not np.isfinite(z0) or z0 <= 0.0:
         raise RuntimeError("invalid soliton period Z0 computed for plotting normalization.")
+    omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
+    A0 = to_physical_envelope(2.0 * sech(t), 0.0, p0, alpha)
     ensure_finite_records_or_raise(A_records, z_records)
     U_num_records = np.empty_like(A_records, dtype=np.complex128)
     U_true_records = np.empty_like(A_records, dtype=np.complex128)
@@ -575,9 +564,7 @@ def _run(args: argparse.Namespace) -> float:
     U_num = U_num_records[-1]
     U_true = U_true_records[-1]
     epsilon = relative_l2_intensity_error(U_num, U_true)
-    error_curve = relative_l2_intensity_error_curve(U_num_records, U_true_records)
     epsilon_percent = 100.0 * epsilon
-    error_curve_percent = 100.0 * error_curve
     envelope_rel_error = mean_pointwise_abs_relative_error(
         U_num,
         U_true,
@@ -606,7 +593,6 @@ def _run(args: argparse.Namespace) -> float:
         t,
         U_num,
         U_true,
-        error_curve_percent,
         z_map_norm,
         lambda_nm,
         spectral_map,
@@ -623,6 +609,7 @@ def _run(args: argparse.Namespace) -> float:
     )
     print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
     print(f"epsilon (relative L2 intensity error) = {epsilon:.6e} ({epsilon_percent:.6f}%)")
+    print("omitted propagation-error plot: the current analytical second-order trajectory is not yet validated over the full period.")
     print(f"diagnostic mean abs-relative envelope error = {envelope_rel_error:.6e}")
     if configured_start_step is not None:
         print(

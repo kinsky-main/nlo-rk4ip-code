@@ -356,7 +356,8 @@ def plot_convergence_loglog(
     output_path: Path,
     *,
     x_label: str = "Step size Delta z (m)",
-    y_label: str = "Mean pointwise abs-relative error"
+    y_label: str = "Mean pointwise abs-relative error",
+    reference_order: float = 4.0,
 ) -> Path | None:
 
 
@@ -367,13 +368,13 @@ def plot_convergence_loglog(
 
     fit_indices = np.flatnonzero(fit_mask_plot)
     anchor = int(fit_indices[0]) if fit_indices.size > 0 else 0
-    ref = errors_plot[anchor] * (step_sizes_plot / step_sizes_plot[anchor]) ** 4
+    ref = errors_plot[anchor] * (step_sizes_plot / step_sizes_plot[anchor]) ** reference_order
     fit_line = np.exp(fitted_intercept) * (step_sizes_plot**fitted_order)
 
     fig, ax = plt.subplots()
-    ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
     ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="C3", label="Fitted power law")
-    ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^4)$")
+    ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^{%g})$" % reference_order)
+    ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.grid(True, which="both", alpha=0.3)
