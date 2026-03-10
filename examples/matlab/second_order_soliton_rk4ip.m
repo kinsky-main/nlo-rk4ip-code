@@ -67,12 +67,13 @@ end
 
 uNum = uNumRecords(end, :);
 uTrue = uTrueRecords(end, :);
-epsilon = average_relative_intensity_error(uNum, uTrue);
+epsilon = relative_l2_intensity_error(uNum, uTrue);
 if ~isfinite(epsilon)
     error("final epsilon is non-finite; numerical output is invalid.");
 end
 
-errorCurve = relative_l2_error_curve(uNumRecords, uTrueRecords);
+errorCurve = relative_l2_intensity_error_curve(uNumRecords, uTrueRecords);
+errorCurvePercent = 100.0 * errorCurve;
 z0AnalyticError = analytical_initial_condition_error(t, beta2, t0);
 
 lambda0Nm = 1550.0;
@@ -110,16 +111,16 @@ savedPaths(end + 1, 1) = string(backend.plot_final_intensity_comparison( ...
     "final_label", "Numerical")); %#ok<AGROW>
 
 savedPaths(end + 1, 1) = string(backend.plot_total_error_over_propagation( ...
-    zRecords, errorCurve, ...
+    zRecords, errorCurvePercent, ...
     fullfile(outputDir, "total_error_over_propagation.png"), ...
     "title", "Second-Order Soliton: Total Error Over Propagation", ...
-    "y_label", "Relative L2 error (numerical vs analytical)")); %#ok<AGROW>
+    "y_label", "Relative L2 intensity error (%)")); %#ok<AGROW>
 
 [sgnBeta2, ld, lnl] = normalized_nlse_coefficients(beta2, gamma, t0, p0);
 fprintf("normalized NLSE coefficients: sgn(beta2)=%+d, 1/(2*LD)=%.6e 1/m, exp(-alpha*z_final)/LNL=%.6e 1/m.\n", ...
         int32(sgnBeta2), 0.5 / ld, exp(-alpha * zFinal) / lnl);
 fprintf("analytical z=0 envelope max error = %.6e\n", z0AnalyticError);
-fprintf("epsilon = %.6e\n", epsilon);
+fprintf("epsilon (relative L2 intensity error) = %.6e (%.6f%%%%)\n", epsilon, 100.0 * epsilon);
 fprintf("step telemetry events: accepted=%d, next=%d, dropped=%d\n", ...
         numel(stepTelemetry.accepted_z), numel(stepTelemetry.next_z), int64(stepTelemetry.dropped));
 for idx = 1:numel(savedPaths)
@@ -159,7 +160,7 @@ denominator = cosh(4.0 .* t) + 4.0 .* cosh(2.0 .* t) + 3.0 .* cos(4.0 * xi);
 out = numerator ./ denominator;
 end
 
-function out = average_relative_intensity_error(aNum, aTrue)
+function out = relative_l2_intensity_error(aNum, aTrue)
 intNum = abs(aNum).^2;
 intTrue = abs(aTrue).^2;
 finiteMask = isfinite(intNum) & isfinite(intTrue);
@@ -167,8 +168,8 @@ if ~any(finiteMask)
     out = NaN;
     return;
 end
-numerator = mean(abs(intNum(finiteMask) - intTrue(finiteMask)));
-denominator = max(intTrue(finiteMask));
+numerator = norm(intNum(finiteMask) - intTrue(finiteMask), 2);
+denominator = norm(intTrue(finiteMask), 2);
 if denominator <= 0.0 || ~isfinite(denominator)
     out = NaN;
     return;
@@ -371,16 +372,17 @@ outTelemetry.next_z = z(keepMask);
 outTelemetry.next_step_sizes = proposed(keepMask);
 end
 
-function out = relative_l2_error_curve(records, referenceRecords)
+function out = relative_l2_intensity_error_curve(records, referenceRecords)
 if any(size(records) ~= size(referenceRecords))
     error("records and referenceRecords must have the same shape.");
 end
-refNorms = vecnorm(referenceRecords, 2, 2);
+refIntensity = abs(referenceRecords).^2;
+refNorms = vecnorm(refIntensity, 2, 2);
 normFloor = max(max(refNorms) * 1e-12, 1e-15);
 out = zeros(size(records, 1), 1);
 for idx = 1:size(records, 1)
-    ref = referenceRecords(idx, :);
-    num = records(idx, :);
+    ref = abs(referenceRecords(idx, :)).^2;
+    num = abs(records(idx, :)).^2;
     refNorm = norm(ref, 2);
     safeNorm = max(refNorm, normFloor);
     out(idx) = norm(num - ref, 2) / safeNorm;

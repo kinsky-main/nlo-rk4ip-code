@@ -293,7 +293,7 @@ def save_plots(
     t: np.ndarray,
     U_num: np.ndarray,
     U_true: np.ndarray,
-    error_curve: np.ndarray,
+    error_curve_percent: np.ndarray,
     z_samples_norm: np.ndarray,
     lambda_nm: np.ndarray,
     spectral_map: np.ndarray,
@@ -348,9 +348,9 @@ def save_plots(
 
     p4 = plot_total_error_over_propagation(
         z_samples_norm,
-        error_curve,
+        error_curve_percent,
         output_dir / "soliton_total_error_over_propagation.png",
-        y_label="Relative L2 intensity error (numerical vs analytical)",
+        y_label="Relative L2 intensity error (%)",
         x_label="Normalized propagation z / Z0",
     )
     if p4 is not None:
@@ -510,7 +510,7 @@ def _run(args: argparse.Namespace) -> float:
         configured_max_step = float(sim_cfg.max_step_size)
         configured_min_step = float(sim_cfg.min_step_size)
         configured_error_tolerance = float(sim_cfg.error_tolerance)
-        exec_options = SimulationOptions(backend="auto", fft_backend="auto")
+        exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
         runner = NloExampleRunner()
         progress_callback = make_eta_abort_progress_callback(runner.api)
         storage_kwargs = db.storage_kwargs(
@@ -576,6 +576,8 @@ def _run(args: argparse.Namespace) -> float:
     U_true = U_true_records[-1]
     epsilon = relative_l2_intensity_error(U_num, U_true)
     error_curve = relative_l2_intensity_error_curve(U_num_records, U_true_records)
+    epsilon_percent = 100.0 * epsilon
+    error_curve_percent = 100.0 * error_curve
     envelope_rel_error = mean_pointwise_abs_relative_error(
         U_num,
         U_true,
@@ -604,7 +606,7 @@ def _run(args: argparse.Namespace) -> float:
         t,
         U_num,
         U_true,
-        error_curve,
+        error_curve_percent,
         z_map_norm,
         lambda_nm,
         spectral_map,
@@ -620,7 +622,7 @@ def _run(args: argparse.Namespace) -> float:
         f"exp(-alpha*z_final)/LNL={math.exp(-alpha * z_final) / lnl:.6e} 1/m."
     )
     print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
-    print(f"epsilon (relative L2 intensity error) = {epsilon:.6e}")
+    print(f"epsilon (relative L2 intensity error) = {epsilon:.6e} ({epsilon_percent:.6f}%)")
     print(f"diagnostic mean abs-relative envelope error = {envelope_rel_error:.6e}")
     if configured_start_step is not None:
         print(

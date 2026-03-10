@@ -26,6 +26,8 @@ from backend.storage import ExampleRunDB
 
 
 INTENSITY_FILTER_RATIO = 1.0e-8
+NUM_TIME_SAMPLES = 2**10
+WINDOW_MULTIPLE_T0 = 32.0
 
 
 def _configure_runtime_logging(runner: NloExampleRunner) -> None:
@@ -97,8 +99,11 @@ def _run(args) -> float:
     z0 = 0.5 * math.pi * ld
     z_final = z0
 
-    n = 2**9
-    dt = (16.0 * t0) / n
+    # A narrow periodic window creates a benchmark-side floor in the fine regime
+    # before the RK4IP truncation error is visible. Keep the time window wide
+    # enough that the final-field benchmark measures the solver, not wraparound.
+    n = NUM_TIME_SAMPLES
+    dt = (WINDOW_MULTIPLE_T0 * t0) / n
     omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
     tau = centered_time_grid(n, dt) / t0
     p0 = abs(beta2) / (gamma * t0 * t0)
@@ -112,7 +117,7 @@ def _run(args) -> float:
 
     runner = NloExampleRunner()
     _configure_runtime_logging(runner)
-    exec_options = SimulationOptions(backend="auto", fft_backend="auto")
+    exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
 
     run_data: list[tuple[int, float, np.ndarray]] = []
     if args.replot:
@@ -199,7 +204,7 @@ def _run(args) -> float:
     step_counts = np.asarray([entry[0] for entry in run_data], dtype=int)
     step_sizes = np.asarray([entry[1] for entry in run_data], dtype=np.float64)
     step_sizes_norm = step_sizes / float(z0)
-    fit_mask = step_counts <= 4
+    fit_mask = step_counts <= 16
 
     records_finite = np.asarray(
         [bool(np.all(np.isfinite(records))) for _, _, records in run_data],
@@ -240,9 +245,10 @@ def _run(args) -> float:
 
     print(f"fixed-step soliton convergence summary (run_group={run_group}):")
     print(f"  benchmark = analytical fundamental soliton final field")
-    print("  backend = auto (GPU preferred)")
     print(f"  records per run = {target_records}")
     print(f"  intensity_filter_ratio = {INTENSITY_FILTER_RATIO:.1e}")
+    print(f"  num_time_samples = {n}")
+    print(f"  time_window = {WINDOW_MULTIPLE_T0:.1f} * T0")
     for k, dz, dz_norm, finite_records, final_err in zip(
         step_counts.tolist(),
         step_sizes,
