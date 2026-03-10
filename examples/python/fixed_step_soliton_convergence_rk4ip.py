@@ -112,7 +112,7 @@ def _run(args) -> float:
     db = ExampleRunDB(args.db_path)
     example_name = "fixed_step_soliton_convergence_rk4ip"
 
-    step_counts_base = np.asarray([1, 2, 4, 8, 16, 32, 64], dtype=int)
+    step_counts_base = np.asarray([1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024], dtype=int)
     target_records = 2
 
     runner = NloExampleRunner()
