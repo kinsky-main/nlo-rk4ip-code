@@ -45,6 +45,10 @@ add_test(NAME test_python_reference_benchmarks
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_reference_benchmarks.py"
 )
 
+add_test(NAME test_python_package_surface
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_package_surface.py"
+)
+
 set(_NLOLIB_TEST_PATH "$ENV{PATH}")
 string(REPLACE ";" "\\;" _NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}")
 
@@ -81,5 +85,9 @@ set_tests_properties(test_python_example_oop_structure PROPERTIES
 )
 
 set_tests_properties(test_python_reference_benchmarks PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
+)
+
+set_tests_properties(test_python_package_surface PROPERTIES
   ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
 )
