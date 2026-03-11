@@ -8,7 +8,7 @@ gamma = 0.01;
 alpha = 0.0;
 tfwhm = 100e-3;
 t0 = tfwhm / (2.0 * log(1.0 + sqrt(2.0)));
-p0 = (2^2) * abs(beta2) / (gamma * t0 * t0);
+p0 = abs(beta2) / (gamma * t0 * t0);
 zFinal = 0.506;
 
 n = 2^10;

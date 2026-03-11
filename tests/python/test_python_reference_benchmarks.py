@@ -13,7 +13,11 @@ if str(EXAMPLES_PYTHON) not in sys.path:
 
 from backend.metrics import filtered_relative_l2_error, relative_l2_error  # noqa: E402
 from backend.reference import (  # noqa: E402
+    analytical_initial_condition_error,
     exact_linear_temporal_final,
+    peak_intensity_over_records,
+    second_order_soliton_normalized_records,
+    second_order_soliton_period,
 )
 from nlolib import (  # noqa: E402
     NLOLIB_LOG_LEVEL_ERROR,
@@ -94,6 +98,38 @@ def _fundamental_soliton_case(n: int = 256, window_multiple_t0: float = 32.0) ->
         "field0": field0,
         "reference": reference,
     }
+
+
+def test_second_order_reference_matches_known_recurrence_and_midperiod_compression() -> None:
+    beta2 = -0.01
+    tfwhm = 100e-3
+    t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
+    n = 4096
+    dt = (64.0 * t0) / float(n)
+    t = _centered_time_grid(n, dt) / t0
+    z0 = second_order_soliton_period(beta2, t0)
+    z_axis = np.linspace(0.0, z0, 513, dtype=np.float64)
+
+    initial_error = analytical_initial_condition_error(t, beta2, t0)
+    assert initial_error <= 1.0e-12, f"second-order analytical initial condition drifted: {initial_error}"
+
+    records = second_order_soliton_normalized_records(t, z_axis, beta2, t0)
+    peak_trace = peak_intensity_over_records(records)
+    peak_index = int(np.argmax(peak_trace))
+    peak_location = float(z_axis[peak_index] / z0)
+    peak_intensity = float(peak_trace[peak_index])
+
+    initial_intensity = np.abs(records[0]) ** 2
+    final_intensity = np.abs(records[-1]) ** 2
+    recurrence_error = relative_l2_error(final_intensity, initial_intensity)
+
+    assert recurrence_error <= 1.0e-12, f"second-order analytical intensity no longer recurs over one period: {recurrence_error}"
+    assert abs(peak_location - 0.5) <= 0.01, (
+        f"second-order analytical peak compression moved away from mid-period: {peak_location}"
+    )
+    assert 15.5 <= peak_intensity <= 16.5, (
+        f"second-order analytical peak intensity is outside the expected N=2 range: {peak_intensity}"
+    )
 
 
 def test_linear_reference_prefers_current_dispersion_sign(api: NLolib) -> None:
@@ -180,6 +216,7 @@ def main() -> None:
     api = NLolib()
     api.set_log_level(NLOLIB_LOG_LEVEL_ERROR)
 
+    test_second_order_reference_matches_known_recurrence_and_midperiod_compression()
     test_linear_reference_prefers_current_dispersion_sign(api)
     test_zero_operator_identity_fixed_step_cpu_and_auto(api)
 

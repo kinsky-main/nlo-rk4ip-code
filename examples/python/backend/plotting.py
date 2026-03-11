@@ -417,6 +417,7 @@ def plot_wavelength_step_history(
     map_y_label: str = "Wavelength (nm)",
     step_x_label: str = "Propagation distance z (m)",
     step_y_label: str = "Step size (m)",
+    normalization_peak: float | None = None,
 ) -> Path | None:
 
     z_axis = np.asarray(z_samples, dtype=np.float64)
@@ -427,9 +428,11 @@ def plot_wavelength_step_history(
     if data.shape != (z_axis.size, lambda_axis.size):
         raise ValueError("spectral_map shape must be [record, wavelength].")
 
-    peak = float(np.max(data))
+    peak = float(np.max(data)) if normalization_peak is None else float(normalization_peak)
+    if peak < 0.0:
+        raise ValueError("normalization_peak must be non-negative.")
     if peak > 0.0:
-        data = data / peak
+        data = np.clip(data / peak, 0.0, 1.0)
 
     fig = plt.figure(figsize=(4.0, 6.0))
     grid = fig.add_gridspec(2, 1, height_ratios=[4.6, 1.4], hspace=0.24)
