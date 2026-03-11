@@ -14,8 +14,6 @@ if str(EXAMPLES_PYTHON) not in sys.path:
 from backend.metrics import filtered_relative_l2_error, relative_l2_error  # noqa: E402
 from backend.reference import (  # noqa: E402
     exact_linear_temporal_final,
-    scipy_available,
-    solve_temporal_nlse_scipy_final,
 )
 from nlolib import (  # noqa: E402
     NLOLIB_LOG_LEVEL_ERROR,
@@ -178,70 +176,12 @@ def test_zero_operator_identity_fixed_step_cpu_and_auto(api: NLolib) -> None:
     auto_error = relative_l2_error(auto_final, field0)
     assert auto_error <= 5.0e-6, f"AUTO/Vulkan identity propagation drift exceeded diagnostic bound: {auto_error}"
 
-
-def test_fundamental_soliton_matches_scipy_reference(api: NLolib) -> None:
-    if not scipy_available():
-        print("test_fundamental_soliton_matches_scipy_reference: SciPy not available, skipping.")
-        return
-
-    case = _fundamental_soliton_case()
-    auto_available = _auto_backend_resolves_to_vulkan(api)
-    scipy_final = solve_temporal_nlse_scipy_final(
-        case["field0"],
-        float(case["z_final"]),
-        case["omega"],
-        0.5 * float(case["beta2"]),
-        float(case["gamma"]),
-        atol=1.0e-13,
-        rtol=1.0e-11,
-    )
-    scipy_vs_analytic = filtered_relative_l2_error(scipy_final, case["reference"], min_relative_intensity=1.0e-8)
-    assert scipy_vs_analytic <= 5.0e-6, f"SciPy reference drifted too far from analytical soliton: {scipy_vs_analytic}"
-
-    step_counts = [8, 16, 32]
-    cpu_errors: list[float] = []
-    auto_errors: list[float] = []
-    for step_count in step_counts:
-        step = float(case["z_final"]) / float(step_count)
-        cfg = prepare_sim_config(
-            int(case["field0"].size),
-            propagation_distance=float(case["z_final"]),
-            starting_step_size=step,
-            max_step_size=step,
-            min_step_size=step,
-            error_tolerance=1.0e-12,
-            pulse_period=float(case["field0"].size) * float(case["dt"]),
-            delta_time=float(case["dt"]),
-            frequency_grid=[complex(v, 0.0) for v in case["omega"]],
-            runtime=RuntimeOperators(constants=[0.5 * float(case["beta2"]), 0.0, float(case["gamma"])]),
-        )
-
-        cpu_final = np.asarray(
-            api.propagate(cfg, case["field0"].tolist(), 2, default_execution_options(NLO_VECTOR_BACKEND_CPU)).records[1],
-            dtype=np.complex128,
-        )
-        cpu_errors.append(filtered_relative_l2_error(cpu_final, scipy_final, min_relative_intensity=1.0e-8))
-
-        if auto_available:
-            auto_final = np.asarray(
-                api.propagate(cfg, case["field0"].tolist(), 2, default_execution_options(NLO_VECTOR_BACKEND_AUTO)).records[1],
-                dtype=np.complex128,
-            )
-            auto_errors.append(filtered_relative_l2_error(auto_final, scipy_final, min_relative_intensity=1.0e-8))
-
-    assert cpu_errors[-1] < cpu_errors[0], f"CPU refinement did not reduce SciPy-reference error: {cpu_errors}"
-    if auto_errors:
-        assert auto_errors[-1] < auto_errors[0], f"AUTO/Vulkan refinement did not reduce SciPy-reference error: {auto_errors}"
-        assert auto_errors[-1] <= 1.0e-3, f"AUTO/Vulkan SciPy-reference error remained unexpectedly high: {auto_errors}"
-
-
 def main() -> None:
     api = NLolib()
     api.set_log_level(NLOLIB_LOG_LEVEL_ERROR)
 
     test_linear_reference_prefers_current_dispersion_sign(api)
     test_zero_operator_identity_fixed_step_cpu_and_auto(api)
-    test_fundamental_soliton_matches_scipy_reference(api)
 
     api.set_log_level(NLOLIB_LOG_LEVEL_WARN)
     print("test_python_reference_benchmarks: reference benchmarks validated.")

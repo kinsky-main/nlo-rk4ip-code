@@ -25,9 +25,6 @@ from .plotting import (
 from .reference import (
     exact_linear_temporal_final,
     exact_linear_temporal_records,
-    scipy_available,
-    solve_temporal_nlse_scipy_final,
-    solve_temporal_nlse_scipy_records,
 )
 from .runner import (
     NloExampleRunner,
@@ -79,7 +76,4 @@ __all__ = [
     "plot_wavelength_step_history",
     "exact_linear_temporal_final",
     "exact_linear_temporal_records",
-    "scipy_available",
-    "solve_temporal_nlse_scipy_final",
-    "solve_temporal_nlse_scipy_records",
 ]

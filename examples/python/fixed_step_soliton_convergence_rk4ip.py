@@ -138,7 +138,7 @@ def _run(args) -> float:
 
     runner = NloExampleRunner()
     _configure_runtime_logging(runner)
-    exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
+    exec_options = SimulationOptions(backend="auto", fft_backend="auto")
 
     fixed_run_data: list[tuple[int, float, np.ndarray]] = []
     adaptive_run_data: list[tuple[float, np.ndarray]] = []
