@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 from backend.app_base import ExampleAppBase
-from backend.metrics import mean_pointwise_abs_relative_error
+from backend.metrics import relative_l2_intensity_error
 from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
     plot_phase_shift_comparison,
@@ -39,10 +39,9 @@ def _configure_runtime_logging(runner: NloExampleRunner) -> None:
 
 
 def _relative_l2_error(num: np.ndarray, ref: np.ndarray) -> float:
-    return mean_pointwise_abs_relative_error(
+    return relative_l2_intensity_error(
         num,
-        ref,
-        context="spm:record_error",
+        ref
     )
 
 

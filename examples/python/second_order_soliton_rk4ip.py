@@ -22,6 +22,7 @@ from backend.plotting import (
     plot_final_re_im_comparison,
     plot_intensity_colormap_vs_propagation,
     plot_wavelength_step_history,
+    plot_total_error_over_propagation
 )
 from backend.reference import (
     analytical_initial_condition_error,
@@ -40,8 +41,8 @@ from backend.spectral import (
 )
 from backend.storage import ExampleRunDB
 from backend.metrics import (
-    mean_pointwise_abs_relative_error,
     relative_l2_intensity_error,
+    relative_l2_intensity_error_curve,
 )
 
 
@@ -270,6 +271,8 @@ def normalize_step_telemetry(telemetry: StepTelemetry, z_scale: float) -> StepTe
 
 def save_plots(
     t: np.ndarray,
+    U_num_records: np.ndarray,
+    U_true_records: np.ndarray,
     U_num: np.ndarray,
     U_true: np.ndarray,
     z_samples_norm: np.ndarray,
@@ -345,6 +348,16 @@ def save_plots(
     )
     if p3 is not None:
         saved_paths.append(p3)
+    
+    p4 = plot_total_error_over_propagation(
+        z_samples_norm,
+        relative_l2_intensity_error_curve(U_num_records, U_true_records),
+        output_dir / "soliton_total_error_over_propagation.png",
+        x_label="Soliton Period z / Z0",
+        y_label="Relative L2 Intensity Error",
+    )
+    if p4 is not None:
+        saved_paths.append(p4)
 
     return saved_paths
 
@@ -570,7 +583,7 @@ def _run(args: argparse.Namespace) -> float:
     U_true = U_true_records[-1]
     epsilon = relative_l2_intensity_error(U_num, U_true)
     epsilon_percent = 100.0 * epsilon
-    envelope_rel_error = mean_pointwise_abs_relative_error(
+    envelope_rel_error = relative_l2_intensity_error(
         U_num,
         U_true,
         context="second_order_soliton:envelope_relative_error",
@@ -605,6 +618,8 @@ def _run(args: argparse.Namespace) -> float:
     output_dir = args.output_dir
     save_plots(
         t,
+        U_num_records,
+        U_true_records,
         U_num,
         U_true,
         z_map_norm,

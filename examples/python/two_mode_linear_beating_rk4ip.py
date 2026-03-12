@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 from backend.app_base import ExampleAppBase
-from backend.metrics import mean_pointwise_abs_relative_error_curve
+from backend.metrics import relative_l2_intensity_error_curve
 from backend.plotting import plot_mode_power_exchange, plot_total_error_over_propagation
 from backend.storage import ExampleRunDB
 
@@ -113,10 +113,9 @@ def _run(args: argparse.Namespace) -> float:
         a_ref[i, 0] = math.cos(theta)
         a_ref[i, 1] = 1j * math.sin(theta)
 
-    error_curve = mean_pointwise_abs_relative_error_curve(
+    error_curve = relative_l2_intensity_error_curve(
         records,
         a_ref,
-        context="two_mode_linear_beating:mode_error",
     )
 
     mode1_num = np.abs(records[:, 0]) ** 2

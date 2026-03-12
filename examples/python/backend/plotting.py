@@ -574,8 +574,6 @@ def plot_3d_intensity_scatter_propagation(
     output_path: Path,
     *,
     intensity_cutoff: float = 0.05,
-    xy_stride: int = 16,
-    z_stride: int = 1,
     min_marker_size: float = 2.0,
     max_marker_size: float = 36.0,
     alpha_min: float = 0.08,
@@ -631,9 +629,9 @@ def plot_3d_intensity_scatter_propagation(
     c_points: list[float] = []
     s_points: list[float] = []
 
-    for zi in range(0, z.size, z_stride):
-        for yi in range(0, y.size, xy_stride):
-            for xi in range(0, x.size, xy_stride):
+    for zi in range(0, z.size):
+        for yi in range(0, y.size):
+            for xi in range(0, x.size):
                 norm_intensity = float(intensity[zi, yi, xi] / norm_peak)
                 norm_intensity_clipped = float(np.clip(norm_intensity, 0.0, 1.0))
                 if norm_intensity_clipped < intensity_cutoff:
