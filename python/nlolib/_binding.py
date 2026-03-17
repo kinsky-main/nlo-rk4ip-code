@@ -256,146 +256,41 @@ class NloPropagateOutput(ctypes.Structure):
     ]
 
 
-def _candidate_library_paths() -> list[str]:
-    candidates: list[str] = []
-    env_path = os.environ.get("NLOLIB_LIBRARY")
-    if env_path:
-        candidates.append(env_path)
-
-    package_dir = Path(__file__).resolve().parent
-    package_root = package_dir.parent
-    repo_root = package_root.parent
-    if os.name == "nt":
-        candidates.extend(
-            [
-                str(package_root / "Release" / "nlolib.dll"),
-                str(package_root / "RelWithDebInfo" / "nlolib.dll"),
-                str(package_root / "MinSizeRel" / "nlolib.dll"),
-                str(package_root / "Debug" / "nlolib.dll"),
-                str(package_dir / "Release" / "nlolib.dll"),
-                str(package_dir / "RelWithDebInfo" / "nlolib.dll"),
-                str(package_dir / "MinSizeRel" / "nlolib.dll"),
-                str(package_dir / "Debug" / "nlolib.dll"),
-                str(repo_root / "build" / "src" / "Release" / "nlolib.dll"),
-                str(repo_root / "build" / "src" / "Debug" / "nlolib.dll"),
-                str(repo_root / "build" / "src" / "RelWithDebInfo" / "nlolib.dll"),
-                str(repo_root / "build" / "src" / "MinSizeRel" / "nlolib.dll"),
-                str(repo_root / "build" / "examples" / "Release" / "nlolib.dll"),
-                str(repo_root / "build" / "examples" / "Debug" / "nlolib.dll"),
-                str(repo_root / "build" / "examples" / "RelWithDebInfo" / "nlolib.dll"),
-                str(repo_root / "build" / "examples" / "MinSizeRel" / "nlolib.dll"),
-                str(package_dir / "nlolib.dll"),
-                str(package_root / "nlolib.dll"),
-                str(repo_root / "nlolib.dll"),
-            ]
-        )
-    elif os.name == "posix":
-        candidates.extend(
-            [
-                str(package_dir / "libnlolib.so"),
-                str(package_root / "libnlolib.so"),
-                str(repo_root / "libnlolib.so"),
-                str(package_dir / "libnlolib.dylib"),
-                str(package_root / "libnlolib.dylib"),
-                str(repo_root / "libnlolib.dylib"),
-            ]
-        )
-
-    found = ctypes.util.find_library("nlolib")
-    if found:
-        candidates.append(found)
-    return candidates
-
-
-def _load_library_candidate(candidate: str) -> tuple[ctypes.CDLL, list[object]]:
-    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
-        return ctypes.CDLL(candidate), []
-
-    candidate_path = Path(candidate)
-    search_dirs: list[Path] = []
-    seen: set[str] = set()
-
-    def add_dir(path: Path) -> None:
-        key = str(path)
-        if key in seen or not path.exists() or not path.is_dir():
-            return
-        seen.add(key)
-        search_dirs.append(path)
-
-    add_dir(candidate_path.parent)
-    add_dir(candidate_path.parent.parent)
-
-    for config_name in ("Debug", "Release", "RelWithDebInfo", "MinSizeRel"):
-        add_dir(candidate_path.parent.parent / config_name)
-
-    handles: list[object] = []
-    try:
-        for path in search_dirs:
-            handles.append(os.add_dll_directory(str(path)))
-        return ctypes.CDLL(candidate), handles
-    except Exception:
-        for handle in handles:
-            handle.close()
-        raise
-
-
-def load(path: str | None = None) -> ctypes.CDLL:
+def load(path: Path | None= None) -> ctypes.CDLL:
     """
     Load and configure the NLOLib shared library.
 
     Set NLOLIB_LIBRARY to override discovery.
     """
-    lib_path: str | None = path
+    lib_path: Path | None = path
     env_override = os.environ.get("NLOLIB_LIBRARY")
-    if lib_path is None and env_override:
-        lib_path = env_override
-
-    if lib_path is not None:
-        lib, dll_dir_handles = _load_library_candidate(lib_path)
-    else:
-        preferred_lib = None
-        preferred_path = None
-        preferred_handles = None
-        fallback_lib = None
-        fallback_path = None
-        fallback_handles = None
-        for candidate in _candidate_library_paths():
-            try:
-                loaded, handles = _load_library_candidate(candidate)
-            except OSError:
-                continue
-
-            if hasattr(loaded, "nlolib_query_runtime_limits"):
-                if fallback_handles is not None:
-                    for handle in fallback_handles:
-                        handle.close()
-                    fallback_handles = None
-                preferred_lib = loaded
-                preferred_path = candidate
-                preferred_handles = handles
-                break
-
-            if fallback_lib is None and hasattr(loaded, "nlolib_propagate"):
-                fallback_lib = loaded
-                fallback_path = candidate
-                fallback_handles = handles
-            else:
-                for handle in handles:
-                    handle.close()
-
-        if preferred_lib is not None:
-            lib = preferred_lib
-            lib_path = preferred_path
-            dll_dir_handles = preferred_handles or []
-        elif fallback_lib is not None:
-            lib = fallback_lib
-            lib_path = fallback_path
-            dll_dir_handles = fallback_handles or []
+    if env_override:
+        lib_path = Path(env_override)
+    elif lib_path is None or not lib_path.exists():
+        package_dir = Path(__file__).resolve().parent
+        package_root = package_dir.parent
+        if os.name == "nt":
+            lib_path = package_root.joinpath("Release", "nlolib.dll")
         else:
-            raise OSError(
-                "Unable to locate NLOLib shared library. "
-                "Set NLOLIB_LIBRARY to the full path."
-            )
+            lib_path = package_root.joinpath("libnlolib.so")
+
+    if lib_path is None or not lib_path.exists():
+        raise OSError(
+            "Unable to locate NLOLib shared library. "
+            "Set NLOLIB_LIBRARY to the full path."
+        )
+ 
+    lib = ctypes.CDLL(str(lib_path))
+    dll_dir_handles = []
+    if os.name == "nt":
+        # Add the library directory to the DLL search path on Windows to ensure dependencies are found.
+        # This is needed when the library is not in the same directory as the Python executable.
+        dll_dir = str(lib_path.parent)
+        try:
+            os.add_dll_directory(dll_dir)
+            dll_dir_handles.append(dll_dir)  # Keep handle alive
+        except Exception as e:
+            raise OSError(f"Failed to add '{dll_dir}' to DLL search path: {e}") from e
 
     print(f"Loaded NLOLib from '{lib_path}'")
 
@@ -416,46 +311,45 @@ def load(path: str | None = None) -> ctypes.CDLL:
             ctypes.POINTER(NloRuntimeLimits),
         ]
         lib.nlolib_query_runtime_limits.restype = ctypes.c_int
-        lib._has_query_runtime_limits = True
+        lib._has_query_runtime_limits = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_query_runtime_limits = False
+        lib._has_query_runtime_limits = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_propagate_options_default.argtypes = []
         lib.nlolib_propagate_options_default.restype = NloPropagateOptions
         lib.nlolib_propagate_output_default.argtypes = []
         lib.nlolib_propagate_output_default.restype = NloPropagateOutput
-        lib._has_propagate_defaults = True
+        lib._has_propagate_defaults = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_propagate_defaults = False
+        lib._has_propagate_defaults = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_storage_is_available.argtypes = []
         lib.nlolib_storage_is_available.restype = ctypes.c_int
-        lib._has_storage_is_available = True
+        lib._has_storage_is_available = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_storage_is_available = False
+        lib._has_storage_is_available = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_set_log_file.argtypes = [ctypes.c_char_p, ctypes.c_int]
         lib.nlolib_set_log_file.restype = ctypes.c_int
-        lib._has_set_log_file = True
+        lib._has_set_log_file = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_set_log_file = False
+        lib._has_set_log_file = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_set_log_buffer.argtypes = [ctypes.c_size_t]
         lib.nlolib_set_log_buffer.restype = ctypes.c_int
-        lib._has_set_log_buffer = True
+        lib._has_set_log_buffer = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_set_log_buffer = False
-
+        lib._has_set_log_buffer = False # pyright: ignore[reportAttributeAccessIssue]
     try:
         lib.nlolib_clear_log_buffer.argtypes = []
         lib.nlolib_clear_log_buffer.restype = ctypes.c_int
-        lib._has_clear_log_buffer = True
+        lib._has_clear_log_buffer = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_clear_log_buffer = False
+        lib._has_clear_log_buffer = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_read_log_buffer.argtypes = [
@@ -465,33 +359,33 @@ def load(path: str | None = None) -> ctypes.CDLL:
             ctypes.c_int,
         ]
         lib.nlolib_read_log_buffer.restype = ctypes.c_int
-        lib._has_read_log_buffer = True
+        lib._has_read_log_buffer = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_read_log_buffer = False
+        lib._has_read_log_buffer = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_set_log_level.argtypes = [ctypes.c_int]
         lib.nlolib_set_log_level.restype = ctypes.c_int
-        lib._has_set_log_level = True
+        lib._has_set_log_level = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_set_log_level = False
+        lib._has_set_log_level = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_set_progress_options.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int]
         lib.nlolib_set_progress_options.restype = ctypes.c_int
-        lib._has_set_progress_options = True
+        lib._has_set_progress_options = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_set_progress_options = False
+        lib._has_set_progress_options = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_set_progress_stream.argtypes = [ctypes.c_int]
         lib.nlolib_set_progress_stream.restype = ctypes.c_int
-        lib._has_set_progress_stream = True
+        lib._has_set_progress_stream = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
-        lib._has_set_progress_stream = False
+        lib._has_set_progress_stream = False # pyright: ignore[reportAttributeAccessIssue]
 
-    lib._nlo_loaded_path = str(lib_path) if lib_path is not None else ""
-    lib._nlo_dll_dir_handles = dll_dir_handles
+    lib._nlo_loaded_path = str(lib_path) if lib_path is not None else "" # pyright: ignore[reportAttributeAccessIssue]
+    lib._nlo_dll_dir_handles = dll_dir_handles # pyright: ignore[reportAttributeAccessIssue]
     return lib
 
 
