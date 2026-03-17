@@ -36,6 +36,10 @@ from backend.metrics import (
     mean_pointwise_abs_relative_error,
     relative_l2_intensity_error,
 )
+from backend.reference import (
+    analytical_initial_condition_error,
+    second_order_soliton_normalized_envelope,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -85,33 +89,6 @@ def normalized_nlse_coefficients(beta2: float, gamma: float, T0: float, P0: floa
     lnl = 1.0 / (gamma * P0)
     sgn_beta2 = 1.0 if beta2 > 0.0 else -1.0
     return sgn_beta2, ld, lnl
-
-
-def second_order_soliton_normalized_envelope(
-    t: np.ndarray,
-    z: float,
-    beta2: float,
-    T0: float,
-) -> np.ndarray:
-    """Analytical normalized envelope U for an N=2 soliton of the NLSE."""
-    ld = (T0 * T0) / abs(beta2)
-    xi = z / ld
-    numerator = 4.0 * (
-        np.cosh(3.0 * t) + 3.0 * np.exp(4.0j * xi) * np.cosh(t)
-    ) * np.exp(0.5j * xi)
-    denominator = np.cosh(4.0 * t) + 4.0 * np.cosh(2.0 * t) + 3.0 * np.cos(4.0 * xi)
-    return numerator / denominator
-
-
-def analytical_initial_condition_error(
-    t: np.ndarray,
-    beta2: float,
-    T0: float,
-) -> float:
-    u_ref = 2.0 * sech(t)
-    u_analytic = second_order_soliton_normalized_envelope(t, 0.0, beta2, T0)
-    return float(np.max(np.abs(u_ref - u_analytic)))
-
 
 def compute_wavelength_spectral_map_from_records(
     A_records: np.ndarray,
