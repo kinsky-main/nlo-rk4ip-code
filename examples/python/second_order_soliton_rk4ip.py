@@ -44,6 +44,10 @@ from backend.metrics import (
     relative_l2_intensity_error,
     relative_l2_intensity_error_curve,
 )
+from backend.reference import (
+    analytical_initial_condition_error,
+    second_order_soliton_normalized_envelope,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -513,7 +517,7 @@ def _run(args: argparse.Namespace) -> float:
         configured_max_step = float(sim_cfg.max_step_size)
         configured_min_step = float(sim_cfg.min_step_size)
         configured_error_tolerance = float(sim_cfg.error_tolerance)
-        exec_options = SimulationOptions(backend="auto", fft_backend="auto")
+        exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
         runner = NloExampleRunner()
         progress_callback = make_eta_abort_progress_callback(runner.api)
         storage_kwargs = db.storage_kwargs(
@@ -585,7 +589,7 @@ def _run(args: argparse.Namespace) -> float:
     epsilon_percent = 100.0 * epsilon
     envelope_rel_error = relative_l2_intensity_error(
         U_num,
-        U_true,
+        U_true
     )
     z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):
