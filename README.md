@@ -1,6 +1,6 @@
 # nlolib
 
-`nlolib` is a C99 nonlinear optics library with CPU CBLAS and Vulkan compute backends, plus Python and MATLAB bindings.
+`nlolib` is a C99 nonlinear optics library with CPU CBLAS and Vulkan compute backends, plus Python, MATLAB, and Julia bindings.
 
 Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-code/.
 
@@ -228,6 +228,7 @@ Run the new Python callable-translation test directly:
 
 ```bash
 ctest --test-dir build -R "^test_python_runtime_expr_translation$" --output-on-failure
+ctest --test-dir build -R "^test_julia_api_smoke$" --output-on-failure
 ```
 
 Enable and run optional MATLAB parser/runtime tests:
@@ -253,6 +254,7 @@ Current test groups:
 - Numerics/backend tests: `test_nlo_numerics`, `test_nlo_vector_backend`, `test_nlo_vector_backend_vulkan`
 - Python tests: `test_python_api_smoke`, `test_python_operator_regression`, `test_python_storage_chunking`
 - Python translation test: `test_python_runtime_expr_translation`
+- Julia tests: `test_julia_api_smoke`
 - MATLAB tests (optional): `test_matlab_runtime_handle_parser` when `NLOLIB_BUILD_MATLAB_TESTS=ON` and MATLAB is found
 
 Note: Python tests require a discoverable Python interpreter at CMake configure time.
@@ -426,6 +428,55 @@ matlab -batch "addpath('matlab'); package_mltbx('build', 'Release')"
 ```
 
 Additional manual publication steps are documented in `docs/release_manual.md`.
+
+## Julia Usage
+
+Stage the Julia package artifacts:
+
+```powershell
+cmake --build build --config Release --target julia_stage
+```
+
+```bash
+cmake --build build --config Release --target julia_stage
+```
+
+Then in Julia:
+
+```julia
+using Pkg
+Pkg.activate("build/julia_package")
+using NLOLib
+
+NLOLib.load()
+```
+
+From the source tree without staging, point Julia at a built shared library:
+
+```powershell
+$env:NLOLIB_LIBRARY="$PWD\\python\\Release\\nlolib.dll"
+julia --project=julia
+```
+
+```bash
+export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
+julia --project=julia
+```
+
+The Julia wrapper is intentionally low-level and performance-first:
+
+- results are returned as typed dense arrays instead of nested language objects
+- `propagate` returns records as a column-major matrix shaped `(num_time_samples, num_records)`
+- `propagate!` writes directly into caller-owned output buffers
+- pointer-backed helper views use Julia FFI primitives (`ccall`, `GC.@preserve`, `unsafe_wrap`, `reinterpret`)
+
+`julia_stage` copies:
+
+- `julia/src`
+- `julia/test`
+- `julia/Project.toml`
+- shared library into `build/julia_package/lib`
+- `src/nlolib_matlab.h` into `build/julia_package/lib`
 
 ## Preset Workflow (Optional)
 

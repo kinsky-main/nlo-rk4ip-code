@@ -279,33 +279,12 @@ def _candidate_library_paths() -> list[str]:
         candidates.extend(
             [
                 str(here / "Release" / "nlolib.dll"),
-                str(here / "RelWithDebInfo" / "nlolib.dll"),
-                str(here / "MinSizeRel" / "nlolib.dll"),
-                str(here / "Debug" / "nlolib.dll"),
-                str(root / "build" / "src" / "Release" / "nlolib.dll"),
-                str(root / "build" / "src" / "Debug" / "nlolib.dll"),
-                str(root / "build" / "src" / "RelWithDebInfo" / "nlolib.dll"),
-                str(root / "build" / "src" / "MinSizeRel" / "nlolib.dll"),
-                str(root / "build" / "examples" / "Release" / "nlolib.dll"),
-                str(root / "build" / "examples" / "Debug" / "nlolib.dll"),
-                str(root / "build" / "examples" / "RelWithDebInfo" / "nlolib.dll"),
-                str(root / "build" / "examples" / "MinSizeRel" / "nlolib.dll"),
-                # Prefer local build outputs before packaged fallback to avoid
-                # ABI mismatches while developing against in-tree ctypes structs.
-                str(here / "nlolib.dll"),
-                str(package_dir / "nlolib.dll"),
-                str(root / "nlolib.dll"),
             ]
         )
     elif os.name == "posix":
         candidates.extend(
             [
                 str(package_dir / "libnlolib.so"),
-                str(here / "libnlolib.so"),
-                str(root / "libnlolib.so"),
-                str(package_dir / "libnlolib.dylib"),
-                str(here / "libnlolib.dylib"),
-                str(root / "libnlolib.dylib"),
             ]
         )
 
@@ -330,36 +309,7 @@ def load(path: str | None = None) -> ctypes.CDLL:
     if lib_path is not None:
         lib = ctypes.CDLL(lib_path)
     else:
-        preferred_lib = None
-        preferred_path = None
-        fallback_lib = None
-        fallback_path = None
-        for candidate in _candidate_library_paths():
-            try:
-                loaded = ctypes.CDLL(candidate)
-            except OSError:
-                continue
-
-            if hasattr(loaded, "nlolib_query_runtime_limits"):
-                preferred_lib = loaded
-                preferred_path = candidate
-                break
-
-            if fallback_lib is None and hasattr(loaded, "nlolib_propagate"):
-                fallback_lib = loaded
-                fallback_path = candidate
-
-        if preferred_lib is not None:
-            lib = preferred_lib
-            lib_path = preferred_path
-        elif fallback_lib is not None:
-            lib = fallback_lib
-            lib_path = fallback_path
-        else:
-            raise OSError(
-                "Unable to locate NLOLib shared library. "
-                "Set NLOLIB_LIBRARY to the full path."
-            )
+        package_dir = Path(__file__).resolve().parent
             
     print(f"Loaded NLOLib from '{lib_path}'")
 

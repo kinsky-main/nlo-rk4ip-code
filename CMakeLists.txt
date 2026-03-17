@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 nlo_configure_build_configurations()
 
-project(nlolib VERSION 1.10.26 LANGUAGES C)
+project(nlolib VERSION 1.10.27 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -61,6 +61,7 @@ endif()
 add_subdirectory(src)
 add_subdirectory(python)
 add_subdirectory(matlab)
+add_subdirectory(julia)
 
 include(CTest)
 if(NLO_BUMP_PATCH_ON_BUILD)
