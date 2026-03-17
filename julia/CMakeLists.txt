@@ -11,6 +11,7 @@ add_custom_command(TARGET julia_stage POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${NLO_JULIA_STAGE_DIR}/src"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${NLO_JULIA_STAGE_DIR}/test"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${NLO_JULIA_STAGE_DIR}/lib"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${NLO_JULIA_STAGE_DIR}/examples"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/julia/Project.toml"
         "${NLO_JULIA_STAGE_DIR}/Project.toml"
@@ -20,6 +21,9 @@ add_custom_command(TARGET julia_stage POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/julia/test"
         "${NLO_JULIA_STAGE_DIR}/test"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/examples/julia"
+        "${NLO_JULIA_STAGE_DIR}/examples/julia"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/src/nlolib_matlab.h"
         "${NLO_JULIA_STAGE_DIR}/lib/nlolib_matlab.h"
@@ -31,5 +35,5 @@ add_custom_command(TARGET julia_stage POST_BUILD
         -DNLO_RUNTIME_DEST="${NLO_JULIA_STAGE_DIR}/lib"
         -DNLO_RUNTIME_HINTS="${NLO_SQLITE_RUNTIME_HINTS}"
         -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
-    COMMENT "Copying Julia package sources, tests, header, and shared library to ${NLO_JULIA_STAGE_DIR}"
+    COMMENT "Copying Julia package sources, tests, examples, header, and shared library to ${NLO_JULIA_STAGE_DIR}"
 )

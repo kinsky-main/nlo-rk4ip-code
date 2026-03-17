@@ -26,6 +26,19 @@ const NLOLIB_STATUS_ALLOCATION_FAILED = Cint(2)
 const NLOLIB_STATUS_NOT_IMPLEMENTED = Cint(3)
 const NLOLIB_STATUS_ABORTED = Cint(4)
 
+const NLOLIB_LOG_LEVEL_ERROR = Cint(0)
+const NLOLIB_LOG_LEVEL_WARN = Cint(1)
+const NLOLIB_LOG_LEVEL_INFO = Cint(2)
+const NLOLIB_LOG_LEVEL_DEBUG = Cint(3)
+
+const NLOLIB_PROGRESS_STREAM_STDERR = Cint(0)
+const NLOLIB_PROGRESS_STREAM_STDOUT = Cint(1)
+const NLOLIB_PROGRESS_STREAM_BOTH = Cint(2)
+
+const NLO_PROGRESS_EVENT_ACCEPTED = Cint(0)
+const NLO_PROGRESS_EVENT_REJECTED = Cint(1)
+const NLO_PROGRESS_EVENT_FINISH = Cint(2)
+
 struct NLOComplex
     re::Cdouble
     im::Cdouble
@@ -154,6 +167,20 @@ struct StepEvent
     error::Cdouble
 end
 
+struct CProgressInfo
+    event_type::Cint
+    step_index::Csize_t
+    reject_attempt::Csize_t
+    z::Cdouble
+    z_end::Cdouble
+    percent::Cdouble
+    step_size::Cdouble
+    next_step_size::Cdouble
+    error::Cdouble
+    elapsed_seconds::Cdouble
+    eta_seconds::Cdouble
+end
+
 struct PropagateOptions
     num_recorded_samples::Csize_t
     output_mode::Cint
@@ -216,3 +243,5 @@ default_execution_options(; backend_type::Integer = NLO_VECTOR_BACKEND_AUTO,
         Csize_t(forced_device_budget_bytes),
         vulkan
     )
+
+default_storage_options(; kwargs...) = storage_options(; kwargs...)

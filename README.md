@@ -229,6 +229,7 @@ Run the new Python callable-translation test directly:
 ```bash
 ctest --test-dir build -R "^test_python_runtime_expr_translation$" --output-on-failure
 ctest --test-dir build -R "^test_julia_api_smoke$" --output-on-failure
+ctest --test-dir build -R "^test_julia_example_soliton$" --output-on-failure
 ```
 
 Enable and run optional MATLAB parser/runtime tests:
@@ -254,7 +255,7 @@ Current test groups:
 - Numerics/backend tests: `test_nlo_numerics`, `test_nlo_vector_backend`, `test_nlo_vector_backend_vulkan`
 - Python tests: `test_python_api_smoke`, `test_python_operator_regression`, `test_python_storage_chunking`
 - Python translation test: `test_python_runtime_expr_translation`
-- Julia tests: `test_julia_api_smoke`
+- Julia tests: `test_julia_api_smoke`, `test_julia_example_soliton`
 - MATLAB tests (optional): `test_matlab_runtime_handle_parser` when `NLOLIB_BUILD_MATLAB_TESTS=ON` and MATLAB is found
 
 Note: Python tests require a discoverable Python interpreter at CMake configure time.
@@ -451,6 +452,28 @@ using NLOLib
 NLOLib.load()
 ```
 
+Stage and run the Julia examples:
+
+```powershell
+julia --project=examples/julia -e "using Pkg; Pkg.instantiate()"
+$env:NLOLIB_LIBRARY="$PWD\\python\\Release\\nlolib.dll"
+julia --project=examples/julia examples\julia\second_order_soliton_rk4ip.jl
+julia --project=examples/julia examples\julia\raman_scattering_rk4ip.jl
+julia --project=examples/julia examples\julia\tensor_dispersion_3d_rk4ip.jl
+```
+
+```bash
+julia --project=examples/julia -e 'using Pkg; Pkg.instantiate()'
+export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
+julia --project=examples/julia examples/julia/second_order_soliton_rk4ip.jl
+julia --project=examples/julia examples/julia/raman_scattering_rk4ip.jl
+julia --project=examples/julia examples/julia/tensor_dispersion_3d_rk4ip.jl
+```
+
+The Julia examples reuse the Python example SQLite database at
+`examples/python/output/example_runs.sqlite` so runs can be replayed across
+bindings with `--replot`.
+
 From the source tree without staging, point Julia at a built shared library:
 
 ```powershell
@@ -475,6 +498,7 @@ The Julia wrapper is intentionally low-level and performance-first:
 - `julia/src`
 - `julia/test`
 - `julia/Project.toml`
+- `examples/julia`
 - shared library into `build/julia_package/lib`
 - `src/nlolib_matlab.h` into `build/julia_package/lib`
 

@@ -181,8 +181,8 @@ function tensor_record_view(records::AbstractMatrix, index::Integer, nt::Integer
 end
 
 function propagate!(output,
-                    simulation_config,
-                    physics_config_value,
+                    simulation_config::SimulationConfig,
+                    physics_config_value::Union{PreparedValue, PhysicsConfig},
                     input_field;
                     num_recorded_samples = nothing,
                     output_mode = nothing,
@@ -295,8 +295,8 @@ function propagate!(output,
     )
 end
 
-function propagate(simulation_config,
-                   physics_config_value,
+function propagate(simulation_config::SimulationConfig,
+                   physics_config_value::Union{PreparedValue, PhysicsConfig},
                    input_field;
                    num_recorded_samples::Integer = 2,
                    output_mode = nothing,

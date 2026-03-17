@@ -5,6 +5,11 @@ using Libdl
 include("types.jl")
 include("lib.jl")
 include("api.jl")
+include("models.jl")
+include("config.jl")
+include("requests.jl")
+include("executor.jl")
+include("client.jl")
 
 export NLOComplex
 export PropagationParams
@@ -21,10 +26,21 @@ export RuntimeLimits
 export StorageOptions
 export StorageResult
 export StepEvent
+export CProgressInfo
 export PreparedValue
+export PreparedSimConfig
+export PulseSpec
+export OperatorSpec
+export RuntimeOperators
+export ProgressInfo
+export PropagationResult
+export PropagateResult
+export PropagationAbortedError
+export NLolib
 export physics_config
 export storage_options
 export default_execution_options
+export default_storage_options
 export load
 export loaded_library_path
 export storage_is_available
@@ -52,5 +68,23 @@ export NLOLIB_STATUS_INVALID_ARGUMENT
 export NLOLIB_STATUS_ALLOCATION_FAILED
 export NLOLIB_STATUS_NOT_IMPLEMENTED
 export NLOLIB_STATUS_ABORTED
+export NLOLIB_LOG_LEVEL_ERROR
+export NLOLIB_LOG_LEVEL_WARN
+export NLOLIB_LOG_LEVEL_INFO
+export NLOLIB_LOG_LEVEL_DEBUG
+export NLOLIB_PROGRESS_STREAM_STDERR
+export NLOLIB_PROGRESS_STREAM_STDOUT
+export NLOLIB_PROGRESS_STREAM_BOTH
+export NLO_PROGRESS_EVENT_ACCEPTED
+export NLO_PROGRESS_EVENT_REJECTED
+export NLO_PROGRESS_EVENT_FINISH
+export prepare_sim_config
+export set_log_file
+export set_log_buffer
+export clear_log_buffer
+export read_log_buffer
+export set_log_level
+export set_progress_options
+export set_progress_stream
 
 end
