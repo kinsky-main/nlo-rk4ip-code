@@ -4,25 +4,27 @@
 
 - [ ] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
 - [ ] Fix MATLAB output for installed packages where progress is not printed.
-- [ ] Improve printout for progress of solver, showing estimated time of completion.
-- [ ] Remove working buffers by keeping one k_tmp and k_tot buffer then summing k values as each stage is computed.
-- [ ] Step size appears to cap at 1e-4 for some reason, investigate and fix.
-- [ ] Numerical error is exceptionally high even when cropping to 1e-6 floating max amplitude, investigate and fix.
+- [x] Improve printout for progress of solver, showing estimated time of completion.
+- [x] Remove working buffers by keeping one k_tmp and k_tot buffer then summing k values as each stage is computed.
+- [x] Step size appears to cap at 1e-4 for some reason, investigate and fix.
+- [x] Numerical error is exceptionally high even when cropping to 1e-6 floating max amplitude, investigate and fix.
+- [ ] Cut first and final step from soliton variable step plot in example.
+- [ ] Bring MATLAB and Julia interfaces up to date with Python API, currently using very old interfaces (complete rewrite required).
 
 ## Potentially Required Tasks
 
 - [ ] Implement more efficient GPU memory management and data transfer strategies, e.g. pinned memory, async transfers, etc.
 - [ ] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
 - [ ] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
-- [ ] Loading bar with estimated time remaining for long-running simulations.
-- [ ] Refactor state.c into respective init files.
+- [x] Loading bar with estimated time remaining for long-running simulations.
+- [x] Refactor state.c into respective init files.
 - [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.
 - [ ] Utilise OS level shared memory for GPU backend to allow for larger problem sizes.
 
 ## Extensions
 
 - [ ] Add Massively Parallel Algorithm solver mode for coupled mode problems.
-- [ ] OpenMP backend for multi-core CPU parallelism.
+- [ ] OpenMP backend for multi-core CPU parallelism, compile CBLAS with OpenMP support and add OpenMP pragmas to CPU kernels.
 - [ ] Add example problem documentation on the physics of the problems (Do this in the report first).
 - [ ] Review directory and module sturcture for better organisation. Currently there are some looped dependencies between modules which are not ideal, e.g. core -> physics -> core.
 - [ ] Add finite difference kernel for solving course/sharp problems with high accuracy and ability to parallelise much more efficiently on GPU following the approach used in [NLSEMagic](https://github.com/sumseq/NLSEMagic).

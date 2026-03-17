@@ -4,9 +4,10 @@ from .app_base import ExampleAppBase
 from .cli import build_example_parser
 from .metrics import (
     DEFAULT_RELATIVE_ERROR_EPS,
-    mean_pointwise_abs_relative_error,
-    mean_pointwise_abs_relative_error_curve,
-    pointwise_abs_relative_error,
+    relative_l2_intensity_error,
+    relative_l2_intensity_error_curve,
+    filtered_relative_l2_intensity_error,
+    filtered_relative_l2_intensity_error_curve
 )
 from .plotting import (
     plot_3d_intensity_scatter_propagation,
@@ -23,11 +24,13 @@ from .plotting import (
     plot_wavelength_step_history,
 )
 from .reference import (
+    analytical_initial_condition_error,
     exact_linear_temporal_final,
     exact_linear_temporal_records,
-    scipy_available,
-    solve_temporal_nlse_scipy_final,
-    solve_temporal_nlse_scipy_records,
+    peak_intensity_over_records,
+    second_order_soliton_normalized_records,
+    second_order_soliton_normalized_envelope,
+    second_order_soliton_period,
 )
 from .runner import (
     NloExampleRunner,
@@ -53,9 +56,10 @@ __all__ = [
     "centered_time_grid",
     "build_example_parser",
     "DEFAULT_RELATIVE_ERROR_EPS",
-    "pointwise_abs_relative_error",
-    "mean_pointwise_abs_relative_error",
-    "mean_pointwise_abs_relative_error_curve",
+    "relative_l2_intensity_error",
+    "relative_l2_intensity_error_curve",
+    "filtered_relative_l2_intensity_error",
+    "filtered_relative_l2_intensity_error_curve",
     "SPEED_OF_LIGHT_M_PER_S",
     "carrier_wavelength_nm_to_frequency_hz",
     "frequency_hz_to_wavelength_nm",
@@ -77,9 +81,11 @@ __all__ = [
     "plot_total_error_over_propagation",
     "plot_two_curve_comparison",
     "plot_wavelength_step_history",
+    "analytical_initial_condition_error",
     "exact_linear_temporal_final",
     "exact_linear_temporal_records",
-    "scipy_available",
-    "solve_temporal_nlse_scipy_final",
-    "solve_temporal_nlse_scipy_records",
+    "peak_intensity_over_records",
+    "second_order_soliton_normalized_envelope",
+    "second_order_soliton_normalized_records",
+    "second_order_soliton_period",
 ]

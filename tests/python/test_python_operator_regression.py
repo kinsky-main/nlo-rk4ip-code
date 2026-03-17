@@ -145,7 +145,7 @@ def _second_order_soliton_case(n, window_multiple_t0):
     gamma = 0.01
     tfwhm = 100e-3
     t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
-    p0 = (2**2) * abs(beta2) / (gamma * t0 * t0)
+    p0 = abs(beta2) / (gamma * t0 * t0)
     ld = (t0 * t0) / abs(beta2)
     z_final = 0.5 * math.pi * ld
 

@@ -20,7 +20,15 @@ from backend.app_base import ExampleAppBase
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
+    plot_intensity_colormap_vs_propagation,
     plot_wavelength_step_history,
+    plot_total_error_over_propagation
+)
+from backend.reference import (
+    analytical_initial_condition_error,
+    peak_intensity_over_records,
+    second_order_soliton_normalized_records,
+    second_order_soliton_period,
 )
 from backend.runner import (
     NloExampleRunner,
@@ -33,8 +41,8 @@ from backend.spectral import (
 )
 from backend.storage import ExampleRunDB
 from backend.metrics import (
-    mean_pointwise_abs_relative_error,
     relative_l2_intensity_error,
+    relative_l2_intensity_error_curve,
 )
 from backend.reference import (
     analytical_initial_condition_error,
@@ -89,6 +97,7 @@ def normalized_nlse_coefficients(beta2: float, gamma: float, T0: float, P0: floa
     lnl = 1.0 / (gamma * P0)
     sgn_beta2 = 1.0 if beta2 > 0.0 else -1.0
     return sgn_beta2, ld, lnl
+
 
 def compute_wavelength_spectral_map_from_records(
     A_records: np.ndarray,
@@ -266,11 +275,15 @@ def normalize_step_telemetry(telemetry: StepTelemetry, z_scale: float) -> StepTe
 
 def save_plots(
     t: np.ndarray,
+    U_num_records: np.ndarray,
+    U_true_records: np.ndarray,
     U_num: np.ndarray,
     U_true: np.ndarray,
     z_samples_norm: np.ndarray,
-    lambda_nm: np.ndarray,
-    spectral_map: np.ndarray,
+    lambda_num_nm: np.ndarray,
+    spectral_map_num: np.ndarray,
+    lambda_true_nm: np.ndarray,
+    spectral_map_true: np.ndarray,
     telemetry: StepTelemetry,
     output_dir: Path,
 ) -> list[Path]:
@@ -278,10 +291,16 @@ def save_plots(
     saved_paths: list[Path] = []
 
     telemetry_plot = telemetry
+    map_peak = float(
+        max(
+            float(np.max(np.asarray(spectral_map_num, dtype=np.float64))),
+            float(np.max(np.asarray(spectral_map_true, dtype=np.float64))),
+        )
+    )
     p1 = plot_wavelength_step_history(
         z_samples_norm,
-        lambda_nm,
-        spectral_map,
+        lambda_num_nm,
+        spectral_map_num,
         output_dir / "soliton_wavelength_intensity_colormap.png",
         accepted_z=telemetry_plot.accepted_z,
         accepted_step_sizes=telemetry_plot.accepted_step_sizes,
@@ -290,9 +309,23 @@ def save_plots(
         map_y_label=r"Linearized wavelength $\lambda_{lin}$ (nm)",
         step_x_label="Soliton Period z / Z0",
         step_y_label="Normalized Step Size z / Z0",
+        normalization_peak=map_peak,
     )
     if p1 is not None:
         saved_paths.append(p1)
+
+    p1b = plot_intensity_colormap_vs_propagation(
+        lambda_true_nm,
+        z_samples_norm,
+        spectral_map_true,
+        output_dir / "soliton_wavelength_intensity_colormap_analytical.png",
+        x_label=r"Linearized wavelength $\lambda_{lin}$ (nm)",
+        y_label="Soliton Period z / Z0",
+        colorbar_label="Normalized spectral intensity",
+        normalization_peak=map_peak,
+    )
+    if p1b is not None:
+        saved_paths.append(p1b)
 
     p2 = plot_final_re_im_comparison(
         t,
@@ -319,6 +352,16 @@ def save_plots(
     )
     if p3 is not None:
         saved_paths.append(p3)
+    
+    p4 = plot_total_error_over_propagation(
+        z_samples_norm,
+        relative_l2_intensity_error_curve(U_num_records, U_true_records),
+        output_dir / "soliton_total_error_over_propagation.png",
+        x_label="Soliton Period z / Z0",
+        y_label="Relative L2 Intensity Error",
+    )
+    if p4 is not None:
+        saved_paths.append(p4)
 
     return saved_paths
 
@@ -442,7 +485,7 @@ def _run(args: argparse.Namespace) -> float:
         alpha = 0.0
         tfwhm = 100e-3
         t0 = tfwhm / (2.0 * math.log(1.0 + math.sqrt(2.0)))
-        p0 = (2**2) * abs(beta2) / (gamma * t0 * t0)
+        p0 = abs(beta2) / (gamma * t0 * t0)
         ld_tmp = (t0 * t0) / abs(beta2)
         z_final = 0.5 * math.pi * ld_tmp
 
@@ -526,23 +569,25 @@ def _run(args: argparse.Namespace) -> float:
         )
 
     sgn_beta2, ld, lnl = normalized_nlse_coefficients(beta2, gamma, t0, p0)
-    z0 = 0.5 * math.pi * ld
+    z0 = second_order_soliton_period(beta2, t0)
     if not np.isfinite(z0) or z0 <= 0.0:
         raise RuntimeError("invalid soliton period Z0 computed for plotting normalization.")
     omega = 2.0 * math.pi * np.fft.fftfreq(n, d=dt)
     A0 = to_physical_envelope(2.0 * sech(t), 0.0, p0, alpha)
     ensure_finite_records_or_raise(A_records, z_records)
     U_num_records = np.empty_like(A_records, dtype=np.complex128)
-    U_true_records = np.empty_like(A_records, dtype=np.complex128)
     for i, z in enumerate(z_records):
         U_num_records[i] = to_normalized_envelope(A_records[i], float(z), p0, alpha)
-        U_true_records[i] = second_order_soliton_normalized_envelope(t, float(z), beta2, t0)
+    U_true_records = second_order_soliton_normalized_records(t, z_records, beta2, t0)
+    A_true_records = np.empty_like(U_true_records, dtype=np.complex128)
+    for i, z in enumerate(z_records):
+        A_true_records[i] = to_physical_envelope(U_true_records[i], float(z), p0, alpha)
 
     U_num = U_num_records[-1]
     U_true = U_true_records[-1]
     epsilon = relative_l2_intensity_error(U_num, U_true)
     epsilon_percent = 100.0 * epsilon
-    envelope_rel_error = mean_pointwise_abs_relative_error(
+    envelope_rel_error = relative_l2_intensity_error(
         U_num,
         U_true,
         context="second_order_soliton:envelope_relative_error",
@@ -559,8 +604,17 @@ def _run(args: argparse.Namespace) -> float:
         lambda0_nm,
         fft_size_visual=4 * n,
     )
+    _, lambda_true_nm, spectral_map_true = compute_wavelength_spectral_map_from_records(
+        A_true_records,
+        z_records,
+        dt,
+        lambda0_nm,
+        fft_size_visual=4 * n,
+    )
     if not np.all(np.isfinite(spectral_map)):
         raise RuntimeError("spectral map contains non-finite values; refusing to render blank output.")
+    if not np.all(np.isfinite(spectral_map_true)):
+        raise RuntimeError("analytical spectral map contains non-finite values; refusing to render blank output.")
 
     z_map_norm = np.asarray(z_map, dtype=np.float64) / z0
     telemetry_plot = normalize_step_telemetry(telemetry, z0)
@@ -568,14 +622,23 @@ def _run(args: argparse.Namespace) -> float:
     output_dir = args.output_dir
     save_plots(
         t,
+        U_num_records,
+        U_true_records,
         U_num,
         U_true,
         z_map_norm,
         lambda_nm,
         spectral_map,
+        lambda_true_nm,
+        spectral_map_true,
         telemetry_plot,
         output_dir,
     )
+
+    numerical_peak_trace = peak_intensity_over_records(U_num_records)
+    analytical_peak_trace = peak_intensity_over_records(U_true_records)
+    num_peak_idx = int(np.argmax(numerical_peak_trace))
+    ref_peak_idx = int(np.argmax(analytical_peak_trace))
 
     print(f"second-order soliton summary (run_group={run_group})")
     print(
@@ -586,7 +649,16 @@ def _run(args: argparse.Namespace) -> float:
     )
     print(f"analytical z=0 envelope max error = {z0_analytic_error:.6e}")
     print(f"epsilon (relative L2 intensity error) = {epsilon:.6e} ({epsilon_percent:.6f}%)")
-    print("omitted propagation-error plot: the current analytical second-order trajectory is not yet validated over the full period.")
+    print(
+        "analytical peak compression (reference): "
+        f"z/Z0={z_map_norm[ref_peak_idx]:.6f} "
+        f"max |U|^2={analytical_peak_trace[ref_peak_idx]:.6e}"
+    )
+    print(
+        "numerical record peak compression: "
+        f"z/Z0={z_map_norm[num_peak_idx]:.6f} "
+        f"max |U|^2={numerical_peak_trace[num_peak_idx]:.6e}"
+    )
     print(f"diagnostic mean abs-relative envelope error = {envelope_rel_error:.6e}")
     if configured_start_step is not None:
         print(

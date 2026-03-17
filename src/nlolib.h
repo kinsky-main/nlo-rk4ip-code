@@ -136,6 +136,7 @@ typedef struct {
  * @brief Unified propagation output metadata and buffers.
  *
  * @param output_records Optional destination records buffer.
+ *        When omitted, records may still be captured through storage.
  * @param output_record_capacity Maximum records available in output_records.
  * @param records_written Number of records actually written.
  * @param storage_result Optional storage summary output.

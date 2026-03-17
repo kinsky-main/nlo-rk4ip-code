@@ -417,6 +417,7 @@ def plot_wavelength_step_history(
     map_y_label: str = "Wavelength (nm)",
     step_x_label: str = "Propagation distance z (m)",
     step_y_label: str = "Step size (m)",
+    normalization_peak: float | None = None,
 ) -> Path | None:
 
     z_axis = np.asarray(z_samples, dtype=np.float64)
@@ -427,9 +428,11 @@ def plot_wavelength_step_history(
     if data.shape != (z_axis.size, lambda_axis.size):
         raise ValueError("spectral_map shape must be [record, wavelength].")
 
-    peak = float(np.max(data))
+    peak = float(np.max(data)) if normalization_peak is None else float(normalization_peak)
+    if peak < 0.0:
+        raise ValueError("normalization_peak must be non-negative.")
     if peak > 0.0:
-        data = data / peak
+        data = np.clip(data / peak, 0.0, 1.0)
 
     fig = plt.figure(figsize=(4.0, 6.0))
     grid = fig.add_gridspec(2, 1, height_ratios=[4.6, 1.4], hspace=0.24)
@@ -571,13 +574,10 @@ def plot_3d_intensity_scatter_propagation(
     output_path: Path,
     *,
     intensity_cutoff: float = 0.05,
-    xy_stride: int = 16,
-    z_stride: int = 1,
     min_marker_size: float = 2.0,
     max_marker_size: float = 36.0,
     alpha_min: float = 0.08,
     alpha_max: float = 0.90,
-    dpi: int = 320,
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
     z_label: str = "z",
@@ -597,17 +597,10 @@ def plot_3d_intensity_scatter_propagation(
     if records.shape[0] != z.size or records.shape[1] != y.size or records.shape[2] != x.size:
         raise ValueError("Axes lengths must match field_records shape.")
 
-    if xy_stride <= 0:
-        raise ValueError("xy_stride must be positive.")
-    if z_stride <= 0:
-        raise ValueError("z_stride must be positive.")
     if intensity_cutoff < 0.0 or intensity_cutoff >= 1.0:
         raise ValueError("intensity_cutoff must be in [0, 1).")
     if alpha_min < 0.0 or alpha_min > 1.0 or alpha_max < 0.0 or alpha_max > 1.0 or alpha_min > alpha_max:
         raise ValueError("alpha_min/alpha_max must satisfy 0 <= alpha_min <= alpha_max <= 1.")
-    if dpi <= 0:
-        raise ValueError("dpi must be positive.")
-
     if input_is_intensity:
         intensity = np.asarray(records, dtype=np.float64)
         intensity = np.nan_to_num(intensity, nan=0.0, posinf=0.0, neginf=0.0)
@@ -628,9 +621,9 @@ def plot_3d_intensity_scatter_propagation(
     c_points: list[float] = []
     s_points: list[float] = []
 
-    for zi in range(0, z.size, z_stride):
-        for yi in range(0, y.size, xy_stride):
-            for xi in range(0, x.size, xy_stride):
+    for zi in range(0, z.size):
+        for yi in range(0, y.size):
+            for xi in range(0, x.size):
                 norm_intensity = float(intensity[zi, yi, xi] / norm_peak)
                 norm_intensity_clipped = float(np.clip(norm_intensity, 0.0, 1.0))
                 if norm_intensity_clipped < intensity_cutoff:

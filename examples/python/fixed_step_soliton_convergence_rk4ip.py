@@ -14,7 +14,7 @@ import math
 
 import numpy as np
 from backend.app_base import ExampleAppBase
-from backend.metrics import filtered_relative_l2_error
+from backend.metrics import filtered_relative_l2_intensity_error
 from backend.plotting import plot_convergence_loglog
 from backend.runner import (
     NloExampleRunner,
@@ -104,7 +104,7 @@ def _final_error_against_reference(
     records: np.ndarray,
     reference_final: np.ndarray,
 ) -> float:
-    return filtered_relative_l2_error(
+    return filtered_relative_l2_intensity_error(
         np.asarray(records, dtype=np.complex128)[-1],
         reference_final,
         min_relative_intensity=INTENSITY_FILTER_RATIO,
@@ -138,7 +138,7 @@ def _run(args) -> float:
 
     runner = NloExampleRunner()
     _configure_runtime_logging(runner)
-    exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
+    exec_options = SimulationOptions(backend="auto", fft_backend="auto")
 
     fixed_run_data: list[tuple[int, float, np.ndarray]] = []
     adaptive_run_data: list[tuple[float, np.ndarray]] = []

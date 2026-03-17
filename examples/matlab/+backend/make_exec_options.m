@@ -11,12 +11,6 @@ end
 options = simOptions;
 options.backend = lower(string(options.backend));
 options.fft_backend = lower(string(options.fft_backend));
-if options.record_ring_target == 0 && ...
-   (options.backend == "auto" || options.backend == "vulkan") && ...
-   numRecords > 0
-    options.record_ring_target = uint64(max(1, min(double(numRecords), 32)));
-end
-
 execOptions = struct();
 execOptions.backend_type = map_backend(options.backend);
 execOptions.fft_backend = map_fft_backend(options.fft_backend);

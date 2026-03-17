@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 from backend.app_base import ExampleAppBase
 from backend.metrics import (
-    mean_pointwise_abs_relative_error,
-    pointwise_abs_relative_error,
+    relative_l2_intensity_error_curve,
+    relative_l2_intensity_error,
 )
 from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
@@ -42,6 +42,27 @@ def _spectral_centroid(freq_axis: np.ndarray, spectral_intensity: np.ndarray) ->
     numer = np.sum(weights * freq_axis[None, :], axis=1)
     denom = np.maximum(np.sum(weights, axis=1), 1e-15)
     return numer / denom
+
+
+def _optics_shifted_spectrum_map(
+    field_records: np.ndarray,
+    dt: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Return an optics-facing spectral map.
+
+    The examples use the convention "IFFT to frequency, FFT to time". With
+    NumPy this means building the plotted spectrum from ``ifft`` rather than
+    ``fft`` so positive detuning corresponds to higher optical frequency.
+    """
+    fields = np.asarray(field_records, dtype=np.complex128)
+    if fields.ndim != 2:
+        raise ValueError("field_records must have shape [record, time].")
+    n = int(fields.shape[1])
+    omega_axis = np.fft.fftshift(2.0 * np.pi * np.fft.fftfreq(n, d=dt))
+    spectra = np.fft.fftshift(np.fft.ifft(fields, axis=1), axes=1)
+    spectral_map = np.abs(spectra) ** 2
+    return omega_axis, spectral_map
 
 
 def _normalized_rows(values: np.ndarray) -> np.ndarray:
@@ -109,6 +130,25 @@ def _row_centroid(axis: np.ndarray, rows: np.ndarray) -> np.ndarray:
     numer = np.sum(data * coords[None, :], axis=1)
     denom = np.maximum(np.sum(data, axis=1), 1e-15)
     return numer / denom
+
+
+def _time_window_edge_fraction(
+    field_records: np.ndarray,
+    *,
+    edge_fraction: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray]:
+    fields = np.asarray(field_records, dtype=np.complex128)
+    if fields.ndim != 2:
+        raise ValueError("field_records must have shape [record, time].")
+    if not (0.0 < edge_fraction < 0.5):
+        raise ValueError("edge_fraction must be in (0, 0.5).")
+    n = int(fields.shape[1])
+    edge_count = max(1, int(np.ceil(edge_fraction * n)))
+    intensity = np.abs(fields) ** 2
+    total = np.maximum(np.sum(intensity, axis=1), 1e-30)
+    left = np.sum(intensity[:, :edge_count], axis=1) / total
+    right = np.sum(intensity[:, -edge_count:], axis=1) / total
+    return left, right
 
 
 def _crop_wavelength_support(
@@ -190,7 +230,7 @@ def _run(args: argparse.Namespace) -> float:
 
     n = 2**11
     dt = 0.002
-    beta2 = 0.01
+    beta2 = -0.01
     gamma = 1.40
     z_final = 0.40
     pulse_width = 0.08
@@ -201,10 +241,12 @@ def _run(args: argparse.Namespace) -> float:
     tau2 = 0.0320
     shock_omega0 = 0.0 # TODO: Any shock results in inf values and solver failure.
     lambda0_nm = 1550.0
+    diagnostic_mode = "fixed_step" if args.fixed_step_diagnostic else "adaptive"
 
     t = centered_time_grid(n, dt)
     omega = 2.0 * np.pi * np.fft.fftfreq(n, d=dt)
     p0 = abs(beta2) / (gamma * pulse_width * pulse_width)
+    ld = (pulse_width * pulse_width) / abs(beta2)
     field0 = (np.sqrt(p0) / np.cosh(t / pulse_width)).astype(np.complex128)
     exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
     runner = NloExampleRunner()
@@ -225,8 +267,10 @@ def _run(args: argparse.Namespace) -> float:
         tau2 = float(meta["tau2"])
         shock_omega0 = float(meta["shock_omega0"])
         lambda0_nm = float(meta.get("lambda0_nm", 1550.0))
+        diagnostic_mode = str(meta.get("diagnostic_mode", diagnostic_mode))
         t = centered_time_grid(n, dt)
         p0 = abs(beta2) / (gamma * pulse_width * pulse_width)
+        ld = (pulse_width * pulse_width) / abs(beta2)
         field0 = (np.sqrt(p0) / np.cosh(t / pulse_width)).astype(np.complex128)
         z_kerr = np.asarray(loaded_kerr.z_axis, dtype=np.float64)
         z_raman = np.asarray(loaded_raman.z_axis, dtype=np.float64)
@@ -255,6 +299,15 @@ def _run(args: argparse.Namespace) -> float:
             raman_tau2=tau2,
             shock_omega0=shock_omega0,
         )
+        if args.fixed_step_diagnostic:
+            exact_record_step = z_final / float(num_records - 1)
+            starting_step_size = exact_record_step
+            max_step_size = exact_record_step
+            min_step_size = exact_record_step
+        else:
+            starting_step_size = z_final / 500.0
+            max_step_size = z_final / 80.0
+            min_step_size = z_final / 20000.0
         base_cfg = dict(
             gamma=gamma,
             beta2=beta2,
@@ -264,9 +317,9 @@ def _run(args: argparse.Namespace) -> float:
             num_time_samples=n,
             pulse_period=n * dt,
             omega=omega,
-            starting_step_size=z_final / 500.0,
-            max_step_size=z_final / 80.0,
-            min_step_size=z_final / 20000.0,
+            starting_step_size=starting_step_size,
+            max_step_size=max_step_size,
+            min_step_size=min_step_size,
             error_tolerance=2e-6,
             honor_solver_controls=True,
         )
@@ -310,6 +363,7 @@ def _run(args: argparse.Namespace) -> float:
                 "tau2": float(tau2),
                 "shock_omega0": float(shock_omega0),
                 "lambda0_nm": float(lambda0_nm),
+                "diagnostic_mode": diagnostic_mode,
             },
         )
 
@@ -340,38 +394,35 @@ def _run(args: argparse.Namespace) -> float:
                 "tau2": float(tau2),
                 "shock_omega0": float(shock_omega0),
                 "lambda0_nm": float(lambda0_nm),
+                "diagnostic_mode": diagnostic_mode,
             },
         )
 
-    omega_axis = np.fft.fftshift(2.0 * np.pi * np.fft.fftfreq(n, d=dt))
-    kerr_spectra = np.fft.fftshift(np.fft.fft(kerr_records, axis=1), axes=1)
-    raman_spectra = np.fft.fftshift(np.fft.fft(raman_records, axis=1), axes=1)
-    kerr_spec_map = np.abs(kerr_spectra) ** 2
-    raman_spec_map = np.abs(raman_spectra) ** 2
+    omega_axis, kerr_spec_map = _optics_shifted_spectrum_map(kerr_records, dt)
+    _, raman_spec_map = _optics_shifted_spectrum_map(raman_records, dt)
     kerr_spec_centroid = _spectral_centroid(omega_axis, kerr_spec_map)
     raman_spec_centroid = _spectral_centroid(omega_axis, raman_spec_map)
 
     response = _default_raman_response(n, dt, tau1, tau2)
     t_r = _raman_first_moment(response, dt)
-    centroid_rhs = _raman_centroid_rhs_moment(raman_records, dt, gamma, f_r, tau1, tau2)
-    centroid_derivative_num = np.gradient(raman_spec_centroid, z_axis, edge_order=2)
+    z_axis_norm = z_axis / ld
+    centroid_rhs = -_raman_centroid_rhs_moment(raman_records, dt, gamma, f_r, tau1, tau2)
+    centroid_rhs_norm = ld * centroid_rhs
+    centroid_derivative_num_norm = np.gradient(raman_spec_centroid, z_axis_norm, edge_order=2)
     predicted_centroid = raman_spec_centroid[0] + _cumulative_trapezoid(centroid_rhs, z_axis)
     centered_num = raman_spec_centroid - raman_spec_centroid[0]
     centered_pred = predicted_centroid - predicted_centroid[0]
-    centroid_pointwise_rel_error = pointwise_abs_relative_error(
+    centroid_pointwise_rel_error = relative_l2_intensity_error(
         centered_num,
-        centered_pred,
-        context="raman_scattering:centroid_shift",
+        centered_pred
     )
-    centroid_curve_rel_error = mean_pointwise_abs_relative_error(
+    centroid_curve_rel_error = relative_l2_intensity_error_curve(
         centered_num,
-        centered_pred,
-        context="raman_scattering:centroid_shift",
+        centered_pred
     )
-    centroid_derivative_rel_error = mean_pointwise_abs_relative_error(
-        centroid_derivative_num,
-        centroid_rhs,
-        context="raman_scattering:centroid_derivative",
+    centroid_derivative_rel_error = relative_l2_intensity_error_curve(
+        centroid_derivative_num_norm,
+        centroid_rhs_norm
     )
 
     final_kerr = _normalized_rows(kerr_spec_map)[-1]
@@ -388,50 +439,65 @@ def _run(args: argparse.Namespace) -> float:
     lambda_kerr_shift = lambda_kerr - lambda_kerr[0]
     lambda_raman_shift = lambda_raman - lambda_raman[0]
     lambda_pred_shift = lambda_pred - lambda_pred[0]
+    left_edge_frac, right_edge_frac = _time_window_edge_fraction(raman_records)
+    time_centroid = _row_centroid(t, np.abs(raman_records) ** 2)
+    peak_time = t[np.argmax(np.abs(raman_records) ** 2, axis=1)]
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
+    p0 = plot_intensity_colormap_vs_propagation(
+        t,
+        z_axis_norm,
+        np.abs(raman_records) ** 2,
+        output_dir / "raman_time_intensity_propagation.png",
+        x_label="Time (ps)",
+        y_label=r"Propagation distance $z / L_D$",
+        colorbar_label="Normalized temporal intensity",
+    )
+    if p0 is not None:
+        saved_paths.append(p0)
+
     p1 = plot_intensity_colormap_vs_propagation(
         omega_axis,
-        z_axis,
+        z_axis_norm,
         raman_spec_map,
         output_dir / "raman_spectral_intensity_propagation.png",
         x_label="Angular-frequency detuning (rad/time)",
-        
+        y_label=r"Propagation distance $z / L_D$",
         colorbar_label="Normalized spectral intensity",
     )
     if p1 is not None:
         saved_paths.append(p1)
 
     p2 = plot_two_curve_comparison(
-        z_axis,
+        z_axis_norm,
         centered_num,
         centered_pred,
         output_dir / "raman_spectral_centroid_over_propagation_with_analytic.png",
         label_a="Numerical centroid shift",
         label_b="Analytical centroid shift",
+        x_label=r"Propagation distance $z / L_D$",
         y_label="Delta spectral centroid (rad/time)",
-        
     )
     if p2 is not None:
         saved_paths.append(p2)
 
     p3 = plot_intensity_colormap_vs_propagation(
         lambda_axis,
-        z_axis,
+        z_axis_norm,
         wavelength_map,
         output_dir / "raman_wavelength_intensity_propagation.png",
         x_label="Wavelength (nm)",
-        
+        y_label=r"Propagation distance $z / L_D$",
         colorbar_label="Normalized spectral intensity",
     )
     if p3 is not None:
         saved_paths.append(p3)
 
     p4 = plot_three_curve_drift(
-        z_axis,
+        z_axis_norm,
         lambda_kerr_shift,
         lambda_raman_shift,
         lambda_pred_shift,
@@ -439,8 +505,8 @@ def _run(args: argparse.Namespace) -> float:
         label_a="Kerr-only",
         label_b="Kerr+Raman",
         label_c="Moment-theorem prediction",
+        x_label=r"Propagation distance $z / L_D$",
         y_label="Delta centroid wavelength (nm)",
-        
     )
     if p4 is not None:
         saved_paths.append(p4)
@@ -460,30 +526,33 @@ def _run(args: argparse.Namespace) -> float:
         saved_paths.append(p5)
 
     p6 = plot_two_curve_comparison(
-        z_axis,
-        centroid_derivative_num,
-        centroid_rhs,
+        z_axis_norm,
+        centroid_derivative_num_norm,
+        centroid_rhs_norm,
         output_dir / "raman_spectral_centroid_derivative_validation.png",
-        label_a="Numerical d(centroid)/dz",
+        label_a=r"Numerical $d\Omega_c / d(z / L_D)$",
         label_b="Analytical moment RHS",
-        y_label="Centroid derivative (rad/time/m)",
-        
+        x_label=r"Propagation distance $z / L_D$",
+        y_label=r"Centroid derivative $d\Omega_c / d(z / L_D)$",
     )
     if p6 is not None:
         saved_paths.append(p6)
 
     p8 = plot_total_error_over_propagation(
-        z_axis,
+        z_axis_norm,
         centroid_pointwise_rel_error,
         output_dir / "raman_spectral_centroid_shift_relative_error.png",
-        
+        x_label=r"Propagation distance $z / L_D$",
         y_label="Pointwise abs-relative error of centroid shift",
     )
     if p8 is not None:
         saved_paths.append(p8)
 
     print(f"raman scattering summary (run_group={run_group}):")
+    print(f"  diagnostic mode                  = {diagnostic_mode}")
     print(f"  n={n}, dt={dt:.6e}, z_final={z_final:.6e}")
+    print(f"  dispersion length L_D            = {ld:.6e}")
+    print(f"  normalized distance z_final/L_D  = {float(z_final / ld):.6e}")
     print(f"  gamma={gamma:.6e}, f_r={f_r:.6e}, tau1={tau1:.6e}, tau2={tau2:.6e}, shock_omega0={shock_omega0:.6e}")
     print(f"  wavelength mapping reference      = {lambda0_nm:.3f} nm (time unit assumed: ps)")
     print(f"  Raman first moment T_R           = {t_r:.6e}")
@@ -492,12 +561,30 @@ def _run(args: argparse.Namespace) -> float:
     print(f"  max pointwise rel. error         = {float(np.max(centroid_pointwise_rel_error)):.6e}")
     print(f"  final centroid shift (raman-kerr)= {centroid_delta_final:.6e}")
     print(f"  predicted centroid shift         = {predicted_delta_final:.6e}")
+    print(f"  time-centroid drift              = {float(time_centroid[-1] - time_centroid[0]):.6e} ps")
+    print(f"  peak-time drift                  = {float(peak_time[-1] - peak_time[0]):.6e} ps")
+    print(f"  max left-edge energy fraction    = {float(np.max(left_edge_frac)):.6e}")
+    print(f"  max right-edge energy fraction   = {float(np.max(right_edge_frac)):.6e}")
+    print(f"  final left-edge energy fraction  = {float(left_edge_frac[-1]):.6e}")
+    print(f"  final right-edge energy fraction = {float(right_edge_frac[-1]):.6e}")
     return centroid_curve_rel_error
 
 
 class RamanScatteringApp(ExampleAppBase):
     example_slug = "raman_scattering"
     description = "Raman self-frequency shift validation (temporal only) with DB-backed run/replot."
+
+    @classmethod
+    def configure_parser(cls, parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--fixed-step-diagnostic",
+            action="store_true",
+            help=(
+                "Run the centroid-derivative validation with exact fixed step size "
+                "equal to the record spacing so saved records are step-end states "
+                "with no solver-side interpolation."
+            ),
+        )
 
     def run(self) -> float:
         return _run(self.args)

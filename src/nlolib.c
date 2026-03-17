@@ -333,7 +333,9 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (local_options.return_records == 0 && !nlo_storage_enabled(local_options.storage_options)) {
         return nlo_propagate_fail("validate.output_or_storage", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
-    if (local_options.return_records != 0 && local_output.output_records == NULL) {
+    if (local_options.return_records != 0 &&
+        local_output.output_records == NULL &&
+        !nlo_storage_enabled(local_options.storage_options)) {
         return nlo_propagate_fail("validate.output_or_storage", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
     if (local_output.output_step_events == NULL && local_output.output_step_event_capacity > 0u) {
@@ -351,10 +353,12 @@ NLOLIB_API nlolib_status nlolib_propagate(
         return nlo_propagate_fail("validate.num_recorded_samples_precision", NLOLIB_STATUS_INVALID_ARGUMENT);
     }
     if (local_options.return_records != 0) {
-        if (local_output.output_record_capacity < num_recorded_samples) {
+        if (local_output.output_records != NULL &&
+            local_output.output_record_capacity < num_recorded_samples) {
             return nlo_propagate_fail("validate.output_record_capacity", NLOLIB_STATUS_INVALID_ARGUMENT);
         }
-        if (nlo_compute_record_bytes(num_recorded_samples, num_time_samples) == 0u) {
+        if (local_output.output_records != NULL &&
+            nlo_compute_record_bytes(num_recorded_samples, num_time_samples) == 0u) {
             return nlo_propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
         }
     }
@@ -400,6 +404,8 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (init_status != 0 || state == NULL) {
         return nlo_propagate_fail("init_simulation_state", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
+    state->output_records = local_output.output_records;
+    state->output_record_capacity = local_output.output_record_capacity;
     state->explicit_record_z = local_options.explicit_record_z;
     state->explicit_record_z_count = local_options.explicit_record_z_count;
     state->explicit_record_schedule_active =
@@ -456,10 +462,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (num_recorded_samples == 1u && state->snapshot_store != NULL) {
         nlo_complex* final_record = local_output.output_records;
         if (final_record == NULL) {
-            final_record = simulation_state_get_field_record(state, 0u);
-            if (final_record == NULL) {
-                final_record = state->snapshot_scratch_record;
-            }
+            final_record = state->snapshot_scratch_record;
         }
         if (final_record == NULL) {
             free_simulation_state(state);
@@ -499,38 +502,6 @@ NLOLIB_API nlolib_status nlolib_propagate(
         }
         final_output_field_cached = local_output.output_records;
     } else if (local_options.return_records != 0 && local_output.output_records != NULL) {
-        if (state->num_host_records == num_recorded_samples && state->field_buffer != NULL) {
-            const size_t records_bytes = nlo_compute_record_bytes(records_available, num_time_samples);
-            if (records_bytes == 0u) {
-                if (records_available > 0u) {
-                    free_simulation_state(state);
-                    return nlo_propagate_fail("validate.output_record_bytes", NLOLIB_STATUS_ALLOCATION_FAILED);
-                }
-            } else {
-                memcpy(local_output.output_records, state->field_buffer, records_bytes);
-            }
-        } else if (state->snapshot_store != NULL) {
-            if (records_available > 0u) {
-                const nlo_snapshot_store_status restore_status =
-                    nlo_snapshot_store_read_all_records(state->snapshot_store,
-                                                       local_output.output_records,
-                                                       records_available,
-                                                       state->num_time_samples);
-                if (restore_status == NLO_SNAPSHOT_STORE_STATUS_ERROR) {
-                    free_simulation_state(state);
-                    return nlo_propagate_fail("restore_records_from_storage", NLOLIB_STATUS_ALLOCATION_FAILED);
-                }
-                if (restore_status == NLO_SNAPSHOT_STORE_STATUS_SOFT_LIMIT) {
-                    free_simulation_state(state);
-                    return nlo_propagate_fail("restore_records_from_storage.truncated",
-                                              NLOLIB_STATUS_ALLOCATION_FAILED);
-                }
-            }
-        } else {
-            free_simulation_state(state);
-            return nlo_propagate_fail("validate.host_record_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
-        }
-
         if (records_available > 0u) {
             final_output_field_cached =
                 local_output.output_records + ((records_available - 1u) * state->num_time_samples);
@@ -543,12 +514,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
         nlo_complex* final_output_scratch = NULL;
         if (final_output_field == NULL) {
-            if (records_available > 0u) {
-                final_output_scratch = simulation_state_get_field_record(state, records_available - 1u);
-            }
-            if (final_output_scratch == NULL) {
-                final_output_scratch = state->snapshot_scratch_record;
-            }
+            final_output_scratch = state->snapshot_scratch_record;
             if (final_output_scratch == NULL) {
                 free_simulation_state(state);
                 return nlo_propagate_fail("storage.final_output_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
@@ -581,7 +547,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
     const size_t step_events_dropped = state->step_events_dropped;
     size_t records_written_actual = 0u;
     if (local_options.return_records != 0) {
-        records_written_actual = (num_recorded_samples == 1u) ? 1u : records_available;
+        records_written_actual = records_available;
     }
     free_simulation_state(state);
     if (local_output.records_written != NULL) {

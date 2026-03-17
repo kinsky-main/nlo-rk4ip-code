@@ -50,11 +50,6 @@ function options = normalize_options(simOptions, numRecords)
 options = simOptions;
 options.backend = lower(string(options.backend));
 options.fft_backend = lower(string(options.fft_backend));
-
-if options.record_ring_target == 0 && ...
-   (options.backend == "auto" || options.backend == "vulkan")
-    options.record_ring_target = uint64(max(1, min(double(numRecords), 32)));
-end
 end
 
 function out = make_exec_options(options)
