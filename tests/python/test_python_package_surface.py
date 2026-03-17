@@ -1,3 +1,5 @@
+import importlib.util
+
 import nlolib
 
 
@@ -11,6 +13,8 @@ def test_package_surface() -> None:
     assert hasattr(nlolib, "translate_callable")
     assert "._legacy_impl" not in nlolib.NLolib.__module__
     assert "._legacy_impl" not in nlolib.propagate.__module__
+    assert importlib.util.find_spec("nlolib._legacy_impl") is None
+    assert importlib.util.find_spec("nlolib_ctypes") is None
 
 
 def main() -> None:
