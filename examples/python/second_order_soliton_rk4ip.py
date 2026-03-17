@@ -517,7 +517,7 @@ def _run(args: argparse.Namespace) -> float:
         configured_max_step = float(sim_cfg.max_step_size)
         configured_min_step = float(sim_cfg.min_step_size)
         configured_error_tolerance = float(sim_cfg.error_tolerance)
-        exec_options = SimulationOptions(backend="cpu", fft_backend="fftw")
+        exec_options = SimulationOptions(backend="auto", fft_backend="auto")
         runner = NloExampleRunner()
         progress_callback = make_eta_abort_progress_callback(runner.api)
         storage_kwargs = db.storage_kwargs(

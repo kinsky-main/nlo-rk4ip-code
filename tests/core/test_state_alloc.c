@@ -441,6 +441,58 @@ static void test_tensor_mode_frequency_mesh_generation(void)
     printf("test_tensor_mode_frequency_mesh_generation: validates tensor t-fast frequency mesh.\n");
 }
 
+static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
+{
+#if !NLO_ENABLE_VULKAN_BACKEND
+    printf("test_tensor_mode_linear_factor_literal_power_vulkan: skipped (Vulkan disabled at build).\n");
+    return;
+#else
+    nlo_vector_backend* probe = nlo_vector_backend_create_vulkan(NULL);
+    if (probe == NULL) {
+        printf("test_tensor_mode_linear_factor_literal_power_vulkan: skipped (Vulkan unavailable).\n");
+        return;
+    }
+    nlo_vector_backend_destroy(probe);
+
+    const size_t nt = 8u;
+    const size_t nx = 4u;
+    const size_t ny = 4u;
+    const size_t total = nt * nx * ny;
+
+    sim_config* config = create_sim_config(total);
+    assert(config != NULL);
+    config->tensor.nt = nt;
+    config->tensor.nx = nx;
+    config->tensor.ny = ny;
+    config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
+    config->time.delta_time = 0.25;
+    config->spatial.delta_x = 0.5;
+    config->spatial.delta_y = 0.5;
+    config->runtime.linear_factor_expr = "i*((0.5*c0)*(wt^2) + c1*((kx^2) + (ky^2)))";
+    config->runtime.linear_expr = "exp(h*D)";
+    config->runtime.potential_expr = "0";
+    config->runtime.num_constants = 2u;
+    config->runtime.constants[0] = 0.08;
+    config->runtime.constants[1] = -0.2;
+
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
+    simulation_state* state = NULL;
+    assert(nlo_init_simulation_state(config,
+                                     total,
+                                     2u,
+                                     &exec_options,
+                                     NULL,
+                                     &state) == 0);
+    assert(state != NULL);
+    assert(nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN);
+
+    free_simulation_state(state);
+    free_sim_config(config);
+
+    printf("test_tensor_mode_linear_factor_literal_power_vulkan: validates Vulkan literal-power lowering.\n");
+#endif
+}
+
 static void test_snapshot_store_dense_readback(void)
 {
     if (!nlo_snapshot_store_is_available()) {
@@ -524,6 +576,7 @@ int main(void)
     test_default_frequency_grid_generated_when_invalid();
     test_frequency_grid_preserved_when_valid();
     test_tensor_mode_frequency_mesh_generation();
+    test_tensor_mode_linear_factor_literal_power_vulkan();
     test_snapshot_store_dense_readback();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;

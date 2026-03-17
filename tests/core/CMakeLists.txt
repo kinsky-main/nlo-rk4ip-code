@@ -90,10 +90,15 @@ set_tests_properties(test_core_state_alloc PROPERTIES
 add_executable(test_core_log_sink
   ${CMAKE_CURRENT_LIST_DIR}/test_log_sink.c
   ${CMAKE_SOURCE_DIR}/src/io/log_format.c
+  ${CMAKE_SOURCE_DIR}/src/io/propagate_log.c
   ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
 )
 
 target_include_directories(test_core_log_sink PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_core_log_sink PRIVATE
+  NLO_ENABLE_VULKAN_BACKEND=0
+  NLO_ENABLE_VKFFT=0
+)
 if(UNIX)
   target_link_libraries(test_core_log_sink PRIVATE m)
 endif()

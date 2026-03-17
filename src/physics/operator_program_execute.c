@@ -269,6 +269,15 @@ nlo_vec_status nlo_operator_program_execute(
             continue;
         }
 
+        if (instruction.opcode == NLO_OPERATOR_OP_POW_REAL_LITERAL) {
+            nlo_vec_buffer* top = stack_vectors[stack_depth - 1u];
+            status = nlo_vec_complex_real_pow_inplace(backend, top, NLO_RE(instruction.literal));
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+            continue;
+        }
+
         if (stack_depth < 2u) {
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
         }

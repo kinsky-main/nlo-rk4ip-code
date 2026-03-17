@@ -113,9 +113,9 @@ def _run(args: argparse.Namespace) -> float:
     example_name = "tensor_dispersion_3d_rk4ip"
     case_key = "default"
 
-    nt = 128
-    nx = 64
-    ny = 64
+    nt = 512
+    nx = 256
+    ny = 256
     dt = 0.04
     dx = 0.15
     dy = 0.15

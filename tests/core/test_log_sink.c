@@ -4,6 +4,7 @@
  */
 
 #include "io/log_format.h"
+#include "io/propagate_log.h"
 #include "io/log_sink.h"
 #include <assert.h>
 #include <stdio.h>
@@ -11,6 +12,14 @@
 #include <string.h>
 
 static int g_progress_callback_calls = 0;
+
+nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type)
+{
+    nlo_execution_options options;
+    memset(&options, 0, sizeof(options));
+    options.backend_type = backend_type;
+    return options;
+}
 
 static int test_progress_callback(const nlo_progress_info* info, void* user_data)
 {
@@ -133,6 +142,34 @@ static void test_progress_callback_abort(void)
     printf("test_progress_callback_abort: passed.\n");
 }
 
+static void test_allocation_summary_marks_non_vulkan_fields_not_applicable(void)
+{
+    nlo_allocation_info allocation = {0};
+    allocation.per_record_bytes = 65536u;
+    allocation.working_vector_bytes = 917504u;
+    allocation.host_snapshot_bytes = 10485760u;
+
+    assert(nlo_log_set_buffer(8192u) == 0);
+    assert(nlo_log_clear_buffer() == 0);
+    assert(nlo_log_set_level(NLO_LOG_LEVEL_INFO) == 0);
+
+    nlo_log_propagate_allocation_summary(NLO_VECTOR_BACKEND_AUTO,
+                                         NLO_VECTOR_BACKEND_CPU,
+                                         &allocation,
+                                         NULL);
+
+    char out[4096];
+    size_t written = 0u;
+    assert(nlo_log_read_buffer(out, sizeof(out), &written, 1) == 0);
+    assert(written > 0u);
+    assert(strstr(out, "record_ring_capacity: n/a (non-Vulkan backend)") != NULL);
+    assert(strstr(out, "record_ring_bytes: n/a (non-Vulkan backend)") != NULL);
+    assert(strstr(out, "device_budget_bytes_effective: n/a (non-Vulkan backend)") != NULL);
+    assert(strstr(out, "device_local_total_bytes: n/a (non-Vulkan backend)") != NULL);
+    assert(strstr(out, "device_local_available_bytes: n/a (non-Vulkan backend)") != NULL);
+    printf("test_allocation_summary_marks_non_vulkan_fields_not_applicable: passed.\n");
+}
+
 int main(void)
 {
     test_grouped_integer_format();
@@ -141,6 +178,7 @@ int main(void)
     test_progress_stream_options();
     test_progress_entries();
     test_progress_callback_abort();
+    test_allocation_summary_marks_non_vulkan_fields_not_applicable();
 
     (void)nlo_log_set_buffer(0u);
     (void)nlo_log_set_file(NULL, 0);
