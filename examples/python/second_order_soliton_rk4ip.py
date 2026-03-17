@@ -586,7 +586,6 @@ def _run(args: argparse.Namespace) -> float:
     envelope_rel_error = relative_l2_intensity_error(
         U_num,
         U_true,
-        context="second_order_soliton:envelope_relative_error",
     )
     z0_analytic_error = analytical_initial_condition_error(t, beta2, t0)
     if not np.isfinite(epsilon):

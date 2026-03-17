@@ -10,6 +10,7 @@
 - [x] Numerical error is exceptionally high even when cropping to 1e-6 floating max amplitude, investigate and fix.
 - [ ] Cut first and final step from soliton variable step plot in example.
 - [ ] Bring MATLAB and Julia interfaces up to date with Python API, currently using very old interfaces (complete rewrite required).
+- [ ] Benchmark GPU against CPU backend for 3D problems, show scaling of performance with regions for < GPU memory, > GPU memory, and > system memory.
 
 ## Potentially Required Tasks
 
