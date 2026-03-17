@@ -180,18 +180,14 @@ class NLolib:
         """
         Unified propagation entrypoint.
 
-        Low-level form:
-            propagate(config, input_field, num_recorded_samples, exec_options=None, **storage_kwargs)
-
-        High-level form:
-            propagate(
-                pulse,
-                linear_operator="gvd",
-                nonlinear_operator="kerr",
-                *,
-                propagation_distance=...,
-                ...
-            )
+        propagate(
+            pulse,
+            linear_operator="gvd",
+            nonlinear_operator="kerr",
+            *,
+            propagation_distance=...,
+            ...
+        )
         """
         if isinstance(primary, (PreparedSimConfig, NloSimulationConfig)):
             request = self._request_builder.from_config(primary, *args, **kwargs)

@@ -2,6 +2,8 @@
 
 add_executable(bench_solver_backend
   ${CMAKE_CURRENT_LIST_DIR}/bench_solver_backend.c
+  ${CMAKE_CURRENT_LIST_DIR}/bench_tensor_scaling.c
+  ${CMAKE_CURRENT_LIST_DIR}/tensor_scaling_plan.c
   ${CMAKE_SOURCE_DIR}/src/core/init.c
   ${CMAKE_SOURCE_DIR}/src/core/init_defaults.c
   ${CMAKE_SOURCE_DIR}/src/core/init_limits.c
@@ -89,6 +91,17 @@ endif()
 if(WIN32)
   target_compile_definitions(bench_solver_backend PRIVATE NLOLIB_EXPORTS)
   target_link_options(bench_solver_backend PRIVATE /IGNORE:4099)
+  set(_nlo_runtime_hints "${NLO_SQLITE_RUNTIME_HINTS}")
+  if(NLO_CBLAS_RUNTIME_HINTS)
+    list(APPEND _nlo_runtime_hints "${NLO_CBLAS_RUNTIME_HINTS}")
+  endif()
+  add_custom_command(TARGET bench_solver_backend POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:bench_solver_backend>"
+            -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:bench_solver_backend>"
+            -DNLO_RUNTIME_HINTS="${_nlo_runtime_hints}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
+  )
 endif()
 
 if(UNIX)
@@ -99,4 +112,13 @@ target_include_directories(bench_solver_backend PRIVATE ${CMAKE_BINARY_DIR}/src/
 target_link_libraries(bench_solver_backend PRIVATE Vulkan::Vulkan)
 if(TARGET nlo_vk_shaders)
   add_dependencies(bench_solver_backend nlo_vk_shaders)
+endif()
+
+if(BUILD_TESTING)
+  add_test(NAME test_bench_solver_backend_tensor_dry_run
+    COMMAND ${CMAKE_COMMAND}
+            -DTEST_EXECUTABLE=$<TARGET_FILE:bench_solver_backend>
+            -DTEST_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -P ${CMAKE_SOURCE_DIR}/tests/core/check_tensor_bench_dry_run.cmake
+  )
 endif()

@@ -4,6 +4,7 @@
  */
 
 #include "backend/nlo_complex.h"
+#include "bench_tensor_scaling.h"
 #include "core/init.h"
 #include "core/state.h"
 #include "numerics/rk4_kernel.h"
@@ -43,6 +44,11 @@
 #endif
 
 typedef enum {
+    NLO_BENCH_SCENARIO_TEMPORAL = 0,
+    NLO_BENCH_SCENARIO_TENSOR3D_SCALING = 1
+} nlo_bench_scenario;
+
+typedef enum {
     NLO_BENCH_BACKEND_CPU = 0,
     NLO_BENCH_BACKEND_GPU = 1,
     NLO_BENCH_BACKEND_BOTH = 2
@@ -54,12 +60,20 @@ typedef enum {
 } nlo_bench_runtime_backend;
 
 typedef struct {
+    nlo_bench_scenario scenario;
     nlo_bench_backend_request backend;
     size_t sizes[NLO_BENCH_MAX_SIZES];
     size_t size_count;
+    size_t tensor_scales[NLO_BENCH_MAX_SIZES];
+    size_t tensor_scale_count;
     size_t warmup_runs;
     size_t measured_runs;
+    size_t planner_host_bytes;
+    size_t planner_gpu_bytes;
+    int dry_run;
+    int csv_explicit;
     char csv_path[NLO_BENCH_MAX_PATH];
+    char storage_dir[NLO_BENCH_MAX_PATH];
 } nlo_bench_options;
 
 typedef struct {
@@ -159,10 +173,16 @@ static void nlo_bench_print_usage(const char* executable_name)
 {
     printf("Usage: %s [options]\n", executable_name);
     printf("Options:\n");
+    printf("  --scenario=temporal|tensor3d_scaling\n");
     printf("  --backend=cpu|gpu|both\n");
     printf("  --sizes=1024,4096,16384,65536\n");
+    printf("  --tensor-scales=8,16,32,64\n");
     printf("  --warmup=N\n");
     printf("  --runs=N\n");
+    printf("  --dry-run\n");
+    printf("  --planner-host-bytes=N\n");
+    printf("  --planner-gpu-bytes=N\n");
+    printf("  --storage-dir=path/to/storage\n");
     printf("  --csv=path/to/results.csv\n");
     printf("  --help\n");
 }
@@ -175,6 +195,7 @@ static void nlo_bench_set_default_options(nlo_bench_options* options)
     }
 
     memset(options, 0, sizeof(*options));
+    options->scenario = NLO_BENCH_SCENARIO_TEMPORAL;
     options->backend = NLO_BENCH_BACKEND_BOTH;
     options->warmup_runs = 2u;
     options->measured_runs = 8u;
@@ -187,6 +208,9 @@ static void nlo_bench_set_default_options(nlo_bench_options* options)
     snprintf(options->csv_path,
              sizeof(options->csv_path),
              "benchmarks/results/solver_backend.csv");
+    snprintf(options->storage_dir,
+             sizeof(options->storage_dir),
+             "benchmarks/results/storage");
 }
 
 static int nlo_bench_parse_unsigned_size(const char* text, size_t* out_value)
@@ -206,9 +230,14 @@ static int nlo_bench_parse_unsigned_size(const char* text, size_t* out_value)
     return 0;
 }
 
-static int nlo_bench_parse_size_list(const char* text, nlo_bench_options* options)
+static int nlo_bench_parse_size_values(
+    const char* text,
+    size_t* out_values,
+    size_t max_values,
+    size_t* out_count
+)
 {
-    if (text == NULL || options == NULL || *text == '\0') {
+    if (text == NULL || out_values == NULL || out_count == NULL || *text == '\0') {
         return -1;
     }
 
@@ -228,11 +257,11 @@ static int nlo_bench_parse_size_list(const char* text, nlo_bench_options* option
         if (errno != 0 || end_ptr == cursor || value == 0u) {
             return -1;
         }
-        if (count >= NLO_BENCH_MAX_SIZES) {
+        if (count >= max_values) {
             return -1;
         }
 
-        options->sizes[count] = (size_t)value;
+        out_values[count] = (size_t)value;
         count += 1u;
 
         cursor = end_ptr;
@@ -252,7 +281,7 @@ static int nlo_bench_parse_size_list(const char* text, nlo_bench_options* option
         return -1;
     }
 
-    options->size_count = count;
+    *out_count = count;
     return 0;
 }
 
@@ -272,6 +301,24 @@ static int nlo_bench_parse_options(
         if (strcmp(arg, "--help") == 0) {
             nlo_bench_print_usage(argv[0]);
             return 1;
+        }
+        if (strcmp(arg, "--dry-run") == 0) {
+            options->dry_run = 1;
+            continue;
+        }
+
+        if (strncmp(arg, "--scenario=", 11) == 0) {
+            const char* value = arg + 11;
+            if (nlo_bench_string_equals_ci(value, "temporal")) {
+                options->scenario = NLO_BENCH_SCENARIO_TEMPORAL;
+                continue;
+            }
+            if (nlo_bench_string_equals_ci(value, "tensor3d_scaling")) {
+                options->scenario = NLO_BENCH_SCENARIO_TENSOR3D_SCALING;
+                continue;
+            }
+            fprintf(stderr, "Invalid scenario option: %s\n", value);
+            return -1;
         }
 
         if (strncmp(arg, "--backend=", 10) == 0) {
@@ -295,8 +342,22 @@ static int nlo_bench_parse_options(
         }
 
         if (strncmp(arg, "--sizes=", 8) == 0) {
-            if (nlo_bench_parse_size_list(arg + 8, options) != 0) {
+            if (nlo_bench_parse_size_values(arg + 8,
+                                            options->sizes,
+                                            NLO_BENCH_MAX_SIZES,
+                                            &options->size_count) != 0) {
                 fprintf(stderr, "Invalid sizes list: %s\n", arg + 8);
+                return -1;
+            }
+            continue;
+        }
+
+        if (strncmp(arg, "--tensor-scales=", 16) == 0) {
+            if (nlo_bench_parse_size_values(arg + 16,
+                                            options->tensor_scales,
+                                            NLO_BENCH_MAX_SIZES,
+                                            &options->tensor_scale_count) != 0) {
+                fprintf(stderr, "Invalid tensor scales list: %s\n", arg + 16);
                 return -1;
             }
             continue;
@@ -322,6 +383,32 @@ static int nlo_bench_parse_options(
             continue;
         }
 
+        if (strncmp(arg, "--planner-host-bytes=", 21) == 0) {
+            if (nlo_bench_parse_unsigned_size(arg + 21, &options->planner_host_bytes) != 0) {
+                fprintf(stderr, "Invalid planner host bytes: %s\n", arg + 21);
+                return -1;
+            }
+            continue;
+        }
+
+        if (strncmp(arg, "--planner-gpu-bytes=", 20) == 0) {
+            if (nlo_bench_parse_unsigned_size(arg + 20, &options->planner_gpu_bytes) != 0) {
+                fprintf(stderr, "Invalid planner gpu bytes: %s\n", arg + 20);
+                return -1;
+            }
+            continue;
+        }
+
+        if (strncmp(arg, "--storage-dir=", 14) == 0) {
+            const char* value = arg + 14;
+            if (*value == '\0') {
+                fprintf(stderr, "Invalid storage directory.\n");
+                return -1;
+            }
+            snprintf(options->storage_dir, sizeof(options->storage_dir), "%s", value);
+            continue;
+        }
+
         if (strncmp(arg, "--csv=", 6) == 0) {
             const char* value = arg + 6;
             if (*value == '\0') {
@@ -329,6 +416,7 @@ static int nlo_bench_parse_options(
                 return -1;
             }
             snprintf(options->csv_path, sizeof(options->csv_path), "%s", value);
+            options->csv_explicit = 1;
             continue;
         }
 
@@ -1131,6 +1219,11 @@ int main(int argc, char** argv)
 {
     nlo_bench_options options;
     const int parse_status = nlo_bench_parse_options(argc, argv, &options);
+    int error_count = 0;
+    bool gpu_available = false;
+    char gpu_skip_reason[NLO_BENCH_NOTE_CAP];
+    nlo_bench_vk_context vk_context;
+
     if (parse_status > 0) {
         return 0;
     }
@@ -1138,43 +1231,32 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (nlo_bench_make_parent_dirs(options.csv_path) != 0) {
-        fprintf(stderr, "Failed to create parent directories for CSV output: %s\n", options.csv_path);
-        return 1;
-    }
-
-    const int csv_exists = nlo_bench_file_exists(options.csv_path);
-    FILE* csv_file = fopen(options.csv_path, "a");
-    if (csv_file == NULL) {
-        fprintf(stderr, "Failed to open CSV output path: %s\n", options.csv_path);
-        return 1;
-    }
-
-    if (!csv_exists && nlo_bench_write_csv_header(csv_file) != 0) {
-        fclose(csv_file);
-        fprintf(stderr, "Failed to write CSV header.\n");
-        return 1;
+    if (options.scenario == NLO_BENCH_SCENARIO_TENSOR3D_SCALING && !options.csv_explicit) {
+        snprintf(options.csv_path,
+                 sizeof(options.csv_path),
+                 "benchmarks/results/tensor_backend_scaling.csv");
     }
 
     printf("Benchmark configuration:\n");
+    printf("  scenario: %s\n",
+           (options.scenario == NLO_BENCH_SCENARIO_TENSOR3D_SCALING)
+               ? "tensor3d_scaling"
+               : "temporal");
     printf("  backend: %s\n",
            (options.backend == NLO_BENCH_BACKEND_CPU) ? "cpu" :
            (options.backend == NLO_BENCH_BACKEND_GPU) ? "gpu" : "both");
     printf("  warmup runs: %zu\n", options.warmup_runs);
     printf("  measured runs: %zu\n", options.measured_runs);
     printf("  csv: %s\n", options.csv_path);
+    printf("  storage_dir: %s\n", options.storage_dir);
+    printf("  dry_run: %s\n", options.dry_run ? "true" : "false");
 
-    int error_count = 0;
     const bool run_cpu = (options.backend == NLO_BENCH_BACKEND_CPU ||
                           options.backend == NLO_BENCH_BACKEND_BOTH);
     const bool run_gpu = (options.backend == NLO_BENCH_BACKEND_GPU ||
                           options.backend == NLO_BENCH_BACKEND_BOTH);
 
-    bool gpu_available = false;
-    char gpu_skip_reason[NLO_BENCH_NOTE_CAP];
     nlo_bench_copy_note(gpu_skip_reason, sizeof(gpu_skip_reason), "");
-
-    nlo_bench_vk_context vk_context;
     memset(&vk_context, 0, sizeof(vk_context));
 
     if (run_gpu) {
@@ -1185,6 +1267,61 @@ int main(int argc, char** argv)
         } else {
             gpu_available = false;
         }
+    }
+
+    if (options.scenario == NLO_BENCH_SCENARIO_TENSOR3D_SCALING) {
+        nlo_bench_tensor_options tensor_options;
+        memset(&tensor_options, 0, sizeof(tensor_options));
+        tensor_options.backend_request = (int)options.backend;
+        tensor_options.warmup_runs = options.warmup_runs;
+        tensor_options.measured_runs = options.measured_runs;
+        tensor_options.dry_run = options.dry_run;
+        tensor_options.planner_host_bytes = options.planner_host_bytes;
+        tensor_options.planner_gpu_bytes = options.planner_gpu_bytes;
+        tensor_options.tensor_scales = options.tensor_scales;
+        tensor_options.tensor_scale_count = options.tensor_scale_count;
+        tensor_options.csv_path = options.csv_path;
+        tensor_options.storage_dir = options.storage_dir;
+
+        (void)nlo_bench_run_tensor_scaling(&tensor_options,
+                                           gpu_available ? &vk_context : NULL,
+                                           gpu_available,
+                                           gpu_skip_reason,
+                                           &error_count);
+
+        if (run_gpu && gpu_available) {
+            nlo_bench_vk_context_destroy(&vk_context);
+        }
+
+        printf("\nBenchmark completed with %d error(s).\n", error_count);
+        return (error_count == 0) ? 0 : 1;
+    }
+
+    if (nlo_bench_make_parent_dirs(options.csv_path) != 0) {
+        fprintf(stderr, "Failed to create parent directories for CSV output: %s\n", options.csv_path);
+        if (run_gpu && gpu_available) {
+            nlo_bench_vk_context_destroy(&vk_context);
+        }
+        return 1;
+    }
+
+    const int csv_exists = nlo_bench_file_exists(options.csv_path);
+    FILE* csv_file = fopen(options.csv_path, "a");
+    if (csv_file == NULL) {
+        fprintf(stderr, "Failed to open CSV output path: %s\n", options.csv_path);
+        if (run_gpu && gpu_available) {
+            nlo_bench_vk_context_destroy(&vk_context);
+        }
+        return 1;
+    }
+
+    if (!csv_exists && nlo_bench_write_csv_header(csv_file) != 0) {
+        fclose(csv_file);
+        if (run_gpu && gpu_available) {
+            nlo_bench_vk_context_destroy(&vk_context);
+        }
+        fprintf(stderr, "Failed to write CSV header.\n");
+        return 1;
     }
 
     for (size_t i = 0u; i < options.size_count; ++i) {
