@@ -624,7 +624,8 @@ static int nlo_program_compute_stack_requirements(nlo_operator_program* program)
             op == NLO_OPERATOR_OP_LOG ||
             op == NLO_OPERATOR_OP_SQRT ||
             op == NLO_OPERATOR_OP_SIN ||
-            op == NLO_OPERATOR_OP_COS) {
+            op == NLO_OPERATOR_OP_COS ||
+            op == NLO_OPERATOR_OP_POW_REAL_LITERAL) {
             if (depth < 1u) {
                 return -1;
             }
@@ -656,6 +657,34 @@ static int nlo_program_compute_stack_requirements(nlo_operator_program* program)
     return 0;
 }
 
+static void nlo_program_lower_real_literal_powers(nlo_operator_program* program)
+{
+    if (program == NULL || program->instruction_count == 0u) {
+        return;
+    }
+
+    size_t write = 0u;
+    for (size_t i = 0u; i < program->instruction_count; ++i) {
+        const nlo_operator_instruction instruction = program->instructions[i];
+        if (instruction.opcode == NLO_OPERATOR_OP_POW &&
+            write > 0u &&
+            program->instructions[write - 1u].opcode == NLO_OPERATOR_OP_PUSH_LITERAL &&
+            NLO_IM(program->instructions[write - 1u].literal) == 0.0) {
+            const double exponent = NLO_RE(program->instructions[write - 1u].literal);
+            write -= 1u;
+            program->instructions[write++] = (nlo_operator_instruction){
+                .opcode = NLO_OPERATOR_OP_POW_REAL_LITERAL,
+                .literal = nlo_make(exponent, 0.0)
+            };
+            continue;
+        }
+
+        program->instructions[write++] = instruction;
+    }
+
+    program->instruction_count = write;
+}
+
 nlo_vec_status nlo_operator_program_compile(
     const char* expression,
     nlo_operator_program_context context,
@@ -684,8 +713,13 @@ nlo_vec_status nlo_operator_program_compile(
 
     if (nlo_parser_next_token(&parser) != 0 ||
         nlo_parse_expression(&parser) != 0 ||
-        parser.current.kind != NLO_TOKEN_END ||
-        nlo_program_compute_stack_requirements(out_program) != 0) {
+        parser.current.kind != NLO_TOKEN_END) {
+        *out_program = (nlo_operator_program){0};
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_program_lower_real_literal_powers(out_program);
+    if (nlo_program_compute_stack_requirements(out_program) != 0) {
         *out_program = (nlo_operator_program){0};
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }

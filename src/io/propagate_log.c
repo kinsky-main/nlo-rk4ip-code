@@ -50,6 +50,44 @@ static const char* nlo_backend_type_to_string(nlo_vector_backend_type backend_ty
     return "UNKNOWN";
 }
 
+static void nlo_format_or_mark_non_vulkan(
+    char* dst,
+    size_t dst_size,
+    nlo_vector_backend_type actual_backend,
+    size_t value_bytes
+)
+{
+    if (dst == NULL || dst_size == 0u) {
+        return;
+    }
+
+    if (actual_backend != NLO_VECTOR_BACKEND_VULKAN) {
+        (void)snprintf(dst, dst_size, "n/a (non-Vulkan backend)");
+        return;
+    }
+
+    (void)nlo_log_format_bytes_summary(dst, dst_size, value_bytes);
+}
+
+static void nlo_format_count_or_mark_non_vulkan(
+    char* dst,
+    size_t dst_size,
+    nlo_vector_backend_type actual_backend,
+    size_t value_count
+)
+{
+    if (dst == NULL || dst_size == 0u) {
+        return;
+    }
+
+    if (actual_backend != NLO_VECTOR_BACKEND_VULKAN) {
+        (void)snprintf(dst, dst_size, "n/a (non-Vulkan backend)");
+        return;
+    }
+
+    (void)nlo_log_format_u64_grouped(dst, dst_size, (uint64_t)value_count);
+}
+
 static size_t nlo_compute_input_bytes(size_t count, size_t stride)
 {
     if (stride == 0u || count > (SIZE_MAX / stride)) {
@@ -302,9 +340,6 @@ void nlo_log_propagate_allocation_summary(
     char total_device_text[48];
     char available_device_text[48];
 
-    (void)nlo_log_format_u64_grouped(ring_capacity_text,
-                                     sizeof(ring_capacity_text),
-                                     (uint64_t)safe_allocation->device_ring_capacity);
     (void)nlo_log_format_bytes_summary(per_record_text,
                                        sizeof(per_record_text),
                                        safe_allocation->per_record_bytes);
@@ -314,16 +349,26 @@ void nlo_log_propagate_allocation_summary(
     (void)nlo_log_format_bytes_summary(host_snapshot_text,
                                        sizeof(host_snapshot_text),
                                        safe_allocation->host_snapshot_bytes);
-    (void)nlo_log_format_bytes_summary(ring_bytes_text, sizeof(ring_bytes_text), record_ring_bytes);
-    (void)nlo_log_format_bytes_summary(device_budget_text,
-                                       sizeof(device_budget_text),
-                                       safe_allocation->device_budget_bytes);
-    (void)nlo_log_format_bytes_summary(total_device_text,
-                                       sizeof(total_device_text),
-                                       safe_mem_info->device_local_total_bytes);
-    (void)nlo_log_format_bytes_summary(available_device_text,
-                                       sizeof(available_device_text),
-                                       safe_mem_info->device_local_available_bytes);
+    nlo_format_count_or_mark_non_vulkan(ring_capacity_text,
+                                        sizeof(ring_capacity_text),
+                                        actual_backend,
+                                        safe_allocation->device_ring_capacity);
+    nlo_format_or_mark_non_vulkan(ring_bytes_text,
+                                  sizeof(ring_bytes_text),
+                                  actual_backend,
+                                  record_ring_bytes);
+    nlo_format_or_mark_non_vulkan(device_budget_text,
+                                  sizeof(device_budget_text),
+                                  actual_backend,
+                                  safe_allocation->device_budget_bytes);
+    nlo_format_or_mark_non_vulkan(total_device_text,
+                                  sizeof(total_device_text),
+                                  actual_backend,
+                                  safe_mem_info->device_local_total_bytes);
+    nlo_format_or_mark_non_vulkan(available_device_text,
+                                  sizeof(available_device_text),
+                                  actual_backend,
+                                  safe_mem_info->device_local_available_bytes);
 
     nlo_log_emit(NLO_LOG_LEVEL_INFO,
                  "[nlolib] backend resolved:\n"
