@@ -159,13 +159,21 @@ static void nlo_fill_allocation_info(
     size_t working_bytes = 0u;
 
     (void)nlo_checked_mul_size_t(num_time_samples, sizeof(nlo_complex), &per_record_bytes);
-    (void)nlo_checked_mul_size_t(per_record_bytes, state->num_host_records, &host_snapshot_bytes);
+    if (state->snapshot_scratch_record != NULL) {
+        host_snapshot_bytes += per_record_bytes;
+    }
+    if (state->field_buffer != NULL) {
+        size_t field_buffer_bytes = 0u;
+        if (nlo_checked_mul_size_t(per_record_bytes, state->num_host_records, &field_buffer_bytes) == 0) {
+            host_snapshot_bytes += field_buffer_bytes;
+        }
+    }
     if (nlo_estimate_working_vector_bytes(per_record_bytes, state, &working_bytes) != 0) {
         working_bytes = 0u;
     }
 
     allocation_info->requested_records = requested_records;
-    allocation_info->allocated_records = state->num_host_records;
+    allocation_info->allocated_records = (state->snapshot_scratch_record != NULL) ? 1u : state->num_host_records;
     allocation_info->per_record_bytes = per_record_bytes;
     allocation_info->host_snapshot_bytes = host_snapshot_bytes;
     allocation_info->working_vector_bytes = working_bytes;

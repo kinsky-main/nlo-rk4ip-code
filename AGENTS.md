@@ -19,7 +19,7 @@
 - Do prioritize the GPU backend
 - Do update README build/test/docs sections when CMake options or targets change
 - Do keep Windows and Linux command examples in sync for setup/build/test paths
-- Do attempt to reduce bloat in code where possible, via structs/helpers/templates, while maintaining 
+- Do attempt to reduce bloat in code where possible, via structs/helpers/templates, while maintaining performance
 - Do check bloat by line count
 
 ## Formatting
@@ -31,6 +31,7 @@
 ## Workflow
 - Read relevant files before editing
 - Prefer small, reviewable patches
+- Prioritize subtractive edits (removing code) over additive edits when possible
 - Explain what and why in responses
 - For doc updates, verify commands against current CMake targets/options before finalizing
 

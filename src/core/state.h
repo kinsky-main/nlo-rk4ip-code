@@ -309,6 +309,8 @@ typedef struct {
 
     nlo_complex* field_buffer;
     nlo_complex* snapshot_scratch_record;
+    nlo_complex* output_records;
+    size_t output_record_capacity;
     nlo_snapshot_store* snapshot_store;
     nlo_storage_result snapshot_result;
     nlo_vec_status snapshot_status;
@@ -493,17 +495,37 @@ nlo_vec_status simulation_state_capture_snapshot_from_vec(
 nlo_vec_status simulation_state_flush_snapshots(simulation_state* state);
 
 /**
- * @brief Return a pointer to a host-side record slot by index.
+ * @brief Resolve the operator-visible frequency grid for the active state.
+ *
+ * Tensor mode uses wt mesh storage directly; temporal mode uses the
+ * dedicated frequency grid vector.
+ *
+ * @param state Active simulation state.
+ * @return const nlo_vec_buffer* Frequency-domain grid buffer, or NULL.
+ */
+static inline const nlo_vec_buffer* nlo_state_operator_frequency_grid(const simulation_state* state)
+{
+    if (state == NULL) {
+        return NULL;
+    }
+    if (state->frequency_grid_vec != NULL) {
+        return state->frequency_grid_vec;
+    }
+    return state->working_vectors.wt_mesh_vec;
+}
+
+/**
+ * @brief Return a pointer to a caller-owned output record slot by index.
  *
  * @param state Active simulation state.
  * @param record_index Zero-based record index.
  * @return nlo_complex* Pointer to record start, or NULL when unavailable.
  */
-static inline nlo_complex* simulation_state_get_field_record(simulation_state* state, size_t record_index)
+static inline nlo_complex* simulation_state_get_output_record(simulation_state* state, size_t record_index)
 {
-    if (state == NULL || state->field_buffer == NULL || record_index >= state->num_host_records) {
+    if (state == NULL || state->output_records == NULL || record_index >= state->output_record_capacity) {
         return NULL;
     }
 
-    return state->field_buffer + (record_index * state->num_time_samples);
+    return state->output_records + (record_index * state->num_time_samples);
 }

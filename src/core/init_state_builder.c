@@ -20,6 +20,10 @@
 #define NLO_MIN_DEVICE_RING_CAPACITY 1u
 #endif
 
+#ifndef NLO_MAX_DEVICE_RING_CAPACITY
+#define NLO_MAX_DEVICE_RING_CAPACITY 4u
+#endif
+
 #ifndef NLO_DEVICE_RING_BUDGET_HEADROOM_NUM
 #define NLO_DEVICE_RING_BUDGET_HEADROOM_NUM 9u
 #endif
@@ -563,9 +567,9 @@ static int nlo_estimate_active_device_bytes(
     return 0;
 }
 
-static size_t nlo_compute_device_ring_capacity(const simulation_state* state, size_t requested_records)
+static size_t nlo_compute_device_ring_capacity(const simulation_state* state)
 {
-    if (state == NULL || state->backend == NULL || requested_records == 0u) {
+    if (state == NULL || state->backend == NULL || state->num_recorded_samples <= 1u) {
         return 0u;
     }
 
@@ -647,13 +651,13 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
 
     size_t ring_capacity = budget_bytes / per_record_bytes;
 
-    if (state->exec_options.record_ring_target > 0u &&
-        ring_capacity > state->exec_options.record_ring_target) {
-        ring_capacity = state->exec_options.record_ring_target;
-    }
-
-    if (ring_capacity > requested_records) {
-        ring_capacity = requested_records;
+    {
+        const size_t ring_target = (state->exec_options.record_ring_target > 0u)
+                                       ? state->exec_options.record_ring_target
+                                       : (size_t)NLO_MAX_DEVICE_RING_CAPACITY;
+        if (ring_capacity > ring_target) {
+            ring_capacity = ring_target;
+        }
     }
 
     size_t reserve_bytes = per_record_bytes;
@@ -675,7 +679,7 @@ static size_t nlo_compute_device_ring_capacity(const simulation_state* state, si
         ring_capacity = safe_capacity;
     }
 
-    nlo_state_debug_log_ring_capacity(requested_records,
+    nlo_state_debug_log_ring_capacity(state->num_recorded_samples,
                                       per_record_bytes,
                                       active_bytes,
                                       state->runtime_operator_stack_slots,
@@ -778,18 +782,8 @@ simulation_state* create_simulation_state_with_storage(
     state->num_points_xy = spatial_nx * spatial_ny;
     state->num_recorded_samples = num_recorded_samples;
     const int coupled_mode = (spatial_nx > 1u || spatial_ny > 1u);
-    state->num_host_records = nlo_compute_host_record_capacity(config, num_time_samples, num_recorded_samples);
     const int storage_enabled = nlo_storage_options_enabled(storage_options);
-    if (state->num_host_records == 0u && !storage_enabled) {
-        nlo_state_debug_log_failure("host_record_capacity", NLO_VEC_STATUS_ALLOCATION_FAILED);
-        free_simulation_state(state);
-        return NULL;
-    }
-    if (!storage_enabled && state->num_host_records < num_recorded_samples) {
-        nlo_state_debug_log_failure("host_record_capacity_insufficient", NLO_VEC_STATUS_ALLOCATION_FAILED);
-        free_simulation_state(state);
-        return NULL;
-    }
+    state->num_host_records = 0u;
 
     state->current_z = 0.0;
     state->current_step_size = config->propagation.starting_step_size;
@@ -859,23 +853,7 @@ simulation_state* create_simulation_state_with_storage(
         nlo_snapshot_store_get_result(state->snapshot_store, &state->snapshot_result);
     }
 
-    if (state->num_host_records > 0u) {
-        size_t host_elements = 0u;
-        if (nlo_checked_mul_size_t(state->num_time_samples, state->num_host_records, &host_elements) != 0) {
-            nlo_state_debug_log_failure("host_elements_overflow", NLO_VEC_STATUS_INVALID_ARGUMENT);
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        state->field_buffer = (nlo_complex*)calloc(host_elements, sizeof(nlo_complex));
-        if (state->field_buffer == NULL) {
-            nlo_state_debug_log_failure("allocate_host_field_buffer", NLO_VEC_STATUS_ALLOCATION_FAILED);
-            free_simulation_state(state);
-            return NULL;
-        }
-    }
-
-    if (storage_enabled && state->num_host_records < state->num_recorded_samples) {
+    if (num_recorded_samples > 1u || storage_enabled) {
         state->snapshot_scratch_record = (nlo_complex*)calloc(state->num_time_samples, sizeof(nlo_complex));
         if (state->snapshot_scratch_record == NULL) {
             nlo_state_debug_log_failure("allocate_snapshot_scratch_record", NLO_VEC_STATUS_ALLOCATION_FAILED);
@@ -905,7 +883,8 @@ simulation_state* create_simulation_state_with_storage(
     nlo_state_debug_log_backend_memory_stage(state, "backend_created");
 
     if (nlo_create_complex_vec(state->backend, num_time_samples, &state->current_field_vec) != NLO_VEC_STATUS_OK ||
-        nlo_create_complex_vec(state->backend, num_time_samples, &state->frequency_grid_vec) != NLO_VEC_STATUS_OK ||
+        (!state->tensor_mode_active &&
+         nlo_create_complex_vec(state->backend, num_time_samples, &state->frequency_grid_vec) != NLO_VEC_STATUS_OK) ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.ip_field_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.field_working_vec) != NLO_VEC_STATUS_OK ||
         nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.field_freq_vec) != NLO_VEC_STATUS_OK ||
@@ -1089,15 +1068,6 @@ simulation_state* create_simulation_state_with_storage(
         }
 
         nlo_release_init_vectors(state);
-
-        status = nlo_vec_complex_copy(state->backend,
-                                      state->frequency_grid_vec,
-                                      state->working_vectors.wt_mesh_vec);
-        if (status != NLO_VEC_STATUS_OK) {
-            nlo_state_debug_log_failure("upload_frequency_grid_tensor", status);
-            free_simulation_state(state);
-            return NULL;
-        }
     } else if (explicit_nd != 0) {
         nlo_complex* temporal_line = (nlo_complex*)malloc(state->nt * sizeof(nlo_complex));
         nlo_complex* temporal_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
@@ -1370,7 +1340,7 @@ simulation_state* create_simulation_state_with_storage(
     if (state->tensor_mode_active) {
         if (config->spatial.potential_grid == NULL) {
             const nlo_operator_eval_context potential_eval_ctx = {
-                .frequency_grid = state->frequency_grid_vec,
+                .frequency_grid = nlo_state_operator_frequency_grid(state),
                 .wt_grid = state->working_vectors.wt_mesh_vec,
                 .kx_grid = state->working_vectors.kx_mesh_vec,
                 .ky_grid = state->working_vectors.ky_mesh_vec,
@@ -1396,7 +1366,7 @@ simulation_state* create_simulation_state_with_storage(
         }
 
         const nlo_operator_eval_context linear_factor_eval_ctx = {
-            .frequency_grid = state->frequency_grid_vec,
+            .frequency_grid = nlo_state_operator_frequency_grid(state),
             .wt_grid = state->working_vectors.wt_mesh_vec,
             .kx_grid = state->working_vectors.kx_mesh_vec,
             .ky_grid = state->working_vectors.ky_mesh_vec,
@@ -1421,7 +1391,7 @@ simulation_state* create_simulation_state_with_storage(
         }
     } else {
         const nlo_operator_eval_context dispersion_factor_eval_ctx = {
-            .frequency_grid = state->frequency_grid_vec,
+            .frequency_grid = nlo_state_operator_frequency_grid(state),
             .field = state->current_field_vec,
             .dispersion_factor = NULL,
             .potential = state->working_vectors.potential_vec,
@@ -1505,7 +1475,7 @@ simulation_state* create_simulation_state_with_storage(
     }
 
     nlo_state_debug_log_backend_memory_stage(state, "pre_ring_allocation");
-    state->record_ring_capacity = nlo_compute_device_ring_capacity(state, state->num_recorded_samples);
+    state->record_ring_capacity = nlo_compute_device_ring_capacity(state);
     if (state->record_ring_capacity > 0u) {
         state->record_ring_vec = (nlo_vec_buffer**)calloc(state->record_ring_capacity, sizeof(nlo_vec_buffer*));
         if (state->record_ring_vec == NULL) {

@@ -57,14 +57,6 @@ static inline int nlo_resolve_sim_dimensions_internal(
     int* out_explicit_nd
 )
 {
-    if (config == NULL ||
-        out_nt == NULL ||
-        out_nx == NULL ||
-        out_ny == NULL ||
-        out_explicit_nd == NULL ||
-        total_samples == 0u) {
-        return -1;
-    }
 
     if (config->tensor.nt > 0u) {
         if (config->tensor.nx == 0u ||

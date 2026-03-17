@@ -176,21 +176,9 @@ class NloExampleRunner:
         options: SimulationOptions,
         num_records: int,
     ) -> SimulationOptions:
-        backend_type = options.backend_type()
         if options.record_ring_target > 0:
             return options
-        if backend_type not in {"auto", "vulkan"}:
-            return options
-
-        # Keep GPU prioritized while avoiding oversized descriptor/ring allocations.
-        capped_ring = max(1, min(int(num_records), 32))
-        return SimulationOptions(
-            backend=options.backend,
-            fft_backend=options.fft_backend,
-            device_heap_fraction=options.device_heap_fraction,
-            record_ring_target=capped_ring,
-            forced_device_budget_bytes=options.forced_device_budget_bytes,
-        )
+        return options
 
     def _runtime_overrides(self, runtime_cfg: Any) -> dict[str, Any]:
         if runtime_cfg is None:

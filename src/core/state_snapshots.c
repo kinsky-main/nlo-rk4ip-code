@@ -10,6 +10,7 @@
 
 static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t record_index, const nlo_complex* record);
 static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state* state);
+static nlo_complex* simulation_state_resolve_download_target(simulation_state* state, size_t record_index);
 
 nlo_vec_status simulation_state_upload_initial_field(simulation_state* state, const nlo_complex* field)
 {
@@ -69,13 +70,10 @@ static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t r
     }
 
     int recorded_anywhere = 0;
-    if (record_index < state->num_host_records) {
-        nlo_complex* host_record = simulation_state_get_field_record(state, record_index);
-        if (host_record == NULL) {
-            return NLO_VEC_STATUS_INVALID_ARGUMENT;
-        }
-        if (host_record != record) {
-            memcpy(host_record, record, state->num_time_samples * sizeof(nlo_complex));
+    nlo_complex* output_record = simulation_state_get_output_record(state, record_index);
+    if (output_record != NULL) {
+        if (output_record != record) {
+            memcpy(output_record, record, state->num_time_samples * sizeof(nlo_complex));
         }
         recorded_anywhere = 1;
     }
@@ -101,6 +99,16 @@ static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t r
     return NLO_VEC_STATUS_OK;
 }
 
+static nlo_complex* simulation_state_resolve_download_target(simulation_state* state, size_t record_index)
+{
+    nlo_complex* output_record = simulation_state_get_output_record(state, record_index);
+    if (output_record != NULL) {
+        return output_record;
+    }
+
+    return state->snapshot_scratch_record;
+}
+
 static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state* state)
 {
     if (state == NULL || state->record_ring_size == 0u || state->record_ring_capacity == 0u) {
@@ -111,11 +119,8 @@ static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state*
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    nlo_complex* host_record = simulation_state_get_field_record(state, state->record_ring_flushed_count);
-    nlo_complex* download_target = host_record;
-    if (download_target == NULL) {
-        download_target = state->snapshot_scratch_record;
-    }
+    nlo_complex* download_target =
+        simulation_state_resolve_download_target(state, state->record_ring_flushed_count);
     if (download_target == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
@@ -195,11 +200,8 @@ nlo_vec_status simulation_state_capture_snapshot_from_vec(
     }
 
     if (state->record_ring_capacity == 0u) {
-        nlo_complex* host_record = simulation_state_get_field_record(state, state->current_record_index);
-        nlo_complex* download_target = host_record;
-        if (download_target == NULL) {
-            download_target = state->snapshot_scratch_record;
-        }
+        nlo_complex* download_target =
+            simulation_state_resolve_download_target(state, state->current_record_index);
         if (download_target == NULL) {
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
         }

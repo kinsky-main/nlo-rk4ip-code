@@ -8,6 +8,8 @@ import ctypes
 import ctypes.util
 import os
 import re
+import sqlite3
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -864,6 +866,74 @@ def _storage_result_to_meta(storage_result: NloStorageResult) -> dict[str, objec
     }
 
 
+def _create_temp_sqlite_path() -> str:
+    fd, path = tempfile.mkstemp(prefix="nlolib_records_", suffix=".sqlite3")
+    os.close(fd)
+    return path
+
+
+def _remove_temp_sqlite(path: str | None) -> None:
+    if path is None or path == "":
+        return
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.remove(path + suffix)
+        except (FileNotFoundError, PermissionError):
+            pass
+
+
+def _load_records_from_sqlite(
+    db_path: str,
+    run_id: str,
+    num_time_samples: int,
+    records_written: int,
+) -> list[list[complex]]:
+    if records_written <= 0:
+        return []
+
+    with sqlite3.connect(db_path) as con:
+        rows = con.execute(
+            "SELECT record_start, record_count, payload FROM io_record_chunks "
+            "WHERE run_id=? ORDER BY record_start ASC;",
+            (run_id,),
+        ).fetchall()
+
+    if not rows:
+        raise RuntimeError(f"run_id '{run_id}' has no stored records in '{db_path}'.")
+
+    out: list[list[complex] | None] = [None] * int(records_written)
+    for row in rows:
+        record_start = int(row[0])
+        record_count = int(row[1])
+        payload = bytes(row[2])
+        values = memoryview(payload).cast("d")
+        expected_values = int(record_count) * int(num_time_samples) * 2
+        if len(values) != expected_values:
+            raise RuntimeError(
+                f"stored chunk decode mismatch for run_id '{run_id}': "
+                f"expected {expected_values} float64 values, got {len(values)}."
+            )
+
+        for local_record in range(record_count):
+            record_index = record_start + local_record
+            if record_index >= records_written:
+                break
+            base = local_record * num_time_samples * 2
+            record = [0j] * int(num_time_samples)
+            for sample_index in range(int(num_time_samples)):
+                src = base + (2 * sample_index)
+                record[sample_index] = complex(values[src], values[src + 1])
+            out[record_index] = record
+
+    missing = [idx for idx, record in enumerate(out) if record is None]
+    if missing:
+        raise RuntimeError(
+            f"stored run_id '{run_id}' is missing records {missing[:8]} in '{db_path}'."
+        )
+
+    return [record for record in out if record is not None]
+
+
 def _step_events_to_meta(step_events: ctypes.Array, count: int) -> dict[str, object]:
     n = max(0, int(count))
     step_index: list[int] = [0] * n
@@ -1652,16 +1722,32 @@ class NLolib:
         phys_ptr = ctypes.pointer(request.phys_cfg)
         in_arr = make_complex_array(request.input_seq)
         n = len(request.input_seq)
-        out_arr = make_complex_array(n * request.num_records) if request.return_records else None
         progress_callback_ref = None
         progress_callback_context = None
         progress_callback_error: list[BaseException | None] = [None]
+        temp_sqlite_path: str | None = None
+        spill_to_temp_storage = False
+
+        resolved_sqlite_path = request.sqlite_path
+        if (request.return_records and
+                request.num_records > 1 and
+                resolved_sqlite_path is None and
+                self.storage_is_available()):
+            temp_sqlite_path = _create_temp_sqlite_path()
+            resolved_sqlite_path = temp_sqlite_path
+            spill_to_temp_storage = True
+
+        out_arr = (
+            make_complex_array(n * request.num_records)
+            if request.return_records and not spill_to_temp_storage
+            else None
+        )
 
         storage_opts = None
         storage_keepalive: list[bytes] = []
-        if request.sqlite_path is not None:
+        if resolved_sqlite_path is not None:
             storage_opts, storage_keepalive = default_storage_options(
-                sqlite_path=request.sqlite_path,
+                sqlite_path=resolved_sqlite_path,
                 run_id=request.run_id,
                 sqlite_max_bytes=request.sqlite_max_bytes,
                 chunk_records=request.chunk_records,
@@ -1755,69 +1841,86 @@ class NLolib:
         propagate_output.step_events_written = ctypes.pointer(step_events_written)
         propagate_output.step_events_dropped = ctypes.pointer(step_events_dropped)
 
-        status = int(
-            self.lib.nlolib_propagate(
-                sim_ptr,
-                phys_ptr,
-                n,
-                ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
-                ctypes.pointer(propagate_options),
-                ctypes.pointer(propagate_output),
+        try:
+            status = int(
+                self.lib.nlolib_propagate(
+                    sim_ptr,
+                    phys_ptr,
+                    n,
+                    ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
+                    ctypes.pointer(propagate_options),
+                    ctypes.pointer(propagate_output),
+                )
             )
-        )
-        if status not in {NLOLIB_STATUS_OK, NLOLIB_STATUS_ABORTED}:
-            raise RuntimeError(f"nlolib_propagate failed with status={status}")
+            if status not in {NLOLIB_STATUS_OK, NLOLIB_STATUS_ABORTED}:
+                raise RuntimeError(f"nlolib_propagate failed with status={status}")
 
-        records_written_count = int(records_written.value)
-        if out_arr is None:
-            out_records: list[list[complex]] = []
-        else:
-            out_records = self._records_from_complex_array(out_arr, n, records_written_count)
-        storage_result_meta = (
-            _storage_result_to_meta(storage_result)
-            if request.sqlite_path is not None
-            else None
-        )
+            records_written_count = int(records_written.value)
+            storage_result_meta = (
+                _storage_result_to_meta(storage_result)
+                if resolved_sqlite_path is not None
+                else None
+            )
+            if out_arr is not None:
+                out_records = self._records_from_complex_array(out_arr, n, records_written_count)
+            elif spill_to_temp_storage:
+                if storage_result_meta is None:
+                    raise RuntimeError("internal record spill did not produce storage metadata")
+                run_id = str(storage_result_meta.get("run_id", "")).strip()
+                if run_id == "":
+                    raise RuntimeError("internal record spill did not return a run_id")
+                out_records = _load_records_from_sqlite(
+                    resolved_sqlite_path,
+                    run_id,
+                    n,
+                    records_written_count,
+                )
+            else:
+                out_records = []
 
-        distance = float(request.sim_cfg.propagation.propagation_distance)
-        z_axis = self._build_z_axis(distance, records_written_count)
-        final = list(out_records[-1]) if out_records else []
-        meta: dict[str, Any] = {
-            "output": request.output_label,
-            "records": request.num_records,
-            "records_requested": request.num_records,
-            "records_written": records_written_count,
-            "storage_enabled": bool(request.sqlite_path is not None),
-            "records_returned": bool(len(out_records) > 0),
-            "backend_requested": (
-                int(request.exec_options.backend_type)
-                if request.exec_options is not None
-                else int(NLO_VECTOR_BACKEND_AUTO)
-            ),
-            "coupled": bool(
-                int(request.sim_cfg.spatial.nx) > 1 or int(request.sim_cfg.spatial.ny) > 1
-            ),
-            "status": int(status),
-            "message": (
-                "propagate aborted by progress callback"
-                if status == NLOLIB_STATUS_ABORTED
-                else "propagate completed"
-            ),
-        }
-        if storage_result_meta is not None:
-            meta["storage_result"] = storage_result_meta
-        if step_events_out is not None:
-            step_history = _step_events_to_meta(step_events_out, int(step_events_written.value))
-            step_history["dropped"] = int(step_events_dropped.value)
-            step_history["capacity"] = int(request.step_history_capacity)
-            meta["step_history"] = step_history
-        meta.update(request.meta_overrides)
-        result = PropagationResult(records=out_records, z_axis=z_axis, final=final, meta=meta)
-        if progress_callback_error[0] is not None:
-            raise progress_callback_error[0]
-        if status == NLOLIB_STATUS_ABORTED:
-            raise PropagationAbortedError(result)
-        return result
+            distance = float(request.sim_cfg.propagation.propagation_distance)
+            z_axis = self._build_z_axis(distance, records_written_count)
+            final = list(out_records[-1]) if out_records else []
+            meta: dict[str, Any] = {
+                "output": request.output_label,
+                "records": request.num_records,
+                "records_requested": request.num_records,
+                "records_written": records_written_count,
+                "storage_enabled": bool(resolved_sqlite_path is not None),
+                "storage_internal_spill": bool(spill_to_temp_storage),
+                "records_returned": bool(len(out_records) > 0),
+                "backend_requested": (
+                    int(request.exec_options.backend_type)
+                    if request.exec_options is not None
+                    else int(NLO_VECTOR_BACKEND_AUTO)
+                ),
+                "coupled": bool(
+                    int(request.sim_cfg.spatial.nx) > 1 or int(request.sim_cfg.spatial.ny) > 1
+                ),
+                "status": int(status),
+                "message": (
+                    "propagate aborted by progress callback"
+                    if status == NLOLIB_STATUS_ABORTED
+                    else "propagate completed"
+                ),
+            }
+            if storage_result_meta is not None:
+                meta["storage_result"] = storage_result_meta
+            if step_events_out is not None:
+                step_history = _step_events_to_meta(step_events_out, int(step_events_written.value))
+                step_history["dropped"] = int(step_events_dropped.value)
+                step_history["capacity"] = int(request.step_history_capacity)
+                meta["step_history"] = step_history
+            meta.update(request.meta_overrides)
+            result = PropagationResult(records=out_records, z_axis=z_axis, final=final, meta=meta)
+            if progress_callback_error[0] is not None:
+                raise progress_callback_error[0]
+            if status == NLOLIB_STATUS_ABORTED:
+                raise PropagationAbortedError(result)
+            return result
+        finally:
+            if spill_to_temp_storage:
+                _remove_temp_sqlite(temp_sqlite_path)
 
     def propagate(self, primary: Any, *args: Any, **kwargs: Any) -> PropagationResult:
         """

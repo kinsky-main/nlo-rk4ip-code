@@ -578,7 +578,6 @@ def plot_3d_intensity_scatter_propagation(
     max_marker_size: float = 36.0,
     alpha_min: float = 0.08,
     alpha_max: float = 0.90,
-    dpi: int = 320,
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
     z_label: str = "z",
@@ -598,17 +597,10 @@ def plot_3d_intensity_scatter_propagation(
     if records.shape[0] != z.size or records.shape[1] != y.size or records.shape[2] != x.size:
         raise ValueError("Axes lengths must match field_records shape.")
 
-    if xy_stride <= 0:
-        raise ValueError("xy_stride must be positive.")
-    if z_stride <= 0:
-        raise ValueError("z_stride must be positive.")
     if intensity_cutoff < 0.0 or intensity_cutoff >= 1.0:
         raise ValueError("intensity_cutoff must be in [0, 1).")
     if alpha_min < 0.0 or alpha_min > 1.0 or alpha_max < 0.0 or alpha_max > 1.0 or alpha_min > alpha_max:
         raise ValueError("alpha_min/alpha_max must satisfy 0 <= alpha_min <= alpha_max <= 1.")
-    if dpi <= 0:
-        raise ValueError("dpi must be positive.")
-
     if input_is_intensity:
         intensity = np.asarray(records, dtype=np.float64)
         intensity = np.nan_to_num(intensity, nan=0.0, posinf=0.0, neginf=0.0)

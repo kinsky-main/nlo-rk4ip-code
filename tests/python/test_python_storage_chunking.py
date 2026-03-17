@@ -194,6 +194,36 @@ def _simulate_storage_facade_case(api: NLolib, db_path: Path) -> None:
         assert cur.execute("SELECT COUNT(*) FROM io_runs").fetchone()[0] == 1
 
 
+def _internal_spill_dense_return_case(api: NLolib) -> None:
+    n = 40
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.1,
+        starting_step_size=0.01,
+        max_step_size=0.02,
+        min_step_size=1e-4,
+        error_tolerance=1e-6,
+        pulse_period=1.0,
+        delta_time=1.0 / n,
+        frequency_grid=[complex(i, 0.0) for i in range(n)],
+    )
+    field0 = [complex(math.exp(-(((i - (n / 2.0)) / 7.0) ** 2)), 0.0) for i in range(n)]
+
+    result = api.propagate(
+        cfg,
+        field0,
+        6,
+        return_records=True,
+    )
+
+    assert result.meta.get("storage_enabled") is True
+    assert result.meta.get("storage_internal_spill") is True
+    assert result.meta.get("records_returned") is True
+    assert int(result.meta.get("records_written", 0)) == 6
+    assert len(result.records) == 6
+    assert len(result.final) == n
+
+
 def main() -> None:
     api = NLolib()
     if not api.storage_is_available():
@@ -211,6 +241,7 @@ def main() -> None:
     _legacy_ntmax_exceed_case(api, ntmax_db)
     _final_output_logging_case(api, final_output_db)
     _simulate_storage_facade_case(api, facade_db)
+    _internal_spill_dense_return_case(api)
     print("test_python_storage_chunking: passed")
 
 

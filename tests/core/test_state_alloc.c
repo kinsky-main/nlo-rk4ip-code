@@ -77,9 +77,9 @@ static void test_init_state_success(void)
     assert(state != NULL);
 
     assert(info.requested_records == num_records);
-    assert(info.allocated_records == state->num_recorded_samples);
+    assert(info.allocated_records <= 1u);
     assert(info.per_record_bytes == num_time_samples * sizeof(nlo_complex));
-    assert(info.host_snapshot_bytes == info.per_record_bytes * state->num_recorded_samples);
+    assert(info.host_snapshot_bytes <= info.per_record_bytes);
     assert(info.working_vector_bytes >= info.per_record_bytes * 12u);
     assert(info.backend_type == NLO_VECTOR_BACKEND_CPU);
 
@@ -87,6 +87,46 @@ static void test_init_state_success(void)
     free_sim_config(config);
 
     printf("test_init_state_success: validates allocation sizing info.\n");
+}
+
+static void test_record_count_does_not_change_init_snapshot_allocation(void)
+{
+    const size_t num_time_samples = 1024u;
+    sim_config* config = create_sim_config(num_time_samples);
+    assert(config != NULL);
+
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+
+    simulation_state* state_small = NULL;
+    simulation_state* state_large = NULL;
+    nlo_allocation_info info_small = {0};
+    nlo_allocation_info info_large = {0};
+
+    assert(nlo_init_simulation_state(config,
+                                     num_time_samples,
+                                     2u,
+                                     &exec_options,
+                                     &info_small,
+                                     &state_small) == 0);
+    assert(nlo_init_simulation_state(config,
+                                     num_time_samples,
+                                     128u,
+                                     &exec_options,
+                                     &info_large,
+                                     &state_large) == 0);
+    assert(state_small != NULL);
+    assert(state_large != NULL);
+
+    assert(info_small.per_record_bytes == info_large.per_record_bytes);
+    assert(info_small.host_snapshot_bytes == info_large.host_snapshot_bytes);
+    assert(info_small.working_vector_bytes == info_large.working_vector_bytes);
+    assert(info_small.allocated_records == info_large.allocated_records);
+
+    free_simulation_state(state_large);
+    free_simulation_state(state_small);
+    free_sim_config(config);
+
+    printf("test_record_count_does_not_change_init_snapshot_allocation: validates O(1) snapshot allocation.\n");
 }
 
 static void test_init_state_invalid_args(void)
@@ -370,13 +410,14 @@ static void test_tensor_mode_frequency_mesh_generation(void)
     assert(state->init_vectors.t_axis_vec == NULL);
     assert(state->init_vectors.x_axis_vec == NULL);
     assert(state->init_vectors.y_axis_vec == NULL);
+    assert(state->frequency_grid_vec == NULL);
 
     nlo_complex expected_axis[3] = {0};
     test_fill_expected_omega_grid(expected_axis, nt, delta_time);
 
     nlo_complex downloaded[12] = {0};
     assert(nlo_vec_download(state->backend,
-                            state->frequency_grid_vec,
+                            state->working_vectors.wt_mesh_vec,
                             downloaded,
                             sizeof(downloaded)) == NLO_VEC_STATUS_OK);
     for (size_t block = 0u; block < (nx * ny); ++block) {
@@ -476,6 +517,7 @@ static void test_snapshot_store_dense_readback(void)
 int main(void)
 {
     test_init_state_success();
+    test_record_count_does_not_change_init_snapshot_allocation();
     test_init_state_invalid_args();
     test_init_state_xy_shape_rejected_without_tensor();
     test_init_state_tensor_shape_rules();
