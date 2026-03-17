@@ -183,11 +183,29 @@ cmake -S . -B build -DNLOLIB_BUILD_BENCHMARKS=ON
 cmake --build build --target bench_solver_backend --config Release
 ```
 
-Run benchmark example:
+Run temporal benchmark example:
 
 ```powershell
 .\build\benchmarks\Release\bench_solver_backend.exe --backend=both --sizes=1024,4096 --warmup=2 --runs=8 --csv=benchmarks/results/solver_backend.csv
 ```
+
+Run tensor scaling benchmark planning pass:
+
+```powershell
+.\build\benchmarks\Release\bench_solver_backend.exe --scenario=tensor3d_scaling --dry-run --tensor-scales=8,16,32,64 --planner-host-bytes=40000000 --planner-gpu-bytes=5000000
+```
+
+Run tensor scaling benchmark execution:
+
+```powershell
+.\build\benchmarks\Release\bench_solver_backend.exe --scenario=tensor3d_scaling --backend=both --tensor-scales=8,16,32,64 --warmup=1 --runs=3 --csv=benchmarks/results/tensor_backend_scaling.csv --storage-dir=benchmarks/results/tensor_storage
+```
+
+Tensor scaling reports three regions:
+
+- `gpu_fit`: active tensor working set fits both GPU and system memory, so CPU and GPU both run normally.
+- `host_fit_only`: active tensor working set fits system memory but exceeds the effective GPU budget, so CPU runs and GPU is reported as an expected limit.
+- `output_spill`: active tensor working set still fits execution, but the captured output volume is forced above the effective host-memory budget and spilled through SQLite-backed snapshot storage.
 
 ## Running Tests
 
@@ -367,6 +385,12 @@ On Linux:
 export PYTHONPATH="$PWD/python"
 export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
 python3 examples/python/runtime_temporal_demo.py
+```
+
+Tensor-grid backend timing example:
+
+```powershell
+python examples/python/tensor_backend_scaling_rk4ip.py --gpu-fit-scales 8,16,32 --host-fit-scales 48,64 --spill-scale 32 --spill-records 128,256,512
 ```
 
 Build wheel artifacts manually:

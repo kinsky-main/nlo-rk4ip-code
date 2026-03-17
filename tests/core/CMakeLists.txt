@@ -99,3 +99,18 @@ if(UNIX)
 endif()
 
 add_test(NAME test_core_log_sink COMMAND test_core_log_sink)
+
+add_executable(test_tensor_bench_plan
+  ${CMAKE_CURRENT_LIST_DIR}/test_tensor_bench_plan.c
+  ${CMAKE_SOURCE_DIR}/benchmarks/tensor_scaling_plan.c
+)
+
+target_include_directories(test_tensor_bench_plan PRIVATE
+  ${CMAKE_SOURCE_DIR}/benchmarks
+)
+
+if(UNIX)
+  target_link_libraries(test_tensor_bench_plan PRIVATE m)
+endif()
+
+add_test(NAME test_tensor_bench_plan COMMAND test_tensor_bench_plan)
