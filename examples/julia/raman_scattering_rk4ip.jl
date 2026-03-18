@@ -96,7 +96,8 @@ end
 function main(argv = ARGS)
     args = parse_example_args("raman_scattering", "Raman self-frequency-shift validation with DB-backed run/replot.", argv)
     activate_example_theme!()
-    NLOLib.set_progress_options(enabled = false)
+    NLOLib.set_progress_options(enabled = true, milestone_percent = 2, emit_on_step_adjust = true)
+    NLOLib.set_log_level(NLOLIB_LOG_LEVEL_INFO)
     db = ExampleRunDB(args[:db_path])
     example_name = "raman_scattering_rk4ip"
     kerr_case_key = "kerr_only"

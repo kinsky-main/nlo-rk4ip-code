@@ -500,9 +500,9 @@ julia --project=examples/julia examples/julia/tensor_dispersion_3d_rk4ip.jl
 julia --project=examples/julia examples/julia/high_order_grin_soliton_rk4ip.jl
 ```
 
-The Julia examples reuse the Python example SQLite database at
-`examples/python/output/example_runs.sqlite` so runs can be replayed across
-bindings with `--replot`.
+The Python and Julia examples share the SQLite directory
+`examples/output/db`, with one database file per example, so runs can be
+replayed across bindings with `--replot`.
 
 From the source tree without staging, point Julia at a built shared library:
 
@@ -530,7 +530,7 @@ The Julia wrapper is intentionally low-level and performance-first:
 - `julia/Project.toml`
 - `examples/julia`
 - shared library into `build/julia_package/lib`
-- `src/nlolib_matlab.h` into `build/julia_package/lib`
+- `src/nlolib.h` into `build/julia_package/lib`
 
 ## Preset Workflow (Optional)
 

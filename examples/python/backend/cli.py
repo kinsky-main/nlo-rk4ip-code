@@ -104,7 +104,7 @@ def build_example_parser(
     parser.add_argument(
         "--db-path",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "output" / example_slug / "runs.sqlite3",
+        default=Path(__file__).resolve().parents[2] / "output" / "db" / f"{example_slug}.sqlite3",
         help="SQLite path used for solver run storage and replot reads.",
     )
     parser.add_argument(

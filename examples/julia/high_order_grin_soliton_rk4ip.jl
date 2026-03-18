@@ -269,21 +269,21 @@ end
 function main(argv = ARGS)
     args = parse_example_args("high_order_grin_soliton", "High-order GRIN-guided nonlinear tensor propagation.", argv)
     activate_example_theme!()
-    NLOLib.set_progress_options(enabled = false)
-    NLOLib.set_log_level(NLOLIB_LOG_LEVEL_ERROR)
+    NLOLib.set_progress_options(enabled = true, milestone_percent = 2, emit_on_step_adjust = true)
+    NLOLib.set_log_level(NLOLIB_LOG_LEVEL_INFO)
     db = ExampleRunDB(args[:db_path])
     example_name = "high_order_grin_soliton_rk4ip"
     nonlinear_case_key = "nonlinear"
     linear_case_key = "linear_baseline"
 
-    nt = 512
-    nx = 128
-    ny = 128
+    nt = 256
+    nx = 64
+    ny = 64
     dt = 0.06
-    dx = 0.60
-    dy = 0.60
+    dx = 0.24
+    dy = 0.24
     temporal_width = 0.30
-    soliton_order = 3.0
+    soliton_order = 2.0
     mode_width = 2.4
     spatial_chirp = 0.0
     beta2 = -0.08
@@ -291,7 +291,7 @@ function main(argv = ARGS)
     grin_strength = 1.5e-3
     gamma_nonlinear = 1.0
     z_period = soliton_period(beta2, temporal_width)
-    z_final = 4.0 * z_period
+    z_final = 2.0 * z_period
     num_records = 72
 
     t_axis = centered_time_grid(nt, dt)

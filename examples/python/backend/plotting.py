@@ -93,6 +93,49 @@ def _evenly_spaced_indices(count: int, *, max_count: int) -> np.ndarray:
     return np.unique(np.rint(np.linspace(0.0, float(count - 1), int(max_count))).astype(np.int64))
 
 
+def _pulse_supported_time_indices(
+    field_records_tyx: np.ndarray,
+    *,
+    max_count: int,
+    support_threshold: float,
+    padding_fraction: float = 0.04,
+) -> np.ndarray:
+    records = np.asarray(field_records_tyx)
+    if records.ndim != 4:
+        raise ValueError("field_records_tyx must have shape [record, time, y, x].")
+
+    time_count = int(records.shape[1])
+    profile = np.zeros(time_count, dtype=np.float64)
+    for time_index in range(time_count):
+        frame = records[:, time_index, :, :]
+        if np.iscomplexobj(frame):
+            profile[time_index] = float(np.sum(np.abs(frame) ** 2))
+        else:
+            profile[time_index] = float(np.sum(np.clip(frame, 0.0, None)))
+
+    peak = float(np.max(profile))
+    if peak <= 0.0:
+        return _evenly_spaced_indices(time_count, max_count=max_count)
+
+    normalized = profile / peak
+    occupied = np.flatnonzero(normalized >= max(float(support_threshold), 1.0e-4))
+    if occupied.size == 0:
+        occupied = np.flatnonzero(normalized >= 1.0e-4)
+    if occupied.size == 0:
+        return _evenly_spaced_indices(time_count, max_count=max_count)
+
+    start = int(occupied[0])
+    stop = int(occupied[-1])
+    padding = max(1, int(np.ceil((stop - start + 1) * max(float(padding_fraction), 0.0))))
+    start = max(0, start - padding)
+    stop = min(time_count - 1, stop + padding)
+
+    supported_count = stop - start + 1
+    if supported_count <= max_count:
+        return np.arange(start, stop + 1, dtype=np.int64)
+    return np.unique(np.rint(np.linspace(float(start), float(stop), int(max_count))).astype(np.int64))
+
+
 def _axis_edges(axis: np.ndarray) -> np.ndarray:
     values = np.asarray(axis, dtype=np.float64).reshape(-1)
     if values.size == 0:
@@ -631,8 +674,8 @@ def plot_3d_intensity_contours_propagation(
     max_x_samples: int = 48,
     max_y_samples: int = 48,
     max_z_samples: int = 18,
-    alpha_min: float = 0.12,
-    alpha_max: float = 0.72,
+    alpha_min: float = 0.05,
+    alpha_max: float = 0.90,
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
     z_label: str = "z",
@@ -728,12 +771,9 @@ def _render_3d_intensity_contours_frame(
     x_small = x[x_indices]
     y_small = y[y_indices]
     z_small = z[z_indices]
-    x_span = float(np.max(x_small) - np.min(x_small))
-    y_span = float(np.max(y_small) - np.min(y_small))
-    z_span = float(np.max(z_small) - np.min(z_small))
-    if float(np.max(intensity_small)) < intensity_cutoff:
-        print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
-        return None
+    # if float(np.max(intensity_small)) < intensity_cutoff:
+    #     print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
+    #     return None
 
     try:
         import pyvista as pv
@@ -745,9 +785,9 @@ def _render_3d_intensity_contours_frame(
 
     max_intensity = float(np.max(intensity_small))
     level_upper = min(0.92, max_intensity)
-    if level_upper <= float(intensity_cutoff):
-        print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
-        return None
+    # if level_upper <= float(intensity_cutoff):
+    #     print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
+    #     return None
     levels = np.linspace(float(intensity_cutoff), level_upper, int(num_levels), dtype=np.float64)
 
     volume_xyz = np.transpose(intensity_small, (2, 1, 0))
@@ -758,25 +798,6 @@ def _render_3d_intensity_contours_frame(
     plotter = pv.Plotter(off_screen=True, window_size=(1320, 960))
     plotter.set_background("white")
     plotter.enable_parallel_projection()
-    center_x = float(0.5 * (np.min(x_small) + np.max(x_small)))
-    center_y = float(0.5 * (np.min(y_small) + np.max(y_small)))
-    center_z = float(0.5 * (np.min(z_small) + np.max(z_small)))
-    plotter.camera_position = [
-        (
-            float(center_x + 1.45 * max(x_span, 1.0e-9)),
-            float(center_y + 1.25 * max(y_span, 1.0e-9)),
-            float(center_z + 0.82 * max(z_span, 1.0e-9)),
-        ),
-        (center_x, center_y, center_z),
-        (0.0, 0.0, 1.0),
-    ]
-    plotter.camera.up = (0.0, 0.0, 1.0)
-    plotter.camera.parallel_scale = 0.58 * max(
-        x_span,
-        y_span,
-        0.42 * max(z_span, 1.0),
-        1.0,
-    )
 
     any_surface = False
     scalar_bar_added = False
@@ -806,10 +827,10 @@ def _render_3d_intensity_contours_frame(
         scalar_bar_added = True
         any_surface = True
 
-    if not any_surface:
-        print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
-        plotter.close()
-        return None
+    # if not any_surface:
+    #     print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
+    #     plotter.close()
+    #     return None
 
     plotter.show_bounds(
         xtitle="x",
@@ -846,15 +867,15 @@ def save_3d_intensity_time_sweep_video(
     field_records_tyx: np.ndarray,
     output_path: Path,
     *,
-    max_time_frames: int = 13,
-    fps: int = 6,
-    intensity_cutoff: float = 0.05,
-    num_levels: int = 7,
+    max_time_frames: int = 128,
+    fps: int = 24,
+    intensity_cutoff: float = 0.02,
+    num_levels: int = 20,
     max_x_samples: int = 48,
     max_y_samples: int = 48,
     max_z_samples: int = 18,
-    alpha_min: float = 0.12,
-    alpha_max: float = 0.72,
+    alpha_min: float = 0.05,
+    alpha_max: float = 0.90,
 ) -> Path | None:
     try:
         import imageio.v2 as imageio
@@ -879,7 +900,19 @@ def save_3d_intensity_time_sweep_video(
         print("time-sweep video skipped because intensity is zero everywhere.")
         return None
 
-    frame_indices = _evenly_spaced_indices(t.size, max_count=int(max_time_frames))
+    frame_indices = _pulse_supported_time_indices(
+        records,
+        max_count=int(max_time_frames),
+        support_threshold=max(0.01, 0.25 * float(intensity_cutoff)),
+    )
+    if frame_indices.size == 0:
+        print("time-sweep video skipped because there are no valid time samples.")
+        return None
+    print(
+        "Rendering "
+        f"{len(frame_indices)} frames for time-sweep video over pulse support "
+        f"[{float(t[int(frame_indices[0])]):+.3f}, {float(t[int(frame_indices[-1])]):+.3f}]..."
+    )
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     frames: list[np.ndarray] = []
