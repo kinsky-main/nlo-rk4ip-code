@@ -375,17 +375,21 @@ Troubleshooting:
 Example environment setup:
 
 ```powershell
+python -m pip install -r examples\python\requirements.txt
 $env:PYTHONPATH="$PWD/python"
 $env:NLOLIB_LIBRARY="$PWD/python/nlolib.dll"
 python examples/python/runtime_temporal_demo.py
+python examples/python/high_order_grin_soliton_rk4ip.py
 ```
 
 On Linux:
 
 ```bash
+python3 -m pip install -r examples/python/requirements.txt
 export PYTHONPATH="$PWD/python"
 export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
 python3 examples/python/runtime_temporal_demo.py
+python3 examples/python/high_order_grin_soliton_rk4ip.py
 ```
 
 Tensor-grid backend timing example:
@@ -484,6 +488,7 @@ $env:NLOLIB_LIBRARY="$PWD\\python\\Release\\nlolib.dll"
 julia --project=examples/julia examples\julia\second_order_soliton_rk4ip.jl
 julia --project=examples/julia examples\julia\raman_scattering_rk4ip.jl
 julia --project=examples/julia examples\julia\tensor_dispersion_3d_rk4ip.jl
+julia --project=examples/julia examples\julia\high_order_grin_soliton_rk4ip.jl
 ```
 
 ```bash
@@ -492,6 +497,7 @@ export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
 julia --project=examples/julia examples/julia/second_order_soliton_rk4ip.jl
 julia --project=examples/julia examples/julia/raman_scattering_rk4ip.jl
 julia --project=examples/julia examples/julia/tensor_dispersion_3d_rk4ip.jl
+julia --project=examples/julia examples/julia/high_order_grin_soliton_rk4ip.jl
 ```
 
 The Julia examples reuse the Python example SQLite database at

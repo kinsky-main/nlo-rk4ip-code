@@ -1,8 +1,4 @@
-include(joinpath(@__DIR__, "backend", "common.jl"))
-include(joinpath(@__DIR__, "backend", "metrics.jl"))
-include(joinpath(@__DIR__, "backend", "reference.jl"))
-include(joinpath(@__DIR__, "backend", "storage.jl"))
-
+using NLOLibExamples
 pushfirst!(LOAD_PATH, nlo_package_root_from(@__FILE__))
 
 using CairoMakie
@@ -20,36 +16,44 @@ to_physical_envelope(U, z, p0, alpha) = ComplexF64.(U) .* (sqrt(p0) * exp(-0.5 *
 function save_soliton_plots(output_dir, t, z_axis_norm, numerical_records, reference_records, telemetry)
     mkpath(output_dir)
 
-    fig1 = Figure(size = (900, 600))
+    fig1 = styled_figure()
     ax1 = Axis(fig1[1, 1], xlabel = "t / T0", ylabel = "z / Z0", title = "Numerical intensity")
-    hm1 = heatmap!(ax1, t, z_axis_norm, abs2.(numerical_records))
-    Colorbar(fig1[1, 2], hm1)
-    save(joinpath(output_dir, "soliton_intensity_map.png"), fig1)
+    hm1 = heatmap!(
+        ax1,
+        t,
+        z_axis_norm,
+        permutedims(normalized_plot_data(abs2.(numerical_records)), (2, 1)),
+        colormap = nlolib_hdr_colormap(),
+        colorrange = (0.0, 1.0),
+    )
+    Colorbar(fig1[1, 2], hm1, label = "Normalized intensity")
+    save_example_figure(joinpath(output_dir, "soliton_intensity_map.png"), fig1)
 
-    fig2 = Figure(size = (900, 600))
+    fig2 = styled_figure()
     ax2 = Axis(fig2[1, 1], xlabel = "t / T0", ylabel = "Intensity", title = "Final intensity")
     lines!(ax2, t, abs2.(reference_records[end, :]), label = "Analytical")
     lines!(ax2, t, abs2.(numerical_records[end, :]), label = "Numerical")
     axislegend(ax2, position = :rt)
-    save(joinpath(output_dir, "soliton_final_intensity.png"), fig2)
+    save_example_figure(joinpath(output_dir, "soliton_final_intensity.png"), fig2)
 
-    fig3 = Figure(size = (900, 600))
+    fig3 = styled_figure()
     ax3 = Axis(fig3[1, 1], xlabel = "z / Z0", ylabel = "Relative L2 intensity error", title = "Propagation error")
     lines!(ax3, z_axis_norm, relative_l2_intensity_error_curve(numerical_records, reference_records))
-    save(joinpath(output_dir, "soliton_error_curve.png"), fig3)
+    save_example_figure(joinpath(output_dir, "soliton_error_curve.png"), fig3)
 
     if telemetry !== nothing && !isempty(get(telemetry, "z", Float64[]))
-        fig4 = Figure(size = (900, 600))
+        fig4 = styled_figure()
         ax4 = Axis(fig4[1, 1], xlabel = "z (m)", ylabel = "Step size (m)", title = "Adaptive step history")
         lines!(ax4, telemetry["z"], telemetry["step_size"], label = "accepted")
         lines!(ax4, telemetry["z"], telemetry["next_step_size"], label = "next")
         axislegend(ax4, position = :rt)
-        save(joinpath(output_dir, "soliton_step_history.png"), fig4)
+        save_example_figure(joinpath(output_dir, "soliton_step_history.png"), fig4)
     end
 end
 
 function main(argv = ARGS)
     args = parse_example_args("second_order_soliton", "Second-order soliton validation with DB-backed run/replot.", argv)
+    activate_example_theme!()
     NLOLib.set_progress_options(enabled = false)
     db = ExampleRunDB(args[:db_path])
     example_name = "second_order_soliton_rk4ip"

@@ -97,7 +97,10 @@ end
 function _single_string_query(db::ExampleRunDB, sql::AbstractString, params)
     return _with_db(db) do conn
         rows = collect(DBInterface.execute(conn, sql, params))
-        isempty(rows) ? nothing : String(rows[1][1])
+        if isempty(rows) || ismissing(rows[1][1])
+            return nothing
+        end
+        return String(rows[1][1])
     end
 end
 

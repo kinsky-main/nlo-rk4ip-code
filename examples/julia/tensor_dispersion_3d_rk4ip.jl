@@ -1,8 +1,4 @@
-include(joinpath(@__DIR__, "backend", "common.jl"))
-include(joinpath(@__DIR__, "backend", "metrics.jl"))
-include(joinpath(@__DIR__, "backend", "reference.jl"))
-include(joinpath(@__DIR__, "backend", "storage.jl"))
-
+using NLOLibExamples
 pushfirst!(LOAD_PATH, nlo_package_root_from(@__FILE__))
 
 using CairoMakie
@@ -59,51 +55,62 @@ function save_tensor_plots(output_dir, z_axis, t_axis, x_axis, y_axis, records_t
     mkpath(output_dir)
     final_temporal_ref, final_x_ref, final_y_ref = marginal_intensity_profiles(reference_records[end, :, :, :])
     final_temporal_num, final_x_num, final_y_num = marginal_intensity_profiles(records_tyx[end, :, :, :])
+    xy_intensity_records = dropdims(sum(abs2.(records_tyx), dims = 2), dims = 2)
 
-    fig1 = Figure(size = (900, 600))
+    fig1 = styled_figure()
     ax1 = Axis(fig1[1, 1], xlabel = "z", ylabel = "Relative error", title = "Tensor propagation error")
     lines!(ax1, z_axis, field_error_curve, label = "field")
     lines!(ax1, z_axis, intensity_error_curve, label = "intensity")
     axislegend(ax1, position = :rt)
-    save(joinpath(output_dir, "tensor_error_curve.png"), fig1)
+    save_example_figure(joinpath(output_dir, "tensor_error_curve.png"), fig1)
 
-    fig2 = Figure(size = (900, 600))
+    fig2 = styled_figure()
     ax2 = Axis(fig2[1, 1], xlabel = "time", ylabel = "Marginal intensity", title = "Final temporal marginal")
     lines!(ax2, t_axis, final_temporal_ref, label = "reference")
     lines!(ax2, t_axis, final_temporal_num, label = "numerical")
     axislegend(ax2, position = :rt)
-    save(joinpath(output_dir, "tensor_temporal_marginal.png"), fig2)
+    save_example_figure(joinpath(output_dir, "tensor_temporal_marginal.png"), fig2)
 
-    fig3 = Figure(size = (900, 600))
+    fig3 = styled_figure()
     ax3 = Axis(fig3[1, 1], xlabel = "x", ylabel = "Marginal intensity", title = "Final x marginal")
     lines!(ax3, x_axis, final_x_ref, label = "reference")
     lines!(ax3, x_axis, final_x_num, label = "numerical")
     axislegend(ax3, position = :rt)
-    save(joinpath(output_dir, "tensor_x_marginal.png"), fig3)
+    save_example_figure(joinpath(output_dir, "tensor_x_marginal.png"), fig3)
 
-    fig4 = Figure(size = (900, 600))
+    fig4 = styled_figure()
     ax4 = Axis(fig4[1, 1], xlabel = "y", ylabel = "Marginal intensity", title = "Final y marginal")
     lines!(ax4, y_axis, final_y_ref, label = "reference")
     lines!(ax4, y_axis, final_y_num, label = "numerical")
     axislegend(ax4, position = :rt)
-    save(joinpath(output_dir, "tensor_y_marginal.png"), fig4)
+    save_example_figure(joinpath(output_dir, "tensor_y_marginal.png"), fig4)
+
+    plot_3d_intensity_contours_propagation(
+        x_axis,
+        y_axis,
+        z_axis,
+        xy_intensity_records,
+        joinpath(output_dir, "tensor_3d_intensity_contour_surfaces.png");
+        input_is_intensity = true,
+    )
 end
 
 function main(argv = ARGS)
     args = parse_example_args("tensor_dispersion_3d", "Tensor 3D dispersion/diffraction with DB-backed run/replot.", argv)
+    activate_example_theme!()
     NLOLib.set_progress_options(enabled = false)
     db = ExampleRunDB(args[:db_path])
     example_name = "tensor_dispersion_3d_rk4ip"
     case_key = "default"
 
-    nt = 128
-    nx = 64
-    ny = 64
+    nt = 256
+    nx = 128
+    ny = 128
     dt = 0.04
     dx = 0.15
     dy = 0.15
     temporal_width = 0.24
-    x_width = 0.60
+    x_width = 0.70
     y_width = 0.70
     beta2 = 0.08
     beta_t = -0.20

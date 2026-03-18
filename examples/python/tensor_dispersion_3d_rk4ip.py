@@ -14,7 +14,7 @@ from backend.plotting import (
     plot_intensity_colormap_vs_propagation,
     plot_total_error_over_propagation,
     plot_two_curve_comparison,
-    plot_3d_intensity_scatter_propagation
+    plot_3d_intensity_contours_propagation,
 )
 from backend.reference import exact_linear_tensor3d_records
 from backend.runner import NloExampleRunner, SimulationOptions, centered_time_grid
@@ -114,8 +114,8 @@ def _run(args: argparse.Namespace) -> float:
     case_key = "default"
 
     nt = 512
-    nx = 256
-    ny = 256
+    nx = 128
+    ny = 128
     dt = 0.04
     dx = 0.15
     dy = 0.15
@@ -356,12 +356,12 @@ def _run(args: argparse.Namespace) -> float:
     if saved is not None:
         saved_paths.append(saved)
         
-    saved = plot_3d_intensity_scatter_propagation(
+    saved = plot_3d_intensity_contours_propagation(
         x_axis,
         y_axis,
         z_records,
         np.sum(np.abs(records_tyx) ** 2, axis=1),
-        output_dir / "tensor_dispersion_3d_3d_intensity_scatter.png"
+        output_dir / "tensor_dispersion_3d_3d_intensity_contour_surfaces.png",
     )
     if saved is not None:
         saved_paths.append(saved)

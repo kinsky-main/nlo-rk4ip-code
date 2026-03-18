@@ -2,7 +2,7 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "9cf25cffebb635f4a83e8529175d232d7f2d5768"
+project_hash = "88dc7127371270af395989cbe871aa6fbabed98b"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -885,6 +885,11 @@ git-tree-sha1 = "7eb8cdaa6f0e8081616367c10b31b9d9b34bb02a"
 uuid = "0a4f8689-d25c-4efe-a92b-7142dfc1aa53"
 version = "0.6.7"
 
+[[deps.Meshing]]
+git-tree-sha1 = "5705d4f32545f7bcecdff75759a20d17812e5caf"
+uuid = "e6723b4c-ebff-59f1-b4b7-d97aa5274f73"
+version = "0.7.0"
+
 [[deps.Missings]]
 deps = ["DataAPI"]
 git-tree-sha1 = "ec4f7fbeab05d7747bdf98eb74d130a2a2ed298d"
@@ -911,7 +916,7 @@ uuid = "46d2c3a1-f734-5fdb-9937-b9b9aeba4221"
 version = "0.2.4"
 
 [[deps.NLOLibExamples]]
-deps = ["ArgParse", "CairoMakie", "DBInterface", "FFTW", "JSON3", "SQLite"]
+deps = ["ArgParse", "CairoMakie", "DBInterface", "Dates", "FFTW", "JSON3", "LinearAlgebra", "PrecompileTools", "SHA", "SQLite"]
 path = "."
 uuid = "4f1b50d9-321e-4d59-aa1b-c1fcb34258ce"
 version = "1.0.0"

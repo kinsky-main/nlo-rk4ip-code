@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,42 @@ def _resolve_cmap(plt, cmap):
     return cmap
 
 
+def _normalized_nonnegative_data(values: np.ndarray, *, normalization_peak: float | None) -> tuple[np.ndarray, float]:
+    data = np.asarray(values, dtype=np.float64)
+    data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
+    data = np.clip(data, 0.0, None)
+    peak = float(np.max(data))
+    norm_peak = peak if normalization_peak is None else float(normalization_peak)
+    if normalization_peak is not None and norm_peak <= 0.0:
+        raise ValueError("normalization_peak must be positive when provided.")
+    if norm_peak > 0.0:
+        data = np.clip(data / norm_peak, 0.0, 1.0)
+    return data, norm_peak
+
+
+def _evenly_spaced_indices(count: int, *, max_count: int) -> np.ndarray:
+    if count <= 0:
+        return np.zeros(0, dtype=np.int64)
+    if max_count <= 0:
+        raise ValueError("max_count must be positive.")
+    if count <= max_count:
+        return np.arange(count, dtype=np.int64)
+    return np.unique(np.rint(np.linspace(0.0, float(count - 1), int(max_count))).astype(np.int64))
+
+
+def _axis_edges(axis: np.ndarray) -> np.ndarray:
+    values = np.asarray(axis, dtype=np.float64).reshape(-1)
+    if values.size == 0:
+        raise ValueError("axis must not be empty.")
+    if values.size == 1:
+        delta = 1.0
+        return np.asarray([values[0] - 0.5 * delta, values[0] + 0.5 * delta], dtype=np.float64)
+    midpoints = 0.5 * (values[1:] + values[:-1])
+    first = values[0] - 0.5 * (values[1] - values[0])
+    last = values[-1] + 0.5 * (values[-1] - values[-2])
+    return np.concatenate(([first], midpoints, [last]))
+
+
 def configure_plot_saving(
     *,
     primary_output_dir: Path | None = None,
@@ -121,6 +158,22 @@ def _resolve_report_output_path(output_path: Path) -> Path | None:
         except Exception:
             relative_path = Path(output_path.name)
     return _REPORT_OUTPUT_DIR / relative_path
+
+
+def _save_rendered_image(source_path: Path, output_path: Path) -> Path | None:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    selected = _plot_is_selected(output_path)
+    report_output_path = _resolve_report_output_path(output_path)
+    shutil.copyfile(source_path, output_path)
+    if report_output_path is None or not selected:
+        return output_path
+    report_output_path = Path(report_output_path)
+    if report_output_path.resolve() == output_path.resolve():
+        return output_path
+    report_output_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source_path, report_output_path)
+    return output_path
 
 def _save_figure(fig: Any, output_path: Path, **kwargs: Any) -> Path | None:
     output_path = Path(output_path)
@@ -566,7 +619,7 @@ def plot_total_error_over_propagation(
     return saved
 
 
-def plot_3d_intensity_scatter_propagation(
+def plot_3d_intensity_contours_propagation(
     x_axis: np.ndarray,
     y_axis: np.ndarray,
     z_axis: np.ndarray,
@@ -574,16 +627,70 @@ def plot_3d_intensity_scatter_propagation(
     output_path: Path,
     *,
     intensity_cutoff: float = 0.05,
-    min_marker_size: float = 2.0,
-    max_marker_size: float = 36.0,
-    alpha_min: float = 0.08,
-    alpha_max: float = 0.90,
+    num_levels: int = 7,
+    max_x_samples: int = 48,
+    max_y_samples: int = 48,
+    max_z_samples: int = 18,
+    alpha_min: float = 0.12,
+    alpha_max: float = 0.72,
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
     z_label: str = "z",
+    annotation_text: str | None = None,
 ) -> Path | None:
 
+    image = _render_3d_intensity_contours_frame(
+        x_axis,
+        y_axis,
+        z_axis,
+        field_records,
+        intensity_cutoff=intensity_cutoff,
+        num_levels=num_levels,
+        max_x_samples=max_x_samples,
+        max_y_samples=max_y_samples,
+        max_z_samples=max_z_samples,
+        alpha_min=alpha_min,
+        alpha_max=alpha_max,
+        input_is_intensity=input_is_intensity,
+        normalization_peak=normalization_peak,
+        z_label=z_label,
+        annotation_text=annotation_text,
+    )
+    if image is None:
+        return None
+    try:
+        import imageio.v3 as iio
+    except ImportError as exc:
+        raise RuntimeError(
+            "plot_3d_intensity_contours_propagation requires imageio. "
+            "Install the Python example dependencies first."
+        ) from exc
+    temp_output_path = Path(output_path).with_suffix(".tmp.png")
+    temp_output_path.parent.mkdir(parents=True, exist_ok=True)
+    iio.imwrite(temp_output_path, image)
+    saved = _save_rendered_image(temp_output_path, output_path)
+    temp_output_path.unlink(missing_ok=True)
+    return saved
 
+
+def _render_3d_intensity_contours_frame(
+    x_axis: np.ndarray,
+    y_axis: np.ndarray,
+    z_axis: np.ndarray,
+    field_records: np.ndarray,
+    *,
+    intensity_cutoff: float,
+    num_levels: int,
+    max_x_samples: int,
+    max_y_samples: int,
+    max_z_samples: int,
+    alpha_min: float,
+    alpha_max: float,
+    input_is_intensity: bool,
+    normalization_peak: float | None,
+    z_label: str,
+    annotation_text: str | None,
+) -> np.ndarray | None:
     if input_is_intensity:
         records = np.asarray(field_records, dtype=np.float64)
     else:
@@ -599,75 +706,234 @@ def plot_3d_intensity_scatter_propagation(
 
     if intensity_cutoff < 0.0 or intensity_cutoff >= 1.0:
         raise ValueError("intensity_cutoff must be in [0, 1).")
+    if num_levels <= 0:
+        raise ValueError("num_levels must be positive.")
+    if max_x_samples <= 0 or max_y_samples <= 0 or max_z_samples <= 0:
+        raise ValueError("max_x_samples/max_y_samples/max_z_samples must be positive.")
     if alpha_min < 0.0 or alpha_min > 1.0 or alpha_max < 0.0 or alpha_max > 1.0 or alpha_min > alpha_max:
         raise ValueError("alpha_min/alpha_max must satisfy 0 <= alpha_min <= alpha_max <= 1.")
     if input_is_intensity:
         intensity = np.asarray(records, dtype=np.float64)
-        intensity = np.nan_to_num(intensity, nan=0.0, posinf=0.0, neginf=0.0)
-        intensity = np.clip(intensity, 0.0, None)
     else:
         intensity = np.abs(records) ** 2
-    max_intensity = float(np.max(intensity))
-    if max_intensity <= 0.0:
-        print("intensity is zero everywhere; skipping 3D propagation scatter plot.")
-        return None
-    norm_peak = max_intensity if normalization_peak is None else float(normalization_peak)
-    if norm_peak <= 0.0:
-        raise ValueError("normalization_peak must be positive when provided.")
-
-    x_points: list[float] = []
-    y_points: list[float] = []
-    z_points: list[float] = []
-    c_points: list[float] = []
-    s_points: list[float] = []
-
-    for zi in range(0, z.size):
-        for yi in range(0, y.size):
-            for xi in range(0, x.size):
-                norm_intensity = float(intensity[zi, yi, xi] / norm_peak)
-                norm_intensity_clipped = float(np.clip(norm_intensity, 0.0, 1.0))
-                if norm_intensity_clipped < intensity_cutoff:
-                    continue
-
-                x_points.append(float(x[xi]))
-                y_points.append(float(y[yi]))
-                z_points.append(float(z[zi]))
-                c_points.append(norm_intensity_clipped)
-                s_points.append(min_marker_size + (max_marker_size - min_marker_size) * norm_intensity_clipped)
-
-    if not x_points:
-        print("no points passed intensity cutoff; skipping 3D propagation scatter plot.")
+    intensity, _ = _normalized_nonnegative_data(intensity, normalization_peak=normalization_peak)
+    if float(np.max(intensity)) <= 0.0:
+        print("intensity is zero everywhere; skipping 3D propagation contour-surface plot.")
         return None
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-    norm_values = np.asarray(c_points, dtype=np.float64)
+    x_indices = _evenly_spaced_indices(x.size, max_count=int(max_x_samples))
+    y_indices = _evenly_spaced_indices(y.size, max_count=int(max_y_samples))
+    z_indices = _evenly_spaced_indices(z.size, max_count=int(max_z_samples))
+    intensity_small = intensity[np.ix_(z_indices, y_indices, x_indices)]
+    x_small = x[x_indices]
+    y_small = y[y_indices]
+    z_small = z[z_indices]
+    x_span = float(np.max(x_small) - np.min(x_small))
+    y_span = float(np.max(y_small) - np.min(y_small))
+    z_span = float(np.max(z_small) - np.min(z_small))
+    if float(np.max(intensity_small)) < intensity_cutoff:
+        print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
+        return None
+
+    try:
+        import pyvista as pv
+    except ImportError as exc:
+        raise RuntimeError(
+            "plot_3d_intensity_contours_propagation requires pyvista. "
+            "Install the Python example dependencies first."
+        ) from exc
+
+    max_intensity = float(np.max(intensity_small))
+    level_upper = min(0.92, max_intensity)
+    if level_upper <= float(intensity_cutoff):
+        print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
+        return None
+    levels = np.linspace(float(intensity_cutoff), level_upper, int(num_levels), dtype=np.float64)
+
+    volume_xyz = np.transpose(intensity_small, (2, 1, 0))
+    grid = pv.RectilinearGrid(x_small, y_small, z_small)
+    grid.point_data["intensity"] = np.ascontiguousarray(volume_xyz).ravel(order="F")
     cmap = _resolve_cmap(plt, None)
-    rgba = cmap(np.clip(norm_values, 0.0, 1.0))
-    rgba[:, 3] = alpha_min + (alpha_max - alpha_min) * np.clip(norm_values, 0.0, 1.0)
-    scatter = ax.scatter(
-        np.asarray(x_points),
-        np.asarray(y_points),
-        np.asarray(z_points),
-        c=rgba,
-        s=np.asarray(s_points),
-        marker="o",
-        depthshade=False,
-        linewidths=0.0,
-    )
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel(z_label)
 
-    from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
-
-    cbar = fig.colorbar(
-        ScalarMappable(norm=Normalize(vmin=0.0, vmax=1.0), cmap=cmap),
-        ax=ax,
-        pad=0.10,
+    plotter = pv.Plotter(off_screen=True, window_size=(1320, 960))
+    plotter.set_background("white")
+    plotter.enable_parallel_projection()
+    center_x = float(0.5 * (np.min(x_small) + np.max(x_small)))
+    center_y = float(0.5 * (np.min(y_small) + np.max(y_small)))
+    center_z = float(0.5 * (np.min(z_small) + np.max(z_small)))
+    plotter.camera_position = [
+        (
+            float(center_x + 1.45 * max(x_span, 1.0e-9)),
+            float(center_y + 1.25 * max(y_span, 1.0e-9)),
+            float(center_z + 0.82 * max(z_span, 1.0e-9)),
+        ),
+        (center_x, center_y, center_z),
+        (0.0, 0.0, 1.0),
+    ]
+    plotter.camera.up = (0.0, 0.0, 1.0)
+    plotter.camera.parallel_scale = 0.58 * max(
+        x_span,
+        y_span,
+        0.42 * max(z_span, 1.0),
+        1.0,
     )
-    cbar.set_label("Normalized intensity")
-    saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    return saved
+
+    any_surface = False
+    scalar_bar_added = False
+    for level in levels:
+        contour = grid.contour(isosurfaces=[float(level)], scalars="intensity")
+        if contour.n_points == 0:
+            continue
+        opacity = alpha_min + (alpha_max - alpha_min) * float(level)
+        plotter.add_mesh(
+            contour,
+            scalars="intensity",
+            clim=(0.0, 1.0),
+            cmap=cmap,
+            opacity=float(opacity),
+            smooth_shading=True,
+            show_edges=False,
+            specular=0.08,
+            ambient=0.25,
+            diffuse=0.75,
+            show_scalar_bar=not scalar_bar_added,
+            scalar_bar_args={
+                "title": "Normalized intensity",
+                "color": "black",
+                "vertical": True,
+            },
+        )
+        scalar_bar_added = True
+        any_surface = True
+
+    if not any_surface:
+        print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
+        plotter.close()
+        return None
+
+    plotter.show_bounds(
+        xtitle="x",
+        ytitle="y",
+        ztitle=z_label,
+        color="black",
+        font_size=14,
+        location="outer",
+        grid=None,
+        ticks="outside",
+        minor_ticks=False,
+        n_xlabels=5,
+        n_ylabels=5,
+        n_zlabels=5,
+    )
+    plotter.add_bounding_box(color="black", line_width=1.0)
+    if annotation_text:
+        plotter.add_text(
+            str(annotation_text),
+            position="upper_left",
+            font_size=16,
+            color="black",
+        )
+    image = np.asarray(plotter.screenshot(return_img=True))
+    plotter.close()
+    return image
+
+
+def save_3d_intensity_time_sweep_video(
+    t_axis: np.ndarray,
+    x_axis: np.ndarray,
+    y_axis: np.ndarray,
+    z_axis: np.ndarray,
+    field_records_tyx: np.ndarray,
+    output_path: Path,
+    *,
+    max_time_frames: int = 13,
+    fps: int = 6,
+    intensity_cutoff: float = 0.05,
+    num_levels: int = 7,
+    max_x_samples: int = 48,
+    max_y_samples: int = 48,
+    max_z_samples: int = 18,
+    alpha_min: float = 0.12,
+    alpha_max: float = 0.72,
+) -> Path | None:
+    try:
+        import imageio.v2 as imageio
+    except ImportError as exc:
+        raise RuntimeError(
+            "save_3d_intensity_time_sweep_video requires imageio. "
+            "Install the Python example dependencies first."
+        ) from exc
+
+    t = np.asarray(t_axis, dtype=np.float64).reshape(-1)
+    records = np.asarray(field_records_tyx)
+    if records.ndim != 4:
+        raise ValueError("field_records_tyx must have shape [record, time, y, x].")
+    if records.shape[1] != t.size:
+        raise ValueError("t axis length must match field_records_tyx time dimension.")
+
+    if np.iscomplexobj(records):
+        global_peak = float(np.max(np.abs(records) ** 2))
+    else:
+        global_peak = float(np.max(records))
+    if global_peak <= 0.0:
+        print("time-sweep video skipped because intensity is zero everywhere.")
+        return None
+
+    frame_indices = _evenly_spaced_indices(t.size, max_count=int(max_time_frames))
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    frames: list[np.ndarray] = []
+    for time_index in frame_indices:
+        frame = _render_3d_intensity_contours_frame(
+            x_axis,
+            y_axis,
+            z_axis,
+            records[:, int(time_index), :, :],
+            intensity_cutoff=float(intensity_cutoff),
+            num_levels=int(num_levels),
+            max_x_samples=int(max_x_samples),
+            max_y_samples=int(max_y_samples),
+            max_z_samples=int(max_z_samples),
+            alpha_min=float(alpha_min),
+            alpha_max=float(alpha_max),
+            input_is_intensity=not np.iscomplexobj(records),
+            normalization_peak=global_peak,
+            z_label="z",
+            annotation_text=f"t = {float(t[int(time_index)]):+.3f}",
+        )
+        if frame is not None:
+            frames.append(frame)
+    if not frames:
+        output_path.unlink(missing_ok=True)
+        return None
+    try:
+        writer = imageio.get_writer(
+            str(output_path),
+            format="FFMPEG",
+            fps=int(fps),
+            codec="libx264",
+            quality=7,
+            macro_block_size=None,
+        )
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        gif_path = output_path.with_suffix(".gif")
+        imageio.mimsave(str(gif_path), frames, duration=(1.0 / max(int(fps), 1)))
+        return gif_path
+
+    try:
+        for frame in frames:
+            writer.append_data(frame)
+    finally:
+        writer.close()
+    return output_path
+
+
+def plot_3d_intensity_volume_propagation(*args: Any, **kwargs: Any) -> Path | None:
+    """Backward-compatible alias for the contour-surface tensor propagation view."""
+    return plot_3d_intensity_contours_propagation(*args, **kwargs)
+
+
+def plot_3d_intensity_scatter_propagation(*args: Any, **kwargs: Any) -> Path | None:
+    """Backward-compatible alias for the contour-surface tensor propagation view."""
+    return plot_3d_intensity_contours_propagation(*args, **kwargs)

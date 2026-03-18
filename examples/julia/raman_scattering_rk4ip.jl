@@ -1,7 +1,4 @@
-include(joinpath(@__DIR__, "backend", "common.jl"))
-include(joinpath(@__DIR__, "backend", "metrics.jl"))
-include(joinpath(@__DIR__, "backend", "storage.jl"))
-
+using NLOLibExamples
 pushfirst!(LOAD_PATH, nlo_package_root_from(@__FILE__))
 
 using CairoMakie
@@ -62,28 +59,43 @@ end
 function save_raman_plots(output_dir, z_axis_norm, t_axis, raman_records, omega_axis, raman_spec_map, centered_num, centered_pred)
     mkpath(output_dir)
 
-    fig1 = Figure(size = (900, 600))
+    fig1 = styled_figure()
     ax1 = Axis(fig1[1, 1], xlabel = "time", ylabel = "z / Ld", title = "Temporal intensity")
-    hm1 = heatmap!(ax1, t_axis, z_axis_norm, abs2.(raman_records))
-    Colorbar(fig1[1, 2], hm1)
-    save(joinpath(output_dir, "raman_time_intensity.png"), fig1)
+    hm1 = heatmap!(
+        ax1,
+        t_axis,
+        z_axis_norm,
+        permutedims(normalized_plot_data(abs2.(raman_records)), (2, 1)),
+        colormap = nlolib_hdr_colormap(),
+        colorrange = (0.0, 1.0),
+    )
+    Colorbar(fig1[1, 2], hm1, label = "Normalized intensity")
+    save_example_figure(joinpath(output_dir, "raman_time_intensity.png"), fig1)
 
-    fig2 = Figure(size = (900, 600))
+    fig2 = styled_figure()
     ax2 = Axis(fig2[1, 1], xlabel = "omega", ylabel = "z / Ld", title = "Spectral intensity")
-    hm2 = heatmap!(ax2, omega_axis, z_axis_norm, raman_spec_map)
-    Colorbar(fig2[1, 2], hm2)
-    save(joinpath(output_dir, "raman_spectral_intensity.png"), fig2)
+    hm2 = heatmap!(
+        ax2,
+        omega_axis,
+        z_axis_norm,
+        permutedims(normalized_plot_data(raman_spec_map), (2, 1)),
+        colormap = nlolib_hdr_colormap(),
+        colorrange = (0.0, 1.0),
+    )
+    Colorbar(fig2[1, 2], hm2, label = "Normalized intensity")
+    save_example_figure(joinpath(output_dir, "raman_spectral_intensity.png"), fig2)
 
-    fig3 = Figure(size = (900, 600))
+    fig3 = styled_figure()
     ax3 = Axis(fig3[1, 1], xlabel = "z / Ld", ylabel = "Delta centroid", title = "Centroid shift")
     lines!(ax3, z_axis_norm, centered_num, label = "Numerical")
     lines!(ax3, z_axis_norm, centered_pred, label = "Moment prediction")
     axislegend(ax3, position = :rt)
-    save(joinpath(output_dir, "raman_centroid_shift.png"), fig3)
+    save_example_figure(joinpath(output_dir, "raman_centroid_shift.png"), fig3)
 end
 
 function main(argv = ARGS)
     args = parse_example_args("raman_scattering", "Raman self-frequency-shift validation with DB-backed run/replot.", argv)
+    activate_example_theme!()
     NLOLib.set_progress_options(enabled = false)
     db = ExampleRunDB(args[:db_path])
     example_name = "raman_scattering_rk4ip"

@@ -10,7 +10,10 @@ from .metrics import (
     filtered_relative_l2_intensity_error_curve
 )
 from .plotting import (
+    plot_3d_intensity_contours_propagation,
     plot_3d_intensity_scatter_propagation,
+    plot_3d_intensity_volume_propagation,
+    save_3d_intensity_time_sweep_video,
     plot_convergence_loglog,
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
@@ -69,7 +72,10 @@ __all__ = [
     "ExampleRunDB",
     "CaseListing",
     "LoadedCase",
+    "plot_3d_intensity_contours_propagation",
     "plot_3d_intensity_scatter_propagation",
+    "plot_3d_intensity_volume_propagation",
+    "save_3d_intensity_time_sweep_video",
     "plot_convergence_loglog",
     "plot_intensity_colormap_vs_propagation",
     "plot_final_re_im_comparison",
