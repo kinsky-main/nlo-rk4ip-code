@@ -6,6 +6,7 @@ from nlolib import (
     NLOLIB_STATUS_ABORTED,
     NLO_VECTOR_BACKEND_AUTO,
     NLO_VECTOR_BACKEND_CPU,
+    NLO_VECTOR_BACKEND_VULKAN,
     NLO_TENSOR_LAYOUT_XYT_T_FAST,
     NLolib,
     OperatorSpec,
@@ -92,6 +93,12 @@ def main():
     rel_drift = abs(final_norm - baseline_norm) / max(baseline_norm, 1e-12)
     assert rel_drift <= 1e-6, f"AUTO identity propagation drift too large: {rel_drift}"
     print("test_python_api_smoke: AUTO identity propagation preserved field norm.")
+
+    vulkan_opts = default_execution_options(NLO_VECTOR_BACKEND_VULKAN)
+    explicit_vulkan_records = api.propagate(identity_cfg, gaussian, 3, vulkan_opts).records
+    assert len(explicit_vulkan_records) == 3
+    assert len(explicit_vulkan_records[0]) == n
+    print("test_python_api_smoke: explicit VULKAN defaults now resolve a usable backend.")
 
     step_history_result = api.propagate(
         identity_cfg,

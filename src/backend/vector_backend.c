@@ -89,6 +89,21 @@ static const char* nlo_vk_device_type_to_string(VkPhysicalDeviceType device_type
 
 static int nlo_vk_memory_info_source_logged = 0;
 
+static bool nlo_vk_backend_config_is_empty(const nlo_vk_backend_config* config)
+{
+    if (config == NULL) {
+        return true;
+    }
+
+    return config->physical_device == VK_NULL_HANDLE &&
+           config->device == VK_NULL_HANDLE &&
+           config->queue == VK_NULL_HANDLE &&
+           config->queue_family_index == 0u &&
+           config->command_pool == VK_NULL_HANDLE &&
+           config->descriptor_set_budget_bytes == 0u &&
+           config->descriptor_set_count_override == 0u;
+}
+
 #if NLO_ENABLE_VULKAN_BACKEND
 static size_t nlo_size_saturating_add(size_t lhs, size_t rhs)
 {
@@ -319,7 +334,7 @@ bool nlo_vec_is_in_simulation(const nlo_vector_backend* backend)
 
 nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config* config)
 {
-    if (config == NULL) {
+    if (nlo_vk_backend_config_is_empty(config)) {
         return nlo_vector_backend_create_auto(NULL);
     }
     if (config->physical_device == VK_NULL_HANDLE ||
