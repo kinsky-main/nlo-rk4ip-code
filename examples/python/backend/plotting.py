@@ -771,9 +771,6 @@ def _render_3d_intensity_contours_frame(
     x_small = x[x_indices]
     y_small = y[y_indices]
     z_small = z[z_indices]
-    # if float(np.max(intensity_small)) < intensity_cutoff:
-    #     print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
-    #     return None
 
     try:
         import pyvista as pv
@@ -785,9 +782,6 @@ def _render_3d_intensity_contours_frame(
 
     max_intensity = float(np.max(intensity_small))
     level_upper = min(0.92, max_intensity)
-    # if level_upper <= float(intensity_cutoff):
-    #     print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
-    #     return None
     levels = np.linspace(float(intensity_cutoff), level_upper, int(num_levels), dtype=np.float64)
 
     volume_xyz = np.transpose(intensity_small, (2, 1, 0))
@@ -798,6 +792,7 @@ def _render_3d_intensity_contours_frame(
     plotter = pv.Plotter(off_screen=True, window_size=(1320, 960))
     plotter.set_background("white")
     plotter.enable_parallel_projection()
+    plotter.set_scale(1.0, 1.0, 1.0)
 
     any_surface = False
     scalar_bar_added = False
@@ -825,12 +820,6 @@ def _render_3d_intensity_contours_frame(
             },
         )
         scalar_bar_added = True
-        any_surface = True
-
-    # if not any_surface:
-    #     print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
-    #     plotter.close()
-    #     return None
 
     plotter.show_bounds(
         xtitle="x",
@@ -847,6 +836,7 @@ def _render_3d_intensity_contours_frame(
         n_zlabels=5,
     )
     plotter.add_bounding_box(color="black", line_width=1.0)
+    plotter.view_isometric()
     if annotation_text:
         plotter.add_text(
             str(annotation_text),
