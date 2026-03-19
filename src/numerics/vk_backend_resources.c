@@ -16,7 +16,7 @@ VkDeviceSize nlo_vk_min_size(VkDeviceSize a, VkDeviceSize b)
 
 enum {
     NLO_VK_DESCRIPTOR_SET_BUDGET_DEFAULT_BYTES = 512u * 1024u,
-    NLO_VK_DESCRIPTOR_SET_ESTIMATED_BYTES = 512u,
+    NLO_VK_DESCRIPTOR_SET_ESTIMATED_BYTES = 2048u,
     NLO_VK_DESCRIPTOR_SET_MIN_COUNT = 16u,
     NLO_VK_DESCRIPTOR_SET_MAX_COUNT = 4096u
 };
@@ -312,23 +312,17 @@ static nlo_vec_status nlo_vk_create_descriptor_resources(
     const nlo_vk_backend_config* config
 )
 {
-    VkDescriptorSetLayoutBinding bindings[3] = {0};
-    bindings[0].binding = 0u;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[0].descriptorCount = 1u;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    bindings[1].binding = 1u;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1u;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    bindings[2].binding = 2u;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[2].descriptorCount = 1u;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    VkDescriptorSetLayoutBinding bindings[NLO_VK_DESCRIPTOR_BINDING_COUNT] = {0};
+    for (uint32_t i = 0u; i < NLO_VK_DESCRIPTOR_BINDING_COUNT; ++i) {
+        bindings[i].binding = i;
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[i].descriptorCount = 1u;
+        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
 
     VkDescriptorSetLayoutCreateInfo layout_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 3u,
+        .bindingCount = NLO_VK_DESCRIPTOR_BINDING_COUNT,
         .pBindings = bindings
     };
     if (vkCreateDescriptorSetLayout(backend->vk.device, &layout_info, NULL, &backend->vk.descriptor_set_layout) != VK_SUCCESS) {
@@ -359,7 +353,7 @@ static nlo_vec_status nlo_vk_create_descriptor_resources(
         bool attempt_failed = false;
         VkDescriptorPoolSize pool_size = {
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 3u * target_count
+            .descriptorCount = NLO_VK_DESCRIPTOR_BINDING_COUNT * target_count
         };
         VkDescriptorPoolCreateInfo pool_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -498,6 +492,7 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
     nlo_vk_destroy_buffer_raw(backend, &backend->vk.reduction_buffer_a, &backend->vk.reduction_memory_a);
     nlo_vk_destroy_buffer_raw(backend, &backend->vk.reduction_buffer_b, &backend->vk.reduction_memory_b);
     backend->vk.reduction_capacity = 0u;
+    nlo_vk_operator_jit_destroy_all(backend);
 
     for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
         if (backend->vk.kernels[i].pipeline != VK_NULL_HANDLE) {
@@ -567,6 +562,7 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
     backend->vk.simulation_phase_recording = false;
     backend->vk.simulation_phase_has_commands = false;
     backend->vk.simulation_descriptor_set_cursor = 0u;
+    backend->vk.operator_jit_entries = NULL;
 }
 
 nlo_vec_status nlo_vk_ensure_staging_capacity(nlo_vector_backend* backend, VkDeviceSize min_bytes)

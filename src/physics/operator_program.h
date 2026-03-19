@@ -6,6 +6,7 @@
 
 #include "backend/vector_backend.h"
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +18,14 @@ extern "C" {
 
 #ifndef NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS
 #define NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS 8u
+#endif
+
+#ifndef NLO_OPERATOR_PROGRAM_MAX_VALUES
+#define NLO_OPERATOR_PROGRAM_MAX_VALUES NLO_OPERATOR_PROGRAM_MAX_INSTRUCTIONS
+#endif
+
+#ifndef NLO_OPERATOR_VALUE_INVALID
+#define NLO_OPERATOR_VALUE_INVALID UINT16_MAX
 #endif
 
 typedef enum {
@@ -61,12 +70,48 @@ typedef struct {
     nlo_complex literal;
 } nlo_operator_instruction;
 
+typedef enum {
+    NLO_OPERATOR_SYMBOL_MASK_NONE = 0u,
+    NLO_OPERATOR_SYMBOL_MASK_W = (1u << 0),
+    NLO_OPERATOR_SYMBOL_MASK_A = (1u << 1),
+    NLO_OPERATOR_SYMBOL_MASK_I = (1u << 2),
+    NLO_OPERATOR_SYMBOL_MASK_D = (1u << 3),
+    NLO_OPERATOR_SYMBOL_MASK_V = (1u << 4),
+    NLO_OPERATOR_SYMBOL_MASK_H = (1u << 5),
+    NLO_OPERATOR_SYMBOL_MASK_WT = (1u << 6),
+    NLO_OPERATOR_SYMBOL_MASK_KX = (1u << 7),
+    NLO_OPERATOR_SYMBOL_MASK_KY = (1u << 8),
+    NLO_OPERATOR_SYMBOL_MASK_T = (1u << 9),
+    NLO_OPERATOR_SYMBOL_MASK_X = (1u << 10),
+    NLO_OPERATOR_SYMBOL_MASK_Y = (1u << 11)
+} nlo_operator_symbol_mask;
+
+typedef struct {
+    nlo_operator_opcode opcode;
+    uint16_t left;
+    uint16_t right;
+    nlo_complex literal;
+    uint32_t symbol_mask;
+} nlo_operator_value;
+
+typedef struct nlo_vk_operator_jit_entry nlo_vk_operator_jit_entry;
+
 typedef struct {
     int active;
     nlo_operator_program_context context;
     size_t instruction_count;
     size_t required_stack_slots;
     nlo_operator_instruction instructions[NLO_OPERATOR_PROGRAM_MAX_INSTRUCTIONS];
+    size_t value_count;
+    size_t root_value;
+    uint32_t active_symbol_mask;
+    uint64_t lowered_hash;
+    int vk_jit_eligible;
+    int vk_jit_active;
+    int vk_jit_compile_attempted;
+    int vk_jit_warning_emitted;
+    nlo_vk_operator_jit_entry* vk_jit_entry;
+    nlo_operator_value values[NLO_OPERATOR_PROGRAM_MAX_VALUES];
 } nlo_operator_program;
 
 typedef struct {

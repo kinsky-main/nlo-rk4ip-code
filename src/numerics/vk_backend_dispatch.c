@@ -20,7 +20,7 @@ static size_t nlo_vk_max_chunk_elements(const nlo_vector_backend* backend, size_
     return (size_t)max_elems;
 }
 
-static nlo_vec_status nlo_vk_acquire_descriptor_set(
+nlo_vec_status nlo_vk_acquire_descriptor_set(
     nlo_vector_backend* backend,
     VkDescriptorSet* out_descriptor_set
 )

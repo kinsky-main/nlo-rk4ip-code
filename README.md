@@ -15,7 +15,7 @@ Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-c
 - Vulkan toolchain only when `NLO_ENABLE_VULKAN_BACKEND=ON`:
   - Vulkan loader library (runtime + link-time)
   - Vulkan headers (auto-discovered or fetched by CMake)
-  - Vulkan SDK/glslang development components that provide CMake target `Vulkan::glslang`
+  - Vulkan SDK/glslang development components that provide CMake target `Vulkan::glslang` and the glslang C interface headers used by the runtime operator JIT
   - `glslangValidator` on `PATH` (or available via `VULKAN_SDK`)
 
 ### Optional but commonly needed
@@ -124,7 +124,7 @@ Multi-config generators use `--config <type>` during build/test.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan headers are found via `find_package(Vulkan)` or fetched from `NLO_VULKAN_HEADERS_URL`.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan loader must be present locally (`vulkan`/`vulkan-1` library).
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, `glslangValidator` is required to compile compute shaders to SPIR-V during build.
-- When `NLO_ENABLE_VKFFT=ON`, CMake target `Vulkan::glslang` must be resolvable for FFT backend linking.
+- When `NLO_ENABLE_VULKAN_BACKEND=ON`, CMake target `Vulkan::glslang` must be resolvable for VkFFT linkage and runtime operator shader compilation.
 - SQLite is linked from the fetched amalgamation as a static library (no external `sqlite3.dll` runtime dependency).
 
 ## Runtime Operator Semantics
@@ -132,6 +132,8 @@ Multi-config generators use `--config <type>` during build/test.
 - Runtime operators use symbols: `A` (field), `w` (frequency/spatial-frequency), `I` (`|A|^2`), `D` (dispersion factor), `V` (potential), `h` (half-step exponent).
 - `nonlinear_expr` is interpreted as the full nonlinear RHS `N(A)` and is written directly by the solver.
 - Legacy multiplier-form nonlinear expressions must be migrated to include `A`.
+- On the Vulkan backend, eligible runtime operator programs are lowered to a compact internal DAG and JIT-compiled to cached compute pipelines during state initialization. Unsupported expressions or runtime compiler failures fall back to the existing interpreter path.
+- In tensor mode, the Vulkan JIT can execute `wt/kx/ky/t/x/y` symbols from compact axis buffers instead of materialized full-volume meshes when all active tensor operator programs stay on the JIT path.
 - `runtime.nonlinear_model` selects nonlinear execution mode:
   - `0` (`NLO_NONLINEAR_MODEL_EXPR`): evaluate `nonlinear_expr` (default).
   - `1` (`NLO_NONLINEAR_MODEL_KERR_RAMAN`): built-in Kerr + delayed Raman model with optional self-steepening.

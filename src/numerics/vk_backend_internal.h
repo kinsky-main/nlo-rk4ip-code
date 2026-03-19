@@ -33,6 +33,11 @@ nlo_vec_status nlo_vk_ensure_reduction_capacity(nlo_vector_backend* backend, VkD
 
 nlo_vec_status nlo_vk_begin_commands(nlo_vector_backend* backend);
 nlo_vec_status nlo_vk_submit_commands(nlo_vector_backend* backend);
+nlo_vec_status nlo_vk_acquire_descriptor_set(
+    nlo_vector_backend* backend,
+    VkDescriptorSet* out_descriptor_set
+);
+void nlo_vk_operator_jit_destroy_all(nlo_vector_backend* backend);
 
 void nlo_vk_cmd_transfer_to_compute(
     VkCommandBuffer cmd,

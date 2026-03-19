@@ -50,8 +50,24 @@ enum {
     /** Vulkan compute local size used by kernels in this backend. */
     NLO_VK_LOCAL_SIZE_X = 64u,
     /** Default staging-buffer size used for host/device transfers. */
-    NLO_VK_DEFAULT_STAGING_BYTES = 8u * 1024u * 1024u
+    NLO_VK_DEFAULT_STAGING_BYTES = 8u * 1024u * 1024u,
+    /** Total descriptor bindings reserved in the shared compute set layout. */
+    NLO_VK_DESCRIPTOR_BINDING_COUNT = 11u
 };
+
+typedef enum {
+    NLO_VK_BINDING_DST = 0,
+    NLO_VK_BINDING_FIELD = 1,
+    NLO_VK_BINDING_W = 2,
+    NLO_VK_BINDING_WT = 3,
+    NLO_VK_BINDING_KX = 4,
+    NLO_VK_BINDING_KY = 5,
+    NLO_VK_BINDING_T = 6,
+    NLO_VK_BINDING_X = 7,
+    NLO_VK_BINDING_Y = 8,
+    NLO_VK_BINDING_D = 9,
+    NLO_VK_BINDING_V = 10
+} nlo_vk_descriptor_binding;
 
 /**
  * @brief Internal kernel identifiers mapped to compiled Vulkan pipelines.
@@ -94,6 +110,8 @@ typedef struct {
 typedef struct {
     VkPipeline pipeline;
 } nlo_vk_kernel;
+
+typedef struct nlo_vk_operator_jit_entry nlo_vk_operator_jit_entry;
 
 /**
  * @brief Internal Vulkan backend runtime state and resources.
@@ -140,6 +158,7 @@ typedef struct {
     bool simulation_phase_recording;
     bool simulation_phase_has_commands;
     uint32_t simulation_descriptor_set_cursor;
+    nlo_vk_operator_jit_entry* operator_jit_entries;
 } nlo_vk_backend;
 
 /**

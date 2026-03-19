@@ -29,6 +29,7 @@ if(NLO_ENABLE_VULKAN_BACKEND)
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_dispatch.c
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
+    ${CMAKE_SOURCE_DIR}/src/numerics/vk_operator_jit.c
   )
 else()
   target_sources(test_core_state_alloc PRIVATE
@@ -38,6 +39,9 @@ endif()
 
 include(ResolveVulkan)
 nlo_resolve_vulkan(_nlo_vk_headers_available _nlo_vk_loader_available)
+if(NLO_ENABLE_VULKAN_BACKEND)
+  find_package(Vulkan QUIET COMPONENTS glslang)
+endif()
 include(NLOCblas)
 nlo_configure_cblas(_nlo_cblas_target _nlo_cblas_include_dirs)
 
@@ -46,6 +50,28 @@ target_include_directories(test_core_state_alloc PRIVATE
 )
 if(NLO_ENABLE_VULKAN_BACKEND)
   target_include_directories(test_core_state_alloc PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
+  find_path(NLO_TEST_GLSLANG_C_INCLUDE_DIR
+    NAMES glslang_c_interface.h
+    HINTS
+      ENV VULKAN_SDK
+    PATH_SUFFIXES
+      Include/glslang/Include
+      glslang/Include
+  )
+  if(NLO_TEST_GLSLANG_C_INCLUDE_DIR)
+    target_include_directories(test_core_state_alloc PRIVATE ${NLO_TEST_GLSLANG_C_INCLUDE_DIR})
+  endif()
+  find_path(NLO_TEST_GLSLANG_RESOURCE_INCLUDE_DIR
+    NAMES resource_limits_c.h
+    HINTS
+      ENV VULKAN_SDK
+    PATH_SUFFIXES
+      Include/glslang/Public
+      glslang/Public
+  )
+  if(NLO_TEST_GLSLANG_RESOURCE_INCLUDE_DIR)
+    target_include_directories(test_core_state_alloc PRIVATE ${NLO_TEST_GLSLANG_RESOURCE_INCLUDE_DIR})
+  endif()
 endif()
 target_link_libraries(test_core_state_alloc PRIVATE nlo_fft_backend ${_nlo_cblas_target})
 target_compile_definitions(test_core_state_alloc PRIVATE
@@ -53,7 +79,17 @@ target_compile_definitions(test_core_state_alloc PRIVATE
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
 )
 if(NLO_ENABLE_VULKAN_BACKEND)
-  target_link_libraries(test_core_state_alloc PRIVATE Vulkan::Vulkan)
+  target_link_libraries(test_core_state_alloc PRIVATE Vulkan::Vulkan Vulkan::glslang)
+  if(WIN32 AND DEFINED ENV{VULKAN_SDK})
+    target_link_directories(test_core_state_alloc PRIVATE "$ENV{VULKAN_SDK}/Lib")
+    target_link_libraries(test_core_state_alloc PRIVATE
+      $<$<CONFIG:Debug>:MachineIndependentd;OSDependentd;GenericCodeGend;SPIRVd;SPIRV-Toolsd;SPIRV-Tools-optd;glslang-default-resource-limitsd>
+      $<$<NOT:$<CONFIG:Debug>>:MachineIndependent;OSDependent;GenericCodeGen;SPIRV;SPIRV-Tools;SPIRV-Tools-opt;glslang-default-resource-limits>
+    )
+    if(MSVC)
+      target_link_options(test_core_state_alloc PRIVATE /IGNORE:4099)
+    endif()
+  endif()
 endif()
 include(NLOSQLite)
 nlo_configure_sqlite(test_core_state_alloc)

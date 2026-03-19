@@ -6,6 +6,7 @@
 
 #include "backend/vk_auto_context.h"
 #include "numerics/vk_vector_ops.h"
+#include "physics/operator_program_jit.h"
 #include <string.h>
 
 static nlo_vec_status nlo_vk_unavailable_status(void)
@@ -306,5 +307,29 @@ nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
     (void)nt;
     (void)ny;
     (void)axis_kind;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_operator_program_prepare_jit(
+    nlo_vector_backend* backend,
+    nlo_operator_program* program
+)
+{
+    (void)backend;
+    (void)program;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_operator_program_execute_jit(
+    nlo_vector_backend* backend,
+    const nlo_operator_program* program,
+    const nlo_operator_eval_context* eval_ctx,
+    nlo_vec_buffer* out_vector
+)
+{
+    (void)backend;
+    (void)program;
+    (void)eval_ctx;
+    (void)out_vector;
     return nlo_vk_unavailable_status();
 }

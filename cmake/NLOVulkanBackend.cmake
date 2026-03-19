@@ -12,6 +12,12 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
       "Install Vulkan loader/SDK (e.g. libvulkan-dev on Linux or LunarG Vulkan SDK on Windows).")
   endif()
 
+  find_package(Vulkan QUIET COMPONENTS glslang)
+  if(NOT TARGET Vulkan::glslang)
+    message(FATAL_ERROR
+      "Required target Vulkan::glslang is unavailable.")
+  endif()
+
   find_program(NLO_GLSLANG_VALIDATOR
     NAMES glslangValidator glslangValidator.exe
     HINTS
@@ -103,4 +109,40 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
 
   target_include_directories(${target} PRIVATE "${target_binary_dir}/generated")
   target_link_libraries(${target} PUBLIC Vulkan::Headers Vulkan::Vulkan)
+  target_link_libraries(${target} PRIVATE Vulkan::glslang)
+
+  find_path(NLO_GLSLANG_C_INCLUDE_DIR
+    NAMES glslang_c_interface.h
+    HINTS
+      ENV VULKAN_SDK
+    PATH_SUFFIXES
+      Include/glslang/Include
+      glslang/Include
+  )
+  if(NLO_GLSLANG_C_INCLUDE_DIR)
+    target_include_directories(${target} PRIVATE ${NLO_GLSLANG_C_INCLUDE_DIR})
+  endif()
+
+  find_path(NLO_GLSLANG_RESOURCE_INCLUDE_DIR
+    NAMES resource_limits_c.h
+    HINTS
+      ENV VULKAN_SDK
+    PATH_SUFFIXES
+      Include/glslang/Public
+      glslang/Public
+  )
+  if(NLO_GLSLANG_RESOURCE_INCLUDE_DIR)
+    target_include_directories(${target} PRIVATE ${NLO_GLSLANG_RESOURCE_INCLUDE_DIR})
+  endif()
+
+  if(WIN32 AND DEFINED ENV{VULKAN_SDK})
+    target_link_directories(${target} PRIVATE "$ENV{VULKAN_SDK}/Lib")
+    target_link_libraries(${target} PRIVATE
+      $<$<CONFIG:Debug>:MachineIndependentd;OSDependentd;GenericCodeGend;SPIRVd;SPIRV-Toolsd;SPIRV-Tools-optd;glslang-default-resource-limitsd>
+      $<$<NOT:$<CONFIG:Debug>>:MachineIndependent;OSDependent;GenericCodeGen;SPIRV;SPIRV-Tools;SPIRV-Tools-opt;glslang-default-resource-limits>
+    )
+    if(MSVC)
+      target_link_options(${target} PRIVATE /IGNORE:4099)
+    endif()
+  endif()
 endfunction()

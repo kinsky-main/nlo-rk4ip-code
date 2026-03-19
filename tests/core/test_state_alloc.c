@@ -470,7 +470,7 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
     config->spatial.delta_y = 0.5;
     config->runtime.linear_factor_expr = "i*((0.5*c0)*(wt^2) + c1*((kx^2) + (ky^2)))";
     config->runtime.linear_expr = "exp(h*D)";
-    config->runtime.potential_expr = "0";
+    config->runtime.potential_expr = "x+y+t";
     config->runtime.num_constants = 2u;
     config->runtime.constants[0] = 0.08;
     config->runtime.constants[1] = -0.2;
@@ -485,11 +485,118 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
                                      &state) == 0);
     assert(state != NULL);
     assert(nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN);
+    assert(state->tensor_compact_axis_symbols != 0);
+    assert(state->potential_operator_program.vk_jit_active != 0);
+    assert(state->linear_factor_operator_program.vk_jit_active != 0);
+    assert(state->linear_operator_program.vk_jit_active != 0);
+    assert(state->nonlinear_operator_program.vk_jit_active != 0);
+    assert(state->working_vectors.wt_mesh_vec == NULL);
+    assert(state->working_vectors.kx_mesh_vec == NULL);
+    assert(state->working_vectors.ky_mesh_vec == NULL);
+    assert(state->working_vectors.t_mesh_vec == NULL);
+    assert(state->working_vectors.x_mesh_vec == NULL);
+    assert(state->working_vectors.y_mesh_vec == NULL);
+    assert(state->init_vectors.wt_axis_vec != NULL);
+    assert(state->init_vectors.kx_axis_vec != NULL);
+    assert(state->init_vectors.ky_axis_vec != NULL);
+    assert(state->init_vectors.t_axis_vec != NULL);
+    assert(state->init_vectors.x_axis_vec != NULL);
+    assert(state->init_vectors.y_axis_vec != NULL);
+    nlo_complex potential_downloaded[128] = {0};
+    assert(nlo_vec_download(state->backend,
+                            state->working_vectors.potential_vec,
+                            potential_downloaded,
+                            sizeof(potential_downloaded)) == NLO_VEC_STATUS_OK);
+    assert(fabs(potential_downloaded[0].re + 2.375) <= NLO_TEST_FREQ_EPS);
+    assert(fabs(potential_downloaded[0].im) <= NLO_TEST_FREQ_EPS);
 
     free_simulation_state(state);
     free_sim_config(config);
 
     printf("test_tensor_mode_linear_factor_literal_power_vulkan: validates Vulkan literal-power lowering.\n");
+#endif
+}
+
+static void test_runtime_operator_lowering_constant_fold(void)
+{
+    nlo_operator_program program = {0};
+    assert(nlo_operator_program_compile("((1.0+2.0)*(3.0+4.0))",
+                                        NLO_OPERATOR_CONTEXT_NONLINEAR,
+                                        0u,
+                                        NULL,
+                                        &program) == NLO_VEC_STATUS_OK);
+    assert(program.active != 0);
+    assert(program.value_count == 1u);
+    assert(program.root_value == 0u);
+    assert(program.active_symbol_mask == NLO_OPERATOR_SYMBOL_MASK_NONE);
+    assert(program.vk_jit_eligible != 0);
+    assert(fabs(program.values[0].literal.re - 21.0) <= NLO_TEST_FREQ_EPS);
+    assert(fabs(program.values[0].literal.im) <= NLO_TEST_FREQ_EPS);
+    printf("test_runtime_operator_lowering_constant_fold: validates lowering constant folding.\n");
+}
+
+static void test_runtime_operator_lowering_symbol_mask(void)
+{
+    nlo_operator_program program = {0};
+    assert(nlo_operator_program_compile("sin(A)+cos(A)+log(I+1.0)+sqrt(I+1.0)",
+                                        NLO_OPERATOR_CONTEXT_NONLINEAR,
+                                        0u,
+                                        NULL,
+                                        &program) == NLO_VEC_STATUS_OK);
+    assert(program.active != 0);
+    assert((program.active_symbol_mask & NLO_OPERATOR_SYMBOL_MASK_A) != 0u);
+    assert((program.active_symbol_mask & NLO_OPERATOR_SYMBOL_MASK_I) != 0u);
+    assert((program.active_symbol_mask &
+            ~(NLO_OPERATOR_SYMBOL_MASK_A | NLO_OPERATOR_SYMBOL_MASK_I)) == 0u);
+    assert(program.value_count < program.instruction_count);
+    printf("test_runtime_operator_lowering_symbol_mask: validates lowering symbol analysis.\n");
+}
+
+static void test_runtime_operator_jit_warmup_vulkan(void)
+{
+#if !NLO_ENABLE_VULKAN_BACKEND
+    printf("test_runtime_operator_jit_warmup_vulkan: skipped (Vulkan disabled at build).\n");
+    return;
+#else
+    nlo_vector_backend* probe = nlo_vector_backend_create_vulkan(NULL);
+    if (probe == NULL) {
+        printf("test_runtime_operator_jit_warmup_vulkan: skipped (Vulkan unavailable).\n");
+        return;
+    }
+    nlo_vector_backend_destroy(probe);
+
+    const size_t n = 128u;
+    sim_config* config = create_sim_config(n);
+    assert(config != NULL);
+    config->time.delta_time = 0.02;
+    config->time.pulse_period = (double)n * config->time.delta_time;
+
+    test_fill_expected_omega_grid(config->frequency.frequency_grid, n, config->time.delta_time);
+    config->runtime.dispersion_factor_expr = "i*c0*(w^2)/(c1+1.0)";
+    config->runtime.dispersion_expr = "exp(h*D)";
+    config->runtime.nonlinear_expr = "sin(A)+cos(A)+log(I+1.0)+sqrt(I+1.0)";
+    config->runtime.num_constants = 3u;
+    config->runtime.constants[0] = 0.01;
+    config->runtime.constants[1] = 2.0;
+    config->runtime.constants[2] = 0.05;
+
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
+    simulation_state* state = NULL;
+    assert(nlo_init_simulation_state(config,
+                                     n,
+                                     2u,
+                                     &exec_options,
+                                     NULL,
+                                     &state) == 0);
+    assert(state != NULL);
+    assert(nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN);
+    assert(state->dispersion_factor_operator_program.vk_jit_active != 0);
+    assert(state->dispersion_operator_program.vk_jit_active != 0);
+    assert(state->nonlinear_operator_program.vk_jit_active != 0);
+
+    free_simulation_state(state);
+    free_sim_config(config);
+    printf("test_runtime_operator_jit_warmup_vulkan: validates Vulkan JIT program warmup.\n");
 #endif
 }
 
@@ -577,6 +684,9 @@ int main(void)
     test_frequency_grid_preserved_when_valid();
     test_tensor_mode_frequency_mesh_generation();
     test_tensor_mode_linear_factor_literal_power_vulkan();
+    test_runtime_operator_lowering_constant_fold();
+    test_runtime_operator_lowering_symbol_mask();
+    test_runtime_operator_jit_warmup_vulkan();
     test_snapshot_store_dense_readback();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;

@@ -275,7 +275,7 @@ typedef struct {
 } simulation_working_vectors;
 
 /**
- * @brief Init-only scratch buffers used to construct tensor axes and meshes.
+ * @brief Tensor axis buffers used during initialization and compact-axis JIT execution.
  */
 typedef struct {
     nlo_vec_buffer* wt_axis_vec;
@@ -301,6 +301,7 @@ typedef struct {
     size_t ny;
     int tensor_layout;
     int tensor_mode_active;
+    int tensor_compact_axis_symbols;
     size_t num_time_samples;
     size_t num_points_xy;
     size_t num_recorded_samples;
@@ -497,8 +498,8 @@ nlo_vec_status simulation_state_flush_snapshots(simulation_state* state);
 /**
  * @brief Resolve the operator-visible frequency grid for the active state.
  *
- * Tensor mode uses wt mesh storage directly; temporal mode uses the
- * dedicated frequency grid vector.
+ * Tensor mode uses the wt mesh when materialized, otherwise the compact wt axis.
+ * Temporal mode uses the dedicated frequency grid vector.
  *
  * @param state Active simulation state.
  * @return const nlo_vec_buffer* Frequency-domain grid buffer, or NULL.
@@ -511,7 +512,76 @@ static inline const nlo_vec_buffer* nlo_state_operator_frequency_grid(const simu
     if (state->frequency_grid_vec != NULL) {
         return state->frequency_grid_vec;
     }
-    return state->working_vectors.wt_mesh_vec;
+    if (state->working_vectors.wt_mesh_vec != NULL) {
+        return state->working_vectors.wt_mesh_vec;
+    }
+    return state->init_vectors.wt_axis_vec;
+}
+
+static inline const nlo_vec_buffer* nlo_state_operator_wt_grid(const simulation_state* state)
+{
+    if (state == NULL) {
+        return NULL;
+    }
+    if (state->working_vectors.wt_mesh_vec != NULL) {
+        return state->working_vectors.wt_mesh_vec;
+    }
+    return state->init_vectors.wt_axis_vec;
+}
+
+static inline const nlo_vec_buffer* nlo_state_operator_kx_grid(const simulation_state* state)
+{
+    if (state == NULL) {
+        return NULL;
+    }
+    if (state->working_vectors.kx_mesh_vec != NULL) {
+        return state->working_vectors.kx_mesh_vec;
+    }
+    return state->init_vectors.kx_axis_vec;
+}
+
+static inline const nlo_vec_buffer* nlo_state_operator_ky_grid(const simulation_state* state)
+{
+    if (state == NULL) {
+        return NULL;
+    }
+    if (state->working_vectors.ky_mesh_vec != NULL) {
+        return state->working_vectors.ky_mesh_vec;
+    }
+    return state->init_vectors.ky_axis_vec;
+}
+
+static inline const nlo_vec_buffer* nlo_state_operator_t_grid(const simulation_state* state)
+{
+    if (state == NULL) {
+        return NULL;
+    }
+    if (state->working_vectors.t_mesh_vec != NULL) {
+        return state->working_vectors.t_mesh_vec;
+    }
+    return state->init_vectors.t_axis_vec;
+}
+
+static inline const nlo_vec_buffer* nlo_state_operator_x_grid(const simulation_state* state)
+{
+    if (state == NULL) {
+        return NULL;
+    }
+    if (state->working_vectors.x_mesh_vec != NULL) {
+        return state->working_vectors.x_mesh_vec;
+    }
+    return state->init_vectors.x_axis_vec;
+}
+
+static inline const nlo_vec_buffer* nlo_state_operator_y_grid(const simulation_state* state)
+{
+    if (state == NULL) {
+        return NULL;
+    }
+    if (state->working_vectors.y_mesh_vec != NULL) {
+        return state->working_vectors.y_mesh_vec;
+    }
+    return state->init_vectors.y_axis_vec;
 }
 
 /**

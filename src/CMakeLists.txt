@@ -33,6 +33,7 @@ if(NLO_ENABLE_VULKAN_BACKEND)
     ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_dispatch.c
     ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_transfer.c
     ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_ops.c
+    ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_operator_jit.c
   )
 else()
   list(APPEND NLOLIB_SOURCES

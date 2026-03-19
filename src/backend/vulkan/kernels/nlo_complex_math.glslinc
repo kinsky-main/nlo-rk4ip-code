@@ -1,0 +1,132 @@
+#ifndef NLO_COMPLEX_MATH_GLSLINC
+#define NLO_COMPLEX_MATH_GLSLINC
+
+nlo_vk_complex64 nlo_vk_make_complex(double re, double im)
+{
+    nlo_vk_complex64 value;
+    value.re = re;
+    value.im = im;
+    return value;
+}
+
+double nlo_vk_complex_abs_sq(nlo_vk_complex64 value)
+{
+    return (value.re * value.re) + (value.im * value.im);
+}
+
+nlo_vk_complex64 nlo_vk_complex_add(nlo_vk_complex64 lhs, nlo_vk_complex64 rhs)
+{
+    return nlo_vk_make_complex(lhs.re + rhs.re, lhs.im + rhs.im);
+}
+
+nlo_vk_complex64 nlo_vk_complex_negate(nlo_vk_complex64 value)
+{
+    return nlo_vk_make_complex(-value.re, -value.im);
+}
+
+nlo_vk_complex64 nlo_vk_complex_mul(nlo_vk_complex64 lhs, nlo_vk_complex64 rhs)
+{
+    return nlo_vk_make_complex((lhs.re * rhs.re) - (lhs.im * rhs.im),
+                               (lhs.re * rhs.im) + (lhs.im * rhs.re));
+}
+
+nlo_vk_complex64 nlo_vk_complex_scale(nlo_vk_complex64 value, double scale)
+{
+    return nlo_vk_make_complex(value.re * scale, value.im * scale);
+}
+
+nlo_vk_complex64 nlo_vk_complex_magnitude_squared(nlo_vk_complex64 value)
+{
+    return nlo_vk_make_complex(nlo_vk_complex_abs_sq(value), 0.0);
+}
+
+nlo_vk_complex64 nlo_vk_complex_exp(nlo_vk_complex64 value)
+{
+    double sin_im = 0.0;
+    double cos_im = 0.0;
+    double exp_re = nlo_exp_double(value.re);
+    nlo_sincos_double(value.im, sin_im, cos_im);
+    return nlo_vk_make_complex(exp_re * cos_im, exp_re * sin_im);
+}
+
+nlo_vk_complex64 nlo_vk_complex_log(nlo_vk_complex64 value)
+{
+    double radius = sqrt(nlo_vk_complex_abs_sq(value));
+    double angle = nlo_atan2_double(value.im, value.re);
+    return nlo_vk_make_complex(nlo_log_double(radius), angle);
+}
+
+nlo_vk_complex64 nlo_vk_complex_real_pow(nlo_vk_complex64 value, double exponent)
+{
+    double radius = sqrt(nlo_vk_complex_abs_sq(value));
+    if (radius == 0.0) {
+        if (exponent == 0.0) {
+            return nlo_vk_make_complex(1.0, 0.0);
+        }
+        return nlo_vk_make_complex(0.0, 0.0);
+    }
+
+    double angle = nlo_atan2_double(value.im, value.re);
+    double scaled_angle = exponent * angle;
+    double scaled_radius = nlo_pow_double(radius, exponent);
+    double sin_angle = 0.0;
+    double cos_angle = 0.0;
+    nlo_sincos_double(scaled_angle, sin_angle, cos_angle);
+    return nlo_vk_make_complex(scaled_radius * cos_angle,
+                               scaled_radius * sin_angle);
+}
+
+nlo_vk_complex64 nlo_vk_complex_pow(nlo_vk_complex64 base, nlo_vk_complex64 exponent)
+{
+    double radius = sqrt(nlo_vk_complex_abs_sq(base));
+    if (radius == 0.0) {
+        if (exponent.re == 0.0 && exponent.im == 0.0) {
+            return nlo_vk_make_complex(1.0, 0.0);
+        }
+        return nlo_vk_make_complex(0.0, 0.0);
+    }
+
+    double theta = nlo_atan2_double(base.im, base.re);
+    double log_radius = nlo_log_double(radius);
+    double scaled_re = (exponent.re * log_radius) - (exponent.im * theta);
+    double scaled_im = (exponent.re * theta) + (exponent.im * log_radius);
+    double magnitude = nlo_exp_double(scaled_re);
+    double sin_angle = 0.0;
+    double cos_angle = 0.0;
+    nlo_sincos_double(scaled_im, sin_angle, cos_angle);
+    return nlo_vk_make_complex(magnitude * cos_angle,
+                               magnitude * sin_angle);
+}
+
+nlo_vk_complex64 nlo_vk_complex_div(nlo_vk_complex64 lhs, nlo_vk_complex64 rhs)
+{
+    return nlo_vk_complex_mul(lhs, nlo_vk_complex_real_pow(rhs, -1.0));
+}
+
+nlo_vk_complex64 nlo_vk_complex_sin(nlo_vk_complex64 value)
+{
+    double sin_re = 0.0;
+    double cos_re = 0.0;
+    nlo_sincos_double(value.re, sin_re, cos_re);
+    double exp_im = nlo_exp_double(value.im);
+    double exp_neg_im = nlo_exp_double(-value.im);
+    double cosh_im = 0.5 * (exp_im + exp_neg_im);
+    double sinh_im = 0.5 * (exp_im - exp_neg_im);
+    return nlo_vk_make_complex(sin_re * cosh_im,
+                               cos_re * sinh_im);
+}
+
+nlo_vk_complex64 nlo_vk_complex_cos(nlo_vk_complex64 value)
+{
+    double sin_re = 0.0;
+    double cos_re = 0.0;
+    nlo_sincos_double(value.re, sin_re, cos_re);
+    double exp_im = nlo_exp_double(value.im);
+    double exp_neg_im = nlo_exp_double(-value.im);
+    double cosh_im = 0.5 * (exp_im + exp_neg_im);
+    double sinh_im = 0.5 * (exp_im - exp_neg_im);
+    return nlo_vk_make_complex(cos_re * cosh_im,
+                               -sin_re * sinh_im);
+}
+
+#endif

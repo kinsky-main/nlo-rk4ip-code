@@ -4,6 +4,7 @@
  */
 
 #include "physics/operator_program.h"
+#include "physics/operator_program_jit.h"
 
 nlo_vec_status nlo_operator_program_execute(
     nlo_vector_backend* backend,
@@ -17,9 +18,21 @@ nlo_vec_status nlo_operator_program_execute(
     if (backend == NULL ||
         program == NULL ||
         eval_ctx == NULL ||
-        stack_vectors == NULL ||
         out_vector == NULL ||
-        !program->active ||
+        !program->active) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_vec_status jit_status =
+        nlo_operator_program_execute_jit(backend, program, eval_ctx, out_vector);
+    if (jit_status == NLO_VEC_STATUS_OK) {
+        return NLO_VEC_STATUS_OK;
+    }
+    if (jit_status != NLO_VEC_STATUS_UNSUPPORTED) {
+        return jit_status;
+    }
+
+    if (stack_vectors == NULL ||
         program->required_stack_slots == 0u ||
         stack_vector_count < program->required_stack_slots) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
