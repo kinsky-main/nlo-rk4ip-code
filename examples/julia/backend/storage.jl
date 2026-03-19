@@ -4,6 +4,17 @@ using SHA
 using SQLite
 using DBInterface
 
+function _emit_db_progress(label::AbstractString, current::Integer, total::Integer)
+    total_i = max(Int(total), 1)
+    current_i = clamp(Int(current), 0, total_i)
+    width = 24
+    filled = round(Int, width * (current_i / total_i))
+    bar = repeat("#", filled) * repeat("-", width - filled)
+    print(stderr, "[example-db] [", bar, "] ", current_i, "/", total_i, " ", label, current_i >= total_i ? "\n" : "\r")
+    flush(stderr)
+    return nothing
+end
+
 struct LoadedCase
     run_id::String
     case_key::String
@@ -36,40 +47,43 @@ function _with_db(f::Function, db::ExampleRunDB)
 end
 
 function ensure_schema!(db::ExampleRunDB)
-    schema = """
-    PRAGMA foreign_keys=ON;
-    CREATE TABLE IF NOT EXISTS ex_run_groups (
-      example_name TEXT NOT NULL,
-      run_group TEXT NOT NULL,
-      created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(example_name, run_group)
-    );
-    CREATE TABLE IF NOT EXISTS ex_case_runs (
-      example_name TEXT NOT NULL,
-      run_group TEXT NOT NULL,
-      case_key TEXT NOT NULL,
-      run_id TEXT NOT NULL,
-      meta_json TEXT NOT NULL DEFAULT '{}',
-      created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY(example_name, run_group, case_key),
-      UNIQUE(run_id),
-      FOREIGN KEY(example_name, run_group)
-        REFERENCES ex_run_groups(example_name, run_group) ON DELETE CASCADE
-    );
-    CREATE TABLE IF NOT EXISTS ex_step_history (
-      run_id TEXT PRIMARY KEY,
-      event_count INTEGER NOT NULL,
-      dropped INTEGER NOT NULL,
-      capacity INTEGER NOT NULL,
-      step_index_blob BLOB NOT NULL,
-      z_blob BLOB NOT NULL,
-      step_size_blob BLOB NOT NULL,
-      next_step_size_blob BLOB NOT NULL,
-      error_blob BLOB NOT NULL
-    );
-    """
     _with_db(db) do conn
-        DBInterface.execute(conn, schema)
+        SQLite.execute(conn, "PRAGMA foreign_keys=ON;")
+        SQLite.execute(conn, """
+            CREATE TABLE IF NOT EXISTS ex_run_groups (
+              example_name TEXT NOT NULL,
+              run_group TEXT NOT NULL,
+              created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(example_name, run_group)
+            );
+            """)
+        SQLite.execute(conn, """
+            CREATE TABLE IF NOT EXISTS ex_case_runs (
+              example_name TEXT NOT NULL,
+              run_group TEXT NOT NULL,
+              case_key TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              meta_json TEXT NOT NULL DEFAULT '{}',
+              created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(example_name, run_group, case_key),
+              UNIQUE(run_id),
+              FOREIGN KEY(example_name, run_group)
+                REFERENCES ex_run_groups(example_name, run_group) ON DELETE CASCADE
+            );
+            """)
+        SQLite.execute(conn, """
+            CREATE TABLE IF NOT EXISTS ex_step_history (
+              run_id TEXT PRIMARY KEY,
+              event_count INTEGER NOT NULL,
+              dropped INTEGER NOT NULL,
+              capacity INTEGER NOT NULL,
+              step_index_blob BLOB NOT NULL,
+              z_blob BLOB NOT NULL,
+              step_size_blob BLOB NOT NULL,
+              next_step_size_blob BLOB NOT NULL,
+              error_blob BLOB NOT NULL
+            );
+            """)
     end
     return db
 end
@@ -87,7 +101,15 @@ end
 function begin_group(db::ExampleRunDB, example_name::AbstractString, run_group::Union{Nothing, AbstractString} = nothing)
     resolved = run_group === nothing || isempty(run_group) ? new_run_group_id() : String(run_group)
     _with_db(db) do conn
-        DBInterface.execute(conn,
+        SQLite.execute(conn, """
+            CREATE TABLE IF NOT EXISTS ex_run_groups (
+              example_name TEXT NOT NULL,
+              run_group TEXT NOT NULL,
+              created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(example_name, run_group)
+            );
+            """)
+        SQLite.execute(conn,
             "INSERT OR IGNORE INTO ex_run_groups(example_name, run_group) VALUES(?, ?);",
             (String(example_name), resolved))
     end
@@ -159,7 +181,21 @@ function save_case!(db::ExampleRunDB;
                     meta = nothing)
     begin_group(db, example_name, run_group)
     _with_db(db) do conn
-        DBInterface.execute(conn,
+        SQLite.execute(conn, """
+            CREATE TABLE IF NOT EXISTS ex_case_runs (
+              example_name TEXT NOT NULL,
+              run_group TEXT NOT NULL,
+              case_key TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              meta_json TEXT NOT NULL DEFAULT '{}',
+              created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(example_name, run_group, case_key),
+              UNIQUE(run_id),
+              FOREIGN KEY(example_name, run_group)
+                REFERENCES ex_run_groups(example_name, run_group) ON DELETE CASCADE
+            );
+            """)
+        SQLite.execute(conn,
             "INSERT OR REPLACE INTO ex_case_runs(example_name, run_group, case_key, run_id, meta_json) VALUES(?,?,?,?,?);",
             (String(example_name), String(run_group), String(case_key), String(run_id), _meta_json(meta)))
     end
@@ -176,6 +212,7 @@ function save_case_from_solver_meta!(db::ExampleRunDB;
     storage_result isa Dict || error("solver meta does not contain storage_result")
     run_id = String(get(storage_result, "run_id", ""))
     isempty(run_id) && error("solver storage_result did not provide a run_id")
+    _emit_db_progress("writing metadata for $(case_key)", 0, 1)
     save_case!(db;
         example_name = example_name,
         run_group = run_group,
@@ -183,6 +220,7 @@ function save_case_from_solver_meta!(db::ExampleRunDB;
         run_id = run_id,
         meta = meta)
     save_step_history && save_step_history!(db; run_id = run_id, step_history = get(solver_meta, "step_history", nothing))
+    _emit_db_progress("writing metadata for $(case_key)", 1, 1)
     return run_id
 end
 
@@ -290,7 +328,20 @@ function save_step_history!(db::ExampleRunDB; run_id::AbstractString, step_histo
     error_values = error_values[1:count]
 
     _with_db(db) do conn
-        DBInterface.execute(conn,
+        SQLite.execute(conn, """
+            CREATE TABLE IF NOT EXISTS ex_step_history (
+              run_id TEXT PRIMARY KEY,
+              event_count INTEGER NOT NULL,
+              dropped INTEGER NOT NULL,
+              capacity INTEGER NOT NULL,
+              step_index_blob BLOB NOT NULL,
+              z_blob BLOB NOT NULL,
+              step_size_blob BLOB NOT NULL,
+              next_step_size_blob BLOB NOT NULL,
+              error_blob BLOB NOT NULL
+            );
+            """)
+        SQLite.execute(conn,
             "INSERT OR REPLACE INTO ex_step_history(run_id, event_count, dropped, capacity, step_index_blob, z_blob, step_size_blob, next_step_size_blob, error_blob) "
             * "VALUES(?,?,?,?,?,?,?,?,?);",
             (

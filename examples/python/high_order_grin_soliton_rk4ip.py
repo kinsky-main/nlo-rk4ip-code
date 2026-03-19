@@ -281,14 +281,14 @@ def _run(args: argparse.Namespace) -> float:
     nonlinear_case_key = "nonlinear"
     linear_case_key = "linear_baseline"
 
-    nt = 64
+    nt = 128
     nx = 40
     ny = 40
     dt = 0.06
-    dx = 0.60
-    dy = 0.60
+    dx = 0.24
+    dy = 0.24
     temporal_width = 0.30
-    soliton_order = 3.0
+    soliton_order = 1.0
     mode_width = 2.4
     spatial_chirp = 0.0
     beta2 = -0.08
@@ -296,7 +296,7 @@ def _run(args: argparse.Namespace) -> float:
     grin_strength = 1.5e-3
     gamma_nonlinear = 1.0
     z_period = soliton_period(beta2, temporal_width)
-    z_final = 4.0 * z_period
+    z_final = 2.0 * z_period
     num_records = 72
 
     t_axis = centered_time_grid(nt, dt)
@@ -602,7 +602,7 @@ def _run(args: argparse.Namespace) -> float:
         linear_xy,
         output_dir / "high_order_grin_soliton_linear_3d_intensity_contour_surfaces.png",
         input_is_intensity=True,
-        num_levels=11,
+        num_levels=20,
         max_x_samples=48,
         max_y_samples=48,
         max_z_samples=72,
@@ -615,7 +615,7 @@ def _run(args: argparse.Namespace) -> float:
         nonlinear_xy,
         output_dir / "high_order_grin_soliton_nonlinear_3d_intensity_contour_surfaces.png",
         input_is_intensity=True,
-        num_levels=11,
+        num_levels=20,
         max_x_samples=48,
         max_y_samples=48,
         max_z_samples=72,
@@ -628,11 +628,6 @@ def _run(args: argparse.Namespace) -> float:
         z_scaled,
         nonlinear_records,
         output_dir / "high_order_grin_soliton_nonlinear_time_sweep.mp4",
-        max_time_frames=21,
-        num_levels=11,
-        max_x_samples=48,
-        max_y_samples=48,
-        max_z_samples=72,
     )
 
     nonlinear_power_drift = abs(float(nonlinear_power[-1] - nonlinear_power[0])) / max(float(nonlinear_power[0]), 1.0e-30)

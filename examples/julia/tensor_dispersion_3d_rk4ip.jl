@@ -98,7 +98,8 @@ end
 function main(argv = ARGS)
     args = parse_example_args("tensor_dispersion_3d", "Tensor 3D dispersion/diffraction with DB-backed run/replot.", argv)
     activate_example_theme!()
-    NLOLib.set_progress_options(enabled = false)
+    NLOLib.set_progress_options(enabled = true, milestone_percent = 2, emit_on_step_adjust = true)
+    NLOLib.set_log_level(NLOLIB_LOG_LEVEL_INFO)
     db = ExampleRunDB(args[:db_path])
     example_name = "tensor_dispersion_3d_rk4ip"
     case_key = "default"

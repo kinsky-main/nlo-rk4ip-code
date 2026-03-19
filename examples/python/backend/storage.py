@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -163,6 +164,17 @@ class ExampleRunDB:
             "log_final_output_field_to_db": bool(log_final_output_field_to_db),
         }
 
+    @staticmethod
+    def _emit_db_progress(label: str, current: int, total: int) -> None:
+        total = max(int(total), 1)
+        current = min(max(int(current), 0), total)
+        width = 24
+        filled = int(round(width * (current / total)))
+        bar = ("#" * filled).ljust(width, "-")
+        end = "\n" if current >= total else "\r"
+        sys.stderr.write(f"[example-db] [{bar}] {current}/{total} {label}{end}")
+        sys.stderr.flush()
+
     def save_case(
         self,
         *,
@@ -198,6 +210,7 @@ class ExampleRunDB:
         run_id = str(storage_result.get("run_id", "")).strip()
         if not run_id:
             raise RuntimeError("solver storage_result did not provide a run_id.")
+        self._emit_db_progress(f"writing metadata for {case_key}", 0, 1)
         self.save_case(
             example_name=example_name,
             run_group=run_group,
@@ -207,6 +220,7 @@ class ExampleRunDB:
         )
         if save_step_history:
             self.save_step_history(run_id=run_id, step_history=solver_meta.get("step_history"))
+        self._emit_db_progress(f"writing metadata for {case_key}", 1, 1)
         return run_id
 
     def list_cases(self, *, example_name: str, run_group: str) -> list[CaseListing]:
