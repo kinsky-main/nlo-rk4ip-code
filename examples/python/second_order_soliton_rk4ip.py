@@ -616,7 +616,10 @@ def _run(args: argparse.Namespace) -> float:
         raise RuntimeError("analytical spectral map contains non-finite values; refusing to render blank output.")
 
     z_map_norm = np.asarray(z_map, dtype=np.float64) / z0
-    telemetry_plot = normalize_step_telemetry(telemetry, z0)
+    telemetry_plot = normalize_step_telemetry(
+        select_step_telemetry_for_plot(telemetry, z_records),
+        z0,
+    )
 
     output_dir = args.output_dir
     save_plots(

@@ -122,8 +122,8 @@ function rms_temporal_width_curve(records_tyx, t_axis)
     return out
 end
 
-peak_intensity_curve(records_tyx) = [maximum(abs2.(ComplexF64.(records_tyx[ridx, :, :, :]))) for ridx in axes(records_tyx, 1)]
 total_power_curve(records_tyx) = [sum(abs2.(ComplexF64.(records_tyx[ridx, :, :, :]))) for ridx in axes(records_tyx, 1)]
+peak_transverse_intensity_curve(records_xy) = [maximum(Float64.(records_xy[ridx, :, :])) for ridx in axes(records_xy, 1)]
 
 function centerline_intensity_map(records_tyx)
     center_row = Int(cld(size(records_tyx, 3), 2))
@@ -182,7 +182,7 @@ function save_grin_plots(output_dir, z_axis, t_axis, x_axis, y_axis, field0_tyx,
     save_example_figure(joinpath(output_dir, "high_order_grin_soliton_rms_radius.png"), fig3)
 
     fig4 = styled_figure()
-    ax4 = Axis(fig4[1, 1], xlabel = "z / L_D", ylabel = "Peak intensity", title = "Peak intensity")
+    ax4 = Axis(fig4[1, 1], xlabel = "z / L_D", ylabel = "Peak transverse intensity", title = "Peak transverse intensity")
     lines!(ax4, z_axis, nonlinear_peak, label = "Nonlinear")
     lines!(ax4, z_axis, linear_peak, label = "Linear baseline")
     axislegend(ax4, position = :rt)
@@ -425,12 +425,14 @@ function main(argv = ARGS)
         save_case_from_solver_meta!(db; example_name = example_name, run_group = run_group, case_key = linear_case_key, solver_meta = result_linear.meta, meta = meta)
     end
 
+    nonlinear_xy = time_integrated_xy_records(nonlinear_records)
+    linear_xy = time_integrated_xy_records(linear_records)
     nonlinear_radius = rms_radius_curve(nonlinear_records, x_axis, y_axis)
     linear_radius = rms_radius_curve(linear_records, x_axis, y_axis)
     nonlinear_temporal_width = rms_temporal_width_curve(nonlinear_records, t_axis)
     linear_temporal_width = rms_temporal_width_curve(linear_records, t_axis)
-    nonlinear_peak = peak_intensity_curve(nonlinear_records)
-    linear_peak = peak_intensity_curve(linear_records)
+    nonlinear_peak = peak_transverse_intensity_curve(nonlinear_xy)
+    linear_peak = peak_transverse_intensity_curve(linear_xy)
     nonlinear_overlap = overlap_fidelity_curve(nonlinear_records, field0_tyx)
     linear_overlap = overlap_fidelity_curve(linear_records, field0_tyx)
     nonlinear_error = intensity_error_curve(nonlinear_records, field0_tyx)

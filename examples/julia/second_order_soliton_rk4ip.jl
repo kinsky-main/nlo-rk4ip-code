@@ -13,7 +13,62 @@ to_dimensionless_time(T, t0) = Float64.(T) ./ Float64(t0)
 to_normalized_envelope(A, z, p0, alpha) = ComplexF64.(A) .* exp(0.5 * alpha * z) ./ sqrt(p0)
 to_physical_envelope(U, z, p0, alpha) = ComplexF64.(U) .* (sqrt(p0) * exp(-0.5 * alpha * z))
 
-function save_soliton_plots(output_dir, t, z_axis_norm, numerical_records, reference_records, telemetry)
+function filter_record_clipped_steps(telemetry, z_axis)
+    telemetry === nothing && return telemetry
+    haskey(telemetry, "z") || return telemetry
+    haskey(telemetry, "step_size") || return telemetry
+    haskey(telemetry, "next_step_size") || return telemetry
+
+    z_samples = Float64.(z_axis)
+    length(z_samples) > 1 || return telemetry
+    spacing = (z_samples[end] - z_samples[1]) / Float64(length(z_samples) - 1)
+    (!isfinite(spacing) || spacing <= 0.0) && return telemetry
+
+    z = Float64.(telemetry["z"])
+    accepted = Float64.(telemetry["step_size"])
+    proposed = Float64.(telemetry["next_step_size"])
+    n = min(length(z), length(accepted), length(proposed))
+    n > 0 || return telemetry
+
+    z = z[1:n]
+    accepted = accepted[1:n]
+    proposed = proposed[1:n]
+    expected_boundaries = z_samples[2:end-1]
+    isempty(expected_boundaries) && return telemetry
+
+    proximity_eps = max(64.0 * eps(max(1.0, abs(z_samples[end]))), spacing * 0.25)
+    distance_to_expected = [minimum(abs.(value .- expected_boundaries)) for value in z]
+    clipped = distance_to_expected .<= proximity_eps
+    any(clipped) || return telemetry
+
+    keep = .!clipped
+    kept = count(keep)
+    total = length(keep)
+    if kept <= 0
+        return telemetry
+    end
+
+    min_keep = max(16, ceil(Int, 0.35 * total))
+    if kept < min_keep
+        return telemetry
+    end
+
+    z_all_span = total > 1 ? (z[end] - z[1]) : 0.0
+    z_filtered = z[keep]
+    z_filtered_span = kept > 1 ? (z_filtered[end] - z_filtered[1]) : 0.0
+    if z_all_span > 0.0 && z_filtered_span < (0.80 * z_all_span)
+        return telemetry
+    end
+
+    return Dict(
+        "z" => z_filtered,
+        "step_size" => accepted[keep],
+        "next_step_size" => proposed[keep],
+        "dropped" => get(telemetry, "dropped", 0),
+    )
+end
+
+function save_soliton_plots(output_dir, t, z_axis, z_axis_norm, numerical_records, reference_records, telemetry)
     mkpath(output_dir)
 
     fig1 = styled_figure()
@@ -41,11 +96,12 @@ function save_soliton_plots(output_dir, t, z_axis_norm, numerical_records, refer
     lines!(ax3, z_axis_norm, relative_l2_intensity_error_curve(numerical_records, reference_records))
     save_example_figure(joinpath(output_dir, "soliton_error_curve.png"), fig3)
 
-    if telemetry !== nothing && !isempty(get(telemetry, "z", Float64[]))
+    telemetry_plot = filter_record_clipped_steps(telemetry, z_axis)
+    if telemetry_plot !== nothing && !isempty(get(telemetry_plot, "z", Float64[]))
         fig4 = styled_figure()
         ax4 = Axis(fig4[1, 1], xlabel = "z (m)", ylabel = "Step size (m)", title = "Adaptive step history")
-        lines!(ax4, telemetry["z"], telemetry["step_size"], label = "accepted")
-        lines!(ax4, telemetry["z"], telemetry["next_step_size"], label = "next")
+        lines!(ax4, telemetry_plot["z"], telemetry_plot["step_size"], label = "accepted")
+        lines!(ax4, telemetry_plot["z"], telemetry_plot["next_step_size"], label = "next")
         axislegend(ax4, position = :rt)
         save_example_figure(joinpath(output_dir, "soliton_step_history.png"), fig4)
     end
@@ -145,7 +201,7 @@ function main(argv = ARGS)
     epsilon = relative_l2_intensity_error(normalized_records[end, :], reference_records[end, :])
 
     z_axis_norm = z_axis ./ z_final
-    save_soliton_plots(args[:output_dir], t, z_axis_norm, normalized_records, reference_records, telemetry)
+    save_soliton_plots(args[:output_dir], t, z_axis, z_axis_norm, normalized_records, reference_records, telemetry)
 
     println("second-order soliton summary")
     println("  run_group = $(run_group)")
