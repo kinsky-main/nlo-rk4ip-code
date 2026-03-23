@@ -108,16 +108,18 @@ function plot_3d_intensity_contours_propagation(
     z_axis,
     field_records,
     output_path;
-    intensity_cutoff::Real = 0.05,
-    num_levels::Integer = 7,
-    max_x_samples::Integer = 48,
-    max_y_samples::Integer = 48,
-    max_z_samples::Integer = 18,
+    intensity_cutoff::Real = 0.01,
+    num_levels::Integer = 20,
+    max_x_samples::Integer = 64,
+    max_y_samples::Integer = 100,
+    max_z_samples::Integer = 64,
     alpha_min::Real = 0.12,
     alpha_max::Real = 0.72,
     input_is_intensity::Bool = false,
     normalization_peak = nothing,
     z_label::AbstractString = "z",
+    xy_crop_inset::Real = 0.12,
+    xy_crop_padding::Real = 0.16,
 )
     0.0 <= intensity_cutoff < 1.0 || error("intensity_cutoff must be in [0, 1).")
     num_levels > 0 || error("num_levels must be positive.")
@@ -125,6 +127,8 @@ function plot_3d_intensity_contours_propagation(
     max_y_samples > 0 || error("max_y_samples must be positive.")
     max_z_samples > 0 || error("max_z_samples must be positive.")
     0.0 <= alpha_min <= alpha_max <= 1.0 || error("alpha_min/alpha_max must satisfy 0 <= alpha_min <= alpha_max <= 1.")
+    0.0 <= xy_crop_inset < 1.0 || error("xy_crop_inset must be in [0, 1).")
+    0.0 <= xy_crop_padding < 1.0 || error("xy_crop_padding must be in [0, 1).")
 
     x = Float64.(x_axis)
     y = Float64.(y_axis)
@@ -156,8 +160,6 @@ function plot_3d_intensity_contours_propagation(
     end
     cmap = nlolib_hdr_colormap()
     cmap_samples = CairoMakie.to_colormap(cmap)
-    x_range = range(minimum(x_small), maximum(x_small), length = length(x_small))
-    y_range = range(minimum(y_small), maximum(y_small), length = length(y_small))
     z_range = range(minimum(z_small), maximum(z_small), length = length(z_small))
     level_upper = min(0.92, max_intensity)
     if level_upper <= Float64(intensity_cutoff)
@@ -165,6 +167,18 @@ function plot_3d_intensity_contours_propagation(
         return nothing
     end
     levels = collect(range(Float64(intensity_cutoff), level_upper, length = num_levels))
+    x_small, y_small, intensity_small = _crop_xy_within_low_contour(
+        x_small,
+        y_small,
+        intensity[z_indices, y_indices, x_indices];
+        intensity_cutoff = Float64(intensity_cutoff),
+        level_upper = Float64(level_upper),
+        xy_crop_inset = Float64(xy_crop_inset),
+        xy_crop_padding = Float64(xy_crop_padding),
+    )
+    x_range = range(minimum(x_small), maximum(x_small), length = length(x_small))
+    y_range = range(minimum(y_small), maximum(y_small), length = length(y_small))
+    volume_data = permutedims(intensity_small, (3, 2, 1))
 
     fig = styled_figure(tensor = true)
     x_span = max(maximum(x_small) - minimum(x_small), 1.0e-9)
@@ -214,6 +228,70 @@ function plot_3d_intensity_contours_propagation(
     ylims!(ax, minimum(y_small), maximum(y_small))
     zlims!(ax, minimum(z_small), maximum(z_small))
     return save_example_figure(output_path, fig)
+end
+
+function _crop_xy_within_low_contour(
+    x_axis,
+    y_axis,
+    intensity_zyx;
+    intensity_cutoff::Real,
+    level_upper::Real,
+    xy_crop_inset::Real,
+    xy_crop_padding::Real,
+)
+    x = Float64.(x_axis)
+    y = Float64.(y_axis)
+    intensity = Float64.(intensity_zyx)
+    ndims(intensity) == 3 || return x, y, intensity
+    length(x) >= 6 || return x, y, intensity
+    length(y) >= 6 || return x, y, intensity
+    size(intensity, 2) == length(y) || return x, y, intensity
+    size(intensity, 3) == length(x) || return x, y, intensity
+
+    crop_threshold = Float64(intensity_cutoff) + Float64(xy_crop_inset) * max(Float64(level_upper) - Float64(intensity_cutoff), 0.0)
+    crop_threshold = min(Float64(level_upper), max(Float64(intensity_cutoff), crop_threshold))
+    support_xy = dropdims(maximum(intensity, dims = 1), dims = 1) .>= crop_threshold
+    any(support_xy) || return x, y, intensity
+
+    support_indices = findall(support_xy)
+    x_values = [idx[2] for idx in support_indices]
+    y_values = [idx[1] for idx in support_indices]
+    x0 = minimum(x_values)
+    x1 = maximum(x_values)
+    y0 = minimum(y_values)
+    y1 = maximum(y_values)
+
+    x_pad_value = max(Float64(xy_crop_padding) * max(x[end] - x[1], 0.0), _median_axis_step(x))
+    y_pad_value = max(Float64(xy_crop_padding) * max(y[end] - y[1], 0.0), _median_axis_step(y))
+    x0, x1 = _expand_crop_window_by_value(x, x0, x1; pad_value = x_pad_value)
+    y0, y1 = _expand_crop_window_by_value(y, y0, y1; pad_value = y_pad_value)
+
+    if x0 == 1 && x1 == length(x) && y0 == 1 && y1 == length(y)
+        return x, y, intensity
+    end
+
+    return x[x0:x1], y[y0:y1], intensity[:, y0:y1, x0:x1]
+end
+
+function _median_axis_step(axis)
+    values = Float64.(axis)
+    length(values) < 2 && return 0.0
+    diffs = diff(values)
+    diffs = diffs[isfinite.(diffs) .& (diffs .> 0.0)]
+    isempty(diffs) && return 0.0
+    return Float64(minimum(diffs))
+end
+
+function _expand_crop_window_by_value(axis, start::Integer, stop::Integer; pad_value::Real)
+    values = Float64.(axis)
+    isempty(values) && return Int(start), Int(stop)
+    target_min = max(values[1], values[Int(start)] - Float64(pad_value))
+    target_max = min(values[end], values[Int(stop)] + Float64(pad_value))
+    start_idx = searchsortedfirst(values, target_min)
+    stop_idx = searchsortedlast(values, target_max)
+    start_idx = clamp(start_idx, 1, length(values))
+    stop_idx = clamp(stop_idx, start_idx, length(values))
+    return start_idx, stop_idx
 end
 
 

@@ -252,7 +252,11 @@ def _run(args: argparse.Namespace) -> float:
     runner = NloExampleRunner()
 
     if args.replot:
-        run_group = db.resolve_replot_group(example_name, args.run_group)
+        run_group = db.resolve_replot_group(
+            example_name,
+            args.run_group,
+            required_case_keys=[kerr_case_key, raman_case_key],
+        )
         loaded_kerr = db.load_case(example_name=example_name, run_group=run_group, case_key=kerr_case_key)
         loaded_raman = db.load_case(example_name=example_name, run_group=run_group, case_key=raman_case_key)
         meta = loaded_raman.meta
