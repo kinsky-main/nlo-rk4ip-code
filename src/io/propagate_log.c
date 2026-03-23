@@ -43,6 +43,9 @@ static const char* nlo_backend_type_to_string(nlo_vector_backend_type backend_ty
     if (backend_type == NLO_VECTOR_BACKEND_VULKAN) {
         return "VULKAN";
     }
+    if (backend_type == NLO_VECTOR_BACKEND_CUDA) {
+        return "CUDA";
+    }
     if (backend_type == NLO_VECTOR_BACKEND_AUTO) {
         return "AUTO";
     }

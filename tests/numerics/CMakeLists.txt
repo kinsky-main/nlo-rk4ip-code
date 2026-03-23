@@ -12,6 +12,7 @@ target_link_libraries(test_nlo_numerics PRIVATE ${_nlo_cblas_target})
 target_compile_definitions(test_nlo_numerics PRIVATE
   NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+  NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
 )
 if(UNIX)
   target_link_libraries(test_nlo_numerics PRIVATE m)
@@ -35,6 +36,8 @@ set(_nlo_vector_backend_test_sources
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_format.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
 )
 if(NLO_ENABLE_VULKAN_BACKEND)
   list(APPEND _nlo_vector_backend_test_sources
@@ -44,6 +47,7 @@ if(NLO_ENABLE_VULKAN_BACKEND)
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_dispatch.c
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
+    ${CMAKE_SOURCE_DIR}/src/numerics/vk_operator_jit.c
   )
 else()
   list(APPEND _nlo_vector_backend_test_sources
@@ -61,14 +65,47 @@ target_include_directories(test_nlo_vector_backend PRIVATE
 )
 if(NLO_ENABLE_VULKAN_BACKEND)
   target_include_directories(test_nlo_vector_backend PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
+  find_path(NLO_TEST_NUM_GLSLANG_C_INCLUDE_DIR
+    NAMES glslang_c_interface.h
+    HINTS
+      ENV VULKAN_SDK
+    PATH_SUFFIXES
+      Include/glslang/Include
+      glslang/Include
+  )
+  if(NLO_TEST_NUM_GLSLANG_C_INCLUDE_DIR)
+    target_include_directories(test_nlo_vector_backend PRIVATE ${NLO_TEST_NUM_GLSLANG_C_INCLUDE_DIR})
+  endif()
+  find_path(NLO_TEST_NUM_GLSLANG_RESOURCE_INCLUDE_DIR
+    NAMES resource_limits_c.h
+    HINTS
+      ENV VULKAN_SDK
+    PATH_SUFFIXES
+      Include/glslang/Public
+      glslang/Public
+  )
+  if(NLO_TEST_NUM_GLSLANG_RESOURCE_INCLUDE_DIR)
+    target_include_directories(test_nlo_vector_backend PRIVATE ${NLO_TEST_NUM_GLSLANG_RESOURCE_INCLUDE_DIR})
+  endif()
 endif()
 target_link_libraries(test_nlo_vector_backend PRIVATE ${_nlo_cblas_target})
 target_compile_definitions(test_nlo_vector_backend PRIVATE
   NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+  NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
 )
 if(NLO_ENABLE_VULKAN_BACKEND)
-  target_link_libraries(test_nlo_vector_backend PRIVATE Vulkan::Vulkan)
+  target_link_libraries(test_nlo_vector_backend PRIVATE Vulkan::Vulkan Vulkan::glslang)
+  if(WIN32 AND DEFINED ENV{VULKAN_SDK})
+    target_link_directories(test_nlo_vector_backend PRIVATE "$ENV{VULKAN_SDK}/Lib")
+    target_link_libraries(test_nlo_vector_backend PRIVATE
+      $<$<CONFIG:Debug>:MachineIndependentd;OSDependentd;GenericCodeGend;SPIRVd;SPIRV-Toolsd;SPIRV-Tools-optd;glslang-default-resource-limitsd>
+      $<$<NOT:$<CONFIG:Debug>>:MachineIndependent;OSDependent;GenericCodeGen;SPIRV;SPIRV-Tools;SPIRV-Tools-opt;glslang-default-resource-limits>
+    )
+    if(MSVC)
+      target_link_options(test_nlo_vector_backend PRIVATE /IGNORE:4099)
+    endif()
+  endif()
 endif()
 if(TARGET nlo_vk_shaders)
   add_dependencies(test_nlo_vector_backend nlo_vk_shaders)
@@ -98,13 +135,32 @@ if(NLO_ENABLE_VULKAN_BACKEND)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}/src/generated
   )
-  target_link_libraries(test_nlo_vector_backend_vulkan PRIVATE ${_nlo_cblas_target} Vulkan::Vulkan)
+  if(NLO_ENABLE_VULKAN_BACKEND)
+    if(NLO_TEST_NUM_GLSLANG_C_INCLUDE_DIR)
+      target_include_directories(test_nlo_vector_backend_vulkan PRIVATE ${NLO_TEST_NUM_GLSLANG_C_INCLUDE_DIR})
+    endif()
+    if(NLO_TEST_NUM_GLSLANG_RESOURCE_INCLUDE_DIR)
+      target_include_directories(test_nlo_vector_backend_vulkan PRIVATE ${NLO_TEST_NUM_GLSLANG_RESOURCE_INCLUDE_DIR})
+    endif()
+  endif()
+  target_link_libraries(test_nlo_vector_backend_vulkan PRIVATE ${_nlo_cblas_target} Vulkan::Vulkan Vulkan::glslang)
   target_compile_definitions(test_nlo_vector_backend_vulkan PRIVATE
     NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
     NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+    NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
   )
   if(TARGET nlo_vk_shaders)
     add_dependencies(test_nlo_vector_backend_vulkan nlo_vk_shaders)
+  endif()
+  if(WIN32 AND DEFINED ENV{VULKAN_SDK})
+    target_link_directories(test_nlo_vector_backend_vulkan PRIVATE "$ENV{VULKAN_SDK}/Lib")
+    target_link_libraries(test_nlo_vector_backend_vulkan PRIVATE
+      $<$<CONFIG:Debug>:MachineIndependentd;OSDependentd;GenericCodeGend;SPIRVd;SPIRV-Toolsd;SPIRV-Tools-optd;glslang-default-resource-limitsd>
+      $<$<NOT:$<CONFIG:Debug>>:MachineIndependent;OSDependent;GenericCodeGen;SPIRV;SPIRV-Tools;SPIRV-Tools-opt;glslang-default-resource-limits>
+    )
+    if(MSVC)
+      target_link_options(test_nlo_vector_backend_vulkan PRIVATE /IGNORE:4099)
+    endif()
   endif()
   if(UNIX)
     target_link_libraries(test_nlo_vector_backend_vulkan PRIVATE m)

@@ -5,6 +5,7 @@
 
 #include "core/state.h"
 #include "io/snapshot_store.h"
+#include "utility/perf_profile.h"
 #include <stdbool.h>
 #include <string.h>
 
@@ -19,10 +20,13 @@ nlo_vec_status simulation_state_upload_initial_field(simulation_state* state, co
     }
 
     const size_t bytes = state->num_time_samples * sizeof(nlo_complex);
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     nlo_vec_status status = nlo_vec_upload(state->backend, state->current_field_vec, field, bytes);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
     }
+    NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_INITIAL_FIELD_UPLOAD, (uint64_t)bytes);
 
     int captured_initial_record = 0;
     if (state->num_recorded_samples > 1u) {
@@ -57,10 +61,18 @@ nlo_vec_status simulation_state_download_current_field(const simulation_state* s
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    return nlo_vec_download(state->backend,
-                            state->current_field_vec,
-                            out_field,
-                            state->num_time_samples * sizeof(nlo_complex));
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
+    nlo_vec_status status = nlo_vec_download(state->backend,
+                                             state->current_field_vec,
+                                             out_field,
+                                             state->num_time_samples * sizeof(nlo_complex));
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope,
+                           NLO_PERF_EVENT_SNAPSHOT_DOWNLOAD,
+                           (uint64_t)(state->num_time_samples * sizeof(nlo_complex)));
+    }
+    return status;
 }
 
 static nlo_vec_status nlo_snapshot_emit_record(simulation_state* state, size_t record_index, const nlo_complex* record)
@@ -133,21 +145,36 @@ static nlo_vec_status simulation_state_flush_oldest_ring_entry(simulation_state*
 
     const bool resume_simulation = nlo_vec_is_in_simulation(state->backend);
     if (resume_simulation) {
+        nlo_perf_scope pause_scope = {0.0, 0};
+        NLO_PERF_SCOPE_BEGIN(pause_scope);
         nlo_vec_status status = nlo_vec_end_simulation(state->backend);
         if (status != NLO_VEC_STATUS_OK) {
             return status;
         }
+        NLO_PERF_SCOPE_END(pause_scope, NLO_PERF_EVENT_SNAPSHOT_PAUSE_END_SIM, 0u);
     }
 
+    nlo_perf_scope download_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(download_scope);
     nlo_vec_status status = nlo_vec_download(state->backend,
                                              src,
                                              download_target,
                                              state->num_time_samples * sizeof(nlo_complex));
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(download_scope,
+                           NLO_PERF_EVENT_SNAPSHOT_DOWNLOAD,
+                           (uint64_t)(state->num_time_samples * sizeof(nlo_complex)));
+    }
 
     if (resume_simulation) {
+        nlo_perf_scope resume_scope = {0.0, 0};
+        NLO_PERF_SCOPE_BEGIN(resume_scope);
         nlo_vec_status begin_status = nlo_vec_begin_simulation(state->backend);
         if (status == NLO_VEC_STATUS_OK) {
             status = begin_status;
+        }
+        if (begin_status == NLO_VEC_STATUS_OK) {
+            NLO_PERF_SCOPE_END(resume_scope, NLO_PERF_EVENT_SNAPSHOT_RESUME_BEGIN_SIM, 0u);
         }
     }
 
@@ -206,23 +233,38 @@ nlo_vec_status simulation_state_capture_snapshot_from_vec(
             return NLO_VEC_STATUS_INVALID_ARGUMENT;
         }
 
-        const bool resume_simulation = nlo_vec_is_in_simulation(state->backend);
-        if (resume_simulation) {
-            nlo_vec_status status = nlo_vec_end_simulation(state->backend);
-            if (status != NLO_VEC_STATUS_OK) {
-                return status;
-            }
+    const bool resume_simulation = nlo_vec_is_in_simulation(state->backend);
+    if (resume_simulation) {
+        nlo_perf_scope pause_scope = {0.0, 0};
+        NLO_PERF_SCOPE_BEGIN(pause_scope);
+        nlo_vec_status status = nlo_vec_end_simulation(state->backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
         }
+        NLO_PERF_SCOPE_END(pause_scope, NLO_PERF_EVENT_SNAPSHOT_PAUSE_END_SIM, 0u);
+    }
 
+        nlo_perf_scope download_scope = {0.0, 0};
+        NLO_PERF_SCOPE_BEGIN(download_scope);
         nlo_vec_status status = nlo_vec_download(state->backend,
                                                  source_vec,
                                                  download_target,
                                                  state->num_time_samples * sizeof(nlo_complex));
+        if (status == NLO_VEC_STATUS_OK) {
+            NLO_PERF_SCOPE_END(download_scope,
+                               NLO_PERF_EVENT_SNAPSHOT_DOWNLOAD,
+                               (uint64_t)(state->num_time_samples * sizeof(nlo_complex)));
+        }
 
         if (resume_simulation) {
+            nlo_perf_scope resume_scope = {0.0, 0};
+            NLO_PERF_SCOPE_BEGIN(resume_scope);
             nlo_vec_status begin_status = nlo_vec_begin_simulation(state->backend);
             if (status == NLO_VEC_STATUS_OK) {
                 status = begin_status;
+            }
+            if (begin_status == NLO_VEC_STATUS_OK) {
+                NLO_PERF_SCOPE_END(resume_scope, NLO_PERF_EVENT_SNAPSHOT_RESUME_BEGIN_SIM, 0u);
             }
         }
 

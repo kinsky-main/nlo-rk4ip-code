@@ -17,8 +17,27 @@ option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
 option(NLOLIB_BUILD_MATLAB_TESTS "Enable MATLAB runtime-handle parser tests when MATLAB is available" OFF)
 option(NLO_ENABLE_VULKAN_BACKEND "Enable Vulkan vector backend and shader compilation path" ON)
 option(NLO_ENABLE_VKFFT "Enable VkFFT backend integration for Vulkan FFT execution" ON)
+option(NLO_ENABLE_CUDA_BACKEND "Enable CUDA backend API/build scaffolding" OFF)
+option(NLO_ENABLE_CUFFT "Enable cuFFT/cuFFT Xt integration when CUDA backend support is present" OFF)
+option(NLO_ENABLE_NVRTC "Enable NVRTC runtime operator JIT integration when CUDA backend support is present" OFF)
+option(NLO_ENABLE_NCCL "Enable NCCL integration for single-node CUDA multi-GPU runs" OFF)
+option(NLO_ENABLE_DOCKER_VALIDATION "Enable Docker validation helper targets when Docker is available" OFF)
 option(NLO_BUMP_PATCH_ON_BUILD "Bump patch version in CMakeLists.txt after successful builds" ON)
 option(NLO_SQLITE_USE_FETCHCONTENT "Deprecated: SQLite amalgamation is always used" ON)
+
+if(NLO_ENABLE_CUDA_BACKEND)
+  find_package(CUDAToolkit QUIET)
+  if(NOT CUDAToolkit_FOUND)
+    message(WARNING "Disabling NLO_ENABLE_CUDA_BACKEND because no CUDA toolkit was found.")
+    set(NLO_ENABLE_CUDA_BACKEND OFF CACHE BOOL "Enable CUDA backend API/build scaffolding" FORCE)
+  endif()
+endif()
+
+if(NOT NLO_ENABLE_CUDA_BACKEND)
+  set(NLO_ENABLE_CUFFT OFF CACHE BOOL "Enable cuFFT/cuFFT Xt integration when CUDA backend support is present" FORCE)
+  set(NLO_ENABLE_NVRTC OFF CACHE BOOL "Enable NVRTC runtime operator JIT integration when CUDA backend support is present" FORCE)
+  set(NLO_ENABLE_NCCL OFF CACHE BOOL "Enable NCCL integration for single-node CUDA multi-GPU runs" FORCE)
+endif()
 
 if(NOT NLO_ENABLE_VULKAN_BACKEND)
   set(NLO_ENABLE_VKFFT OFF CACHE BOOL "Enable VkFFT backend integration for Vulkan FFT execution" FORCE)
@@ -80,6 +99,35 @@ if(NLOLIB_BUILD_BENCHMARKS)
 endif()
 if(NLOLIB_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+if(NLO_ENABLE_DOCKER_VALIDATION)
+  find_program(NLO_DOCKER_EXECUTABLE docker)
+  find_program(NLO_BASH_EXECUTABLE bash)
+  if(NLO_DOCKER_EXECUTABLE AND NLO_BASH_EXECUTABLE)
+    add_custom_target(docker_validate_cpu
+      COMMAND "${NLO_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/docker_validate_cpu.sh"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      USES_TERMINAL
+    )
+    add_custom_target(docker_validate_vulkan
+      COMMAND "${NLO_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/docker_validate_vulkan.sh"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      USES_TERMINAL
+    )
+    add_custom_target(docker_validate_cuda
+      COMMAND "${NLO_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/docker_validate_cuda.sh"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      USES_TERMINAL
+    )
+    add_custom_target(docker_validate_cuda_multigpu
+      COMMAND "${NLO_BASH_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/docker_validate_cuda_multigpu.sh"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      USES_TERMINAL
+    )
+  else()
+    message(WARNING "NLO_ENABLE_DOCKER_VALIDATION is ON, but docker or bash was not found on PATH.")
+  endif()
 endif()
 
 nlo_configure_docs_target()

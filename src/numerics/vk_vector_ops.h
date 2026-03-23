@@ -213,6 +213,66 @@ nlo_vec_status nlo_vk_op_complex_add_inplace(
     const nlo_vec_buffer* src
 );
 
+nlo_vec_status nlo_vk_op_complex_axpy_inplace_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src,
+    double alpha
+);
+
+nlo_vec_status nlo_vk_op_complex_affine_comb2_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta
+);
+
+nlo_vec_status nlo_vk_op_complex_affine_comb3_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma
+);
+
+nlo_vec_status nlo_vk_op_complex_affine_comb4_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma,
+    const nlo_vec_buffer* d,
+    double delta
+);
+
+nlo_vec_status nlo_vk_op_complex_embedded_error_pair_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* fine_out,
+    nlo_vec_buffer* coarse_out,
+    const nlo_vec_buffer* base,
+    const nlo_vec_buffer* stage_k4,
+    double fine_k4_coeff,
+    double coarse_k4_coeff,
+    const nlo_vec_buffer* stage_k5,
+    double coarse_k5_coeff
+);
+
+nlo_vec_status nlo_vk_op_complex_lerp(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    double alpha
+);
+
 /**
  * @brief Apply element-wise complex exponential in place.
  *

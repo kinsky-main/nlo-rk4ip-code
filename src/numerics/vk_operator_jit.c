@@ -6,6 +6,7 @@
 #include "backend/vector_backend_internal.h"
 #include "io/log_sink.h"
 #include "nlo_vk_shader_paths.h"
+#include "numerics/vk_backend_internal.h"
 #include "physics/operator_program_jit.h"
 #include "utility/perf_profile.h"
 #include <glslang_c_interface.h>
@@ -38,6 +39,17 @@ typedef struct {
 } nlo_vk_shader_include_context;
 
 static int nlo_vk_glslang_refcount = 0;
+static nlo_operator_jit_mode g_nlo_operator_jit_mode = NLO_OPERATOR_JIT_MODE_ON;
+
+void nlo_operator_program_set_jit_mode(nlo_operator_jit_mode mode)
+{
+    g_nlo_operator_jit_mode = mode;
+}
+
+nlo_operator_jit_mode nlo_operator_program_get_jit_mode(void)
+{
+    return g_nlo_operator_jit_mode;
+}
 
 static int nlo_str_builder_reserve(nlo_string_builder* builder, size_t extra)
 {
@@ -466,6 +478,8 @@ static int nlo_vk_build_operator_source(
                                "    uint _pad;\n"
                                "    double scalar0;\n"
                                "    double scalar1;\n"
+                               "    double scalar2;\n"
+                               "    double scalar3;\n"
                                "} pc;\n\n"
                                "layout(set = 0, binding = 0, std430) buffer DstBuffer { nlo_vk_complex64 dst[]; };\n"
                                "layout(set = 0, binding = 1, std430) readonly buffer FieldBuffer { nlo_vk_complex64 field_vals[]; };\n"
@@ -829,6 +843,13 @@ nlo_vec_status nlo_operator_program_prepare_jit(
     nlo_operator_program* program
 )
 {
+    if (g_nlo_operator_jit_mode == NLO_OPERATOR_JIT_MODE_OFF) {
+        if (program != NULL) {
+            program->vk_jit_active = 0;
+            program->vk_jit_entry = NULL;
+        }
+        return NLO_VEC_STATUS_UNSUPPORTED;
+    }
     if (backend == NULL || program == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
@@ -973,6 +994,9 @@ nlo_vec_status nlo_operator_program_execute_jit(
     nlo_vec_buffer* out_vector
 )
 {
+    if (g_nlo_operator_jit_mode == NLO_OPERATOR_JIT_MODE_OFF) {
+        return NLO_VEC_STATUS_UNSUPPORTED;
+    }
     if (backend == NULL || program == NULL || eval_ctx == NULL || out_vector == NULL) {
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
@@ -1071,7 +1095,9 @@ nlo_vec_status nlo_operator_program_execute_jit(
         .count = (uint32_t)out_vector->length,
         .pad = 0u,
         .scalar0 = eval_ctx->half_step_size,
-        .scalar1 = 0.0
+        .scalar1 = 0.0,
+        .scalar2 = 0.0,
+        .scalar3 = 0.0
     };
     vkCmdPushConstants(cmd,
                        backend->vk.pipeline_layout,
@@ -1083,7 +1109,13 @@ nlo_vec_status nlo_operator_program_execute_jit(
     const uint32_t groups =
         (uint32_t)((out_vector->length + (size_t)NLO_VK_LOCAL_SIZE_X - 1u) /
                    (size_t)NLO_VK_LOCAL_SIZE_X);
+    nlo_vk_timestamp_ticket timestamp_ticket = {0};
+    nlo_vk_timestamp_write_begin(backend,
+                                 cmd,
+                                 (uint32_t)NLO_PERF_EVENT_OPERATOR_PROGRAM_JIT_EXECUTE,
+                                 &timestamp_ticket);
     vkCmdDispatch(cmd, groups, 1u, 1u);
+    nlo_vk_timestamp_write_end(backend, cmd, &timestamp_ticket);
     nlo_vk_cmd_compute_to_compute(cmd,
                                   out_vector->vk_buffer,
                                   0u,

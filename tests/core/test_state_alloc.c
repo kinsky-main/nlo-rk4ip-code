@@ -7,6 +7,9 @@
 #include "core/init.h"
 #include "core/state.h"
 #include "io/snapshot_store.h"
+#include "numerics/rk4_kernel.h"
+#include "physics/operator_program_jit.h"
+#include "utility/perf_profile.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -600,6 +603,166 @@ static void test_runtime_operator_jit_warmup_vulkan(void)
 #endif
 }
 
+static void test_fused_step_activation_vulkan(void)
+{
+#if !NLO_ENABLE_VULKAN_BACKEND
+    printf("test_fused_step_activation_vulkan: skipped (Vulkan disabled at build).\n");
+    return;
+#else
+    nlo_vector_backend* probe = nlo_vector_backend_create_vulkan(NULL);
+    if (probe == NULL) {
+        printf("test_fused_step_activation_vulkan: skipped (Vulkan unavailable).\n");
+        return;
+    }
+    nlo_vector_backend_destroy(probe);
+
+    {
+        const size_t n = 128u;
+        sim_config* config = create_sim_config(n);
+        nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
+        simulation_state* state = NULL;
+        assert(config != NULL);
+        config->time.delta_time = 0.02;
+        config->time.pulse_period = (double)n * config->time.delta_time;
+        config->runtime.dispersion_factor_expr = "i*c0*(w^2)";
+        config->runtime.dispersion_expr = "exp(h*D)";
+        config->runtime.nonlinear_expr = "i*A*(c1*I)";
+        config->runtime.num_constants = 2u;
+        config->runtime.constants[0] = -0.25;
+        config->runtime.constants[1] = 1.0;
+        test_fill_expected_omega_grid(config->frequency.frequency_grid, n, config->time.delta_time);
+
+        assert(nlo_init_simulation_state(config, n, 2u, &exec_options, NULL, &state) == 0);
+        assert(state != NULL);
+        assert(nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN);
+        assert(state->vk_step_plan.active != 0);
+        assert(state->vk_step_plan.tensor_active == 0);
+
+        free_simulation_state(state);
+        free_sim_config(config);
+    }
+
+    {
+        const size_t nt = 8u;
+        const size_t nx = 4u;
+        const size_t ny = 2u;
+        const size_t total = nt * nx * ny;
+        sim_config* config = create_sim_config(total);
+        nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
+        simulation_state* state = NULL;
+        assert(config != NULL);
+        config->tensor.nt = nt;
+        config->tensor.nx = nx;
+        config->tensor.ny = ny;
+        config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
+        config->time.delta_time = 0.05;
+        config->time.pulse_period = (double)nt * config->time.delta_time;
+        config->spatial.delta_x = 0.5;
+        config->spatial.delta_y = 0.5;
+        config->runtime.linear_factor_expr = "i*(c0*wt*wt + c1*(kx*kx + ky*ky))";
+        config->runtime.linear_expr = "exp(h*D)";
+        config->runtime.potential_expr = "x+y+t";
+        config->runtime.nonlinear_expr = "i*A*(c2*I + V)";
+        config->runtime.num_constants = 3u;
+        config->runtime.constants[0] = -0.2;
+        config->runtime.constants[1] = 0.05;
+        config->runtime.constants[2] = 1.0;
+
+        assert(nlo_init_simulation_state(config, total, 2u, &exec_options, NULL, &state) == 0);
+        assert(state != NULL);
+        assert(nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN);
+        assert(state->vk_step_plan.active != 0);
+        assert(state->vk_step_plan.tensor_active != 0);
+        assert(state->tensor_compact_axis_symbols != 0);
+
+        free_simulation_state(state);
+        free_sim_config(config);
+    }
+
+    printf("test_fused_step_activation_vulkan: validates fused step activation for temporal and tensor Vulkan runs.\n");
+#endif
+}
+
+static void test_runtime_operator_force_interpreter_vulkan(void)
+{
+#if !NLO_ENABLE_VULKAN_BACKEND
+    printf("test_runtime_operator_force_interpreter_vulkan: skipped (Vulkan disabled at build).\n");
+    return;
+#else
+    nlo_vector_backend* probe = nlo_vector_backend_create_vulkan(NULL);
+    if (probe == NULL) {
+        printf("test_runtime_operator_force_interpreter_vulkan: skipped (Vulkan unavailable).\n");
+        return;
+    }
+    nlo_vector_backend_destroy(probe);
+
+    const size_t n = 128u;
+    nlo_complex input_field[128] = {0};
+    sim_config* config = create_sim_config(n);
+    assert(config != NULL);
+    config->time.delta_time = 0.02;
+    config->time.pulse_period = (double)n * config->time.delta_time;
+    config->propagation.propagation_distance = 0.05;
+    config->propagation.starting_step_size = 0.01;
+    config->propagation.max_step_size = 0.01;
+    config->propagation.min_step_size = 0.01;
+    config->runtime.dispersion_factor_expr = "i*c0*(w^2)";
+    config->runtime.dispersion_expr = "exp(h*D)";
+    config->runtime.nonlinear_expr = "sin(A)+sqrt(I+1.0)";
+    config->runtime.num_constants = 1u;
+    config->runtime.constants[0] = -0.5;
+    test_fill_expected_omega_grid(config->frequency.frequency_grid, n, config->time.delta_time);
+    for (size_t i = 0u; i < n; ++i) {
+        const double t = ((double)i - 0.5 * (double)(n - 1u)) * config->time.delta_time;
+        input_field[i] = nlo_make(exp(-(t * t) / 0.02), 0.0);
+    }
+
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
+    simulation_state* state = NULL;
+    assert(nlo_init_simulation_state(config,
+                                     n,
+                                     1u,
+                                     &exec_options,
+                                     NULL,
+                                     &state) == 0);
+    assert(state != NULL);
+    assert(nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN);
+
+    nlo_operator_program_set_jit_mode(NLO_OPERATOR_JIT_MODE_OFF);
+    nlo_perf_profile_set_enabled(1);
+    nlo_perf_profile_reset();
+    assert(simulation_state_upload_initial_field(state, input_field) == NLO_VEC_STATUS_OK);
+    solve_rk4(state);
+
+    nlo_perf_profile_snapshot snapshot = {0};
+    nlo_perf_profile_snapshot_read(&snapshot);
+    assert(snapshot.event_call_count[NLO_PERF_EVENT_OPERATOR_PROGRAM_JIT_EXECUTE] == 0u);
+    assert(snapshot.event_call_count[NLO_PERF_EVENT_OPERATOR_PROGRAM_INTERPRETER_EXECUTE] > 0u);
+
+    nlo_perf_profile_set_enabled(0);
+    nlo_operator_program_set_jit_mode(NLO_OPERATOR_JIT_MODE_ON);
+    free_simulation_state(state);
+    free_sim_config(config);
+    printf("test_runtime_operator_force_interpreter_vulkan: validates forced interpreter fallback.\n");
+#endif
+}
+
+static void test_cuda_execution_defaults(void)
+{
+    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CUDA);
+    assert(exec_options.backend_type == NLO_VECTOR_BACKEND_CUDA);
+    assert(exec_options.fft_backend == NLO_FFT_BACKEND_AUTO);
+    assert(exec_options.cuda.device_ordinal == -1);
+    assert(exec_options.cuda.enable_multi_gpu == 1);
+    assert(exec_options.cuda.max_devices == 8u);
+    assert(exec_options.cuda.enable_peer_access == 1);
+    assert(exec_options.cuda.stream_count == 1u);
+    assert(exec_options.cuda.graph_capture_enabled == 1);
+    assert(exec_options.cuda.nvrtc_enabled == 1);
+
+    printf("test_cuda_execution_defaults: validates CUDA execution option defaults.\n");
+}
+
 static void test_snapshot_store_dense_readback(void)
 {
     if (!nlo_snapshot_store_is_available()) {
@@ -687,6 +850,9 @@ int main(void)
     test_runtime_operator_lowering_constant_fold();
     test_runtime_operator_lowering_symbol_mask();
     test_runtime_operator_jit_warmup_vulkan();
+    test_fused_step_activation_vulkan();
+    test_runtime_operator_force_interpreter_vulkan();
+    test_cuda_execution_defaults();
     test_snapshot_store_dense_readback();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;

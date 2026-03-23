@@ -217,7 +217,8 @@ typedef enum
 {
     NLO_VECTOR_BACKEND_CPU = 0,
     NLO_VECTOR_BACKEND_VULKAN = 1,
-    NLO_VECTOR_BACKEND_AUTO = 2
+    NLO_VECTOR_BACKEND_CUDA = 2,
+    NLO_VECTOR_BACKEND_AUTO = 3
 } nlo_vector_backend_type;
 
 /**
@@ -227,7 +228,9 @@ typedef enum
 {
     NLO_FFT_BACKEND_AUTO = 0,
     NLO_FFT_BACKEND_FFTW = 1,
-    NLO_FFT_BACKEND_VKFFT = 2
+    NLO_FFT_BACKEND_VKFFT = 2,
+    NLO_FFT_BACKEND_CUFFT = 3,
+    NLO_FFT_BACKEND_CUFFT_XT = 4
 } nlo_fft_backend_type;
 
 /* -------------------------------------------------------------------
@@ -253,6 +256,21 @@ typedef struct
     uint32_t descriptor_set_count_override;
 } nlo_vk_backend_config;
 
+/**
+ * @brief CUDA backend configuration with opaque runtime settings only.
+ */
+typedef struct
+{
+    int device_ordinal;
+    int enable_multi_gpu;
+    uint32_t max_devices;
+    int enable_peer_access;
+    uint32_t stream_count;
+    size_t pinned_staging_bytes;
+    int graph_capture_enabled;
+    int nvrtc_enabled;
+} nlo_cuda_backend_config;
+
 /* -------------------------------------------------------------------
  * Execution options
  * ------------------------------------------------------------------- */
@@ -268,6 +286,7 @@ typedef struct
     size_t record_ring_target;
     size_t forced_device_budget_bytes;
     nlo_vk_backend_config vulkan;
+    nlo_cuda_backend_config cuda;
 } nlo_execution_options;
 
 /**

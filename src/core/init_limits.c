@@ -229,10 +229,15 @@ int nlo_query_runtime_limits_internal(
     nlo_vector_backend* backend = NULL;
     if (options.backend_type == NLO_VECTOR_BACKEND_CPU) {
         backend = nlo_vector_backend_create_cpu();
+    } else if (options.backend_type == NLO_VECTOR_BACKEND_CUDA) {
+        backend = nlo_vector_backend_create_cuda(&options.cuda);
     } else if (options.backend_type == NLO_VECTOR_BACKEND_VULKAN) {
         backend = nlo_vector_backend_create_vulkan(&options.vulkan);
     } else {
-        backend = nlo_vector_backend_create_vulkan(NULL);
+        backend = nlo_vector_backend_create_cuda(&options.cuda);
+        if (backend == NULL) {
+            backend = nlo_vector_backend_create_vulkan(NULL);
+        }
         if (backend == NULL) {
             backend = nlo_vector_backend_create_cpu();
         }

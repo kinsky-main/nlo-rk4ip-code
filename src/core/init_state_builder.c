@@ -11,6 +11,7 @@
 #include "io/snapshot_store.h"
 #include "physics/operators.h"
 #include "physics/operator_program_jit.h"
+#include "utility/perf_profile.h"
 #include "utility/state_debug.h"
 #include <math.h>
 #include <stdint.h>
@@ -225,6 +226,66 @@ static int nlo_state_can_use_tensor_compact_axis_symbols(const simulation_state*
     }
 
     return 1;
+}
+
+static int nlo_env_flag_enabled(const char* name)
+{
+    const char* value = getenv(name);
+    return (value != NULL && value[0] != '\0' && value[0] != '0') ? 1 : 0;
+}
+
+static int nlo_state_can_use_fused_temporal_step(const simulation_state* state)
+{
+    if (state == NULL || state->backend == NULL || !state->dispersion_operator_program.active) {
+        return 0;
+    }
+    if (nlo_vector_backend_get_type(state->backend) != NLO_VECTOR_BACKEND_VULKAN) {
+        return 0;
+    }
+    if (state->dispersion_operator_program.vk_jit_active == 0) {
+        return 0;
+    }
+    if (state->nonlinear_model == NLO_NONLINEAR_MODEL_EXPR &&
+        state->nonlinear_operator_program.active &&
+        state->nonlinear_operator_program.vk_jit_active == 0) {
+        return 0;
+    }
+    return 1;
+}
+
+static void nlo_configure_vk_step_plan(simulation_state* state)
+{
+    if (state == NULL) {
+        return;
+    }
+
+    memset(&state->vk_step_plan, 0, sizeof(state->vk_step_plan));
+    if (state->backend == NULL ||
+        nlo_vector_backend_get_type(state->backend) != NLO_VECTOR_BACKEND_VULKAN ||
+        nlo_env_flag_enabled("NLO_DISABLE_VK_FUSED_STEP")) {
+        return;
+    }
+
+    if (state->tensor_mode_active) {
+        if (!nlo_env_flag_enabled("NLO_DISABLE_VK_FUSED_TENSOR") &&
+            state->tensor_compact_axis_symbols != 0) {
+            state->vk_step_plan.active = 1;
+            state->vk_step_plan.tensor_active = 1;
+        }
+        return;
+    }
+
+    if (state->nonlinear_raman_active) {
+        if (!nlo_env_flag_enabled("NLO_DISABLE_VK_FUSED_RAMAN")) {
+            state->vk_step_plan.active = 1;
+            state->vk_step_plan.raman_active = 1;
+        }
+        return;
+    }
+
+    if (nlo_state_can_use_fused_temporal_step(state)) {
+        state->vk_step_plan.active = 1;
+    }
 }
 
 static double nlo_expected_omega_unshifted(size_t index, size_t num_time_samples, double omega_step)
@@ -925,14 +986,24 @@ simulation_state* create_simulation_state_with_storage(
         }
     }
 
+    double backend_create_start_ms = nlo_perf_profile_now_ms();
     if (exec_options->backend_type == NLO_VECTOR_BACKEND_CPU) {
         state->backend = nlo_vector_backend_create_cpu();
+    }
+    else if (exec_options->backend_type == NLO_VECTOR_BACKEND_CUDA) {
+        state->backend = nlo_vector_backend_create_cuda(&exec_options->cuda);
     }
     else if (exec_options->backend_type == NLO_VECTOR_BACKEND_VULKAN) {
         state->backend = nlo_vector_backend_create_vulkan(&exec_options->vulkan);
     }
     else if (exec_options->backend_type == NLO_VECTOR_BACKEND_AUTO) {
-        state->backend = nlo_vector_backend_create_vulkan(NULL);
+        state->backend = nlo_vector_backend_create_cuda(&exec_options->cuda);
+        if (state->backend == NULL) {
+            state->backend = nlo_vector_backend_create_vulkan(NULL);
+        }
+        if (state->backend == NULL) {
+            state->backend = nlo_vector_backend_create_cpu();
+        }
     }
     else {
         state->backend = NULL;
@@ -943,8 +1014,12 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    nlo_perf_profile_add_event(NLO_PERF_EVENT_BACKEND_CREATE,
+                               nlo_perf_profile_now_ms() - backend_create_start_ms,
+                               0u);
     nlo_state_debug_log_backend_memory_stage(state, "backend_created");
 
+    double phase_start_ms = nlo_perf_profile_now_ms();
     if (nlo_create_complex_vec(state->backend, num_time_samples, &state->current_field_vec) != NLO_VEC_STATUS_OK ||
         (!state->tensor_mode_active &&
          nlo_create_complex_vec(state->backend, num_time_samples, &state->frequency_grid_vec) != NLO_VEC_STATUS_OK) ||
@@ -961,6 +1036,9 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    nlo_perf_profile_add_event(NLO_PERF_EVENT_STATE_ALLOCATE_VECTORS,
+                               nlo_perf_profile_now_ms() - phase_start_ms,
+                               (uint64_t)(num_time_samples * sizeof(nlo_complex)));
     nlo_state_debug_log_backend_memory_stage(state, "base_vectors_allocated");
     if (state->nonlinear_raman_active) {
         if (nlo_create_complex_vec(state->backend, num_time_samples, &state->working_vectors.raman_intensity_vec) != NLO_VEC_STATUS_OK ||
@@ -1008,6 +1086,7 @@ simulation_state* create_simulation_state_with_storage(
     const char* nonlinear_expr = nlo_resolve_operator_expr(config->runtime.nonlinear_expr,
                                                            NLO_DEFAULT_NONLINEAR_EXPR);
 
+    phase_start_ms = nlo_perf_profile_now_ms();
     if (state->tensor_mode_active) {
         status = nlo_operator_program_compile(potential_expr,
                                               NLO_OPERATOR_CONTEXT_POTENTIAL,
@@ -1075,8 +1154,12 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    nlo_perf_profile_add_event(NLO_PERF_EVENT_OPERATOR_COMPILE_LOWER,
+                               nlo_perf_profile_now_ms() - phase_start_ms,
+                               0u);
     nlo_warn_legacy_nonlinear_expression(nonlinear_expr, &state->nonlinear_operator_program);
 
+    phase_start_ms = nlo_perf_profile_now_ms();
     if (state->tensor_mode_active) {
         nlo_prepare_operator_program_jit_if_supported(state,
                                                       &state->potential_operator_program,
@@ -1098,9 +1181,14 @@ simulation_state* create_simulation_state_with_storage(
     nlo_prepare_operator_program_jit_if_supported(state,
                                                   &state->nonlinear_operator_program,
                                                   "nonlinear_expr");
+    nlo_perf_profile_add_event(NLO_PERF_EVENT_OPERATOR_JIT_WARMUP,
+                               nlo_perf_profile_now_ms() - phase_start_ms,
+                               0u);
 
     state->tensor_compact_axis_symbols = nlo_state_can_use_tensor_compact_axis_symbols(state);
+    nlo_configure_vk_step_plan(state);
 
+    phase_start_ms = nlo_perf_profile_now_ms();
     if (state->tensor_mode_active) {
         if (nlo_create_complex_vec(state->backend, state->nt, &state->init_vectors.wt_axis_vec) != NLO_VEC_STATUS_OK ||
             nlo_create_complex_vec(state->backend, state->nx, &state->init_vectors.kx_axis_vec) != NLO_VEC_STATUS_OK ||
@@ -1121,6 +1209,11 @@ simulation_state* create_simulation_state_with_storage(
         }
         nlo_state_debug_log_backend_memory_stage(state, "tensor_vectors_allocated");
     }
+    if (state->tensor_mode_active) {
+        nlo_perf_profile_add_event(NLO_PERF_EVENT_TENSOR_AXIS_INIT,
+                                   nlo_perf_profile_now_ms() - phase_start_ms,
+                                   0u);
+    }
 
     status = nlo_vec_complex_fill(state->backend, state->current_field_vec, nlo_make(0.0, 0.0));
     if (status != NLO_VEC_STATUS_OK) {
@@ -1130,6 +1223,7 @@ simulation_state* create_simulation_state_with_storage(
     }
 
     const double delta_time = nlo_resolve_delta_time(config, state->nt);
+    phase_start_ms = nlo_perf_profile_now_ms();
     if (state->tensor_mode_active) {
         const double safe_dt = (delta_time > 0.0) ? delta_time : 1.0;
         const double safe_dx = (config->spatial.delta_x > 0.0) ? config->spatial.delta_x : 1.0;
@@ -1338,7 +1432,11 @@ simulation_state* create_simulation_state_with_storage(
             return NULL;
         }
     }
+    nlo_perf_profile_add_event(NLO_PERF_EVENT_FREQUENCY_GRID_INIT,
+                               nlo_perf_profile_now_ms() - phase_start_ms,
+                               0u);
 
+    phase_start_ms = nlo_perf_profile_now_ms();
     if (!state->tensor_mode_active) {
         if (config->spatial.potential_grid != NULL) {
             if (explicit_nd != 0) {
@@ -1389,6 +1487,9 @@ simulation_state* create_simulation_state_with_storage(
             return NULL;
         }
     }
+    nlo_perf_profile_add_event(NLO_PERF_EVENT_POTENTIAL_INIT,
+                               nlo_perf_profile_now_ms() - phase_start_ms,
+                               (uint64_t)(num_time_samples * sizeof(nlo_complex)));
 
     size_t required_stack_slots = state->nonlinear_operator_program.required_stack_slots;
     if (state->tensor_mode_active) {
@@ -1429,6 +1530,7 @@ simulation_state* create_simulation_state_with_storage(
     }
     nlo_state_debug_log_backend_memory_stage(state, "runtime_stack_allocated");
 
+    phase_start_ms = nlo_perf_profile_now_ms();
     if (state->tensor_mode_active) {
         if (config->spatial.potential_grid == NULL) {
             const nlo_operator_eval_context potential_eval_ctx = {
@@ -1501,9 +1603,13 @@ simulation_state* create_simulation_state_with_storage(
             return NULL;
         }
     }
+    nlo_perf_profile_add_event(NLO_PERF_EVENT_DISPERSION_FACTOR_INIT,
+                               nlo_perf_profile_now_ms() - phase_start_ms,
+                               (uint64_t)(num_time_samples * sizeof(nlo_complex)));
 
     state->dispersion_valid = 1;
 
+    phase_start_ms = nlo_perf_profile_now_ms();
     nlo_vec_status fft_status = NLO_VEC_STATUS_UNSUPPORTED;
     if (explicit_nd != 0 && state->nt > 1u && state->nx > 1u && state->ny > 1u) {
         const nlo_fft_shape shape = {
@@ -1554,6 +1660,9 @@ simulation_state* create_simulation_state_with_storage(
         free_simulation_state(state);
         return NULL;
     }
+    nlo_perf_profile_add_event(NLO_PERF_EVENT_FFT_PLAN_CREATE,
+                               nlo_perf_profile_now_ms() - phase_start_ms,
+                               0u);
     nlo_state_debug_log_backend_memory_stage(state, "fft_plan_created");
 
     if (state->nonlinear_raman_active) {

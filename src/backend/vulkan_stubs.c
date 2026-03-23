@@ -211,6 +211,126 @@ nlo_vec_status nlo_vk_op_complex_add_inplace(
     return nlo_vk_unavailable_status();
 }
 
+nlo_vec_status nlo_vk_op_complex_axpy_inplace_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src,
+    double alpha
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)src;
+    (void)alpha;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_vk_op_complex_affine_comb2_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)a;
+    (void)alpha;
+    (void)b;
+    (void)beta;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_vk_op_complex_affine_comb3_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)a;
+    (void)alpha;
+    (void)b;
+    (void)beta;
+    (void)c;
+    (void)gamma;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_vk_op_complex_affine_comb4_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma,
+    const nlo_vec_buffer* d,
+    double delta
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)a;
+    (void)alpha;
+    (void)b;
+    (void)beta;
+    (void)c;
+    (void)gamma;
+    (void)d;
+    (void)delta;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_vk_op_complex_embedded_error_pair_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* fine_out,
+    nlo_vec_buffer* coarse_out,
+    const nlo_vec_buffer* base,
+    const nlo_vec_buffer* stage_k4,
+    double fine_k4_coeff,
+    double coarse_k4_coeff,
+    const nlo_vec_buffer* stage_k5,
+    double coarse_k5_coeff
+)
+{
+    (void)backend;
+    (void)fine_out;
+    (void)coarse_out;
+    (void)base;
+    (void)stage_k4;
+    (void)fine_k4_coeff;
+    (void)coarse_k4_coeff;
+    (void)stage_k5;
+    (void)coarse_k5_coeff;
+    return nlo_vk_unavailable_status();
+}
+
+nlo_vec_status nlo_vk_op_complex_lerp(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    double alpha
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)a;
+    (void)b;
+    (void)alpha;
+    return nlo_vk_unavailable_status();
+}
+
 nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst)
 {
     (void)backend;
@@ -318,6 +438,18 @@ nlo_vec_status nlo_operator_program_prepare_jit(
     (void)backend;
     (void)program;
     return nlo_vk_unavailable_status();
+}
+
+static nlo_operator_jit_mode g_nlo_stub_operator_jit_mode = NLO_OPERATOR_JIT_MODE_ON;
+
+void nlo_operator_program_set_jit_mode(nlo_operator_jit_mode mode)
+{
+    g_nlo_stub_operator_jit_mode = mode;
+}
+
+nlo_operator_jit_mode nlo_operator_program_get_jit_mode(void)
+{
+    return g_nlo_stub_operator_jit_mode;
 }
 
 nlo_vec_status nlo_operator_program_execute_jit(

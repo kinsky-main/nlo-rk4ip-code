@@ -44,6 +44,7 @@ target_link_libraries(test_fft PRIVATE nlo_fft_backend ${_nlo_cblas_target})
 target_compile_definitions(test_fft PRIVATE
   NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+  NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
 )
 if(NLO_ENABLE_VULKAN_BACKEND)
   target_link_libraries(test_fft PRIVATE Vulkan::Vulkan)

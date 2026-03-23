@@ -21,6 +21,7 @@ export RuntimeOperatorParams
 export SimulationConfig
 export PhysicsConfig
 export VulkanBackendConfig
+export CudaBackendConfig
 export ExecutionOptions
 export RuntimeLimits
 export StorageOptions
@@ -55,10 +56,13 @@ export NLO_NONLINEAR_MODEL_EXPR
 export NLO_NONLINEAR_MODEL_KERR_RAMAN
 export NLO_VECTOR_BACKEND_CPU
 export NLO_VECTOR_BACKEND_VULKAN
+export NLO_VECTOR_BACKEND_CUDA
 export NLO_VECTOR_BACKEND_AUTO
 export NLO_FFT_BACKEND_AUTO
 export NLO_FFT_BACKEND_FFTW
 export NLO_FFT_BACKEND_VKFFT
+export NLO_FFT_BACKEND_CUFFT
+export NLO_FFT_BACKEND_CUFFT_XT
 export NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES
 export NLO_STORAGE_DB_CAP_POLICY_FAIL
 export NLO_PROPAGATE_OUTPUT_DENSE

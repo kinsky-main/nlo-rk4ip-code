@@ -25,6 +25,14 @@ nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type back
     options.device_heap_fraction = NLO_DEFAULT_DEVICE_HEAP_FRACTION;
     options.record_ring_target = 0u;
     options.forced_device_budget_bytes = 0u;
+    options.cuda.device_ordinal = -1;
+    options.cuda.enable_multi_gpu = 1;
+    options.cuda.max_devices = 8u;
+    options.cuda.enable_peer_access = 1;
+    options.cuda.stream_count = 1u;
+    options.cuda.pinned_staging_bytes = 0u;
+    options.cuda.graph_capture_enabled = 1;
+    options.cuda.nvrtc_enabled = 1;
     return options;
 }
 

@@ -5,6 +5,10 @@ This folder contains Dockerfiles for testing nlolib in multiple deployment envir
 ## Layout
 
 - `docker/codex-universal/` - OpenAI Codex universal base image.
+- `docker/cpu-dev.Dockerfile` - CPU-only validation image.
+- `docker/vulkan-dev.Dockerfile` - Vulkan validation image.
+- `docker/cuda-dev.Dockerfile` - CUDA validation image.
+- `docker/cuda-multigpu-dev.Dockerfile` - CUDA multi-GPU validation image.
 - `docker/scripts/` - Shared install/build scripts used by Dockerfiles.
 
 ## Build and Run
@@ -33,3 +37,14 @@ Inside the container, you can run:
 ```
 bash docker/scripts/build_and_test.sh
 ```
+
+Repo-root validation helpers:
+
+```
+bash scripts/docker_validate_cpu.sh
+bash scripts/docker_validate_vulkan.sh
+bash scripts/docker_validate_cuda.sh
+bash scripts/docker_validate_cuda_multigpu.sh
+```
+
+Use `NLO_DOCKER_VALIDATE_DRY_RUN=1` to smoke-test the validation wrappers in CI without invoking Docker.

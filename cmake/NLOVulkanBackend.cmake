@@ -55,6 +55,12 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
     nlo_complex_mesh_from_axis_tfast_t
     nlo_complex_mesh_from_axis_tfast_y
     nlo_complex_mesh_from_axis_tfast_x
+    nlo_complex_axpy_inplace_real
+    nlo_complex_affine_comb2_real
+    nlo_complex_affine_comb3_real
+    nlo_complex_affine_comb4_real
+    nlo_complex_embedded_error_pair_real
+    nlo_complex_lerp
   )
 
   set(_nlo_vk_spv_outputs "")
@@ -100,6 +106,12 @@ function(nlo_configure_vulkan_backend target target_source_dir target_binary_dir
   set(NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_T_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_mesh_from_axis_tfast_t.spv")
   set(NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_Y_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_mesh_from_axis_tfast_y.spv")
   set(NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_X_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_mesh_from_axis_tfast_x.spv")
+  set(NLO_VK_SHADER_COMPLEX_AXPY_INPLACE_REAL_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_axpy_inplace_real.spv")
+  set(NLO_VK_SHADER_COMPLEX_AFFINE_COMB2_REAL_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_affine_comb2_real.spv")
+  set(NLO_VK_SHADER_COMPLEX_AFFINE_COMB3_REAL_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_affine_comb3_real.spv")
+  set(NLO_VK_SHADER_COMPLEX_AFFINE_COMB4_REAL_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_affine_comb4_real.spv")
+  set(NLO_VK_SHADER_COMPLEX_EMBEDDED_ERROR_PAIR_REAL_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_embedded_error_pair_real.spv")
+  set(NLO_VK_SHADER_COMPLEX_LERP_PATH "${NLO_VK_KERNEL_BINARY_DIR}/nlo_complex_lerp.spv")
 
   configure_file(
     "${target_source_dir}/backend/vulkan/nlo_vk_shader_paths.h.in"

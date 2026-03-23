@@ -32,6 +32,7 @@ typedef void* VkPipelineCache;
 typedef void* VkPipeline;
 typedef void* VkBuffer;
 typedef void* VkDeviceMemory;
+typedef void* VkQueryPool;
 typedef uint64_t VkDeviceSize;
 typedef int VkPhysicalDeviceType;
 typedef struct {
@@ -91,7 +92,13 @@ typedef enum {
     NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_T = 15,
     NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_Y = 16,
     NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_X = 17,
-    NLO_VK_KERNEL_COUNT = 18
+    NLO_VK_KERNEL_COMPLEX_AXPY_INPLACE_REAL = 18,
+    NLO_VK_KERNEL_COMPLEX_AFFINE_COMB2_REAL = 19,
+    NLO_VK_KERNEL_COMPLEX_AFFINE_COMB3_REAL = 20,
+    NLO_VK_KERNEL_COMPLEX_AFFINE_COMB4_REAL = 21,
+    NLO_VK_KERNEL_COMPLEX_EMBEDDED_ERROR_PAIR_REAL = 22,
+    NLO_VK_KERNEL_COMPLEX_LERP = 23,
+    NLO_VK_KERNEL_COUNT = 24
 } nlo_vk_kernel_id;
 
 /**
@@ -102,6 +109,8 @@ typedef struct {
     uint32_t pad;
     double scalar0;
     double scalar1;
+    double scalar2;
+    double scalar3;
 } nlo_vk_push_constants;
 
 /**
@@ -112,6 +121,12 @@ typedef struct {
 } nlo_vk_kernel;
 
 typedef struct nlo_vk_operator_jit_entry nlo_vk_operator_jit_entry;
+
+typedef struct {
+    uint32_t event_id;
+    uint32_t start_query;
+    uint32_t end_query;
+} nlo_vk_timestamp_span;
 
 /**
  * @brief Internal Vulkan backend runtime state and resources.
@@ -134,6 +149,15 @@ typedef struct {
     bool owns_command_pool;
     VkCommandBuffer command_buffer;
     VkFence submit_fence;
+    VkQueryPool timestamp_query_pool;
+    nlo_vk_timestamp_span* timestamp_spans;
+    uint32_t timestamp_query_capacity;
+    uint32_t timestamp_query_cursor;
+    uint32_t timestamp_span_capacity;
+    uint32_t timestamp_span_count;
+    uint32_t timestamp_valid_bits;
+    double timestamp_period_ns;
+    bool timestamp_queries_supported;
 
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
@@ -157,17 +181,29 @@ typedef struct {
     VkDeviceSize max_kernel_chunk_bytes;
     bool simulation_phase_recording;
     bool simulation_phase_has_commands;
+    bool submit_pending;
     uint32_t simulation_descriptor_set_cursor;
     nlo_vk_operator_jit_entry* operator_jit_entries;
 } nlo_vk_backend;
 
 /**
- * @brief Concrete backend instance shared across CPU/Vulkan paths.
+ * @brief Internal CUDA backend scaffold state for future device/runtime ownership.
+ */
+typedef struct {
+    int initialized;
+    int device_ordinal;
+    uint32_t active_device_count;
+    int peer_access_enabled;
+} nlo_cuda_backend;
+
+/**
+ * @brief Concrete backend instance shared across CPU, Vulkan, and CUDA paths.
  */
 struct nlo_vector_backend {
     nlo_vector_backend_type type;
     bool in_simulation;
     nlo_vk_backend vk;
+    nlo_cuda_backend cuda;
 };
 
 /**
@@ -227,6 +263,66 @@ nlo_vec_status nlo_vec_validate_pair(
     const nlo_vec_buffer* a,
     const nlo_vec_buffer* b,
     nlo_vec_kind kind
+);
+
+nlo_vec_status nlo_vec_complex_axpy_inplace_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src,
+    double alpha
+);
+
+nlo_vec_status nlo_vec_complex_affine_comb2_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta
+);
+
+nlo_vec_status nlo_vec_complex_affine_comb3_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma
+);
+
+nlo_vec_status nlo_vec_complex_affine_comb4_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma,
+    const nlo_vec_buffer* d,
+    double delta
+);
+
+nlo_vec_status nlo_vec_complex_embedded_error_pair_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* fine_out,
+    nlo_vec_buffer* coarse_out,
+    const nlo_vec_buffer* base,
+    const nlo_vec_buffer* stage_k4,
+    double fine_k4_coeff,
+    double coarse_k4_coeff,
+    const nlo_vec_buffer* stage_k5,
+    double coarse_k5_coeff
+);
+
+nlo_vec_status nlo_vec_complex_lerp(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    double alpha
 );
 
 

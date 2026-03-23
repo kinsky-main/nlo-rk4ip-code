@@ -17,11 +17,14 @@ NLO_STORAGE_RUN_ID_MAX = 64
 
 NLO_VECTOR_BACKEND_CPU = 0
 NLO_VECTOR_BACKEND_VULKAN = 1
-NLO_VECTOR_BACKEND_AUTO = 2
+NLO_VECTOR_BACKEND_CUDA = 2
+NLO_VECTOR_BACKEND_AUTO = 3
 
 NLO_FFT_BACKEND_AUTO = 0
 NLO_FFT_BACKEND_FFTW = 1
 NLO_FFT_BACKEND_VKFFT = 2
+NLO_FFT_BACKEND_CUFFT = 3
+NLO_FFT_BACKEND_CUFFT_XT = 4
 
 NLOLIB_STATUS_OK = 0
 NLOLIB_STATUS_INVALID_ARGUMENT = 1
@@ -69,6 +72,19 @@ class NloVkBackendConfig(ctypes.Structure):
         ("command_pool", VkCommandPool),
         ("descriptor_set_budget_bytes", ctypes.c_size_t),
         ("descriptor_set_count_override", ctypes.c_uint32),
+    ]
+
+
+class NloCudaBackendConfig(ctypes.Structure):
+    _fields_ = [
+        ("device_ordinal", ctypes.c_int),
+        ("enable_multi_gpu", ctypes.c_int),
+        ("max_devices", ctypes.c_uint32),
+        ("enable_peer_access", ctypes.c_int),
+        ("stream_count", ctypes.c_uint32),
+        ("pinned_staging_bytes", ctypes.c_size_t),
+        ("graph_capture_enabled", ctypes.c_int),
+        ("nvrtc_enabled", ctypes.c_int),
     ]
 
 
@@ -160,6 +176,7 @@ class NloExecutionOptions(ctypes.Structure):
         ("record_ring_target", ctypes.c_size_t),
         ("forced_device_budget_bytes", ctypes.c_size_t),
         ("vulkan", NloVkBackendConfig),
+        ("cuda", NloCudaBackendConfig),
     ]
 
 
@@ -433,6 +450,14 @@ def default_execution_options(
     options.vulkan.command_pool = None
     options.vulkan.descriptor_set_budget_bytes = 0
     options.vulkan.descriptor_set_count_override = 0
+    options.cuda.device_ordinal = -1
+    options.cuda.enable_multi_gpu = 1
+    options.cuda.max_devices = 8
+    options.cuda.enable_peer_access = 1
+    options.cuda.stream_count = 1
+    options.cuda.pinned_staging_bytes = 0
+    options.cuda.graph_capture_enabled = 1
+    options.cuda.nvrtc_enabled = 1
     return options
 
 

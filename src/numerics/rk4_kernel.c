@@ -4,9 +4,11 @@
  */
 
 #include "numerics/rk4_kernel.h"
+#include "backend/vector_backend_internal.h"
 #include "fft/fft.h"
 #include "io/log_sink.h"
 #include "physics/operators.h"
+#include "utility/perf_profile.h"
 #include "utility/rk4_debug.h"
 #include <assert.h>
 #include <float.h>
@@ -127,6 +129,236 @@ static int nlo_rk4_nonlinear_depends_on_h(const simulation_state* state)
     return 0;
 }
 
+static int nlo_rk4_use_fused_vk_step(const simulation_state* state)
+{
+    return (state != NULL &&
+            state->backend != NULL &&
+            nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN &&
+            state->vk_step_plan.active != 0)
+               ? 1
+               : 0;
+}
+
+static void nlo_rk4_update_step_plan_coeffs(simulation_state* state, double step)
+{
+    if (state == NULL) {
+        return;
+    }
+
+    state->current_step_size = step;
+    state->current_half_step_exp = 0.5 * step;
+    state->vk_step_plan.step_size = step;
+    state->vk_step_plan.half_step = 0.5 * step;
+    state->vk_step_plan.third_step = step / 3.0;
+    state->vk_step_plan.sixth_step = step / 6.0;
+    state->vk_step_plan.tenth_step = step * 0.1;
+}
+
+static nlo_vec_status nlo_rk4_apply_half_step_linear(
+    simulation_state* state,
+    const nlo_vec_buffer* input,
+    nlo_vec_buffer* output
+)
+{
+    simulation_working_vectors* work = &state->working_vectors;
+    NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, input, work->field_freq_vec));
+    NLO_RK4_CALL(nlo_apply_dispersion_operator_stage(state, work->field_freq_vec));
+    NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->field_freq_vec, output));
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_rk4_step_device_fused(simulation_state* state, size_t step_index)
+{
+    nlo_vector_backend* backend = state->backend;
+    simulation_working_vectors* work = &state->working_vectors;
+    const double step = state->current_step_size;
+
+    nlo_rk4_debug_log_vec_stats(state,
+                                state->current_field_vec,
+                                "current_field_start",
+                                step_index,
+                                state->current_z,
+                                step);
+
+    NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->previous_field_vec, state->current_field_vec));
+    NLO_RK4_CALL(nlo_rk4_apply_half_step_linear(state, state->current_field_vec, work->ip_field_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->ip_field_vec, "ip_field", step_index, state->current_z, step);
+
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, state->current_field_vec, work->field_working_vec));
+    NLO_RK4_CALL(nlo_rk4_apply_half_step_linear(state, work->field_working_vec, work->k_final_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_final_vec, "k1", step_index, state->current_z, step);
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(backend,
+                                                   work->field_working_vec,
+                                                   work->ip_field_vec,
+                                                   1.0,
+                                                   work->k_final_vec,
+                                                   state->vk_step_plan.half_step));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, work->field_working_vec, work->k_temp_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_temp_vec, "k2", step_index, state->current_z, step);
+    NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->field_freq_vec, work->k_temp_vec));
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(backend,
+                                                   work->field_working_vec,
+                                                   work->ip_field_vec,
+                                                   1.0,
+                                                   work->k_temp_vec,
+                                                   state->vk_step_plan.half_step));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, work->field_working_vec, work->k_temp_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_temp_vec, "k3", step_index, state->current_z, step);
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb4_real(backend,
+                                                   work->field_working_vec,
+                                                   work->ip_field_vec,
+                                                   1.0,
+                                                   work->k_final_vec,
+                                                   state->vk_step_plan.sixth_step,
+                                                   work->field_freq_vec,
+                                                   state->vk_step_plan.third_step,
+                                                   work->k_temp_vec,
+                                                   state->vk_step_plan.third_step));
+    NLO_RK4_CALL(nlo_rk4_apply_half_step_linear(state, work->field_working_vec, work->k_final_vec));
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(backend,
+                                                   work->field_working_vec,
+                                                   work->ip_field_vec,
+                                                   1.0,
+                                                   work->k_temp_vec,
+                                                   step));
+    NLO_RK4_CALL(nlo_rk4_apply_half_step_linear(state, work->field_working_vec, work->field_working_vec));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, work->field_working_vec, work->k_temp_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_temp_vec, "k4", step_index, state->current_z, step);
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(backend,
+                                                   state->current_field_vec,
+                                                   work->k_final_vec,
+                                                   1.0,
+                                                   work->k_temp_vec,
+                                                   state->vk_step_plan.sixth_step));
+    nlo_rk4_debug_log_vec_stats(state,
+                                state->current_field_vec,
+                                "current_field_end",
+                                step_index,
+                                state->current_z + step,
+                                step);
+
+    return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_rk4_attempt_embedded_erk43_fused(
+    simulation_state* state,
+    double step,
+    size_t step_index,
+    int reuse_cached_k5,
+    double* out_error
+)
+{
+    nlo_vector_backend* backend = state->backend;
+    simulation_working_vectors* work = &state->working_vectors;
+
+    nlo_rk4_update_step_plan_coeffs(state, step);
+    nlo_rk4_debug_log_vec_stats(state,
+                                state->current_field_vec,
+                                "current_field_start",
+                                step_index,
+                                state->current_z,
+                                step);
+
+    NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->previous_field_vec, state->current_field_vec));
+    NLO_RK4_CALL(nlo_rk4_apply_half_step_linear(state, state->current_field_vec, work->ip_field_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->ip_field_vec, "ip_field", step_index, state->current_z, step);
+
+    if (reuse_cached_k5) {
+        NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->k_temp_vec, work->field_working_vec));
+    } else {
+        NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, state->current_field_vec, work->k_temp_vec));
+    }
+
+    NLO_RK4_CALL(nlo_rk4_apply_half_step_linear(state, work->k_temp_vec, work->k_final_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_final_vec, "k1", step_index, state->current_z, step);
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(backend,
+                                                   work->field_working_vec,
+                                                   work->ip_field_vec,
+                                                   1.0,
+                                                   work->k_final_vec,
+                                                   state->vk_step_plan.half_step));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, work->field_working_vec, work->k_temp_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_temp_vec, "k2", step_index, state->current_z, step);
+    NLO_RK4_CALL(nlo_vec_complex_copy(backend, work->field_freq_vec, work->k_temp_vec));
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(backend,
+                                                   work->field_working_vec,
+                                                   work->ip_field_vec,
+                                                   1.0,
+                                                   work->k_temp_vec,
+                                                   state->vk_step_plan.half_step));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, work->field_working_vec, work->k_temp_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_temp_vec, "k3", step_index, state->current_z, step);
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb4_real(backend,
+                                                   work->field_working_vec,
+                                                   work->ip_field_vec,
+                                                   1.0,
+                                                   work->k_final_vec,
+                                                   state->vk_step_plan.sixth_step,
+                                                   work->field_freq_vec,
+                                                   state->vk_step_plan.third_step,
+                                                   work->k_temp_vec,
+                                                   state->vk_step_plan.third_step));
+    NLO_RK4_CALL(nlo_rk4_apply_half_step_linear(state, work->field_working_vec, work->k_final_vec));
+
+    NLO_RK4_CALL(nlo_vec_complex_copy(backend, state->current_field_vec, work->k_final_vec));
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(backend,
+                                                   work->field_working_vec,
+                                                   work->ip_field_vec,
+                                                   1.0,
+                                                   work->k_temp_vec,
+                                                   step));
+    NLO_RK4_CALL(nlo_rk4_apply_half_step_linear(state, work->field_working_vec, work->field_working_vec));
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, work->field_working_vec, work->k_temp_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->k_temp_vec, "k4", step_index, state->current_z, step);
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(backend,
+                                                   work->k_final_vec,
+                                                   work->k_final_vec,
+                                                   1.0,
+                                                   work->k_temp_vec,
+                                                   state->vk_step_plan.sixth_step));
+
+    NLO_RK4_CALL(nlo_apply_nonlinear_operator_stage(state, work->k_final_vec, work->field_working_vec));
+    nlo_rk4_debug_log_vec_stats(state, work->field_working_vec, "k5", step_index, state->current_z + step, step);
+
+    NLO_RK4_CALL(nlo_vec_complex_affine_comb3_real(backend,
+                                                   state->current_field_vec,
+                                                   state->current_field_vec,
+                                                   1.0,
+                                                   work->k_temp_vec,
+                                                   step / 15.0,
+                                                   work->field_working_vec,
+                                                   state->vk_step_plan.tenth_step));
+
+    NLO_RK4_CALL(nlo_vec_complex_weighted_rms_error(backend,
+                                                    work->k_final_vec,
+                                                    state->current_field_vec,
+                                                    NLO_RK4_REL_ERROR_ATOL_FLOOR,
+                                                    1.0,
+                                                    out_error));
+
+    if (!isfinite(*out_error) || *out_error < 0.0) {
+        *out_error = DBL_MAX;
+    }
+
+    nlo_rk4_debug_log_vec_stats(state,
+                                work->k_final_vec,
+                                "current_field_end",
+                                step_index,
+                                state->current_z + step,
+                                step);
+    return NLO_VEC_STATUS_OK;
+}
+
 static nlo_vec_status nlo_rk4_capture_interpolated_record(
     simulation_state* state,
     double step_start_z,
@@ -166,15 +398,11 @@ static nlo_vec_status nlo_rk4_capture_interpolated_record(
         alpha = 1.0;
     }
 
-    NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->field_freq_vec, work->previous_field_vec));
-    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend,
-                                                    work->field_freq_vec,
-                                                    nlo_make(1.0 - alpha, 0.0)));
-    NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->k_temp_vec, state->current_field_vec));
-    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend,
-                                                    work->k_temp_vec,
-                                                    nlo_make(alpha, 0.0)));
-    NLO_RK4_CALL(nlo_vec_complex_add_inplace(state->backend, work->field_freq_vec, work->k_temp_vec));
+    NLO_RK4_CALL(nlo_vec_complex_lerp(state->backend,
+                                      work->field_freq_vec,
+                                      work->previous_field_vec,
+                                      state->current_field_vec,
+                                      alpha));
 
     return simulation_state_capture_snapshot_from_vec(state, work->field_freq_vec);
 }
@@ -240,6 +468,11 @@ static nlo_vec_status nlo_rk4_step_device(simulation_state *state, size_t step_i
     nlo_vector_backend *backend = state->backend;
     simulation_working_vectors *work = &state->working_vectors;
     const double step = state->current_step_size;
+
+    if (nlo_rk4_use_fused_vk_step(state)) {
+        nlo_rk4_update_step_plan_coeffs(state, step);
+        return nlo_rk4_step_device_fused(state, step_index);
+    }
 
     nlo_rk4_debug_log_vec_stats(state,
                                 state->current_field_vec,
@@ -344,11 +577,18 @@ static nlo_vec_status nlo_rk4_attempt_embedded_erk43(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
+    if (nlo_rk4_use_fused_vk_step(state)) {
+        return nlo_rk4_attempt_embedded_erk43_fused(state,
+                                                    step,
+                                                    step_index,
+                                                    reuse_cached_k5,
+                                                    out_error);
+    }
+
     nlo_vector_backend* backend = state->backend;
     simulation_working_vectors* work = &state->working_vectors;
 
-    state->current_step_size = step;
-    state->current_half_step_exp = 0.5 * step;
+    nlo_rk4_update_step_plan_coeffs(state, step);
 
     nlo_rk4_debug_log_vec_stats(state,
                                 state->current_field_vec,
@@ -549,6 +789,8 @@ void solve_rk4(simulation_state *state)
     int min_step_tol_warning_emitted = 0;
     while (state->current_z < z_end)
     {
+        nlo_perf_scope step_admin_scope = {0.0, 0};
+        NLO_PERF_SCOPE_BEGIN(step_admin_scope);
         double step = nlo_clamp_step(state->current_step_size, min_step, max_step);
         if (step <= 0.0)
         {
@@ -572,6 +814,8 @@ void solve_rk4(simulation_state *state)
         size_t reject_attempt = 0u;
         double error = 0.0;
         double scale = 1.0;
+        nlo_perf_profile_trace_set_step((uint64_t)rk4_step_index, 0u);
+        NLO_PERF_SCOPE_END(step_admin_scope, NLO_PERF_EVENT_HOST_STEP_ADMIN, 0u);
 
         if (fixed_step_mode) {
             state->current_step_size = step;
@@ -589,12 +833,15 @@ void solve_rk4(simulation_state *state)
                                         step,
                                         state->current_step_size,
                                         error);
+                nlo_perf_scope progress_scope = {0.0, 0};
+                NLO_PERF_SCOPE_BEGIN(progress_scope);
                 nlo_log_progress_step_accepted(rk4_step_index,
                                                 state->current_z,
                                                 z_end,
                                                 step,
                                                 error,
                                                 state->current_step_size);
+                NLO_PERF_SCOPE_END(progress_scope, NLO_PERF_EVENT_HOST_PROGRESS_LOGGING, 0u);
                 if (nlo_log_progress_abort_requested() != 0) {
                     terminated_early = 1;
                 }
@@ -603,6 +850,7 @@ void solve_rk4(simulation_state *state)
         } else {
             while (!step_accepted)
             {
+                nlo_perf_profile_trace_set_step((uint64_t)rk4_step_index, (uint64_t)reject_attempt);
                 const int reuse_cached_k5 =
                     (cached_k5_valid != 0 &&
                      reject_attempt == 0u &&
@@ -622,6 +870,8 @@ void solve_rk4(simulation_state *state)
                     error = DBL_MAX;
                 }
 
+                nlo_perf_scope error_control_scope = {0.0, 0};
+                NLO_PERF_SCOPE_BEGIN(error_control_scope);
                 if (error > 0.0 && isfinite(error)) {
                     scale = pow(tol / error, 0.25);
                 } else if (error == 0.0) {
@@ -638,6 +888,7 @@ void solve_rk4(simulation_state *state)
                 
                 const int step_too_small = (step <= (min_step * (1.0 + 1e-12)));
                 const int min_step_forced_accept = (step_too_small && error > tol ? 1 : 0);
+                NLO_PERF_SCOPE_END(error_control_scope, NLO_PERF_EVENT_HOST_ERROR_CONTROL, 0u);
                 if (error <= tol || step_too_small) {
                     if (nlo_vec_complex_copy(state->backend,
                                              state->current_field_vec,
@@ -665,12 +916,15 @@ void solve_rk4(simulation_state *state)
                                             step,
                                             state->current_step_size,
                                             error);
+                    nlo_perf_scope progress_scope = {0.0, 0};
+                    NLO_PERF_SCOPE_BEGIN(progress_scope);
                     nlo_log_progress_step_accepted(rk4_step_index,
                                                    state->current_z,
                                                    z_end,
                                                    step,
                                                    error,
                                                    state->current_step_size);
+                    NLO_PERF_SCOPE_END(progress_scope, NLO_PERF_EVENT_HOST_PROGRESS_LOGGING, 0u);
                     if (nlo_log_progress_abort_requested() != 0) {
                         terminated_early = 1;
                     }
@@ -698,6 +952,8 @@ void solve_rk4(simulation_state *state)
                 }
 
                 reject_attempt += 1u;
+                nlo_perf_scope progress_scope = {0.0, 0};
+                NLO_PERF_SCOPE_BEGIN(progress_scope);
                 nlo_log_progress_step_rejected(rk4_step_index,
                                                state->current_z,
                                                z_end,
@@ -705,6 +961,7 @@ void solve_rk4(simulation_state *state)
                                                error,
                                                retry_step,
                                                reject_attempt);
+                NLO_PERF_SCOPE_END(progress_scope, NLO_PERF_EVENT_HOST_PROGRESS_LOGGING, 0u);
                 if (nlo_log_progress_abort_requested() != 0) {
                     step_accepted = -1;
                     break;
@@ -732,6 +989,8 @@ void solve_rk4(simulation_state *state)
 
         const double step_end_z = state->current_z;
         const double step_start_z = step_end_z - step;
+        nlo_perf_scope snapshot_scope = {0.0, 0};
+        NLO_PERF_SCOPE_BEGIN(snapshot_scope);
         while ((has_explicit_schedule || record_spacing > 0.0) &&
                state->current_record_index < state->num_recorded_samples &&
                step_end_z + record_capture_eps >= next_record_z)
@@ -760,6 +1019,7 @@ void solve_rk4(simulation_state *state)
                 next_record_z = record_spacing * (double)state->current_record_index;
             }
         }
+        NLO_PERF_SCOPE_END(snapshot_scope, NLO_PERF_EVENT_HOST_SNAPSHOT_BOOKKEEPING, 0u);
         if (terminated_early != 0) {
             break;
         }
@@ -775,6 +1035,8 @@ void solve_rk4(simulation_state *state)
            state->current_record_index < state->num_recorded_samples &&
            state->current_z + record_capture_eps >= next_record_z)
     {
+        nlo_perf_scope snapshot_scope = {0.0, 0};
+        NLO_PERF_SCOPE_BEGIN(snapshot_scope);
         if (simulation_state_capture_snapshot(state) != NLO_VEC_STATUS_OK)
         {
             break;
@@ -788,6 +1050,7 @@ void solve_rk4(simulation_state *state)
         } else {
             next_record_z = record_spacing * (double)state->current_record_index;
         }
+        NLO_PERF_SCOPE_END(snapshot_scope, NLO_PERF_EVENT_HOST_SNAPSHOT_BOOKKEEPING, 0u);
     }
 
     (void)nlo_vec_end_simulation(state->backend);

@@ -4,6 +4,7 @@
  */
 
 #include "physics/operators.h"
+#include "backend/vector_backend_internal.h"
 #include "fft/fft.h"
 #include "utility/perf_profile.h"
 #include <assert.h>
@@ -58,12 +59,12 @@ static nlo_vec_status nlo_apply_nonlinear_operator_stage_raman(
         NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->raman_delayed_vec, work->raman_spectrum_vec));
         NLO_RK4_CALL(nlo_vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_response_fft_vec));
         NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_delayed_vec));
-
-        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec));
-        NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend, work->raman_mix_vec, nlo_make(1.0 - f_r, 0.0)));
-        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_polarization_vec, work->raman_delayed_vec));
-        NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend, work->raman_polarization_vec, nlo_make(f_r, 0.0)));
-        NLO_RK4_CALL(nlo_vec_complex_add_inplace(state->backend, work->raman_mix_vec, work->raman_polarization_vec));
+        NLO_RK4_CALL(nlo_vec_complex_affine_comb2_real(state->backend,
+                                                       work->raman_mix_vec,
+                                                       work->raman_intensity_vec,
+                                                       1.0 - f_r,
+                                                       work->raman_delayed_vec,
+                                                       f_r));
     } else {
         NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec));
     }
@@ -95,8 +96,8 @@ nlo_vec_status nlo_apply_dispersion_operator_stage(
     nlo_vec_buffer* freq_domain_envelope
 )
 {
-
-    const double start_ms = nlo_perf_profile_now_ms();
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     nlo_vec_status status = NLO_VEC_STATUS_OK;
     if (state->tensor_mode_active) {
         const nlo_operator_eval_context linear_eval_ctx = {
@@ -143,9 +144,8 @@ nlo_vec_status nlo_apply_dispersion_operator_stage(
                                                  state->working_vectors.dispersion_operator_vec);
         }
     }
-    const double end_ms = nlo_perf_profile_now_ms();
     if (status == NLO_VEC_STATUS_OK) {
-        nlo_perf_profile_add_dispersion_time(end_ms - start_ms);
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_DISPERSION_APPLY, 0u);
     }
     return status;
 }
@@ -164,7 +164,8 @@ nlo_vec_status nlo_apply_nonlinear_operator_stage(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    const double start_ms = nlo_perf_profile_now_ms();
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     nlo_vec_status status = NLO_VEC_STATUS_OK;
     if (state->nonlinear_model == NLO_NONLINEAR_MODEL_KERR_RAMAN) {
         status = nlo_apply_nonlinear_operator_stage_raman(state, field, out_field);
@@ -189,9 +190,8 @@ nlo_vec_status nlo_apply_nonlinear_operator_stage(
                                               state->runtime_operator_stack_slots,
                                               out_field);
     }
-    const double end_ms = nlo_perf_profile_now_ms();
     if (status == NLO_VEC_STATUS_OK) {
-        nlo_perf_profile_add_nonlinear_time(end_ms - start_ms);
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_NONLINEAR_APPLY, 0u);
     }
     return status;
 }

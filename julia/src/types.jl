@@ -8,11 +8,14 @@ const NLO_NONLINEAR_MODEL_KERR_RAMAN = Cint(1)
 
 const NLO_VECTOR_BACKEND_CPU = Cint(0)
 const NLO_VECTOR_BACKEND_VULKAN = Cint(1)
-const NLO_VECTOR_BACKEND_AUTO = Cint(2)
+const NLO_VECTOR_BACKEND_CUDA = Cint(2)
+const NLO_VECTOR_BACKEND_AUTO = Cint(3)
 
 const NLO_FFT_BACKEND_AUTO = Cint(0)
 const NLO_FFT_BACKEND_FFTW = Cint(1)
 const NLO_FFT_BACKEND_VKFFT = Cint(2)
+const NLO_FFT_BACKEND_CUFFT = Cint(3)
+const NLO_FFT_BACKEND_CUFFT_XT = Cint(4)
 
 const NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = Cint(0)
 const NLO_STORAGE_DB_CAP_POLICY_FAIL = Cint(1)
@@ -123,6 +126,17 @@ struct VulkanBackendConfig
     descriptor_set_count_override::UInt32
 end
 
+struct CudaBackendConfig
+    device_ordinal::Cint
+    enable_multi_gpu::Cint
+    max_devices::UInt32
+    enable_peer_access::Cint
+    stream_count::UInt32
+    pinned_staging_bytes::Csize_t
+    graph_capture_enabled::Cint
+    nvrtc_enabled::Cint
+end
+
 struct ExecutionOptions
     backend_type::Cint
     fft_backend::Cint
@@ -130,6 +144,7 @@ struct ExecutionOptions
     record_ring_target::Csize_t
     forced_device_budget_bytes::Csize_t
     vulkan::VulkanBackendConfig
+    cuda::CudaBackendConfig
 end
 
 struct RuntimeLimits
@@ -223,7 +238,14 @@ RuntimeOperatorParams() = RuntimeOperatorParams(
 )
 SimulationConfig() = SimulationConfig(PropagationParams(), Tensor3DDesc(), TimeGrid(), FrequencyGrid(), SpatialGrid())
 VulkanBackendConfig() = VulkanBackendConfig(C_NULL, C_NULL, C_NULL, 0, C_NULL, 0, 0)
-ExecutionOptions() = ExecutionOptions(NLO_VECTOR_BACKEND_AUTO, NLO_FFT_BACKEND_AUTO, 0.70, 0, 0, VulkanBackendConfig())
+CudaBackendConfig() = CudaBackendConfig(-1, 1, UInt32(8), 1, UInt32(1), 0, 1, 1)
+ExecutionOptions() = ExecutionOptions(NLO_VECTOR_BACKEND_AUTO,
+                                      NLO_FFT_BACKEND_AUTO,
+                                      0.70,
+                                      0,
+                                      0,
+                                      VulkanBackendConfig(),
+                                      CudaBackendConfig())
 RuntimeLimits() = RuntimeLimits(0, 0, 0, 0, 0, 0)
 StorageOptions() = StorageOptions(C_NULL, C_NULL, 0, 0, NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES, 0)
 StorageResult() = StorageResult(_zero_chars(Val(NLO_STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0)
@@ -234,14 +256,16 @@ default_execution_options(; backend_type::Integer = NLO_VECTOR_BACKEND_AUTO,
                             device_heap_fraction::Real = 0.70,
                             record_ring_target::Integer = 0,
                             forced_device_budget_bytes::Integer = 0,
-                            vulkan::VulkanBackendConfig = VulkanBackendConfig()) =
+                            vulkan::VulkanBackendConfig = VulkanBackendConfig(),
+                            cuda::CudaBackendConfig = CudaBackendConfig()) =
     ExecutionOptions(
         Cint(backend_type),
         Cint(fft_backend),
         Cdouble(device_heap_fraction),
         Csize_t(record_ring_target),
         Csize_t(forced_device_budget_bytes),
-        vulkan
+        vulkan,
+        cuda
     )
 
 default_storage_options(; kwargs...) = storage_options(; kwargs...)

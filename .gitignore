@@ -13,7 +13,7 @@ CMakeUserPresets.json
 
 # Build directories
 build/
-build-*/
+build*/
 cmake-build-*/
 out/
 output/

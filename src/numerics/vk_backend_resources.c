@@ -5,6 +5,7 @@
 
 #include "numerics/vk_backend_internal.h"
 #include "nlo_vk_shader_paths.h"
+#include "utility/perf_profile.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,10 +16,11 @@ VkDeviceSize nlo_vk_min_size(VkDeviceSize a, VkDeviceSize b)
 }
 
 enum {
-    NLO_VK_DESCRIPTOR_SET_BUDGET_DEFAULT_BYTES = 512u * 1024u,
+    NLO_VK_DESCRIPTOR_SET_BUDGET_DEFAULT_BYTES = 2u * 1024u * 1024u,
     NLO_VK_DESCRIPTOR_SET_ESTIMATED_BYTES = 2048u,
     NLO_VK_DESCRIPTOR_SET_MIN_COUNT = 16u,
-    NLO_VK_DESCRIPTOR_SET_MAX_COUNT = 4096u
+    NLO_VK_DESCRIPTOR_SET_MAX_COUNT = 4096u,
+    NLO_VK_TIMESTAMP_QUERY_CAPACITY = 4096u
 };
 
 static uint32_t nlo_vk_clamp_descriptor_set_count(uint64_t count)
@@ -72,6 +74,64 @@ static bool nlo_vk_supports_required_features(
         *out_limits = properties.limits;
     }
 
+    return true;
+}
+
+static bool nlo_vk_timestamps_requested(void)
+{
+    return nlo_perf_profile_get_gpu_timestamp_mode() != NLO_PERF_GPU_TIMESTAMPS_OFF;
+}
+
+static void nlo_vk_reset_timestamp_state(nlo_vector_backend* backend)
+{
+    if (backend == NULL) {
+        return;
+    }
+
+    backend->vk.timestamp_query_cursor = 0u;
+    backend->vk.timestamp_span_count = 0u;
+}
+
+static bool nlo_vk_query_timestamp_support(
+    VkPhysicalDevice physical_device,
+    uint32_t queue_family_index,
+    uint32_t* out_valid_bits,
+    double* out_period_ns
+)
+{
+    if (physical_device == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkPhysicalDeviceProperties properties = {0};
+    vkGetPhysicalDeviceProperties(physical_device, &properties);
+
+    uint32_t family_count = 0u;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &family_count, NULL);
+    if (family_count == 0u || queue_family_index >= family_count) {
+        return false;
+    }
+
+    VkQueueFamilyProperties* families =
+        (VkQueueFamilyProperties*)calloc((size_t)family_count, sizeof(*families));
+    if (families == NULL) {
+        return false;
+    }
+
+    vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &family_count, families);
+    const uint32_t valid_bits = families[queue_family_index].timestampValidBits;
+    free(families);
+
+    if (valid_bits == 0u) {
+        return false;
+    }
+
+    if (out_valid_bits != NULL) {
+        *out_valid_bits = valid_bits;
+    }
+    if (out_period_ns != NULL) {
+        *out_period_ns = (double)properties.limits.timestampPeriod;
+    }
     return true;
 }
 
@@ -307,6 +367,56 @@ static nlo_vec_status nlo_vk_create_command_resources(nlo_vector_backend* backen
     return NLO_VEC_STATUS_OK;
 }
 
+static nlo_vec_status nlo_vk_create_timestamp_resources(nlo_vector_backend* backend)
+{
+    if (backend == NULL || backend->vk.device == VK_NULL_HANDLE) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_vk_reset_timestamp_state(backend);
+    backend->vk.timestamp_valid_bits = 0u;
+    backend->vk.timestamp_period_ns = 0.0;
+    backend->vk.timestamp_queries_supported = false;
+
+    if (!nlo_vk_timestamps_requested()) {
+        return NLO_VEC_STATUS_OK;
+    }
+
+    if (!nlo_vk_query_timestamp_support(backend->vk.physical_device,
+                                        backend->vk.queue_family_index,
+                                        &backend->vk.timestamp_valid_bits,
+                                        &backend->vk.timestamp_period_ns)) {
+        return NLO_VEC_STATUS_OK;
+    }
+
+    VkQueryPoolCreateInfo query_pool_info = {
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+        .queryType = VK_QUERY_TYPE_TIMESTAMP,
+        .queryCount = NLO_VK_TIMESTAMP_QUERY_CAPACITY
+    };
+    if (vkCreateQueryPool(backend->vk.device,
+                          &query_pool_info,
+                          NULL,
+                          &backend->vk.timestamp_query_pool) != VK_SUCCESS) {
+        backend->vk.timestamp_query_pool = VK_NULL_HANDLE;
+        return NLO_VEC_STATUS_OK;
+    }
+
+    backend->vk.timestamp_spans =
+        (nlo_vk_timestamp_span*)calloc((size_t)NLO_VK_TIMESTAMP_QUERY_CAPACITY / 2u,
+                                       sizeof(*backend->vk.timestamp_spans));
+    if (backend->vk.timestamp_spans == NULL) {
+        vkDestroyQueryPool(backend->vk.device, backend->vk.timestamp_query_pool, NULL);
+        backend->vk.timestamp_query_pool = VK_NULL_HANDLE;
+        return NLO_VEC_STATUS_OK;
+    }
+
+    backend->vk.timestamp_query_capacity = NLO_VK_TIMESTAMP_QUERY_CAPACITY;
+    backend->vk.timestamp_span_capacity = NLO_VK_TIMESTAMP_QUERY_CAPACITY / 2u;
+    backend->vk.timestamp_queries_supported = true;
+    return NLO_VEC_STATUS_OK;
+}
+
 static nlo_vec_status nlo_vk_create_descriptor_resources(
     nlo_vector_backend* backend,
     const nlo_vk_backend_config* config
@@ -462,7 +572,13 @@ static nlo_vec_status nlo_vk_create_kernels(nlo_vector_backend* backend)
         NLO_VK_SHADER_COMPLEX_AXIS_CENTERED_FROM_DELTA_PATH,
         NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_T_PATH,
         NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_Y_PATH,
-        NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_X_PATH
+        NLO_VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_X_PATH,
+        NLO_VK_SHADER_COMPLEX_AXPY_INPLACE_REAL_PATH,
+        NLO_VK_SHADER_COMPLEX_AFFINE_COMB2_REAL_PATH,
+        NLO_VK_SHADER_COMPLEX_AFFINE_COMB3_REAL_PATH,
+        NLO_VK_SHADER_COMPLEX_AFFINE_COMB4_REAL_PATH,
+        NLO_VK_SHADER_COMPLEX_EMBEDDED_ERROR_PAIR_REAL_PATH,
+        NLO_VK_SHADER_COMPLEX_LERP_PATH
     };
 
     for (size_t i = 0u; i < (size_t)NLO_VK_KERNEL_COUNT; ++i) {
@@ -480,6 +596,8 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
     if (backend == NULL) {
         return;
     }
+
+    (void)nlo_vk_wait_for_pending_submit(backend);
 
     const VkDevice device = backend->vk.device;
     if (device != VK_NULL_HANDLE &&
@@ -509,6 +627,22 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
         }
         backend->vk.pipeline_cache = VK_NULL_HANDLE;
     }
+    if (backend->vk.timestamp_query_pool != VK_NULL_HANDLE) {
+        if (device != VK_NULL_HANDLE) {
+            vkDestroyQueryPool(device, backend->vk.timestamp_query_pool, NULL);
+        }
+        backend->vk.timestamp_query_pool = VK_NULL_HANDLE;
+    }
+    if (backend->vk.timestamp_spans != NULL) {
+        free(backend->vk.timestamp_spans);
+        backend->vk.timestamp_spans = NULL;
+    }
+    backend->vk.timestamp_query_capacity = 0u;
+    backend->vk.timestamp_span_capacity = 0u;
+    backend->vk.timestamp_valid_bits = 0u;
+    backend->vk.timestamp_period_ns = 0.0;
+    backend->vk.timestamp_queries_supported = false;
+    nlo_vk_reset_timestamp_state(backend);
     if (backend->vk.descriptor_pool != VK_NULL_HANDLE) {
         if (device != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(device, backend->vk.descriptor_pool, NULL);
@@ -561,12 +695,22 @@ static void nlo_vk_destroy_resources(nlo_vector_backend* backend)
     backend->vk.staging_capacity = 0u;
     backend->vk.simulation_phase_recording = false;
     backend->vk.simulation_phase_has_commands = false;
+    backend->vk.submit_pending = false;
     backend->vk.simulation_descriptor_set_cursor = 0u;
     backend->vk.operator_jit_entries = NULL;
 }
 
 nlo_vec_status nlo_vk_ensure_staging_capacity(nlo_vector_backend* backend, VkDeviceSize min_bytes)
 {
+    if (backend == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_vec_status wait_status = nlo_vk_wait_for_pending_submit(backend);
+    if (wait_status != NLO_VEC_STATUS_OK) {
+        return wait_status;
+    }
+
     if (backend->vk.staging_buffer != VK_NULL_HANDLE && backend->vk.staging_capacity >= min_bytes) {
         return NLO_VEC_STATUS_OK;
     }
@@ -613,6 +757,15 @@ nlo_vec_status nlo_vk_ensure_staging_capacity(nlo_vector_backend* backend, VkDev
 
 nlo_vec_status nlo_vk_ensure_reduction_capacity(nlo_vector_backend* backend, VkDeviceSize min_elements)
 {
+    if (backend == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_vec_status wait_status = nlo_vk_wait_for_pending_submit(backend);
+    if (wait_status != NLO_VEC_STATUS_OK) {
+        return wait_status;
+    }
+
     if (min_elements == 0u) {
         min_elements = 1u;
     }
@@ -714,8 +867,23 @@ nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_bac
     backend->vk.simulation_phase_recording = false;
     backend->vk.simulation_phase_has_commands = false;
     backend->vk.simulation_descriptor_set_cursor = 0u;
+    backend->vk.timestamp_query_pool = VK_NULL_HANDLE;
+    backend->vk.timestamp_spans = NULL;
+    backend->vk.timestamp_query_capacity = 0u;
+    backend->vk.timestamp_query_cursor = 0u;
+    backend->vk.timestamp_span_capacity = 0u;
+    backend->vk.timestamp_span_count = 0u;
+    backend->vk.timestamp_valid_bits = 0u;
+    backend->vk.timestamp_period_ns = 0.0;
+    backend->vk.timestamp_queries_supported = false;
 
     nlo_vec_status status = nlo_vk_create_command_resources(backend, config);
+    if (status != NLO_VEC_STATUS_OK) {
+        nlo_vk_destroy_resources(backend);
+        return status;
+    }
+
+    status = nlo_vk_create_timestamp_resources(backend);
     if (status != NLO_VEC_STATUS_OK) {
         nlo_vk_destroy_resources(backend);
         return status;

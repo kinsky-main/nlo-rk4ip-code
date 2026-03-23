@@ -5,6 +5,7 @@
 
 #include "physics/operator_program.h"
 #include "physics/operator_program_jit.h"
+#include "utility/perf_profile.h"
 
 nlo_vec_status nlo_operator_program_execute(
     nlo_vector_backend* backend,
@@ -23,9 +24,12 @@ nlo_vec_status nlo_operator_program_execute(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     nlo_vec_status jit_status =
         nlo_operator_program_execute_jit(backend, program, eval_ctx, out_vector);
     if (jit_status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_OPERATOR_PROGRAM_JIT_EXECUTE, 0u);
         return NLO_VEC_STATUS_OK;
     }
     if (jit_status != NLO_VEC_STATUS_UNSUPPORTED) {
@@ -344,5 +348,9 @@ nlo_vec_status nlo_operator_program_execute(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    return nlo_vec_complex_copy(backend, out_vector, stack_vectors[0]);
+    nlo_vec_status status = nlo_vec_complex_copy(backend, out_vector, stack_vectors[0]);
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_OPERATOR_PROGRAM_INTERPRETER_EXECUTE, 0u);
+    }
+    return status;
 }

@@ -132,7 +132,7 @@ function main(argv = ARGS)
         run_group = begin_group(db, example_name, isempty(args[:run_group]) ? nothing : args[:run_group])
         pulse = PulseSpec(samples = field0, delta_time = dt, pulse_period = n * dt, frequency_grid = ComplexF64.(omega))
         linear = OperatorSpec(expr = "i*beta2*w*w", params = Dict("beta2" => 0.5 * beta2))
-        exec = default_execution_options(backend_type = NLO_VECTOR_BACKEND_CPU, fft_backend = NLO_FFT_BACKEND_FFTW)
+        exec = default_execution_options(backend_type = NLO_VECTOR_BACKEND_VULKAN, fft_backend = NLO_FFT_BACKEND_VKFFT)
 
         base_kwargs = (
             t_span = (0.0, z_final),

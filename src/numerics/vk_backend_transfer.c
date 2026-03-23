@@ -73,6 +73,8 @@ nlo_vec_status nlo_vk_upload(
     size_t bytes
 )
 {
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     nlo_vec_status status = nlo_vk_ensure_staging_capacity(backend, (VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
@@ -110,6 +112,7 @@ nlo_vec_status nlo_vk_upload(
         offset += chunk;
     }
 
+    NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VK_HOST_TO_DEVICE_TRANSFER, (uint64_t)bytes);
     return NLO_VEC_STATUS_OK;
 }
 
@@ -120,6 +123,8 @@ nlo_vec_status nlo_vk_download(
     size_t bytes
 )
 {
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     nlo_vec_status status = nlo_vk_ensure_staging_capacity(backend, (VkDeviceSize)NLO_VK_DEFAULT_STAGING_BYTES);
     if (status != NLO_VEC_STATUS_OK) {
         return status;
@@ -157,5 +162,6 @@ nlo_vec_status nlo_vk_download(
         offset += chunk;
     }
 
+    NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VK_DEVICE_TO_HOST_TRANSFER, (uint64_t)bytes);
     return NLO_VEC_STATUS_OK;
 }

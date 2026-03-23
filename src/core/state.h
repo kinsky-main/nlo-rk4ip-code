@@ -181,6 +181,7 @@ typedef struct {
     size_t record_ring_target;
     size_t forced_device_budget_bytes;
     nlo_vk_backend_config vulkan;
+    nlo_cuda_backend_config cuda;
 } nlo_execution_options;
 
 /**
@@ -286,6 +287,17 @@ typedef struct {
     nlo_vec_buffer* y_axis_vec;
 } simulation_init_vectors;
 
+typedef struct {
+    int active;
+    int tensor_active;
+    int raman_active;
+    double step_size;
+    double half_step;
+    double third_step;
+    double sixth_step;
+    double tenth_step;
+} nlo_vk_step_plan;
+
 typedef struct nlo_fft_plan nlo_fft_plan;
 
 /**
@@ -335,6 +347,7 @@ typedef struct {
     int explicit_record_schedule_active;
 
     nlo_fft_plan* fft_plan;
+    nlo_vk_step_plan vk_step_plan;
 
     double current_z;
     double current_step_size;
@@ -360,7 +373,7 @@ typedef struct {
 /**
  * @brief Build default execution options for the selected backend family.
  *
- * @param backend_type Backend mode preference (CPU, Vulkan, or AUTO).
+ * @param backend_type Backend mode preference (CPU, Vulkan, CUDA, or AUTO).
  * @return nlo_execution_options Initialized option block.
  */
 nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type);

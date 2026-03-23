@@ -1,6 +1,6 @@
 # nlolib
 
-`nlolib` is a C99 nonlinear optics library with CPU CBLAS and Vulkan compute backends, plus Python, MATLAB, and Julia bindings.
+`nlolib` is a C99 nonlinear optics library with CPU CBLAS and Vulkan compute backends, plus CUDA backend scaffolding, Python, MATLAB, and Julia bindings.
 
 Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-code/.
 
@@ -17,6 +17,9 @@ Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-c
   - Vulkan headers (auto-discovered or fetched by CMake)
   - Vulkan SDK/glslang development components that provide CMake target `Vulkan::glslang` and the glslang C interface headers used by the runtime operator JIT
   - `glslangValidator` on `PATH` (or available via `VULKAN_SDK`)
+- CUDA toolkit only when `NLO_ENABLE_CUDA_BACKEND=ON`:
+  - CMake-detectable CUDA toolkit installation (`CUDAToolkit`)
+  - optional cuFFT/NVRTC/NCCL runtime libraries for future CUDA execution paths
 
 ### Optional but commonly needed
 
@@ -94,6 +97,11 @@ Current top-level CMake options and cache variables:
 | `NLOLIB_BUILD_MATLAB_TESTS` | `OFF` | Enables optional MATLAB parser/runtime tests under `tests/matlab` when MATLAB is available. |
 | `NLO_ENABLE_VULKAN_BACKEND` | `ON` | Enables Vulkan backend and shader compilation path. |
 | `NLO_ENABLE_VKFFT` | `ON` | Enables VkFFT FFT path (auto-forced `OFF` when Vulkan backend is disabled). |
+| `NLO_ENABLE_CUDA_BACKEND` | `OFF` | Enables CUDA backend API/build scaffolding; auto-forced `OFF` when no CUDA toolkit is found. |
+| `NLO_ENABLE_CUFFT` | `OFF` | Enables cuFFT/cuFFT Xt integration hooks when CUDA backend support is present. |
+| `NLO_ENABLE_NVRTC` | `OFF` | Enables NVRTC runtime-operator JIT hooks when CUDA backend support is present. |
+| `NLO_ENABLE_NCCL` | `OFF` | Enables NCCL integration hooks for single-node CUDA multi-GPU work. |
+| `NLO_ENABLE_DOCKER_VALIDATION` | `OFF` | Adds Docker-based validation helper targets when `docker` and `bash` are available. |
 | `NLO_BUMP_PATCH_ON_BUILD` | `ON` | Adds `nlo_patch_bump_on_build` target to patch-bump version on successful build. |
 | `NLO_SQLITE_USE_FETCHCONTENT` | `ON` | Deprecated compatibility toggle; SQLite amalgamation is always used. |
 | `NLO_CBLAS_PREFER_SYSTEM` | `ON` on Linux/macOS, `OFF` on Windows | Prefer a system OpenBLAS install before fetching OpenBLAS. |
@@ -125,6 +133,7 @@ Multi-config generators use `--config <type>` during build/test.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan loader must be present locally (`vulkan`/`vulkan-1` library).
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, `glslangValidator` is required to compile compute shaders to SPIR-V during build.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, CMake target `Vulkan::glslang` must be resolvable for VkFFT linkage and runtime operator shader compilation.
+- When `NLO_ENABLE_CUDA_BACKEND=ON`, CMake probes for `CUDAToolkit`; if it is not found, CUDA backend support is disabled automatically at configure time.
 - SQLite is linked from the fetched amalgamation as a static library (no external `sqlite3.dll` runtime dependency).
 
 ## Runtime Operator Semantics
@@ -134,6 +143,7 @@ Multi-config generators use `--config <type>` during build/test.
 - Legacy multiplier-form nonlinear expressions must be migrated to include `A`.
 - On the Vulkan backend, eligible runtime operator programs are lowered to a compact internal DAG and JIT-compiled to cached compute pipelines during state initialization. Unsupported expressions or runtime compiler failures fall back to the existing interpreter path.
 - In tensor mode, the Vulkan JIT can execute `wt/kx/ky/t/x/y` symbols from compact axis buffers instead of materialized full-volume meshes when all active tensor operator programs stay on the JIT path.
+- The fused Vulkan solver path now includes a four-term affine-combination kernel used by the adaptive and fixed-step RK stage builder, reducing one chained weighted-combination sequence without changing double-precision semantics.
 - `runtime.nonlinear_model` selects nonlinear execution mode:
   - `0` (`NLO_NONLINEAR_MODEL_EXPR`): evaluate `nonlinear_expr` (default).
   - `1` (`NLO_NONLINEAR_MODEL_KERR_RAMAN`): built-in Kerr + delayed Raman model with optional self-steepening.
@@ -243,6 +253,35 @@ ctest --test-dir build -R "^test_fft$" --output-on-failure
 ctest --test-dir build -R "^test_python_.*" --output-on-failure
 ctest --test-dir build -R "^test_nlo_.*" --output-on-failure
 ```
+
+## Docker Validation
+
+The repo includes Docker validation images and scripts for reproducible CPU, Vulkan, and CUDA configure/build/test runs.
+
+Build/run helpers:
+
+```bash
+bash scripts/docker_validate_cpu.sh
+bash scripts/docker_validate_vulkan.sh
+bash scripts/docker_validate_cuda.sh
+bash scripts/docker_validate_cuda_multigpu.sh
+```
+
+Set `NLO_DOCKER_VALIDATE_DRY_RUN=1` to validate the Docker wrapper scripts without requiring a live Docker runtime or GPUs.
+
+Available images:
+
+- `docker/cpu-dev.Dockerfile`
+- `docker/vulkan-dev.Dockerfile`
+- `docker/cuda-dev.Dockerfile`
+- `docker/cuda-multigpu-dev.Dockerfile`
+
+Optional CMake targets when `-DNLO_ENABLE_DOCKER_VALIDATION=ON` and `docker`/`bash` are available:
+
+- `docker_validate_cpu`
+- `docker_validate_vulkan`
+- `docker_validate_cuda`
+- `docker_validate_cuda_multigpu`
 
 Run the new Python callable-translation test directly:
 

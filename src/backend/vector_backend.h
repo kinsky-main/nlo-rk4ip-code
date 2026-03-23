@@ -1,7 +1,7 @@
 /**
  * @file vector_backend.h
  * @dir src/numerics
- * @brief Backend abstraction for vector operations (CPU or Vulkan).
+ * @brief Backend abstraction for vector operations (CPU, Vulkan, or CUDA).
  * @author Wenzel Kinsky
  * @date 2026-02-02
  */
@@ -16,6 +16,10 @@
 
 #ifndef NLO_ENABLE_VULKAN_BACKEND
 #define NLO_ENABLE_VULKAN_BACKEND 1
+#endif
+
+#ifndef NLO_ENABLE_CUDA_BACKEND
+#define NLO_ENABLE_CUDA_BACKEND 0
 #endif
 
 #if NLO_ENABLE_VULKAN_BACKEND
@@ -43,7 +47,8 @@ extern "C" {
 typedef enum {
     NLO_VECTOR_BACKEND_CPU = 0,
     NLO_VECTOR_BACKEND_VULKAN = 1,
-    NLO_VECTOR_BACKEND_AUTO = 2
+    NLO_VECTOR_BACKEND_CUDA = 2,
+    NLO_VECTOR_BACKEND_AUTO = 3
 } nlo_vector_backend_type;
 
 /**
@@ -149,6 +154,23 @@ typedef struct {
 } nlo_vk_backend_config;
 
 /**
+ * @brief CUDA backend configuration for single-device or single-node multi-GPU runs.
+ *
+ * `device_ordinal = -1` selects the best available CUDA device or local peer group.
+ * Multi-GPU execution is currently intended for tensor workloads on one NVLink/NVSwitch node.
+ */
+typedef struct {
+    int device_ordinal;
+    int enable_multi_gpu;
+    uint32_t max_devices;
+    int enable_peer_access;
+    uint32_t stream_count;
+    size_t pinned_staging_bytes;
+    int graph_capture_enabled;
+    int nvrtc_enabled;
+} nlo_cuda_backend_config;
+
+/**
  * @brief Create a Vulkan backend (device-resident buffers).
  *        If config is NULL, Vulkan device/queue are auto-detected from
  *        available hardware.
@@ -157,6 +179,15 @@ typedef struct {
  * @return nlo_vector_backend* Backend handle, or NULL on failure.
  */
 nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config* config);
+
+/**
+ * @brief Create a CUDA backend (device-resident buffers).
+ *        If config is NULL, CUDA device selection follows backend defaults.
+ *
+ * @param config Optional CUDA configuration overrides.
+ * @return nlo_vector_backend* Backend handle, or NULL when CUDA is unavailable.
+ */
+nlo_vector_backend* nlo_vector_backend_create_cuda(const nlo_cuda_backend_config* config);
 
 // MARK: Simulation Guard
 

@@ -14,7 +14,11 @@ typedef enum {
     /** Force CPU FFTW backend. */
     NLO_FFT_BACKEND_FFTW = 1,
     /** Force Vulkan VkFFT backend. */
-    NLO_FFT_BACKEND_VKFFT = 2
+    NLO_FFT_BACKEND_VKFFT = 2,
+    /** Force CUDA cuFFT backend. */
+    NLO_FFT_BACKEND_CUFFT = 3,
+    /** Force CUDA cuFFT Xt backend for eligible multi-GPU tensor FFTs. */
+    NLO_FFT_BACKEND_CUFFT_XT = 4
 } nlo_fft_backend_type;
 
 #ifdef __cplusplus

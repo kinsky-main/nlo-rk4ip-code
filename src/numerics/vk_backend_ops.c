@@ -9,6 +9,7 @@ nlo_vec_status nlo_vk_op_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* 
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_REAL_FILL,
+                                  NLO_PERF_EVENT_COUNT,
                                   dst,
                                   NULL,
                                   sizeof(double),
@@ -26,6 +27,7 @@ nlo_vec_status nlo_vk_op_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_b
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_REAL_MUL_INPLACE,
+                                  NLO_PERF_EVENT_COUNT,
                                   dst,
                                   src,
                                   sizeof(double),
@@ -38,6 +40,7 @@ nlo_vec_status nlo_vk_op_complex_fill(nlo_vector_backend* backend, nlo_vec_buffe
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_FILL,
+                                  NLO_PERF_EVENT_COUNT,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -59,6 +62,7 @@ nlo_vec_status nlo_vk_op_complex_magnitude_squared(
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_MAGNITUDE_SQUARED,
+                                  NLO_PERF_EVENT_VEC_MAGNITUDE_SQUARED,
                                   dst,
                                   src,
                                   sizeof(nlo_complex),
@@ -75,6 +79,7 @@ nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_SCALAR_MUL_INPLACE,
+                                  NLO_PERF_EVENT_VEC_SCALAR_MUL,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -91,6 +96,7 @@ nlo_vec_status nlo_vk_op_complex_mul_inplace(
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_MUL_INPLACE,
+                                  NLO_PERF_EVENT_VEC_MUL,
                                   dst,
                                   src,
                                   sizeof(nlo_complex),
@@ -107,6 +113,7 @@ nlo_vec_status nlo_vk_op_complex_add_inplace(
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_ADD_INPLACE,
+                                  NLO_PERF_EVENT_VEC_ADD,
                                   dst,
                                   src,
                                   sizeof(nlo_complex),
@@ -115,10 +122,97 @@ nlo_vec_status nlo_vk_op_complex_add_inplace(
                                   0.0);
 }
 
+nlo_vec_status nlo_vk_op_complex_axpy_inplace_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src,
+    double alpha
+)
+{
+    return nlo_vk_dispatch_complex_axpy_inplace_real(backend, dst, src, alpha);
+}
+
+nlo_vec_status nlo_vk_op_complex_affine_comb2_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta
+)
+{
+    return nlo_vk_dispatch_complex_affine_comb2_real(backend, dst, a, alpha, b, beta);
+}
+
+nlo_vec_status nlo_vk_op_complex_affine_comb3_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma
+)
+{
+    return nlo_vk_dispatch_complex_affine_comb3_real(backend, dst, a, alpha, b, beta, c, gamma);
+}
+
+nlo_vec_status nlo_vk_op_complex_affine_comb4_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma,
+    const nlo_vec_buffer* d,
+    double delta
+)
+{
+    return nlo_vk_dispatch_complex_affine_comb4_real(backend, dst, a, alpha, b, beta, c, gamma, d, delta);
+}
+
+nlo_vec_status nlo_vk_op_complex_embedded_error_pair_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* fine_out,
+    nlo_vec_buffer* coarse_out,
+    const nlo_vec_buffer* base,
+    const nlo_vec_buffer* stage_k4,
+    double fine_k4_coeff,
+    double coarse_k4_coeff,
+    const nlo_vec_buffer* stage_k5,
+    double coarse_k5_coeff
+)
+{
+    return nlo_vk_dispatch_complex_embedded_error_pair_real(backend,
+                                                            fine_out,
+                                                            coarse_out,
+                                                            base,
+                                                            stage_k4,
+                                                            fine_k4_coeff,
+                                                            coarse_k4_coeff,
+                                                            stage_k5,
+                                                            coarse_k5_coeff);
+}
+
+nlo_vec_status nlo_vk_op_complex_lerp(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    double alpha
+)
+{
+    return nlo_vk_dispatch_complex_lerp(backend, dst, a, b, alpha);
+}
+
 nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst)
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_EXP_INPLACE,
+                                  NLO_PERF_EVENT_COUNT,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -135,6 +229,7 @@ nlo_vec_status nlo_vk_op_complex_real_pow_inplace(
 {
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_REAL_POW_INPLACE,
+                                  NLO_PERF_EVENT_COUNT,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -195,6 +290,7 @@ nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
 
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA,
+                                  NLO_PERF_EVENT_COUNT,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -216,6 +312,7 @@ nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
 
     return nlo_vk_dispatch_kernel(backend,
                                   NLO_VK_KERNEL_COMPLEX_AXIS_CENTERED_FROM_DELTA,
+                                  NLO_PERF_EVENT_COUNT,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -276,6 +373,7 @@ nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
 
     return nlo_vk_dispatch_kernel(backend,
                                   kernel_id,
+                                  NLO_PERF_EVENT_COUNT,
                                   dst,
                                   axis,
                                   sizeof(nlo_complex),

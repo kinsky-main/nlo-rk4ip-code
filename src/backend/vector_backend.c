@@ -1,7 +1,7 @@
 /**
  * @file vector_backend.c
  * @dir src/backend
- * @brief Backend abstraction for vector operations (CPU or Vulkan).
+ * @brief Backend abstraction for vector operations (CPU, Vulkan, or CUDA).
  * @author Wenzel Kinsky
  * @date 2026-02-02
  */
@@ -10,6 +10,7 @@
 #include "backend/vk_auto_context.h"
 #include "numerics/vector_ops.h"
 #include "numerics/vk_vector_ops.h"
+#include "utility/perf_profile.h"
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -63,6 +64,157 @@ static nlo_vec_status nlo_vec_validate_mixed_pair(
         return NLO_VEC_STATUS_INVALID_ARGUMENT;
     }
     return NLO_VEC_STATUS_OK;
+}
+
+static nlo_vec_status nlo_vec_validate_triple(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    const nlo_vec_buffer* c,
+    nlo_vec_kind kind
+)
+{
+    nlo_vec_status status = nlo_vec_validate_pair(backend, a, b, kind);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_validate_buffer(backend, c, kind);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    return (a->length == c->length) ? NLO_VEC_STATUS_OK : NLO_VEC_STATUS_INVALID_ARGUMENT;
+}
+
+static nlo_vec_status nlo_vec_validate_quad(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    const nlo_vec_buffer* c,
+    const nlo_vec_buffer* d,
+    nlo_vec_kind kind
+)
+{
+    nlo_vec_status status = nlo_vec_validate_triple(backend, a, b, c, kind);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_validate_buffer(backend, d, kind);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    return (a->length == d->length) ? NLO_VEC_STATUS_OK : NLO_VEC_STATUS_INVALID_ARGUMENT;
+}
+
+static nlo_vec_status nlo_vec_validate_quint(
+    const nlo_vector_backend* backend,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    const nlo_vec_buffer* c,
+    const nlo_vec_buffer* d,
+    const nlo_vec_buffer* e,
+    nlo_vec_kind kind
+)
+{
+    nlo_vec_status status = nlo_vec_validate_quad(backend, a, b, c, d, kind);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_validate_buffer(backend, e, kind);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    return (a->length == e->length) ? NLO_VEC_STATUS_OK : NLO_VEC_STATUS_INVALID_ARGUMENT;
+}
+
+static void nlo_complex_axpy_inplace_real_host(
+    nlo_complex* dst,
+    const nlo_complex* src,
+    double alpha,
+    size_t length
+)
+{
+    for (size_t i = 0u; i < length; ++i) {
+        dst[i].re += alpha * src[i].re;
+        dst[i].im += alpha * src[i].im;
+    }
+}
+
+static void nlo_complex_affine_comb2_real_host(
+    nlo_complex* dst,
+    const nlo_complex* a,
+    double alpha,
+    const nlo_complex* b,
+    double beta,
+    size_t length
+)
+{
+    for (size_t i = 0u; i < length; ++i) {
+        dst[i].re = alpha * a[i].re + beta * b[i].re;
+        dst[i].im = alpha * a[i].im + beta * b[i].im;
+    }
+}
+
+static void nlo_complex_affine_comb3_real_host(
+    nlo_complex* dst,
+    const nlo_complex* a,
+    double alpha,
+    const nlo_complex* b,
+    double beta,
+    const nlo_complex* c,
+    double gamma,
+    size_t length
+)
+{
+    for (size_t i = 0u; i < length; ++i) {
+        dst[i].re = alpha * a[i].re + beta * b[i].re + gamma * c[i].re;
+        dst[i].im = alpha * a[i].im + beta * b[i].im + gamma * c[i].im;
+    }
+}
+
+static void nlo_complex_affine_comb4_real_host(
+    nlo_complex* dst,
+    const nlo_complex* a,
+    double alpha,
+    const nlo_complex* b,
+    double beta,
+    const nlo_complex* c,
+    double gamma,
+    const nlo_complex* d,
+    double delta,
+    size_t length
+)
+{
+    for (size_t i = 0u; i < length; ++i) {
+        dst[i].re = alpha * a[i].re + beta * b[i].re + gamma * c[i].re + delta * d[i].re;
+        dst[i].im = alpha * a[i].im + beta * b[i].im + gamma * c[i].im + delta * d[i].im;
+    }
+}
+
+static void nlo_complex_embedded_error_pair_real_host(
+    nlo_complex* fine_out,
+    nlo_complex* coarse_out,
+    const nlo_complex* base,
+    const nlo_complex* stage_k4,
+    double fine_k4_coeff,
+    double coarse_k4_coeff,
+    const nlo_complex* stage_k5,
+    double coarse_k5_coeff,
+    size_t length
+)
+{
+    for (size_t i = 0u; i < length; ++i) {
+        const double base_re = base[i].re;
+        const double base_im = base[i].im;
+        const double k4_re = stage_k4[i].re;
+        const double k4_im = stage_k4[i].im;
+        const double k5_re = stage_k5[i].re;
+        const double k5_im = stage_k5[i].im;
+
+        fine_out[i].re = base_re + (fine_k4_coeff * k4_re);
+        fine_out[i].im = base_im + (fine_k4_coeff * k4_im);
+        coarse_out[i].re = base_re + (coarse_k4_coeff * k4_re) + (coarse_k5_coeff * k5_re);
+        coarse_out[i].im = base_im + (coarse_k4_coeff * k4_im) + (coarse_k5_coeff * k5_im);
+    }
 }
 
 static const char* nlo_vk_device_type_to_string(VkPhysicalDeviceType device_type)
@@ -245,6 +397,9 @@ static bool nlo_vk_try_query_device_local_available_bytes(
 #endif
 
 static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template);
+#if NLO_ENABLE_CUDA_BACKEND
+static int nlo_cuda_backend_notice_emitted = 0;
+#endif
 
 nlo_vec_status nlo_vec_validate_backend(const nlo_vector_backend* backend)
 {
@@ -359,6 +514,20 @@ nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config
     return backend;
 }
 
+nlo_vector_backend* nlo_vector_backend_create_cuda(const nlo_cuda_backend_config* config)
+{
+    (void)config;
+#if NLO_ENABLE_CUDA_BACKEND
+    if (nlo_cuda_backend_notice_emitted == 0) {
+        fprintf(stderr,
+                "[nlolib] CUDA backend support is enabled in the build surface, "
+                "but no runtime CUDA implementation is linked in this build.\n");
+        nlo_cuda_backend_notice_emitted = 1;
+    }
+#endif
+    return NULL;
+}
+
 static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template)
 {
     char reason[256];
@@ -429,7 +598,10 @@ nlo_vec_status nlo_vec_begin_simulation(nlo_vector_backend* backend)
         return status;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     backend->in_simulation = true;
+    NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_BEGIN_SIMULATION, 0u);
     return NLO_VEC_STATUS_OK;
 }
 
@@ -440,6 +612,8 @@ nlo_vec_status nlo_vec_end_simulation(nlo_vector_backend* backend)
         return status;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_simulation_phase_flush(backend);
         if (status != NLO_VEC_STATUS_OK) {
@@ -449,6 +623,7 @@ nlo_vec_status nlo_vec_end_simulation(nlo_vector_backend* backend)
     }
 
     backend->in_simulation = false;
+    NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_END_SIMULATION, 0u);
     return NLO_VEC_STATUS_OK;
 }
 
@@ -771,15 +946,20 @@ nlo_vec_status nlo_vec_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer*
         return status;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         nlo_complex_copy((nlo_complex*)dst->host_ptr, (const nlo_complex*)src->host_ptr, dst->length);
-        return NLO_VEC_STATUS_OK;
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_copy(backend, dst, src);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
     }
-    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
-        return nlo_vk_op_complex_copy(backend, dst, src);
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VEC_COPY, (uint64_t)dst->bytes);
     }
-
-    return NLO_VEC_STATUS_UNSUPPORTED;
+    return status;
 }
 
 nlo_vec_status nlo_vec_complex_magnitude_squared(
@@ -793,15 +973,23 @@ nlo_vec_status nlo_vec_complex_magnitude_squared(
         return status;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         calculate_magnitude_squared((const nlo_complex*)src->host_ptr, (nlo_complex*)dst->host_ptr, dst->length);
-        return NLO_VEC_STATUS_OK;
-    }
-    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
-        return nlo_vk_op_complex_magnitude_squared(backend, src, dst);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_magnitude_squared(backend, src, dst);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
     }
 
-    return NLO_VEC_STATUS_UNSUPPORTED;
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope,
+                           NLO_PERF_EVENT_VEC_MAGNITUDE_SQUARED,
+                           (uint64_t)dst->bytes);
+    }
+    return status;
 }
 
 nlo_vec_status nlo_vec_complex_axpy_real(
@@ -839,15 +1027,23 @@ nlo_vec_status nlo_vec_complex_scalar_mul_inplace(
         return status;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         nlo_complex_scalar_mul_inplace((nlo_complex*)dst->host_ptr, alpha, dst->length);
-        return NLO_VEC_STATUS_OK;
-    }
-    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
-        return nlo_vk_op_complex_scalar_mul_inplace(backend, dst, alpha);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_scalar_mul_inplace(backend, dst, alpha);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
     }
 
-    return NLO_VEC_STATUS_UNSUPPORTED;
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope,
+                           NLO_PERF_EVENT_VEC_SCALAR_MUL,
+                           (uint64_t)dst->bytes);
+    }
+    return status;
 }
 
 nlo_vec_status nlo_vec_complex_mul_inplace(
@@ -861,15 +1057,21 @@ nlo_vec_status nlo_vec_complex_mul_inplace(
         return status;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         nlo_complex_mul_inplace((nlo_complex*)dst->host_ptr, (const nlo_complex*)src->host_ptr, dst->length);
-        return NLO_VEC_STATUS_OK;
-    }
-    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
-        return nlo_vk_op_complex_mul_inplace(backend, dst, src);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_mul_inplace(backend, dst, src);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
     }
 
-    return NLO_VEC_STATUS_UNSUPPORTED;
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VEC_MUL, (uint64_t)dst->bytes);
+    }
+    return status;
 }
 
 nlo_vec_status nlo_vec_complex_pow(
@@ -966,15 +1168,270 @@ nlo_vec_status nlo_vec_complex_add_inplace(
         return status;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         nlo_complex_add_inplace((nlo_complex*)dst->host_ptr, (const nlo_complex*)src->host_ptr, dst->length);
-        return NLO_VEC_STATUS_OK;
-    }
-    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
-        return nlo_vk_op_complex_add_inplace(backend, dst, src);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_add_inplace(backend, dst, src);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
     }
 
-    return NLO_VEC_STATUS_UNSUPPORTED;
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VEC_ADD, (uint64_t)dst->bytes);
+    }
+    return status;
+}
+
+nlo_vec_status nlo_vec_complex_axpy_inplace_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* src,
+    double alpha
+)
+{
+    nlo_vec_status status = nlo_vec_validate_pair(backend, dst, src, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex_axpy_inplace_real_host((nlo_complex*)dst->host_ptr,
+                                           (const nlo_complex*)src->host_ptr,
+                                           alpha,
+                                           dst->length);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_axpy_inplace_real(backend, dst, src, alpha);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
+    }
+
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VEC_AXPY, (uint64_t)dst->bytes);
+    }
+    return status;
+}
+
+nlo_vec_status nlo_vec_complex_affine_comb2_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta
+)
+{
+    nlo_vec_status status = nlo_vec_validate_triple(backend, dst, a, b, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex_affine_comb2_real_host((nlo_complex*)dst->host_ptr,
+                                           (const nlo_complex*)a->host_ptr,
+                                           alpha,
+                                           (const nlo_complex*)b->host_ptr,
+                                           beta,
+                                           dst->length);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_affine_comb2_real(backend, dst, a, alpha, b, beta);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
+    }
+
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VEC_AFFINE_COMB2, (uint64_t)dst->bytes);
+    }
+    return status;
+}
+
+nlo_vec_status nlo_vec_complex_affine_comb3_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma
+)
+{
+    nlo_vec_status status = nlo_vec_validate_triple(backend, dst, a, b, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_validate_buffer(backend, c, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK || dst->length != c->length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex_affine_comb3_real_host((nlo_complex*)dst->host_ptr,
+                                           (const nlo_complex*)a->host_ptr,
+                                           alpha,
+                                           (const nlo_complex*)b->host_ptr,
+                                           beta,
+                                           (const nlo_complex*)c->host_ptr,
+                                           gamma,
+                                           dst->length);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_affine_comb3_real(backend, dst, a, alpha, b, beta, c, gamma);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
+    }
+
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VEC_AFFINE_COMB3, (uint64_t)dst->bytes);
+    }
+    return status;
+}
+
+nlo_vec_status nlo_vec_complex_affine_comb4_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    double alpha,
+    const nlo_vec_buffer* b,
+    double beta,
+    const nlo_vec_buffer* c,
+    double gamma,
+    const nlo_vec_buffer* d,
+    double delta
+)
+{
+    nlo_vec_status status = nlo_vec_validate_quad(backend, dst, a, b, c, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+    status = nlo_vec_validate_buffer(backend, d, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK || dst->length != d->length) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex_affine_comb4_real_host((nlo_complex*)dst->host_ptr,
+                                           (const nlo_complex*)a->host_ptr,
+                                           alpha,
+                                           (const nlo_complex*)b->host_ptr,
+                                           beta,
+                                           (const nlo_complex*)c->host_ptr,
+                                           gamma,
+                                           (const nlo_complex*)d->host_ptr,
+                                           delta,
+                                           dst->length);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_affine_comb4_real(backend, dst, a, alpha, b, beta, c, gamma, d, delta);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
+    }
+
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VEC_AFFINE_COMB4, (uint64_t)dst->bytes);
+    }
+    return status;
+}
+
+nlo_vec_status nlo_vec_complex_embedded_error_pair_real(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* fine_out,
+    nlo_vec_buffer* coarse_out,
+    const nlo_vec_buffer* base,
+    const nlo_vec_buffer* stage_k4,
+    double fine_k4_coeff,
+    double coarse_k4_coeff,
+    const nlo_vec_buffer* stage_k5,
+    double coarse_k5_coeff
+)
+{
+    nlo_vec_status status =
+        nlo_vec_validate_quint(backend, fine_out, coarse_out, base, stage_k4, stage_k5, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        nlo_complex_embedded_error_pair_real_host((nlo_complex*)fine_out->host_ptr,
+                                                  (nlo_complex*)coarse_out->host_ptr,
+                                                  (const nlo_complex*)base->host_ptr,
+                                                  (const nlo_complex*)stage_k4->host_ptr,
+                                                  fine_k4_coeff,
+                                                  coarse_k4_coeff,
+                                                  (const nlo_complex*)stage_k5->host_ptr,
+                                                  coarse_k5_coeff,
+                                                  fine_out->length);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_embedded_error_pair_real(backend,
+                                                            fine_out,
+                                                            coarse_out,
+                                                            base,
+                                                            stage_k4,
+                                                            fine_k4_coeff,
+                                                            coarse_k4_coeff,
+                                                            stage_k5,
+                                                            coarse_k5_coeff);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
+    }
+
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope,
+                           NLO_PERF_EVENT_VEC_EMBEDDED_ERROR_PAIR,
+                           (uint64_t)(fine_out->bytes + coarse_out->bytes));
+    }
+    return status;
+}
+
+nlo_vec_status nlo_vec_complex_lerp(
+    nlo_vector_backend* backend,
+    nlo_vec_buffer* dst,
+    const nlo_vec_buffer* a,
+    const nlo_vec_buffer* b,
+    double alpha
+)
+{
+    nlo_vec_status status = nlo_vec_validate_triple(backend, dst, a, b, NLO_VEC_KIND_COMPLEX64);
+    if (status != NLO_VEC_STATUS_OK) {
+        return status;
+    }
+
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
+    if (backend->type == NLO_VECTOR_BACKEND_CPU) {
+        const double beta = 1.0 - alpha;
+        nlo_complex_affine_comb2_real_host((nlo_complex*)dst->host_ptr,
+                                           (const nlo_complex*)a->host_ptr,
+                                           beta,
+                                           (const nlo_complex*)b->host_ptr,
+                                           alpha,
+                                           dst->length);
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_lerp(backend, dst, a, b, alpha);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
+    }
+
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_VEC_LERP, (uint64_t)dst->bytes);
+    }
+    return status;
 }
 
 nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst)
@@ -1267,6 +1724,8 @@ nlo_vec_status nlo_vec_complex_weighted_rms_error(
         rtol = 1e-6;
     }
 
+    nlo_perf_scope perf_scope = {0.0, 0};
+    NLO_PERF_SCOPE_BEGIN(perf_scope);
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         const nlo_complex* fine_values = (const nlo_complex*)fine->host_ptr;
         const nlo_complex* coarse_values = (const nlo_complex*)coarse->host_ptr;
@@ -1295,13 +1754,18 @@ nlo_vec_status nlo_vec_complex_weighted_rms_error(
 
         const double ratio = numerator / denominator;
         *out_error = sqrt((ratio > 0.0) ? ratio : 0.0);
-        return NLO_VEC_STATUS_OK;
+        status = NLO_VEC_STATUS_OK;
+    } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
+        status = nlo_vk_op_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
+    } else {
+        status = NLO_VEC_STATUS_UNSUPPORTED;
     }
 
-    if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
-        return nlo_vk_op_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
+    if (status == NLO_VEC_STATUS_OK) {
+        NLO_PERF_SCOPE_END(perf_scope,
+                           NLO_PERF_EVENT_WEIGHTED_RMS_ERROR,
+                           (uint64_t)(fine->bytes + coarse->bytes));
     }
-
-    return NLO_VEC_STATUS_UNSUPPORTED;
+    return status;
 }
 

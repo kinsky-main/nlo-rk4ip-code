@@ -10,6 +10,25 @@
 extern "C" {
 #endif
 
+typedef enum {
+    NLO_OPERATOR_JIT_MODE_ON = 0,
+    NLO_OPERATOR_JIT_MODE_OFF = 1
+} nlo_operator_jit_mode;
+
+/**
+ * @brief Override the internal Vulkan operator JIT mode.
+ *
+ * @param mode Requested JIT mode.
+ */
+void nlo_operator_program_set_jit_mode(nlo_operator_jit_mode mode);
+
+/**
+ * @brief Query the current internal Vulkan operator JIT mode.
+ *
+ * @return nlo_operator_jit_mode Current JIT mode.
+ */
+nlo_operator_jit_mode nlo_operator_program_get_jit_mode(void);
+
 /**
  * @brief Attempt to prepare a Vulkan JIT program for one compiled operator.
  *

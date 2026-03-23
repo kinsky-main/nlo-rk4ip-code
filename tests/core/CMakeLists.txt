@@ -77,6 +77,8 @@ target_link_libraries(test_core_state_alloc PRIVATE nlo_fft_backend ${_nlo_cblas
 target_compile_definitions(test_core_state_alloc PRIVATE
   NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+  NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
+  NLO_ENABLE_RUNTIME_PROFILING=1
 )
 if(NLO_ENABLE_VULKAN_BACKEND)
   target_link_libraries(test_core_state_alloc PRIVATE Vulkan::Vulkan Vulkan::glslang)
@@ -134,12 +136,32 @@ target_include_directories(test_core_log_sink PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_core_log_sink PRIVATE
   NLO_ENABLE_VULKAN_BACKEND=0
   NLO_ENABLE_VKFFT=0
+  NLO_ENABLE_CUDA_BACKEND=0
 )
 if(UNIX)
   target_link_libraries(test_core_log_sink PRIVATE m)
 endif()
 
 add_test(NAME test_core_log_sink COMMAND test_core_log_sink)
+
+add_executable(test_core_perf_profile
+  ${CMAKE_CURRENT_LIST_DIR}/test_perf_profile.c
+  ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
+  ${CMAKE_SOURCE_DIR}/src/backend/vulkan_stubs.c
+)
+target_include_directories(test_core_perf_profile PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_compile_definitions(test_core_perf_profile PRIVATE
+  NLO_ENABLE_VULKAN_BACKEND=0
+  NLO_ENABLE_VKFFT=0
+  NLO_ENABLE_CUDA_BACKEND=0
+  NLO_ENABLE_RUNTIME_PROFILING=1
+)
+if(UNIX)
+  target_link_libraries(test_core_perf_profile PRIVATE m)
+endif()
+add_test(NAME test_core_perf_profile COMMAND test_core_perf_profile)
 
 add_executable(test_tensor_bench_plan
   ${CMAKE_CURRENT_LIST_DIR}/test_tensor_bench_plan.c
@@ -155,3 +177,30 @@ if(UNIX)
 endif()
 
 add_test(NAME test_tensor_bench_plan COMMAND test_tensor_bench_plan)
+
+find_program(NLO_TEST_BASH_EXECUTABLE bash)
+if(NLO_TEST_BASH_EXECUTABLE)
+  add_test(NAME test_docker_validate_cpu_dry_run
+    COMMAND "${NLO_TEST_BASH_EXECUTABLE}" -lc "export NLO_DOCKER_VALIDATE_DRY_RUN=1; ./scripts/docker_validate_cpu.sh")
+  set_tests_properties(test_docker_validate_cpu_dry_run PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+
+  add_test(NAME test_docker_validate_vulkan_dry_run
+    COMMAND "${NLO_TEST_BASH_EXECUTABLE}" -lc "export NLO_DOCKER_VALIDATE_DRY_RUN=1; ./scripts/docker_validate_vulkan.sh")
+  set_tests_properties(test_docker_validate_vulkan_dry_run PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+
+  add_test(NAME test_docker_validate_cuda_dry_run
+    COMMAND "${NLO_TEST_BASH_EXECUTABLE}" -lc "export NLO_DOCKER_VALIDATE_DRY_RUN=1; ./scripts/docker_validate_cuda.sh")
+  set_tests_properties(test_docker_validate_cuda_dry_run PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+
+  add_test(NAME test_docker_validate_cuda_multigpu_dry_run
+    COMMAND "${NLO_TEST_BASH_EXECUTABLE}" -lc "export NLO_DOCKER_VALIDATE_DRY_RUN=1; ./scripts/docker_validate_cuda_multigpu.sh")
+  set_tests_properties(test_docker_validate_cuda_multigpu_dry_run PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  )
+endif()

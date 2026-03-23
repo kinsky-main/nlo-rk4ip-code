@@ -28,13 +28,21 @@ end
 
 mutable struct ExampleRunDB
     db_path::String
-end
-
-function ExampleRunDB(db_path::AbstractString)
-    mkpath(dirname(String(db_path)))
-    db = ExampleRunDB(String(db_path))
-    ensure_schema!(db)
-    return db
+    function ExampleRunDB(db_path::AbstractString)
+        raw = strip(String(db_path))
+        isempty(raw) && error("example database path must not be empty")
+        resolved = normpath(abspath(expanduser(raw)))
+        isdir(resolved) && error("example database path '$resolved' points to a directory")
+        parent = dirname(resolved)
+        isempty(parent) || mkpath(parent)
+        if !isfile(resolved)
+            open(resolved, "a") do _
+            end
+        end
+        db = new(resolved)
+        ensure_schema!(db)
+        return db
+    end
 end
 
 function _with_db(f::Function, db::ExampleRunDB)
@@ -99,6 +107,7 @@ function make_run_id(example_name::AbstractString, run_group::AbstractString, ca
 end
 
 function begin_group(db::ExampleRunDB, example_name::AbstractString, run_group::Union{Nothing, AbstractString} = nothing)
+    println(stderr, "beginning run group for example '", example_name, "' with group '", run_group, "' at path '", db.db_path, "'")
     resolved = run_group === nothing || isempty(run_group) ? new_run_group_id() : String(run_group)
     _with_db(db) do conn
         SQLite.execute(conn, """
@@ -118,11 +127,14 @@ end
 
 function _single_string_query(db::ExampleRunDB, sql::AbstractString, params)
     return _with_db(db) do conn
-        rows = collect(DBInterface.execute(conn, sql, params))
-        if isempty(rows) || ismissing(rows[1][1])
+        DBInterface.execute(conn, sql, params) do rows
+            for row in rows
+                value = row[1]
+                ismissing(value) && return nothing
+                return String(value)
+            end
             return nothing
         end
-        return String(rows[1][1])
     end
 end
 
@@ -239,15 +251,24 @@ function _blob_to_array(blob, ::Type{T}) where {T}
 end
 
 function _load_records(conn, run_id::AbstractString, num_time_samples::Integer)
-    rows = collect(DBInterface.execute(conn,
+    rows = NamedTuple{(:record_start, :record_count, :payload), Tuple{Int, Int, Vector{UInt8}}}[]
+    DBInterface.execute(conn,
         "SELECT record_start, record_count, payload FROM io_record_chunks WHERE run_id=? ORDER BY record_start ASC;",
-        (String(run_id),)))
+        (String(run_id),)) do query
+        for row in query
+            push!(rows, (
+                record_start = Int(row.record_start),
+                record_count = Int(row.record_count),
+                payload = Vector{UInt8}(row.payload),
+            ))
+        end
+    end
     isempty(rows) && error("run_id '$run_id' has no io_record_chunks")
-    max_records = maximum(Int(row.record_start) + Int(row.record_count) for row in rows)
+    max_records = maximum(row.record_start + row.record_count for row in rows)
     out = zeros(ComplexF64, max_records, Int(num_time_samples))
     for row in rows
-        start = Int(row.record_start)
-        count = Int(row.record_count)
+        start = row.record_start
+        count = row.record_count
         payload = _blob_to_array(row.payload, Float64)
         expected = count * Int(num_time_samples) * 2
         length(payload) == expected || error("run_id '$run_id' chunk decode mismatch")
@@ -259,26 +280,36 @@ end
 
 function load_case(db::ExampleRunDB; example_name::AbstractString, run_group::AbstractString, case_key::AbstractString)
     return _with_db(db) do conn
-        rows = collect(DBInterface.execute(conn,
+        row_data = DBInterface.execute(conn,
             "SELECT c.run_id, c.meta_json, r.num_recorded_samples, r.num_time_samples, s.z_end "
             * "FROM ex_case_runs c "
             * "JOIN io_runs r ON r.run_id = c.run_id "
             * "JOIN io_sim_config s ON s.config_hash = r.config_hash "
             * "WHERE c.example_name=? AND c.run_group=? AND c.case_key=?;",
-            (String(example_name), String(run_group), String(case_key))))
-        isempty(rows) && error("missing case '$case_key' for example '$example_name' / '$run_group'")
-        row = rows[1]
-        run_id = String(row.run_id)
-        num_time_samples = Int(row.num_time_samples)
-        requested_records = Int(row.num_recorded_samples)
-        z_end = Float64(row.z_end)
+            (String(example_name), String(run_group), String(case_key))) do rows
+            for row in rows
+                return (
+                    run_id = String(row.run_id),
+                    meta_json = ismissing(row.meta_json) ? nothing : String(row.meta_json),
+                    requested_records = Int(row.num_recorded_samples),
+                    num_time_samples = Int(row.num_time_samples),
+                    z_end = Float64(row.z_end),
+                )
+            end
+            return nothing
+        end
+        row_data === nothing && error("missing case '$case_key' for example '$example_name' / '$run_group'")
+        run_id = row_data.run_id
+        num_time_samples = row_data.num_time_samples
+        requested_records = row_data.requested_records
+        z_end = row_data.z_end
         records = _load_records(conn, run_id, num_time_samples)
         loaded_records = size(records, 1)
         z_axis = loaded_records == 1 ? [z_end] : collect(range(0.0, z_end, length = loaded_records))
         return LoadedCase(
             run_id,
             String(case_key),
-            _decode_meta_json(row.meta_json),
+            _decode_meta_json(row_data.meta_json),
             records,
             z_axis,
             requested_records,
@@ -290,21 +321,34 @@ end
 
 function load_step_history(db::ExampleRunDB; run_id::AbstractString)
     return _with_db(db) do conn
-        rows = collect(DBInterface.execute(conn,
+        row_data = DBInterface.execute(conn,
             "SELECT event_count, dropped, capacity, step_index_blob, z_blob, step_size_blob, next_step_size_blob, error_blob "
             * "FROM ex_step_history WHERE run_id=?;",
-            (String(run_id),)))
-        isempty(rows) && return nothing
-        row = rows[1]
-        count = Int(row.event_count)
+            (String(run_id),)) do rows
+            for row in rows
+                return (
+                    count = Int(row.event_count),
+                    dropped = Int(row.dropped),
+                    capacity = Int(row.capacity),
+                    step_index_blob = Vector{UInt8}(row.step_index_blob),
+                    z_blob = Vector{UInt8}(row.z_blob),
+                    step_size_blob = Vector{UInt8}(row.step_size_blob),
+                    next_step_size_blob = Vector{UInt8}(row.next_step_size_blob),
+                    error_blob = Vector{UInt8}(row.error_blob),
+                )
+            end
+            return nothing
+        end
+        row_data === nothing && return nothing
+        count = row_data.count
         return Dict{String, Any}(
-            "step_index" => _blob_to_array(row.step_index_blob, Int64)[1:count],
-            "z" => _blob_to_array(row.z_blob, Float64)[1:count],
-            "step_size" => _blob_to_array(row.step_size_blob, Float64)[1:count],
-            "next_step_size" => _blob_to_array(row.next_step_size_blob, Float64)[1:count],
-            "error" => _blob_to_array(row.error_blob, Float64)[1:count],
-            "dropped" => Int(row.dropped),
-            "capacity" => Int(row.capacity),
+            "step_index" => _blob_to_array(row_data.step_index_blob, Int64)[1:count],
+            "z" => _blob_to_array(row_data.z_blob, Float64)[1:count],
+            "step_size" => _blob_to_array(row_data.step_size_blob, Float64)[1:count],
+            "next_step_size" => _blob_to_array(row_data.next_step_size_blob, Float64)[1:count],
+            "error" => _blob_to_array(row_data.error_blob, Float64)[1:count],
+            "dropped" => row_data.dropped,
+            "capacity" => row_data.capacity,
         )
     end
 end
