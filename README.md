@@ -1,6 +1,6 @@
 # nlolib
 
-`nlolib` is a C99 nonlinear optics library with CPU CBLAS and Vulkan compute backends, plus CUDA backend scaffolding, Python, MATLAB, and Julia bindings.
+`nlolib` is a C99 nonlinear optics library with CPU CBLAS, Vulkan compute, and CUDA GPU backends, plus Python, MATLAB, and Julia bindings.
 
 Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-code/.
 
@@ -19,7 +19,8 @@ Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-c
   - `glslangValidator` on `PATH` (or available via `VULKAN_SDK`)
 - CUDA toolkit only when `NLO_ENABLE_CUDA_BACKEND=ON`:
   - CMake-detectable CUDA toolkit installation (`CUDAToolkit`)
-  - optional cuFFT/NVRTC/NCCL runtime libraries for future CUDA execution paths
+  - cuFFT runtime when `NLO_ENABLE_CUFFT=ON`
+  - host C++ compiler supported by the local CUDA toolkit
 
 ### Optional but commonly needed
 
@@ -44,6 +45,21 @@ Run the C demo:
 ```powershell
 cmake --build build --config Release --target runtime_temporal_demo_c
 .\build\examples\Release\runtime_temporal_demo_c.exe
+```
+
+CUDA phase 1 build on Windows:
+
+```powershell
+cmake -S . -B build-cuda `
+  -DNLO_ENABLE_CUDA_BACKEND=ON `
+  -DNLO_ENABLE_CUFFT=ON `
+  -DNLO_ENABLE_VULKAN_BACKEND=OFF `
+  -DNLO_INSTALL_GIT_HOOKS=OFF `
+  -DNLO_BUMP_PATCH_ON_BUILD=OFF
+
+cmake --build build-cuda --config Debug --target nlolib test_nlo_vector_backend test_fft
+$env:PATH = "<CUDA toolkit>\\bin;$env:PATH"
+ctest --test-dir build-cuda --build-config Debug -R "^test_nlo_vector_backend$|^test_fft$" --output-on-failure
 ```
 
 ## Quick Start (Linux)
@@ -97,8 +113,8 @@ Current top-level CMake options and cache variables:
 | `NLOLIB_BUILD_MATLAB_TESTS` | `OFF` | Enables optional MATLAB parser/runtime tests under `tests/matlab` when MATLAB is available. |
 | `NLO_ENABLE_VULKAN_BACKEND` | `ON` | Enables Vulkan backend and shader compilation path. |
 | `NLO_ENABLE_VKFFT` | `ON` | Enables VkFFT FFT path (auto-forced `OFF` when Vulkan backend is disabled). |
-| `NLO_ENABLE_CUDA_BACKEND` | `OFF` | Enables CUDA backend API/build scaffolding; auto-forced `OFF` when no CUDA toolkit is found. |
-| `NLO_ENABLE_CUFFT` | `OFF` | Enables cuFFT/cuFFT Xt integration hooks when CUDA backend support is present. |
+| `NLO_ENABLE_CUDA_BACKEND` | `OFF` | Enables the phase 1 CUDA backend (single-GPU buffers/transfers, solver algebra, runtime-operator interpreter execution, and CUDA-mode `AUTO` selection); auto-forced `OFF` when no CUDA toolkit is found. |
+| `NLO_ENABLE_CUFFT` | `OFF` | Enables single-GPU cuFFT integration for the CUDA backend. |
 | `NLO_ENABLE_NVRTC` | `OFF` | Enables NVRTC runtime-operator JIT hooks when CUDA backend support is present. |
 | `NLO_ENABLE_NCCL` | `OFF` | Enables NCCL integration hooks for single-node CUDA multi-GPU work. |
 | `NLO_ENABLE_DOCKER_VALIDATION` | `OFF` | Adds Docker-based validation helper targets when `docker` and `bash` are available. |
@@ -134,6 +150,8 @@ Multi-config generators use `--config <type>` during build/test.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, `glslangValidator` is required to compile compute shaders to SPIR-V during build.
 - When `NLO_ENABLE_VULKAN_BACKEND=ON`, CMake target `Vulkan::glslang` must be resolvable for VkFFT linkage and runtime operator shader compilation.
 - When `NLO_ENABLE_CUDA_BACKEND=ON`, CMake probes for `CUDAToolkit`; if it is not found, CUDA backend support is disabled automatically at configure time.
+- When `NLO_ENABLE_CUDA_BACKEND=ON`, CMake enables the CUDA language and links CUDA runtime support into the library/test targets that compile backend sources directly.
+- On Windows CUDA builds, ensure the CUDA toolkit `bin` directory is on `PATH` when running tests or executables that use cuFFT so `cufft64_12.dll` can be resolved.
 - SQLite is linked from the fetched amalgamation as a static library (no external `sqlite3.dll` runtime dependency).
 
 ## Runtime Operator Semantics
@@ -142,6 +160,7 @@ Multi-config generators use `--config <type>` during build/test.
 - `nonlinear_expr` is interpreted as the full nonlinear RHS `N(A)` and is written directly by the solver.
 - Legacy multiplier-form nonlinear expressions must be migrated to include `A`.
 - On the Vulkan backend, eligible runtime operator programs are lowered to a compact internal DAG and JIT-compiled to cached compute pipelines during state initialization. Unsupported expressions or runtime compiler failures fall back to the existing interpreter path.
+- On the phase 1 CUDA backend, runtime operators execute through the existing lowered interpreter path on CUDA-resident buffers; NVRTC kernel JIT is deferred to a later phase.
 - In tensor mode, the Vulkan JIT can execute `wt/kx/ky/t/x/y` symbols from compact axis buffers instead of materialized full-volume meshes when all active tensor operator programs stay on the JIT path.
 - The fused Vulkan solver path now includes a four-term affine-combination kernel used by the adaptive and fixed-step RK stage builder, reducing one chained weighted-combination sequence without changing double-precision semantics.
 - `runtime.nonlinear_model` selects nonlinear execution mode:

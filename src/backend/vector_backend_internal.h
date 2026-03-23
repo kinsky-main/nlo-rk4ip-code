@@ -10,6 +10,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if NLO_ENABLE_CUDA_BACKEND
+#include <cuda_runtime_api.h>
+#else
+typedef void* cudaStream_t;
+typedef void* cudaEvent_t;
+#endif
+
 #ifndef NLO_ENABLE_VULKAN_BACKEND
 #define NLO_ENABLE_VULKAN_BACKEND 1
 #endif
@@ -34,6 +41,8 @@ typedef void* VkBuffer;
 typedef void* VkDeviceMemory;
 typedef void* VkQueryPool;
 typedef uint64_t VkDeviceSize;
+typedef uint32_t VkBufferUsageFlags;
+typedef uint32_t VkMemoryPropertyFlags;
 typedef int VkPhysicalDeviceType;
 typedef struct {
     uint32_t maxComputeWorkGroupCount[3];
@@ -194,6 +203,18 @@ typedef struct {
     int device_ordinal;
     uint32_t active_device_count;
     int peer_access_enabled;
+    size_t device_total_bytes;
+    size_t device_available_bytes;
+    void* pinned_staging_ptr;
+    size_t pinned_staging_bytes;
+    cudaStream_t compute_stream;
+    cudaStream_t transfer_stream;
+    cudaEvent_t timing_start;
+    cudaEvent_t timing_stop;
+    void* reduction_buffer_a;
+    void* reduction_buffer_b;
+    size_t reduction_capacity_elements;
+    char device_name[128];
 } nlo_cuda_backend;
 
 /**

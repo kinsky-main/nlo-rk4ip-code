@@ -7,6 +7,7 @@
  */
 
 #include "backend/vector_backend_internal.h"
+#include "backend/cuda_backend_internal.h"
 #include "backend/vk_auto_context.h"
 #include "numerics/vector_ops.h"
 #include "numerics/vk_vector_ops.h"
@@ -397,9 +398,6 @@ static bool nlo_vk_try_query_device_local_available_bytes(
 #endif
 
 static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template);
-#if NLO_ENABLE_CUDA_BACKEND
-static int nlo_cuda_backend_notice_emitted = 0;
-#endif
 
 nlo_vec_status nlo_vec_validate_backend(const nlo_vector_backend* backend)
 {
@@ -467,6 +465,9 @@ void nlo_vector_backend_destroy(nlo_vector_backend* backend)
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         nlo_vk_backend_shutdown(backend);
     }
+    else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        nlo_cuda_backend_shutdown(backend);
+    }
 
     free(backend);
 }
@@ -516,16 +517,29 @@ nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config
 
 nlo_vector_backend* nlo_vector_backend_create_cuda(const nlo_cuda_backend_config* config)
 {
-    (void)config;
 #if NLO_ENABLE_CUDA_BACKEND
-    if (nlo_cuda_backend_notice_emitted == 0) {
-        fprintf(stderr,
-                "[nlolib] CUDA backend support is enabled in the build surface, "
-                "but no runtime CUDA implementation is linked in this build.\n");
-        nlo_cuda_backend_notice_emitted = 1;
+    nlo_vector_backend* backend = (nlo_vector_backend*)calloc(1, sizeof(*backend));
+    if (backend == NULL) {
+        return NULL;
     }
-#endif
+
+    backend->type = NLO_VECTOR_BACKEND_CUDA;
+    backend->in_simulation = false;
+    if (nlo_cuda_backend_init(backend, config) != NLO_VEC_STATUS_OK) {
+        free(backend);
+        return NULL;
+    }
+
+    fprintf(stderr,
+            "[nlolib] CUDA backend selected device='%s' ordinal=%d device_local_bytes=%zu\n",
+            (backend->cuda.device_name[0] != '\0') ? backend->cuda.device_name : "unknown",
+            backend->cuda.device_ordinal,
+            backend->cuda.device_total_bytes);
+    return backend;
+#else
+    (void)config;
     return NULL;
+#endif
 }
 
 static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template)
@@ -600,6 +614,12 @@ nlo_vec_status nlo_vec_begin_simulation(nlo_vector_backend* backend)
 
     nlo_perf_scope perf_scope = {0.0, 0};
     NLO_PERF_SCOPE_BEGIN(perf_scope);
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_backend_begin_simulation(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+    }
     backend->in_simulation = true;
     NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_BEGIN_SIMULATION, 0u);
     return NLO_VEC_STATUS_OK;
@@ -616,6 +636,12 @@ nlo_vec_status nlo_vec_end_simulation(nlo_vector_backend* backend)
     NLO_PERF_SCOPE_BEGIN(perf_scope);
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_simulation_phase_flush(backend);
+        if (status != NLO_VEC_STATUS_OK) {
+            backend->in_simulation = false;
+            return status;
+        }
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_backend_end_simulation(backend);
         if (status != NLO_VEC_STATUS_OK) {
             backend->in_simulation = false;
             return status;
@@ -672,6 +698,10 @@ nlo_vec_status nlo_vec_query_memory_info(
 #endif
     }
 
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_backend_query_memory_info(backend, out_info);
+    }
+
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
 
@@ -722,6 +752,13 @@ nlo_vec_status nlo_vec_create(
             return status;
         }
     }
+    else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        nlo_vec_status status = nlo_cuda_buffer_create(backend, buffer);
+        if (status != NLO_VEC_STATUS_OK) {
+            free(buffer);
+            return status;
+        }
+    }
     else {
         free(buffer);
         return NLO_VEC_STATUS_UNSUPPORTED;
@@ -742,6 +779,9 @@ void nlo_vec_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer)
     }
     else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         nlo_vk_buffer_destroy(backend, buffer);
+    }
+    else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        nlo_cuda_buffer_destroy(backend, buffer);
     }
 
     free(buffer);
@@ -773,6 +813,9 @@ nlo_vec_status nlo_vec_upload(
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_upload(backend, buffer, data, bytes);
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_upload(backend, buffer, data, bytes);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -800,6 +843,9 @@ nlo_vec_status nlo_vec_download(
     }
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_download(backend, buffer, data, bytes);
+    }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_download(backend, buffer, data, bytes);
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
@@ -861,6 +907,9 @@ nlo_vec_status nlo_vec_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* ds
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_real_fill(backend, dst, value);
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_real_fill(backend, dst, value);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -879,6 +928,9 @@ nlo_vec_status nlo_vec_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* ds
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_real_copy(backend, dst, src);
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_real_copy(backend, dst, src);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -896,6 +948,9 @@ nlo_vec_status nlo_vec_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buf
     }
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_real_mul_inplace(backend, dst, src);
+    }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_real_mul_inplace(backend, dst, src);
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
@@ -935,6 +990,9 @@ nlo_vec_status nlo_vec_complex_fill(nlo_vector_backend* backend, nlo_vec_buffer*
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_fill(backend, dst, value);
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_fill(backend, dst, value);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -953,6 +1011,8 @@ nlo_vec_status nlo_vec_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer*
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_copy(backend, dst, src);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_copy(backend, dst, src);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -980,6 +1040,8 @@ nlo_vec_status nlo_vec_complex_magnitude_squared(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_magnitude_squared(backend, src, dst);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_magnitude_squared(backend, src, dst);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1012,6 +1074,9 @@ nlo_vec_status nlo_vec_complex_axpy_real(
         nlo_complex_axpy_real((nlo_complex*)dst->host_ptr, (const double*)src->host_ptr, alpha, dst->length);
         return NLO_VEC_STATUS_OK;
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_axpy_real(backend, dst, src, alpha);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -1034,6 +1099,8 @@ nlo_vec_status nlo_vec_complex_scalar_mul_inplace(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_scalar_mul_inplace(backend, dst, alpha);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_scalar_mul_inplace(backend, dst, alpha);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1064,6 +1131,8 @@ nlo_vec_status nlo_vec_complex_mul_inplace(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_mul_inplace(backend, dst, src);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_mul_inplace(backend, dst, src);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1130,6 +1199,9 @@ nlo_vec_status nlo_vec_complex_pow_elementwise_inplace(
                                             dst->length);
         return NLO_VEC_STATUS_OK;
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_pow_elementwise_inplace(backend, dst, exponent);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -1153,6 +1225,9 @@ nlo_vec_status nlo_vec_complex_real_pow_inplace(
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_real_pow_inplace(backend, dst, exponent);
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_real_pow_inplace(backend, dst, exponent);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -1175,6 +1250,8 @@ nlo_vec_status nlo_vec_complex_add_inplace(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_add_inplace(backend, dst, src);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_add_inplace(backend, dst, src);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1207,6 +1284,8 @@ nlo_vec_status nlo_vec_complex_axpy_inplace_real(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_axpy_inplace_real(backend, dst, src, alpha);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_axpy_inplace_real(backend, dst, src, alpha);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1243,6 +1322,8 @@ nlo_vec_status nlo_vec_complex_affine_comb2_real(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_affine_comb2_real(backend, dst, a, alpha, b, beta);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_affine_comb2_real(backend, dst, a, alpha, b, beta);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1287,6 +1368,8 @@ nlo_vec_status nlo_vec_complex_affine_comb3_real(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_affine_comb3_real(backend, dst, a, alpha, b, beta, c, gamma);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_affine_comb3_real(backend, dst, a, alpha, b, beta, c, gamma);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1335,6 +1418,8 @@ nlo_vec_status nlo_vec_complex_affine_comb4_real(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_affine_comb4_real(backend, dst, a, alpha, b, beta, c, gamma, d, delta);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_affine_comb4_real(backend, dst, a, alpha, b, beta, c, gamma, d, delta);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1386,6 +1471,16 @@ nlo_vec_status nlo_vec_complex_embedded_error_pair_real(
                                                             coarse_k4_coeff,
                                                             stage_k5,
                                                             coarse_k5_coeff);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_embedded_error_pair_real(backend,
+                                                              fine_out,
+                                                              coarse_out,
+                                                              base,
+                                                              stage_k4,
+                                                              fine_k4_coeff,
+                                                              coarse_k4_coeff,
+                                                              stage_k5,
+                                                              coarse_k5_coeff);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1424,6 +1519,8 @@ nlo_vec_status nlo_vec_complex_lerp(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_lerp(backend, dst, a, b, alpha);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_lerp(backend, dst, a, b, alpha);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }
@@ -1449,6 +1546,9 @@ nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_exp_inplace(backend, dst);
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_exp_inplace(backend, dst);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -1463,6 +1563,9 @@ nlo_vec_status nlo_vec_complex_log_inplace(nlo_vector_backend* backend, nlo_vec_
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         nlo_complex_log_inplace((nlo_complex*)dst->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
+    }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_log_inplace(backend, dst);
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
@@ -1479,6 +1582,9 @@ nlo_vec_status nlo_vec_complex_sin_inplace(nlo_vector_backend* backend, nlo_vec_
         nlo_complex_sin_inplace((nlo_complex*)dst->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_sin_inplace(backend, dst);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -1493,6 +1599,9 @@ nlo_vec_status nlo_vec_complex_cos_inplace(nlo_vector_backend* backend, nlo_vec_
     if (backend->type == NLO_VECTOR_BACKEND_CPU) {
         nlo_complex_cos_inplace((nlo_complex*)dst->host_ptr, dst->length);
         return NLO_VEC_STATUS_OK;
+    }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_cos_inplace(backend, dst);
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
@@ -1538,6 +1647,9 @@ nlo_vec_status nlo_vec_complex_axis_unshifted_from_delta(
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_axis_unshifted_from_delta(backend, dst, delta);
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_axis_unshifted_from_delta(backend, dst, delta);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -1564,6 +1676,9 @@ nlo_vec_status nlo_vec_complex_axis_centered_from_delta(
 
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_axis_centered_from_delta(backend, dst, delta);
+    }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_axis_centered_from_delta(backend, dst, delta);
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
@@ -1640,6 +1755,9 @@ nlo_vec_status nlo_vec_complex_mesh_from_axis_tfast(
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_mesh_from_axis_tfast(backend, dst, axis, nt, ny, axis_kind);
     }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_mesh_from_axis_tfast(backend, dst, axis, nt, ny, axis_kind);
+    }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
 }
@@ -1691,6 +1809,9 @@ nlo_vec_status nlo_vec_complex_relative_error(
 
     if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         return nlo_vk_op_complex_relative_error(backend, current, previous, epsilon, out_error);
+    }
+    if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        return nlo_cuda_op_complex_relative_error(backend, current, previous, epsilon, out_error);
     }
 
     return NLO_VEC_STATUS_UNSUPPORTED;
@@ -1757,6 +1878,8 @@ nlo_vec_status nlo_vec_complex_weighted_rms_error(
         status = NLO_VEC_STATUS_OK;
     } else if (backend->type == NLO_VECTOR_BACKEND_VULKAN) {
         status = nlo_vk_op_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
+    } else if (backend->type == NLO_VECTOR_BACKEND_CUDA) {
+        status = nlo_cuda_op_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
     } else {
         status = NLO_VEC_STATUS_UNSUPPORTED;
     }

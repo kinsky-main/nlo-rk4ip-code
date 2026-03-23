@@ -33,6 +33,15 @@ add_executable(bench_solver_backend
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_operator_jit.c
 )
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_sources(bench_solver_backend PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/cuda_backend.cu
+  )
+else()
+  target_sources(bench_solver_backend PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/cuda_backend_stubs.c
+  )
+endif()
 
 add_executable(bench_runtime_breakdown
   ${CMAKE_CURRENT_LIST_DIR}/bench_runtime_breakdown.c
@@ -66,6 +75,15 @@ add_executable(bench_runtime_breakdown
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_operator_jit.c
 )
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_sources(bench_runtime_breakdown PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/cuda_backend.cu
+  )
+else()
+  target_sources(bench_runtime_breakdown PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/cuda_backend_stubs.c
+  )
+endif()
 
 include(ResolveVulkan)
 nlo_resolve_vulkan(_nlo_vk_headers_available _nlo_vk_loader_available)
@@ -81,8 +99,13 @@ foreach(_nlo_bench_target IN ITEMS bench_solver_backend bench_runtime_breakdown)
   target_compile_definitions(${_nlo_bench_target} PRIVATE
     NLO_ENABLE_RUNTIME_PROFILING=1
     NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
+    NLO_ENABLE_CUFFT=$<IF:$<BOOL:${NLO_ENABLE_CUFFT}>,1,0>
   )
 endforeach()
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_link_libraries(bench_solver_backend PRIVATE CUDA::cudart)
+  target_link_libraries(bench_runtime_breakdown PRIVATE CUDA::cudart)
+endif()
 include(NLOSQLite)
 nlo_configure_sqlite(bench_solver_backend)
 nlo_configure_sqlite(bench_runtime_breakdown)

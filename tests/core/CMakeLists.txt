@@ -21,6 +21,15 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/utility/state_debug.c
   ${CMAKE_SOURCE_DIR}/src/fft/fft.c
 )
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_sources(test_core_state_alloc PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/cuda_backend.cu
+  )
+else()
+  target_sources(test_core_state_alloc PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/cuda_backend_stubs.c
+  )
+endif()
 if(NLO_ENABLE_VULKAN_BACKEND)
   target_sources(test_core_state_alloc PRIVATE
     ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
@@ -78,8 +87,12 @@ target_compile_definitions(test_core_state_alloc PRIVATE
   NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
   NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
+  NLO_ENABLE_CUFFT=$<IF:$<BOOL:${NLO_ENABLE_CUFFT}>,1,0>
   NLO_ENABLE_RUNTIME_PROFILING=1
 )
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_link_libraries(test_core_state_alloc PRIVATE CUDA::cudart)
+endif()
 if(NLO_ENABLE_VULKAN_BACKEND)
   target_link_libraries(test_core_state_alloc PRIVATE Vulkan::Vulkan Vulkan::glslang)
   if(WIN32 AND DEFINED ENV{VULKAN_SDK})

@@ -13,7 +13,18 @@ add_executable(test_fft
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_format.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
 )
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_sources(test_fft PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/cuda_backend.cu
+  )
+else()
+  target_sources(test_fft PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/backend/cuda_backend_stubs.c
+  )
+endif()
 if(NLO_ENABLE_VULKAN_BACKEND)
   target_sources(test_fft PRIVATE
     ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
@@ -22,6 +33,7 @@ if(NLO_ENABLE_VULKAN_BACKEND)
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_dispatch.c
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
+    ${CMAKE_SOURCE_DIR}/src/numerics/vk_operator_jit.c
   )
 else()
   target_sources(test_fft PRIVATE
@@ -39,15 +51,55 @@ target_include_directories(test_fft PRIVATE
 )
 if(NLO_ENABLE_VULKAN_BACKEND)
   target_include_directories(test_fft PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
+  find_path(NLO_TEST_FFT_GLSLANG_C_INCLUDE_DIR
+    NAMES glslang_c_interface.h
+    HINTS
+      ENV VULKAN_SDK
+    PATH_SUFFIXES
+      Include/glslang/Include
+      glslang/Include
+  )
+  if(NLO_TEST_FFT_GLSLANG_C_INCLUDE_DIR)
+    target_include_directories(test_fft PRIVATE ${NLO_TEST_FFT_GLSLANG_C_INCLUDE_DIR})
+  endif()
+  find_path(NLO_TEST_FFT_GLSLANG_RESOURCE_INCLUDE_DIR
+    NAMES resource_limits_c.h
+    HINTS
+      ENV VULKAN_SDK
+    PATH_SUFFIXES
+      Include/glslang/Public
+      glslang/Public
+  )
+  if(NLO_TEST_FFT_GLSLANG_RESOURCE_INCLUDE_DIR)
+    target_include_directories(test_fft PRIVATE ${NLO_TEST_FFT_GLSLANG_RESOURCE_INCLUDE_DIR})
+  endif()
 endif()
 target_link_libraries(test_fft PRIVATE nlo_fft_backend ${_nlo_cblas_target})
 target_compile_definitions(test_fft PRIVATE
   NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
   NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
+  NLO_ENABLE_CUFFT=$<IF:$<BOOL:${NLO_ENABLE_CUFFT}>,1,0>
 )
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_link_libraries(test_fft PRIVATE CUDA::cudart)
+endif()
 if(NLO_ENABLE_VULKAN_BACKEND)
+  find_package(Vulkan QUIET COMPONENTS glslang)
   target_link_libraries(test_fft PRIVATE Vulkan::Vulkan)
+  if(TARGET Vulkan::glslang)
+    target_link_libraries(test_fft PRIVATE Vulkan::glslang)
+  endif()
+  if(WIN32 AND DEFINED ENV{VULKAN_SDK})
+    target_link_directories(test_fft PRIVATE "$ENV{VULKAN_SDK}/Lib")
+    target_link_libraries(test_fft PRIVATE
+      $<$<CONFIG:Debug>:MachineIndependentd;OSDependentd;GenericCodeGend;SPIRVd;SPIRV-Toolsd;SPIRV-Tools-optd;glslang-default-resource-limitsd>
+      $<$<NOT:$<CONFIG:Debug>>:MachineIndependent;OSDependent;GenericCodeGen;SPIRV;SPIRV-Tools;SPIRV-Tools-opt;glslang-default-resource-limits>
+    )
+    if(MSVC)
+      target_link_options(test_fft PRIVATE /IGNORE:4099)
+    endif()
+  endif()
 endif()
 if(TARGET nlo_vk_shaders)
   add_dependencies(test_fft nlo_vk_shaders)

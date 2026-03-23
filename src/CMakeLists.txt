@@ -41,6 +41,16 @@ else()
   )
 endif()
 
+if(NLO_ENABLE_CUDA_BACKEND)
+  list(APPEND NLOLIB_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/backend/cuda_backend.cu
+  )
+else()
+  list(APPEND NLOLIB_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/backend/cuda_backend_stubs.c
+  )
+endif()
+
 add_library(nlolib SHARED ${NLOLIB_SOURCES})
 set_target_properties(nlolib PROPERTIES OUTPUT_NAME nlolib)
 
@@ -65,6 +75,10 @@ nlo_configure_sqlite(nlolib)
 
 if(UNIX)
   target_link_libraries(nlolib PUBLIC m)
+endif()
+
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_link_libraries(nlolib PUBLIC CUDA::cudart)
 endif()
 
 if(NLO_ENABLE_VULKAN_BACKEND)
@@ -94,6 +108,7 @@ target_compile_definitions(nlolib PUBLIC
   NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
   NLO_ENABLE_CUDA_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_CUDA_BACKEND}>,1,0>
+  NLO_ENABLE_CUFFT=$<IF:$<BOOL:${NLO_ENABLE_CUFFT}>,1,0>
 )
 target_compile_definitions(nlolib PRIVATE
   $<$<CONFIG:Debug>:NLO_ENABLE_RUNTIME_PROFILING=1>

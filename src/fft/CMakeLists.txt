@@ -62,6 +62,15 @@ if(NLO_ENABLE_VKFFT)
   endif()
 endif()
 
+if(NLO_ENABLE_CUDA_BACKEND)
+  target_link_libraries(nlo_fft_backend INTERFACE CUDA::cudart)
+endif()
+
+if(NLO_ENABLE_CUFFT)
+  target_link_libraries(nlo_fft_backend INTERFACE CUDA::cufft)
+endif()
+
 target_compile_definitions(nlo_fft_backend INTERFACE
   NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+  NLO_ENABLE_CUFFT=$<IF:$<BOOL:${NLO_ENABLE_CUFFT}>,1,0>
 )

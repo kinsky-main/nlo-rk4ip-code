@@ -15,6 +15,10 @@
 
 #include <fftw3.h>
 
+#if NLO_ENABLE_CUDA_BACKEND && NLO_ENABLE_CUFFT
+#include <cufft.h>
+#endif
+
 #ifndef NLO_ENABLE_VKFFT
 #define NLO_ENABLE_VKFFT 1
 #endif
@@ -41,6 +45,12 @@ struct nlo_fft_plan {
     fftw_complex* plan_out;
     double inverse_scale;
 
+#if NLO_ENABLE_CUDA_BACKEND && NLO_ENABLE_CUFFT
+    cufftHandle cufft_plan;
+    int cufft_device_ordinal;
+    struct nlo_cufft_plan_cache_entry* cufft_cache_entry;
+#endif
+
 #if NLO_ENABLE_VKFFT
     VkFFTApplication vk_app;
     nlo_vec_buffer* vk_placeholder_vec;
@@ -52,6 +62,128 @@ struct nlo_fft_plan {
     VkFence vk_submit_fence;
 #endif
 };
+
+#if NLO_ENABLE_CUDA_BACKEND && NLO_ENABLE_CUFFT
+typedef struct nlo_cufft_plan_cache_entry {
+    int device_ordinal;
+    nlo_fft_shape shape;
+    size_t total_size;
+    cufftHandle plan_handle;
+    uint32_t refcount;
+    struct nlo_cufft_plan_cache_entry* next;
+} nlo_cufft_plan_cache_entry;
+
+static nlo_cufft_plan_cache_entry* nlo_cufft_plan_cache_head = NULL;
+
+static int nlo_fft_shape_equals(const nlo_fft_shape* lhs, const nlo_fft_shape* rhs)
+{
+    if (lhs == NULL || rhs == NULL || lhs->rank != rhs->rank) {
+        return 0;
+    }
+    for (size_t i = 0u; i < lhs->rank; ++i) {
+        if (lhs->dims[i] != rhs->dims[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static nlo_cufft_plan_cache_entry* nlo_cufft_plan_cache_find(int device_ordinal, const nlo_fft_shape* shape)
+{
+    for (nlo_cufft_plan_cache_entry* entry = nlo_cufft_plan_cache_head;
+         entry != NULL;
+         entry = entry->next) {
+        if (entry->device_ordinal == device_ordinal && nlo_fft_shape_equals(&entry->shape, shape)) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static nlo_vec_status nlo_cufft_plan_cache_acquire(
+    int device_ordinal,
+    const nlo_fft_shape* shape,
+    size_t total_size,
+    nlo_cufft_plan_cache_entry** out_entry
+)
+{
+    if (shape == NULL || out_entry == NULL) {
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    nlo_cufft_plan_cache_entry* existing = nlo_cufft_plan_cache_find(device_ordinal, shape);
+    if (existing != NULL) {
+        existing->refcount += 1u;
+        *out_entry = existing;
+        return NLO_VEC_STATUS_OK;
+    }
+
+    nlo_cufft_plan_cache_entry* entry =
+        (nlo_cufft_plan_cache_entry*)calloc(1, sizeof(*entry));
+    if (entry == NULL) {
+        return NLO_VEC_STATUS_ALLOCATION_FAILED;
+    }
+
+    entry->device_ordinal = device_ordinal;
+    entry->shape = *shape;
+    entry->total_size = total_size;
+    entry->refcount = 1u;
+
+    if (cudaSetDevice(device_ordinal) != cudaSuccess) {
+        free(entry);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    int dims[3] = {0};
+    if (nlo_fft_shape_to_fftw_dims(shape, dims) != 0) {
+        free(entry);
+        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    cufftResult result = cufftPlanMany(&entry->plan_handle,
+                                       (int)shape->rank,
+                                       dims,
+                                       NULL,
+                                       1,
+                                       0,
+                                       NULL,
+                                       1,
+                                       0,
+                                       CUFFT_Z2Z,
+                                       1);
+    if (result != CUFFT_SUCCESS) {
+        free(entry);
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    entry->next = nlo_cufft_plan_cache_head;
+    nlo_cufft_plan_cache_head = entry;
+    *out_entry = entry;
+    return NLO_VEC_STATUS_OK;
+}
+
+static void nlo_cufft_plan_cache_release(nlo_cufft_plan_cache_entry* entry)
+{
+    if (entry == NULL) {
+        return;
+    }
+    if (entry->refcount > 1u) {
+        entry->refcount -= 1u;
+        return;
+    }
+
+    nlo_cufft_plan_cache_entry** link = &nlo_cufft_plan_cache_head;
+    while (*link != NULL && *link != entry) {
+        link = &(*link)->next;
+    }
+    if (*link == entry) {
+        *link = entry->next;
+    }
+
+    (void)cufftDestroy(entry->plan_handle);
+    free(entry);
+}
+#endif
 
 static int nlo_fft_shape_valid(const nlo_fft_shape* shape)
 {
@@ -135,6 +267,8 @@ static nlo_vec_status nlo_fft_vk_begin_commands(nlo_fft_plan* plan)
 
     return NLO_VEC_STATUS_OK;
 }
+
+static int nlo_fft_shape_to_fftw_dims(const nlo_fft_shape* shape, int out_dims[3]);
 #endif
 
 #if NLO_ENABLE_VKFFT
@@ -493,10 +627,32 @@ nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
 
     if (plan->fft_backend == NLO_FFT_BACKEND_CUFFT ||
         plan->fft_backend == NLO_FFT_BACKEND_CUFFT_XT) {
+        if (plan->backend_type != NLO_VECTOR_BACKEND_CUDA) {
+            nlo_fft_plan_destroy(plan);
+            return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        }
+        if (plan->fft_backend == NLO_FFT_BACKEND_CUFFT_XT) {
+            nlo_fft_plan_destroy(plan);
+            return NLO_VEC_STATUS_UNSUPPORTED;
+        }
+#if NLO_ENABLE_CUDA_BACKEND && NLO_ENABLE_CUFFT
+        nlo_vec_status status = nlo_cufft_plan_cache_acquire(backend->cuda.device_ordinal,
+                                                             &plan->shape,
+                                                             plan->total_size,
+                                                             &plan->cufft_cache_entry);
+        if (status != NLO_VEC_STATUS_OK) {
+            nlo_fft_plan_destroy(plan);
+            return status;
+        }
+
+        plan->cufft_plan = plan->cufft_cache_entry->plan_handle;
+        plan->cufft_device_ordinal = backend->cuda.device_ordinal;
+        *out_plan = plan;
+        return NLO_VEC_STATUS_OK;
+#else
         nlo_fft_plan_destroy(plan);
-        return (plan->backend_type == NLO_VECTOR_BACKEND_CUDA)
-                   ? NLO_VEC_STATUS_BACKEND_UNAVAILABLE
-                   : NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+#endif
     }
 
     nlo_fft_plan_destroy(plan);
@@ -533,6 +689,14 @@ void nlo_fft_plan_destroy(nlo_fft_plan* plan)
         deleteVkFFT(&plan->vk_app);
 #endif
     }
+#if NLO_ENABLE_CUDA_BACKEND && NLO_ENABLE_CUFFT
+    if ((plan->fft_backend == NLO_FFT_BACKEND_CUFFT ||
+         plan->fft_backend == NLO_FFT_BACKEND_CUFFT_XT) &&
+        plan->cufft_cache_entry != NULL) {
+        nlo_cufft_plan_cache_release(plan->cufft_cache_entry);
+        plan->cufft_cache_entry = NULL;
+    }
+#endif
 #if NLO_ENABLE_VKFFT
     if (plan->backend != NULL &&
         plan->backend->type == NLO_VECTOR_BACKEND_VULKAN &&
@@ -616,6 +780,32 @@ nlo_vec_status nlo_fft_forward_vec(
 #else
         status = NLO_VEC_STATUS_UNSUPPORTED;
 #endif
+    } else if (plan->fft_backend == NLO_FFT_BACKEND_CUFFT) {
+#if NLO_ENABLE_CUDA_BACKEND && NLO_ENABLE_CUFFT
+        if (cufftSetStream(plan->cufft_plan, plan->backend->cuda.compute_stream) != CUFFT_SUCCESS ||
+            cudaSetDevice(plan->cufft_device_ordinal) != cudaSuccess) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+        status = NLO_VEC_STATUS_OK;
+        if (input != output) {
+            status = nlo_vec_complex_copy(plan->backend, output, input);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+        }
+        if (cufftExecZ2Z(plan->cufft_plan,
+                         (cufftDoubleComplex*)output->host_ptr,
+                         (cufftDoubleComplex*)output->host_ptr,
+                         CUFFT_FORWARD) != CUFFT_SUCCESS) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+        if (!plan->backend->in_simulation &&
+            cudaStreamSynchronize(plan->backend->cuda.compute_stream) != cudaSuccess) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+#else
+        status = NLO_VEC_STATUS_UNSUPPORTED;
+#endif
     }
     if (status == NLO_VEC_STATUS_OK) {
         NLO_PERF_SCOPE_END(perf_scope, NLO_PERF_EVENT_FFT_FORWARD, (uint64_t)output->bytes);
@@ -674,6 +864,38 @@ nlo_vec_status nlo_fft_inverse_vec(
         status = nlo_vec_complex_scalar_mul_inplace(plan->backend,
                                                     output,
                                                     nlo_make(plan->inverse_scale, 0.0));
+#else
+        status = NLO_VEC_STATUS_UNSUPPORTED;
+#endif
+    } else if (plan->fft_backend == NLO_FFT_BACKEND_CUFFT) {
+#if NLO_ENABLE_CUDA_BACKEND && NLO_ENABLE_CUFFT
+        if (cufftSetStream(plan->cufft_plan, plan->backend->cuda.compute_stream) != CUFFT_SUCCESS ||
+            cudaSetDevice(plan->cufft_device_ordinal) != cudaSuccess) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+        status = NLO_VEC_STATUS_OK;
+        if (input != output) {
+            status = nlo_vec_complex_copy(plan->backend, output, input);
+            if (status != NLO_VEC_STATUS_OK) {
+                return status;
+            }
+        }
+        if (cufftExecZ2Z(plan->cufft_plan,
+                         (cufftDoubleComplex*)output->host_ptr,
+                         (cufftDoubleComplex*)output->host_ptr,
+                         CUFFT_INVERSE) != CUFFT_SUCCESS) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
+        status = nlo_vec_complex_scalar_mul_inplace(plan->backend,
+                                                    output,
+                                                    nlo_make(plan->inverse_scale, 0.0));
+        if (status != NLO_VEC_STATUS_OK) {
+            return status;
+        }
+        if (!plan->backend->in_simulation &&
+            cudaStreamSynchronize(plan->backend->cuda.compute_stream) != cudaSuccess) {
+            return NLO_VEC_STATUS_BACKEND_UNAVAILABLE;
+        }
 #else
         status = NLO_VEC_STATUS_UNSUPPORTED;
 #endif

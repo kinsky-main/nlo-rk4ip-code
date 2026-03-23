@@ -260,6 +260,59 @@ static void test_embedded_error_pair_cpu(void)
     printf("test_embedded_error_pair_cpu: validates fused fine/coarse adaptive combination.\n");
 }
 
+static void test_cuda_backend_smoke_if_available(void)
+{
+#if NLO_ENABLE_CUDA_BACKEND
+    nlo_vector_backend* backend = nlo_vector_backend_create_cuda(NULL);
+    if (backend == NULL) {
+        printf("test_cuda_backend_smoke_if_available: CUDA unavailable, skipping.\n");
+        return;
+    }
+
+    nlo_vec_backend_memory_info info = {0};
+    assert(nlo_vec_query_memory_info(backend, &info) == NLO_VEC_STATUS_OK);
+    assert(info.device_local_total_bytes > 0u);
+
+    nlo_vec_buffer* a = NULL;
+    nlo_vec_buffer* b = NULL;
+    nlo_vec_buffer* c = NULL;
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, 4u, &a) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, 4u, &b) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_create(backend, NLO_VEC_KIND_COMPLEX64, 4u, &c) == NLO_VEC_STATUS_OK);
+
+    const nlo_complex av[4] = {
+        nlo_make(1.0, 0.5), nlo_make(-2.0, 0.25), nlo_make(0.5, -1.0), nlo_make(3.0, 2.0)
+    };
+    const nlo_complex bv[4] = {
+        nlo_make(0.5, -0.5), nlo_make(1.5, 2.0), nlo_make(-1.0, 0.25), nlo_make(0.25, -0.75)
+    };
+    assert(nlo_vec_upload(backend, a, av, sizeof(av)) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_upload(backend, b, bv, sizeof(bv)) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_complex_affine_comb2_real(backend, c, a, 0.75, b, -0.25) == NLO_VEC_STATUS_OK);
+
+    nlo_complex out[4] = {0};
+    assert(nlo_vec_download(backend, c, out, sizeof(out)) == NLO_VEC_STATUS_OK);
+    for (size_t i = 0u; i < 4u; ++i) {
+        const double exp_re = (0.75 * av[i].re) - (0.25 * bv[i].re);
+        const double exp_im = (0.75 * av[i].im) - (0.25 * bv[i].im);
+        assert(fabs(out[i].re - exp_re) < 1e-11);
+        assert(fabs(out[i].im - exp_im) < 1e-11);
+    }
+
+    assert(nlo_vec_begin_simulation(backend) == NLO_VEC_STATUS_OK);
+    assert(nlo_vec_upload(backend, a, av, sizeof(av)) == NLO_VEC_STATUS_TRANSFER_FORBIDDEN);
+    assert(nlo_vec_end_simulation(backend) == NLO_VEC_STATUS_OK);
+
+    nlo_vec_destroy(backend, c);
+    nlo_vec_destroy(backend, b);
+    nlo_vec_destroy(backend, a);
+    nlo_vector_backend_destroy(backend);
+    printf("test_cuda_backend_smoke_if_available: validates CUDA buffer ops and transfer guards.\n");
+#else
+    printf("test_cuda_backend_smoke_if_available: CUDA backend disabled, skipping.\n");
+#endif
+}
+
 int main(void)
 {
     test_real_pipeline();
@@ -268,6 +321,7 @@ int main(void)
     test_axis_and_mesh_ops();
     test_affine_comb4_cpu();
     test_embedded_error_pair_cpu();
+    test_cuda_backend_smoke_if_available();
     printf("test_nlo_vector_backend: all subtests completed.\n");
     return 0;
 }
