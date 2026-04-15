@@ -29,30 +29,30 @@
 #include <sys/types.h>
 #endif
 
-#ifndef NLO_BENCH_MAX_PATH
-#define NLO_BENCH_MAX_PATH 1024u
+#ifndef BENCH_MAX_PATH
+#define BENCH_MAX_PATH 1024u
 #endif
 
-#ifndef NLO_BENCH_NOTE_CAP
-#define NLO_BENCH_NOTE_CAP 256u
+#ifndef BENCH_NOTE_CAP
+#define BENCH_NOTE_CAP 256u
 #endif
 
-#ifndef NLO_BENCH_PI
-#define NLO_BENCH_PI 3.14159265358979323846
+#ifndef BENCH_PI
+#define BENCH_PI 3.14159265358979323846
 #endif
 
-#ifndef NLO_BENCH_MAX_TENSOR_CANDIDATES
-#define NLO_BENCH_MAX_TENSOR_CANDIDATES 16u
+#ifndef BENCH_MAX_TENSOR_CANDIDATES
+#define BENCH_MAX_TENSOR_CANDIDATES 16u
 #endif
 
-#ifndef NLO_BENCH_SPILL_TARGET_COUNT
-#define NLO_BENCH_SPILL_TARGET_COUNT 3u
+#ifndef BENCH_SPILL_TARGET_COUNT
+#define BENCH_SPILL_TARGET_COUNT 3u
 #endif
 
 typedef enum {
-    NLO_BENCH_RUNTIME_CPU = 0,
-    NLO_BENCH_RUNTIME_GPU = 1
-} nlo_bench_runtime_backend;
+    BENCH_RUNTIME_CPU = 0,
+    BENCH_RUNTIME_GPU = 1
+} bench_runtime_backend;
 
 typedef struct {
     size_t total_samples;
@@ -64,8 +64,8 @@ typedef struct {
     sim_config* config;
     nlo_complex* input_field;
     nlo_complex* output_field;
-    char storage_path[NLO_BENCH_MAX_PATH];
-} nlo_bench_tensor_case_data;
+    char storage_path[BENCH_MAX_PATH];
+} bench_tensor_case_data;
 
 typedef struct {
     size_t total_samples;
@@ -104,18 +104,18 @@ typedef struct {
     uint64_t gpu_download_count;
     uint64_t gpu_upload_bytes;
     uint64_t gpu_download_bytes;
-} nlo_bench_tensor_metrics;
+} bench_tensor_metrics;
 
 typedef struct {
-    nlo_bench_tensor_shape shape;
-    nlo_bench_tensor_region region;
+    bench_tensor_shape shape;
+    bench_tensor_region region;
     size_t working_set_bytes;
     size_t per_record_bytes;
     size_t system_budget_bytes;
     size_t gpu_budget_bytes;
     int cpu_probe_ok;
     int gpu_probe_ok;
-} nlo_bench_tensor_candidate;
+} bench_tensor_candidate;
 
 typedef struct {
     double mean_ms;
@@ -123,7 +123,7 @@ typedef struct {
     double min_ms;
     double max_ms;
     double stddev_ms;
-} nlo_bench_summary;
+} bench_summary;
 
 typedef struct {
 #if defined(_WIN32)
@@ -131,9 +131,9 @@ typedef struct {
 #else
     struct timespec value;
 #endif
-} nlo_bench_timestamp;
+} bench_timestamp;
 
-static void nlo_bench_copy_note(
+static void bench_copy_note(
     char* note,
     size_t note_capacity,
     const char* text
@@ -155,12 +155,12 @@ static void nlo_bench_copy_note(
 #endif
 }
 
-static const char* nlo_bench_backend_label(nlo_bench_runtime_backend backend)
+static const char* bench_backend_label(bench_runtime_backend backend)
 {
-    return (backend == NLO_BENCH_RUNTIME_CPU) ? "cpu" : "gpu";
+    return (backend == BENCH_RUNTIME_CPU) ? "cpu" : "gpu";
 }
 
-static void nlo_bench_now(nlo_bench_timestamp* out_time)
+static void bench_now(bench_timestamp* out_time)
 {
     if (out_time == NULL) {
         return;
@@ -173,9 +173,9 @@ static void nlo_bench_now(nlo_bench_timestamp* out_time)
 #endif
 }
 
-static double nlo_bench_elapsed_ms(
-    const nlo_bench_timestamp* start_time,
-    const nlo_bench_timestamp* end_time
+static double bench_elapsed_ms(
+    const bench_timestamp* start_time,
+    const bench_timestamp* end_time
 )
 {
     if (start_time == NULL || end_time == NULL) {
@@ -198,7 +198,7 @@ static double nlo_bench_elapsed_ms(
 #endif
 }
 
-static int nlo_bench_checked_mul_size_t(size_t lhs, size_t rhs, size_t* out_value)
+static int bench_checked_mul_size_t(size_t lhs, size_t rhs, size_t* out_value)
 {
     if (out_value == NULL) {
         return -1;
@@ -214,15 +214,15 @@ static int nlo_bench_checked_mul_size_t(size_t lhs, size_t rhs, size_t* out_valu
     return 0;
 }
 
-static size_t nlo_bench_effective_host_budget_bytes(const nlo_bench_tensor_options* options)
+static size_t bench_effective_host_budget_bytes(const bench_tensor_options* options)
 {
     if (options != NULL && options->planner_host_bytes > 0u) {
         return options->planner_host_bytes;
     }
-    return nlo_apply_memory_headroom(nlo_query_available_system_memory_bytes());
+    return apply_memory_headroom(query_available_system_memory_bytes());
 }
 
-static size_t nlo_bench_scale_size_t_double(size_t value, double factor)
+static size_t bench_scale_size_t_double(size_t value, double factor)
 {
     const double scaled = floor((double)value * factor);
     if (!(scaled > 0.0)) {
@@ -234,7 +234,7 @@ static size_t nlo_bench_scale_size_t_double(size_t value, double factor)
     return (size_t)scaled;
 }
 
-static int nlo_bench_file_exists(const char* path)
+static int bench_file_exists(const char* path)
 {
     FILE* file = NULL;
     if (path == NULL) {
@@ -249,7 +249,7 @@ static int nlo_bench_file_exists(const char* path)
     return 1;
 }
 
-static int nlo_bench_mkdir_single(const char* path)
+static int bench_mkdir_single(const char* path)
 {
     int status = 0;
 
@@ -269,9 +269,9 @@ static int nlo_bench_mkdir_single(const char* path)
     return -1;
 }
 
-static int nlo_bench_make_parent_dirs(const char* file_path)
+static int bench_make_parent_dirs(const char* file_path)
 {
-    char buffer[NLO_BENCH_MAX_PATH];
+    char buffer[BENCH_MAX_PATH];
     char* separator = NULL;
     size_t len = 0u;
 
@@ -288,7 +288,7 @@ static int nlo_bench_make_parent_dirs(const char* file_path)
         }
     }
     if (separator == NULL) {
-        return nlo_bench_mkdir_single(buffer);
+        return bench_mkdir_single(buffer);
     }
 
     *separator = '\0';
@@ -310,33 +310,33 @@ static int nlo_bench_make_parent_dirs(const char* file_path)
         }
 
         buffer[i] = '\0';
-        if (nlo_bench_mkdir_single(buffer) != 0) {
+        if (bench_mkdir_single(buffer) != 0) {
             buffer[i] = ch;
             return -1;
         }
         buffer[i] = ch;
     }
 
-    return nlo_bench_mkdir_single(buffer);
+    return bench_mkdir_single(buffer);
 }
 
-static int nlo_bench_make_directory_tree(const char* dir_path)
+static int bench_make_directory_tree(const char* dir_path)
 {
-    char probe_path[NLO_BENCH_MAX_PATH];
+    char probe_path[BENCH_MAX_PATH];
 
     if (dir_path == NULL || *dir_path == '\0') {
         return -1;
     }
 
-    snprintf(probe_path, sizeof(probe_path), "%s/.nlo_bench_dir_probe", dir_path);
-    if (nlo_bench_make_parent_dirs(probe_path) != 0) {
+    snprintf(probe_path, sizeof(probe_path), "%s/.bench_dir_probe", dir_path);
+    if (bench_make_parent_dirs(probe_path) != 0) {
         return -1;
     }
 
-    return nlo_bench_mkdir_single(dir_path);
+    return bench_mkdir_single(dir_path);
 }
 
-static void nlo_bench_iso8601_utc(char* out_text, size_t out_capacity)
+static void bench_iso8601_utc(char* out_text, size_t out_capacity)
 {
     const time_t now = time(NULL);
     struct tm utc_tm;
@@ -356,7 +356,7 @@ static void nlo_bench_iso8601_utc(char* out_text, size_t out_capacity)
     }
 }
 
-static void nlo_bench_sanitize_note(char* text)
+static void bench_sanitize_note(char* text)
 {
     if (text == NULL) {
         return;
@@ -369,7 +369,7 @@ static void nlo_bench_sanitize_note(char* text)
     }
 }
 
-static size_t nlo_bench_compute_working_set_bytes(const nlo_allocation_info* info)
+static size_t bench_compute_working_set_bytes(const allocation_info* info)
 {
     size_t ring_bytes = 0u;
     size_t total = 0u;
@@ -378,7 +378,7 @@ static size_t nlo_bench_compute_working_set_bytes(const nlo_allocation_info* inf
         return 0u;
     }
 
-    if (nlo_bench_checked_mul_size_t(info->per_record_bytes,
+    if (bench_checked_mul_size_t(info->per_record_bytes,
                                      info->device_ring_capacity,
                                      &ring_bytes) != 0) {
         ring_bytes = 0u;
@@ -391,7 +391,7 @@ static size_t nlo_bench_compute_working_set_bytes(const nlo_allocation_info* inf
     return total + ring_bytes;
 }
 
-static int nlo_bench_write_csv_header(FILE* csv_file)
+static int bench_write_csv_header(FILE* csv_file)
 {
     const int written = fprintf(csv_file,
                                 "timestamp_utc,scenario,region,backend,status,notes,"
@@ -409,29 +409,29 @@ static int nlo_bench_write_csv_header(FILE* csv_file)
     return fflush(csv_file);
 }
 
-static int nlo_bench_write_csv_row(
+static int bench_write_csv_row(
     FILE* csv_file,
     const char* region_label,
     const char* backend_label,
     size_t warmup_runs,
     size_t measured_runs,
     size_t run_index,
-    const nlo_bench_tensor_metrics* metrics,
+    const bench_tensor_metrics* metrics,
     const char* status,
     const char* notes
 )
 {
     char timestamp_utc[32];
-    char note_buffer[NLO_BENCH_NOTE_CAP];
+    char note_buffer[BENCH_NOTE_CAP];
     int written = 0;
 
     if (csv_file == NULL || region_label == NULL || backend_label == NULL || metrics == NULL || status == NULL) {
         return -1;
     }
 
-    nlo_bench_iso8601_utc(timestamp_utc, sizeof(timestamp_utc));
-    nlo_bench_copy_note(note_buffer, sizeof(note_buffer), (notes == NULL) ? "" : notes);
-    nlo_bench_sanitize_note(note_buffer);
+    bench_iso8601_utc(timestamp_utc, sizeof(timestamp_utc));
+    bench_copy_note(note_buffer, sizeof(note_buffer), (notes == NULL) ? "" : notes);
+    bench_sanitize_note(note_buffer);
 
     written = fprintf(csv_file,
                       "%s,tensor3d_scaling,%s,%s,%s,%s,"
@@ -493,12 +493,12 @@ static int nlo_bench_write_csv_row(
     return fflush(csv_file);
 }
 
-static int nlo_bench_prepare_tensor_case_data(
-    const nlo_bench_tensor_shape* shape,
+static int bench_prepare_tensor_case_data(
+    const bench_tensor_shape* shape,
     size_t num_records,
     int storage_enabled,
     const char* storage_path,
-    nlo_bench_tensor_case_data* out_case_data,
+    bench_tensor_case_data* out_case_data,
     char* note,
     size_t note_capacity
 )
@@ -512,7 +512,7 @@ static int nlo_bench_prepare_tensor_case_data(
     const double y_width = 0.70;
 
     if (shape == NULL || out_case_data == NULL || shape->total_samples == 0u || num_records == 0u) {
-        nlo_bench_copy_note(note, note_capacity, "Invalid tensor benchmark case configuration.");
+        bench_copy_note(note, note_capacity, "Invalid tensor benchmark case configuration.");
         return -1;
     }
 
@@ -529,14 +529,14 @@ static int nlo_bench_prepare_tensor_case_data(
 
     out_case_data->config = create_sim_config(shape->total_samples);
     if (out_case_data->config == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "Failed to allocate tensor sim_config.");
+        bench_copy_note(note, note_capacity, "Failed to allocate tensor sim_config.");
         return -1;
     }
 
     out_case_data->input_field = (nlo_complex*)calloc(shape->total_samples, sizeof(nlo_complex));
     out_case_data->output_field = (nlo_complex*)calloc(shape->total_samples, sizeof(nlo_complex));
     if (out_case_data->input_field == NULL || out_case_data->output_field == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "Failed to allocate tensor benchmark buffers.");
+        bench_copy_note(note, note_capacity, "Failed to allocate tensor benchmark buffers.");
         free(out_case_data->input_field);
         free(out_case_data->output_field);
         free_sim_config(out_case_data->config);
@@ -547,7 +547,7 @@ static int nlo_bench_prepare_tensor_case_data(
     out_case_data->config->tensor.nt = shape->nt;
     out_case_data->config->tensor.nx = shape->nx;
     out_case_data->config->tensor.ny = shape->ny;
-    out_case_data->config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
+    out_case_data->config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
     out_case_data->config->time.nt = shape->nt;
     out_case_data->config->time.delta_time = delta_time;
     out_case_data->config->time.pulse_period = (double)shape->nt * delta_time;
@@ -571,9 +571,9 @@ static int nlo_bench_prepare_tensor_case_data(
         const long centered = (t <= shape->nt / 2u)
                                   ? (long)t
                                   : (long)t - (long)shape->nt;
-        const double omega = (2.0 * NLO_BENCH_PI * (double)centered) /
+        const double omega = (2.0 * BENCH_PI * (double)centered) /
                              ((double)shape->nt * delta_time);
-        out_case_data->config->frequency.frequency_grid[t] = nlo_make(omega, 0.0);
+        out_case_data->config->frequency.frequency_grid[t] = make(omega, 0.0);
     }
 
     for (size_t x = 0u; x < shape->nx; ++x) {
@@ -590,30 +590,30 @@ static int nlo_bench_prepare_tensor_case_data(
                 const double temporal = exp(-((centered_t / temporal_width) * (centered_t / temporal_width)));
                 const double phase = 0.15 * centered_t * centered_t;
 
-                if (nlo_bench_checked_mul_size_t(x, shape->ny, &index) != 0 ||
+                if (bench_checked_mul_size_t(x, shape->ny, &index) != 0 ||
                     index > SIZE_MAX - y) {
-                    nlo_bench_copy_note(note, note_capacity, "Tensor index overflow while generating input field.");
+                    bench_copy_note(note, note_capacity, "Tensor index overflow while generating input field.");
                     return -1;
                 }
                 index += y;
-                if (nlo_bench_checked_mul_size_t(index, shape->nt, &index) != 0 ||
+                if (bench_checked_mul_size_t(index, shape->nt, &index) != 0 ||
                     index > SIZE_MAX - t) {
-                    nlo_bench_copy_note(note, note_capacity, "Tensor index overflow while generating input field.");
+                    bench_copy_note(note, note_capacity, "Tensor index overflow while generating input field.");
                     return -1;
                 }
                 index += t;
                 out_case_data->input_field[index] =
-                    nlo_make(temporal * transverse * cos(phase),
+                    make(temporal * transverse * cos(phase),
                              temporal * transverse * sin(phase));
             }
         }
     }
 
-    nlo_bench_copy_note(note, note_capacity, "");
+    bench_copy_note(note, note_capacity, "");
     return 0;
 }
 
-static void nlo_bench_destroy_case_data(nlo_bench_tensor_case_data* case_data)
+static void bench_destroy_case_data(bench_tensor_case_data* case_data)
 {
     if (case_data == NULL) {
         return;
@@ -625,13 +625,13 @@ static void nlo_bench_destroy_case_data(nlo_bench_tensor_case_data* case_data)
     memset(case_data, 0, sizeof(*case_data));
 }
 
-static int nlo_bench_probe_case(
-    const nlo_execution_options* exec_options,
+static int bench_probe_case(
+    const execution_options* exec_options,
     const sim_config* config,
     size_t total_samples,
     size_t num_records,
-    const nlo_storage_options* storage_options,
-    nlo_allocation_info* out_info,
+    const storage_options* storage_options,
+    allocation_info* out_info,
     char* note,
     size_t note_capacity
 )
@@ -640,13 +640,13 @@ static int nlo_bench_probe_case(
     int status = 0;
 
     if (exec_options == NULL || config == NULL || total_samples == 0u || out_info == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "Invalid benchmark probe arguments.");
+        bench_copy_note(note, note_capacity, "Invalid benchmark probe arguments.");
         return -1;
     }
 
     memset(out_info, 0, sizeof(*out_info));
     if (storage_options != NULL) {
-        status = nlo_init_simulation_state_with_storage(config,
+        status = init_simulation_state_with_storage(config,
                                                         total_samples,
                                                         num_records,
                                                         exec_options,
@@ -654,7 +654,7 @@ static int nlo_bench_probe_case(
                                                         out_info,
                                                         &state);
     } else {
-        status = nlo_init_simulation_state(config,
+        status = init_simulation_state(config,
                                            total_samples,
                                            num_records,
                                            exec_options,
@@ -662,36 +662,36 @@ static int nlo_bench_probe_case(
                                            &state);
     }
     if (status != 0 || state == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "State initialization failed.");
+        bench_copy_note(note, note_capacity, "State initialization failed.");
         return -1;
     }
 
     free_simulation_state(state);
-    nlo_bench_copy_note(note, note_capacity, "");
+    bench_copy_note(note, note_capacity, "");
     return 0;
 }
 
-static int nlo_bench_execute_single_run(
-    const nlo_execution_options* exec_options,
-    const nlo_bench_tensor_case_data* case_data,
+static int bench_execute_single_run(
+    const execution_options* exec_options,
+    const bench_tensor_case_data* case_data,
     size_t system_memory_bytes,
     size_t gpu_device_budget_bytes,
-    nlo_bench_tensor_metrics* out_metrics,
+    bench_tensor_metrics* out_metrics,
     char* note,
     size_t note_capacity
 )
 {
     simulation_state* state = NULL;
-    nlo_storage_options storage_options;
-    nlo_allocation_info allocation_info;
-    nlo_bench_timestamp total_start;
-    nlo_bench_timestamp total_end;
-    nlo_bench_timestamp phase_start;
-    nlo_bench_timestamp phase_end;
+    storage_options storage_options;
+    allocation_info allocation_info;
+    bench_timestamp total_start;
+    bench_timestamp total_end;
+    bench_timestamp phase_start;
+    bench_timestamp phase_end;
     int init_status = 0;
 
     if (exec_options == NULL || case_data == NULL || out_metrics == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "Invalid benchmark run arguments.");
+        bench_copy_note(note, note_capacity, "Invalid benchmark run arguments.");
         return -1;
     }
 
@@ -706,26 +706,26 @@ static int nlo_bench_execute_single_run(
     out_metrics->num_records = case_data->num_records;
     out_metrics->system_memory_bytes = system_memory_bytes;
     out_metrics->gpu_device_budget_bytes = gpu_device_budget_bytes;
-    if (nlo_bench_checked_mul_size_t(case_data->num_records,
+    if (bench_checked_mul_size_t(case_data->num_records,
                                      case_data->total_samples * sizeof(nlo_complex),
                                      &out_metrics->output_bytes) != 0) {
         out_metrics->output_bytes = SIZE_MAX;
     }
 
     if (case_data->storage_enabled) {
-        storage_options = nlo_storage_options_default();
+        storage_options = storage_options_default();
         storage_options.sqlite_path = case_data->storage_path;
         storage_options.chunk_records = 1u;
-        storage_options.cap_policy = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES;
+        storage_options.cap_policy = STORAGE_DB_CAP_POLICY_STOP_WRITES;
     }
 
-    nlo_perf_profile_set_enabled(1);
-    nlo_perf_profile_reset();
-    nlo_bench_now(&total_start);
+    perf_profile_set_enabled(1);
+    perf_profile_reset();
+    bench_now(&total_start);
 
-    nlo_bench_now(&phase_start);
+    bench_now(&phase_start);
     if (case_data->storage_enabled) {
-        init_status = nlo_init_simulation_state_with_storage(case_data->config,
+        init_status = init_simulation_state_with_storage(case_data->config,
                                                              case_data->total_samples,
                                                              case_data->num_records,
                                                              exec_options,
@@ -733,93 +733,93 @@ static int nlo_bench_execute_single_run(
                                                              &allocation_info,
                                                              &state);
     } else {
-        init_status = nlo_init_simulation_state(case_data->config,
+        init_status = init_simulation_state(case_data->config,
                                                 case_data->total_samples,
                                                 case_data->num_records,
                                                 exec_options,
                                                 &allocation_info,
                                                 &state);
     }
-    nlo_bench_now(&phase_end);
-    out_metrics->init_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_end);
+    out_metrics->init_ms = bench_elapsed_ms(&phase_start, &phase_end);
 
     out_metrics->per_record_bytes = allocation_info.per_record_bytes;
     out_metrics->allocated_records = allocation_info.allocated_records;
     out_metrics->host_snapshot_bytes = allocation_info.host_snapshot_bytes;
     out_metrics->working_vector_bytes = allocation_info.working_vector_bytes;
     out_metrics->device_ring_capacity = allocation_info.device_ring_capacity;
-    out_metrics->working_set_bytes = nlo_bench_compute_working_set_bytes(&allocation_info);
+    out_metrics->working_set_bytes = bench_compute_working_set_bytes(&allocation_info);
 
     if (init_status != 0 || state == NULL) {
-        nlo_bench_now(&total_end);
-        out_metrics->total_ms = nlo_bench_elapsed_ms(&total_start, &total_end);
-        nlo_bench_copy_note(note, note_capacity, "State initialization failed.");
-        nlo_perf_profile_set_enabled(0);
+        bench_now(&total_end);
+        out_metrics->total_ms = bench_elapsed_ms(&total_start, &total_end);
+        bench_copy_note(note, note_capacity, "State initialization failed.");
+        perf_profile_set_enabled(0);
         return -1;
     }
 
-    nlo_bench_now(&phase_start);
-    if (simulation_state_upload_initial_field(state, case_data->input_field) != NLO_VEC_STATUS_OK) {
-        nlo_bench_now(&phase_end);
-        out_metrics->upload_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
-        nlo_bench_copy_note(note, note_capacity, "Initial field upload failed.");
+    bench_now(&phase_start);
+    if (simulation_state_upload_initial_field(state, case_data->input_field) != VEC_STATUS_OK) {
+        bench_now(&phase_end);
+        out_metrics->upload_ms = bench_elapsed_ms(&phase_start, &phase_end);
+        bench_copy_note(note, note_capacity, "Initial field upload failed.");
         free_simulation_state(state);
-        nlo_perf_profile_set_enabled(0);
+        perf_profile_set_enabled(0);
         return -1;
     }
-    nlo_bench_now(&phase_end);
-    out_metrics->upload_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_end);
+    out_metrics->upload_ms = bench_elapsed_ms(&phase_start, &phase_end);
 
-    nlo_bench_now(&phase_start);
+    bench_now(&phase_start);
     solve_rk4(state);
-    nlo_bench_now(&phase_end);
-    out_metrics->solve_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_end);
+    out_metrics->solve_ms = bench_elapsed_ms(&phase_start, &phase_end);
 
-    if (state->snapshot_status != NLO_VEC_STATUS_OK) {
+    if (state->snapshot_status != VEC_STATUS_OK) {
         out_metrics->records_spilled = state->snapshot_result.records_spilled;
         out_metrics->chunks_written = state->snapshot_result.chunks_written;
         out_metrics->db_size_bytes = state->snapshot_result.db_size_bytes;
-        nlo_bench_copy_note(note, note_capacity, "Snapshot spill path reported an error.");
+        bench_copy_note(note, note_capacity, "Snapshot spill path reported an error.");
         free_simulation_state(state);
-        nlo_perf_profile_set_enabled(0);
+        perf_profile_set_enabled(0);
         return -1;
     }
 
-    nlo_bench_now(&phase_start);
-    if (simulation_state_download_current_field(state, case_data->output_field) != NLO_VEC_STATUS_OK) {
-        nlo_bench_now(&phase_end);
-        out_metrics->download_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_start);
+    if (simulation_state_download_current_field(state, case_data->output_field) != VEC_STATUS_OK) {
+        bench_now(&phase_end);
+        out_metrics->download_ms = bench_elapsed_ms(&phase_start, &phase_end);
         out_metrics->records_spilled = state->snapshot_result.records_spilled;
         out_metrics->chunks_written = state->snapshot_result.chunks_written;
         out_metrics->db_size_bytes = state->snapshot_result.db_size_bytes;
-        nlo_bench_copy_note(note, note_capacity, "Current field download failed.");
+        bench_copy_note(note, note_capacity, "Current field download failed.");
         free_simulation_state(state);
-        nlo_perf_profile_set_enabled(0);
+        perf_profile_set_enabled(0);
         return -1;
     }
-    nlo_bench_now(&phase_end);
-    out_metrics->download_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_end);
+    out_metrics->download_ms = bench_elapsed_ms(&phase_start, &phase_end);
 
     out_metrics->records_spilled = state->snapshot_result.records_spilled;
     out_metrics->chunks_written = state->snapshot_result.chunks_written;
     out_metrics->db_size_bytes = state->snapshot_result.db_size_bytes;
 
-    nlo_bench_now(&phase_start);
+    bench_now(&phase_start);
     free_simulation_state(state);
-    nlo_bench_now(&phase_end);
-    out_metrics->teardown_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_end);
+    out_metrics->teardown_ms = bench_elapsed_ms(&phase_start, &phase_end);
 
-    nlo_bench_now(&total_end);
-    out_metrics->total_ms = nlo_bench_elapsed_ms(&total_start, &total_end);
+    bench_now(&total_end);
+    out_metrics->total_ms = bench_elapsed_ms(&total_start, &total_end);
     if (out_metrics->total_ms > 0.0) {
         out_metrics->samples_per_sec =
             ((double)case_data->total_samples * 1000.0) / out_metrics->total_ms;
     }
 
     {
-        nlo_perf_profile_snapshot snapshot;
+        perf_profile_snapshot snapshot;
         memset(&snapshot, 0, sizeof(snapshot));
-        nlo_perf_profile_snapshot_read(&snapshot);
+        perf_profile_snapshot_read(&snapshot);
         out_metrics->dispersion_ms = snapshot.dispersion_ms;
         out_metrics->nonlinear_ms = snapshot.nonlinear_ms;
         out_metrics->gpu_dispatch_count = snapshot.gpu_dispatch_count;
@@ -832,12 +832,12 @@ static int nlo_bench_execute_single_run(
         out_metrics->gpu_download_bytes = snapshot.gpu_download_bytes;
     }
 
-    nlo_perf_profile_set_enabled(0);
-    nlo_bench_copy_note(note, note_capacity, "");
+    perf_profile_set_enabled(0);
+    bench_copy_note(note, note_capacity, "");
     return 0;
 }
 
-static int nlo_bench_double_compare(const void* lhs, const void* rhs)
+static int bench_double_compare(const void* lhs, const void* rhs)
 {
     const double left = *(const double*)lhs;
     const double right = *(const double*)rhs;
@@ -850,10 +850,10 @@ static int nlo_bench_double_compare(const void* lhs, const void* rhs)
     return 0;
 }
 
-static int nlo_bench_compute_summary(
+static int bench_compute_summary(
     const double* values,
     size_t count,
-    nlo_bench_summary* out_summary
+    bench_summary* out_summary
 )
 {
     double sum = 0.0;
@@ -890,7 +890,7 @@ static int nlo_bench_compute_summary(
         return -1;
     }
     memcpy(sorted, values, count * sizeof(double));
-    qsort(sorted, count, sizeof(double), nlo_bench_double_compare);
+    qsort(sorted, count, sizeof(double), bench_double_compare);
 
     if ((count % 2u) == 0u) {
         out_summary->median_ms = 0.5 * (sorted[count / 2u - 1u] + sorted[count / 2u]);
@@ -902,7 +902,7 @@ static int nlo_bench_compute_summary(
     return 0;
 }
 
-static int nlo_bench_default_tensor_scales(size_t* out_scales, size_t max_scales, size_t* out_count)
+static int bench_default_tensor_scales(size_t* out_scales, size_t max_scales, size_t* out_count)
 {
     size_t scale = 8u;
     size_t count = 0u;
@@ -927,15 +927,15 @@ static int nlo_bench_default_tensor_scales(size_t* out_scales, size_t max_scales
     return 0;
 }
 
-static int nlo_bench_plan_tensor_candidates(
-    const nlo_bench_tensor_options* options,
-    const nlo_bench_vk_context* vk_context,
+static int bench_plan_tensor_candidates(
+    const bench_tensor_options* options,
+    const bench_vk_context* vk_context,
     int gpu_available,
-    nlo_bench_tensor_candidate* out_candidates,
+    bench_tensor_candidate* out_candidates,
     size_t* out_count
 )
 {
-    size_t scales[NLO_BENCH_MAX_TENSOR_CANDIDATES];
+    size_t scales[BENCH_MAX_TENSOR_CANDIDATES];
     size_t scale_count = 0u;
     size_t system_budget_bytes = 0u;
 
@@ -945,27 +945,27 @@ static int nlo_bench_plan_tensor_candidates(
 
     if (options->tensor_scales != NULL && options->tensor_scale_count > 0u) {
         scale_count = options->tensor_scale_count;
-        for (size_t i = 0u; i < scale_count && i < NLO_BENCH_MAX_TENSOR_CANDIDATES; ++i) {
+        for (size_t i = 0u; i < scale_count && i < BENCH_MAX_TENSOR_CANDIDATES; ++i) {
             scales[i] = options->tensor_scales[i];
         }
-    } else if (nlo_bench_default_tensor_scales(scales,
-                                               NLO_BENCH_MAX_TENSOR_CANDIDATES,
+    } else if (bench_default_tensor_scales(scales,
+                                               BENCH_MAX_TENSOR_CANDIDATES,
                                                &scale_count) != 0) {
         return -1;
     }
 
-    system_budget_bytes = nlo_bench_effective_host_budget_bytes(options);
+    system_budget_bytes = bench_effective_host_budget_bytes(options);
     *out_count = 0u;
 
-    for (size_t i = 0u; i < scale_count && *out_count < NLO_BENCH_MAX_TENSOR_CANDIDATES; ++i) {
-        nlo_bench_tensor_candidate* candidate = &out_candidates[*out_count];
-        nlo_bench_tensor_case_data probe_case;
-        nlo_allocation_info cpu_info;
-        nlo_allocation_info gpu_info;
-        nlo_execution_options cpu_options;
-        nlo_execution_options gpu_options;
-        nlo_bench_tensor_region_inputs region_inputs;
-        char note[NLO_BENCH_NOTE_CAP];
+    for (size_t i = 0u; i < scale_count && *out_count < BENCH_MAX_TENSOR_CANDIDATES; ++i) {
+        bench_tensor_candidate* candidate = &out_candidates[*out_count];
+        bench_tensor_case_data probe_case;
+        allocation_info cpu_info;
+        allocation_info gpu_info;
+        execution_options cpu_options;
+        execution_options gpu_options;
+        bench_tensor_region_inputs region_inputs;
+        char note[BENCH_NOTE_CAP];
         size_t working_set_bytes = 0u;
         size_t gpu_budget_bytes = 0u;
         int cpu_probe_ok = 0;
@@ -976,10 +976,10 @@ static int nlo_bench_plan_tensor_candidates(
         memset(&cpu_info, 0, sizeof(cpu_info));
         memset(&gpu_info, 0, sizeof(gpu_info));
 
-        if (nlo_bench_tensor_shape_from_scale(scales[i], &candidate->shape) != 0) {
+        if (bench_tensor_shape_from_scale(scales[i], &candidate->shape) != 0) {
             continue;
         }
-        if (nlo_bench_prepare_tensor_case_data(&candidate->shape,
+        if (bench_prepare_tensor_case_data(&candidate->shape,
                                                1u,
                                                0,
                                                NULL,
@@ -989,8 +989,8 @@ static int nlo_bench_plan_tensor_candidates(
             continue;
         }
 
-        cpu_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
-        cpu_probe_ok = (nlo_bench_probe_case(&cpu_options,
+        cpu_options = execution_options_default(VECTOR_BACKEND_CPU);
+        cpu_probe_ok = (bench_probe_case(&cpu_options,
                                              probe_case.config,
                                              probe_case.total_samples,
                                              1u,
@@ -999,18 +999,18 @@ static int nlo_bench_plan_tensor_candidates(
                                              note,
                                              sizeof(note)) == 0);
         if (cpu_probe_ok) {
-            working_set_bytes = nlo_bench_compute_working_set_bytes(&cpu_info);
+            working_set_bytes = bench_compute_working_set_bytes(&cpu_info);
             candidate->per_record_bytes = cpu_info.per_record_bytes;
         }
 
         if (gpu_available) {
-            gpu_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_VULKAN);
+            gpu_options = execution_options_default(VECTOR_BACKEND_VULKAN);
             gpu_options.vulkan.physical_device = vk_context->physical_device;
             gpu_options.vulkan.device = vk_context->device;
             gpu_options.vulkan.queue = vk_context->queue;
             gpu_options.vulkan.queue_family_index = vk_context->queue_family_index;
             gpu_options.vulkan.command_pool = VK_NULL_HANDLE;
-            gpu_probe_ok = (nlo_bench_probe_case(&gpu_options,
+            gpu_probe_ok = (bench_probe_case(&gpu_options,
                                                  probe_case.config,
                                                  probe_case.total_samples,
                                                  1u,
@@ -1021,7 +1021,7 @@ static int nlo_bench_plan_tensor_candidates(
         }
 
         if (gpu_probe_ok) {
-            const size_t gpu_working_set = nlo_bench_compute_working_set_bytes(&gpu_info);
+            const size_t gpu_working_set = bench_compute_working_set_bytes(&gpu_info);
             if (gpu_working_set > working_set_bytes) {
                 working_set_bytes = gpu_working_set;
             }
@@ -1041,14 +1041,14 @@ static int nlo_bench_plan_tensor_candidates(
         region_inputs.cpu_init_ok = cpu_probe_ok;
         region_inputs.gpu_init_ok = (options->planner_gpu_bytes > 0u) ? 1 : gpu_probe_ok;
 
-        candidate->region = nlo_bench_tensor_classify_fit_region(&region_inputs);
+        candidate->region = bench_tensor_classify_fit_region(&region_inputs);
         candidate->working_set_bytes = working_set_bytes;
         candidate->system_budget_bytes = system_budget_bytes;
         candidate->gpu_budget_bytes = gpu_budget_bytes;
         candidate->cpu_probe_ok = cpu_probe_ok;
         candidate->gpu_probe_ok = gpu_probe_ok;
 
-        nlo_bench_destroy_case_data(&probe_case);
+        bench_destroy_case_data(&probe_case);
         *out_count += 1u;
 
         if (!cpu_probe_ok && options->tensor_scale_count == 0u) {
@@ -1059,36 +1059,36 @@ static int nlo_bench_plan_tensor_candidates(
     return 0;
 }
 
-static void nlo_bench_print_tensor_plan(
-    const nlo_bench_tensor_candidate* candidates,
+static void bench_print_tensor_plan(
+    const bench_tensor_candidate* candidates,
     size_t candidate_count,
-    const nlo_bench_tensor_options* options
+    const bench_tensor_options* options
 )
 {
-    static const double spill_factors[NLO_BENCH_SPILL_TARGET_COUNT] = {1.25, 1.50, 2.00};
-    const nlo_bench_tensor_candidate* spill_candidate = NULL;
+    static const double spill_factors[BENCH_SPILL_TARGET_COUNT] = {1.25, 1.50, 2.00};
+    const bench_tensor_candidate* spill_candidate = NULL;
 
     if (candidates == NULL || options == NULL) {
         return;
     }
 
     printf("Tensor scaling plan:\n");
-    printf("  effective_host_budget: %zu bytes\n", nlo_bench_effective_host_budget_bytes(options));
+    printf("  effective_host_budget: %zu bytes\n", bench_effective_host_budget_bytes(options));
     printf("  effective_gpu_budget: %zu bytes\n", options->planner_gpu_bytes);
 
     for (size_t i = 0u; i < candidate_count; ++i) {
-        const nlo_bench_tensor_candidate* candidate = &candidates[i];
+        const bench_tensor_candidate* candidate = &candidates[i];
         printf("  scale=%zu shape=(nt=%zu nx=%zu ny=%zu total=%zu) region=%s working_set=%zu cpu_probe=%s gpu_probe=%s\n",
                candidate->shape.scale,
                candidate->shape.nt,
                candidate->shape.nx,
                candidate->shape.ny,
                candidate->shape.total_samples,
-               nlo_bench_tensor_region_label(candidate->region),
+               bench_tensor_region_label(candidate->region),
                candidate->working_set_bytes,
                candidate->cpu_probe_ok ? "ok" : "fail",
                candidate->gpu_probe_ok ? "ok" : "fail");
-        if (candidate->region == NLO_BENCH_TENSOR_REGION_GPU_FIT) {
+        if (candidate->region == BENCH_TENSOR_REGION_GPU_FIT) {
             spill_candidate = candidate;
         }
     }
@@ -1098,11 +1098,11 @@ static void nlo_bench_print_tensor_plan(
                spill_candidate->shape.scale,
                spill_candidate->shape.total_samples,
                spill_candidate->per_record_bytes);
-        for (size_t i = 0u; i < NLO_BENCH_SPILL_TARGET_COUNT; ++i) {
+        for (size_t i = 0u; i < BENCH_SPILL_TARGET_COUNT; ++i) {
             const size_t target_output_bytes =
-                nlo_bench_scale_size_t_double(spill_candidate->system_budget_bytes, spill_factors[i]);
+                bench_scale_size_t_double(spill_candidate->system_budget_bytes, spill_factors[i]);
             const size_t spill_records =
-                nlo_bench_tensor_records_for_output_bytes(spill_candidate->per_record_bytes, target_output_bytes);
+                bench_tensor_records_for_output_bytes(spill_candidate->per_record_bytes, target_output_bytes);
             printf("    output_spill factor=%.2f records=%zu output_bytes=%zu\n",
                    spill_factors[i],
                    spill_records,
@@ -1113,19 +1113,19 @@ static void nlo_bench_print_tensor_plan(
     }
 }
 
-static void nlo_bench_print_backend_summary(
+static void bench_print_backend_summary(
     const char* backend_label,
-    const nlo_bench_tensor_metrics* last_metrics,
+    const bench_tensor_metrics* last_metrics,
     const double* measured_totals,
     size_t measured_count
 )
 {
-    nlo_bench_summary total_summary;
+    bench_summary total_summary;
     if (backend_label == NULL || last_metrics == NULL || measured_totals == NULL || measured_count == 0u) {
         return;
     }
 
-    if (nlo_bench_compute_summary(measured_totals, measured_count, &total_summary) != 0) {
+    if (bench_compute_summary(measured_totals, measured_count, &total_summary) != 0) {
         printf("  %-3s warning: failed to compute timing summary.\n", backend_label);
         return;
     }
@@ -1151,26 +1151,26 @@ static void nlo_bench_print_backend_summary(
     }
 }
 
-static int nlo_bench_run_case(
-    nlo_bench_runtime_backend backend,
-    const nlo_bench_tensor_options* options,
+static int bench_run_case(
+    bench_runtime_backend backend,
+    const bench_tensor_options* options,
     const char* region_label,
-    const nlo_bench_tensor_case_data* case_data,
+    const bench_tensor_case_data* case_data,
     size_t system_memory_bytes,
     size_t gpu_device_budget_bytes,
-    const nlo_bench_vk_context* vk_context,
+    const bench_vk_context* vk_context,
     FILE* csv_file,
     const char* skip_reason,
     const char* skip_status,
     int* out_error_count
 )
 {
-    const char* backend_label = nlo_bench_backend_label(backend);
-    nlo_execution_options exec_options;
-    nlo_bench_tensor_metrics metrics;
+    const char* backend_label = bench_backend_label(backend);
+    execution_options exec_options;
+    bench_tensor_metrics metrics;
     double* measured_totals = NULL;
     size_t recorded = 0u;
-    char note[NLO_BENCH_NOTE_CAP];
+    char note[BENCH_NOTE_CAP];
 
     if (options == NULL || region_label == NULL || case_data == NULL || out_error_count == NULL) {
         return -1;
@@ -1180,7 +1180,7 @@ static int nlo_bench_run_case(
     if (skip_reason != NULL && *skip_reason != '\0') {
         printf("  %-3s %s: %s\n", backend_label, skip_status, skip_reason);
         if (csv_file != NULL &&
-            nlo_bench_write_csv_row(csv_file,
+            bench_write_csv_row(csv_file,
                                     region_label,
                                     backend_label,
                                     options->warmup_runs,
@@ -1195,13 +1195,13 @@ static int nlo_bench_run_case(
         return 0;
     }
 
-    exec_options = (backend == NLO_BENCH_RUNTIME_CPU)
-                       ? nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU)
-                       : nlo_execution_options_default(NLO_VECTOR_BACKEND_VULKAN);
+    exec_options = (backend == BENCH_RUNTIME_CPU)
+                       ? execution_options_default(VECTOR_BACKEND_CPU)
+                       : execution_options_default(VECTOR_BACKEND_VULKAN);
     if (case_data->storage_enabled) {
         exec_options.record_ring_target = 1u;
     }
-    if (backend == NLO_BENCH_RUNTIME_GPU) {
+    if (backend == BENCH_RUNTIME_GPU) {
         if (vk_context == NULL) {
             *out_error_count += 1;
             return -1;
@@ -1220,7 +1220,7 @@ static int nlo_bench_run_case(
     }
 
     for (size_t run = 0u; run < options->warmup_runs + options->measured_runs; ++run) {
-        if (nlo_bench_execute_single_run(&exec_options,
+        if (bench_execute_single_run(&exec_options,
                                          case_data,
                                          system_memory_bytes,
                                          gpu_device_budget_bytes,
@@ -1230,7 +1230,7 @@ static int nlo_bench_run_case(
             const char* status = (skip_status != NULL) ? skip_status : "ERROR";
             printf("  %-3s %s: %s\n", backend_label, status, note);
             if (csv_file != NULL) {
-                (void)nlo_bench_write_csv_row(csv_file,
+                (void)bench_write_csv_row(csv_file,
                                               region_label,
                                               backend_label,
                                               options->warmup_runs,
@@ -1256,7 +1256,7 @@ static int nlo_bench_run_case(
         measured_totals[recorded] = metrics.total_ms;
         recorded += 1u;
         if (csv_file != NULL &&
-            nlo_bench_write_csv_row(csv_file,
+            bench_write_csv_row(csv_file,
                                     region_label,
                                     backend_label,
                                     options->warmup_runs,
@@ -1272,24 +1272,24 @@ static int nlo_bench_run_case(
     }
 
     if (recorded > 0u) {
-        nlo_bench_print_backend_summary(backend_label, &metrics, measured_totals, recorded);
+        bench_print_backend_summary(backend_label, &metrics, measured_totals, recorded);
     }
 
     free(measured_totals);
     return 0;
 }
 
-int nlo_bench_run_tensor_scaling(
-    const nlo_bench_tensor_options* options,
-    const nlo_bench_vk_context* vk_context,
+int bench_run_tensor_scaling(
+    const bench_tensor_options* options,
+    const bench_vk_context* vk_context,
     int gpu_available,
     const char* gpu_skip_reason,
     int* out_error_count
 )
 {
-    static const double spill_factors[NLO_BENCH_SPILL_TARGET_COUNT] = {1.25, 1.50, 2.00};
-    nlo_bench_tensor_candidate candidates[NLO_BENCH_MAX_TENSOR_CANDIDATES];
-    const nlo_bench_tensor_candidate* spill_candidate = NULL;
+    static const double spill_factors[BENCH_SPILL_TARGET_COUNT] = {1.25, 1.50, 2.00};
+    bench_tensor_candidate candidates[BENCH_MAX_TENSOR_CANDIDATES];
+    const bench_tensor_candidate* spill_candidate = NULL;
     size_t candidate_count = 0u;
     FILE* csv_file = NULL;
 
@@ -1298,7 +1298,7 @@ int nlo_bench_run_tensor_scaling(
     }
 
     memset(candidates, 0, sizeof(candidates));
-    if (nlo_bench_plan_tensor_candidates(options,
+    if (bench_plan_tensor_candidates(options,
                                          vk_context,
                                          gpu_available,
                                          candidates,
@@ -1307,7 +1307,7 @@ int nlo_bench_run_tensor_scaling(
         return -1;
     }
 
-    nlo_bench_print_tensor_plan(candidates, candidate_count, options);
+    bench_print_tensor_plan(candidates, candidate_count, options);
     if (options->dry_run) {
         return 0;
     }
@@ -1316,20 +1316,20 @@ int nlo_bench_run_tensor_scaling(
         *out_error_count += 1;
         return -1;
     }
-    if (nlo_bench_make_parent_dirs(options->csv_path) != 0 ||
-        nlo_bench_make_directory_tree(options->storage_dir) != 0) {
+    if (bench_make_parent_dirs(options->csv_path) != 0 ||
+        bench_make_directory_tree(options->storage_dir) != 0) {
         *out_error_count += 1;
         return -1;
     }
 
     {
-        const int csv_exists = nlo_bench_file_exists(options->csv_path);
+        const int csv_exists = bench_file_exists(options->csv_path);
         csv_file = fopen(options->csv_path, "a");
         if (csv_file == NULL) {
             *out_error_count += 1;
             return -1;
         }
-        if (!csv_exists && nlo_bench_write_csv_header(csv_file) != 0) {
+        if (!csv_exists && bench_write_csv_header(csv_file) != 0) {
             fclose(csv_file);
             *out_error_count += 1;
             return -1;
@@ -1337,22 +1337,22 @@ int nlo_bench_run_tensor_scaling(
     }
 
     for (size_t i = 0u; i < candidate_count; ++i) {
-        const nlo_bench_tensor_candidate* candidate = &candidates[i];
-        nlo_bench_tensor_case_data case_data;
-        char note[NLO_BENCH_NOTE_CAP];
+        const bench_tensor_candidate* candidate = &candidates[i];
+        bench_tensor_case_data case_data;
+        char note[BENCH_NOTE_CAP];
 
-        if (candidate->region == NLO_BENCH_TENSOR_REGION_TOO_LARGE) {
+        if (candidate->region == BENCH_TENSOR_REGION_TOO_LARGE) {
             continue;
         }
-        if (candidate->region == NLO_BENCH_TENSOR_REGION_GPU_FIT) {
+        if (candidate->region == BENCH_TENSOR_REGION_GPU_FIT) {
             spill_candidate = candidate;
         }
 
         printf("\nTensor scale %zu (%s)\n",
                candidate->shape.scale,
-               nlo_bench_tensor_region_label(candidate->region));
+               bench_tensor_region_label(candidate->region));
 
-        if (nlo_bench_prepare_tensor_case_data(&candidate->shape,
+        if (bench_prepare_tensor_case_data(&candidate->shape,
                                                1u,
                                                0,
                                                NULL,
@@ -1365,9 +1365,9 @@ int nlo_bench_run_tensor_scaling(
         }
 
         if (options->backend_request == 0 || options->backend_request == 2) {
-            (void)nlo_bench_run_case(NLO_BENCH_RUNTIME_CPU,
+            (void)bench_run_case(BENCH_RUNTIME_CPU,
                                      options,
-                                     nlo_bench_tensor_region_label(candidate->region),
+                                     bench_tensor_region_label(candidate->region),
                                      &case_data,
                                      candidate->system_budget_bytes,
                                      candidate->gpu_budget_bytes,
@@ -1383,13 +1383,13 @@ int nlo_bench_run_tensor_scaling(
             if (!gpu_available) {
                 skip_reason = gpu_skip_reason;
                 skip_status = "SKIPPED";
-            } else if (candidate->region == NLO_BENCH_TENSOR_REGION_HOST_FIT_ONLY) {
+            } else if (candidate->region == BENCH_TENSOR_REGION_HOST_FIT_ONLY) {
                 skip_reason = "Tensor working set exceeds effective GPU budget for this machine.";
                 skip_status = "EXPECTED_LIMIT";
             }
-            (void)nlo_bench_run_case(NLO_BENCH_RUNTIME_GPU,
+            (void)bench_run_case(BENCH_RUNTIME_GPU,
                                      options,
-                                     nlo_bench_tensor_region_label(candidate->region),
+                                     bench_tensor_region_label(candidate->region),
                                      &case_data,
                                      candidate->system_budget_bytes,
                                      candidate->gpu_budget_bytes,
@@ -1400,18 +1400,18 @@ int nlo_bench_run_tensor_scaling(
                                      out_error_count);
         }
 
-        nlo_bench_destroy_case_data(&case_data);
+        bench_destroy_case_data(&case_data);
     }
 
     if (spill_candidate != NULL) {
-        for (size_t i = 0u; i < NLO_BENCH_SPILL_TARGET_COUNT; ++i) {
-            nlo_bench_tensor_case_data case_data;
-            char note[NLO_BENCH_NOTE_CAP];
-            char storage_path[NLO_BENCH_MAX_PATH];
+        for (size_t i = 0u; i < BENCH_SPILL_TARGET_COUNT; ++i) {
+            bench_tensor_case_data case_data;
+            char note[BENCH_NOTE_CAP];
+            char storage_path[BENCH_MAX_PATH];
             const size_t target_output_bytes =
-                nlo_bench_scale_size_t_double(spill_candidate->system_budget_bytes, spill_factors[i]);
+                bench_scale_size_t_double(spill_candidate->system_budget_bytes, spill_factors[i]);
             const size_t spill_records =
-                nlo_bench_tensor_records_for_output_bytes(spill_candidate->per_record_bytes, target_output_bytes);
+                bench_tensor_records_for_output_bytes(spill_candidate->per_record_bytes, target_output_bytes);
 
             snprintf(storage_path,
                      sizeof(storage_path),
@@ -1421,7 +1421,7 @@ int nlo_bench_run_tensor_scaling(
                      (size_t)lround(spill_factors[i] * 100.0));
 
             printf("\nTensor output spill factor %.2f (records=%zu)\n", spill_factors[i], spill_records);
-            if (nlo_bench_prepare_tensor_case_data(&spill_candidate->shape,
+            if (bench_prepare_tensor_case_data(&spill_candidate->shape,
                                                    spill_records,
                                                    1,
                                                    storage_path,
@@ -1434,9 +1434,9 @@ int nlo_bench_run_tensor_scaling(
             }
 
             if (options->backend_request == 0 || options->backend_request == 2) {
-                (void)nlo_bench_run_case(NLO_BENCH_RUNTIME_CPU,
+                (void)bench_run_case(BENCH_RUNTIME_CPU,
                                          options,
-                                         nlo_bench_tensor_region_label(NLO_BENCH_TENSOR_REGION_OUTPUT_SPILL),
+                                         bench_tensor_region_label(BENCH_TENSOR_REGION_OUTPUT_SPILL),
                                          &case_data,
                                          spill_candidate->system_budget_bytes,
                                          spill_candidate->gpu_budget_bytes,
@@ -1447,9 +1447,9 @@ int nlo_bench_run_tensor_scaling(
                                          out_error_count);
             }
             if (options->backend_request == 1 || options->backend_request == 2) {
-                (void)nlo_bench_run_case(NLO_BENCH_RUNTIME_GPU,
+                (void)bench_run_case(BENCH_RUNTIME_GPU,
                                          options,
-                                         nlo_bench_tensor_region_label(NLO_BENCH_TENSOR_REGION_OUTPUT_SPILL),
+                                         bench_tensor_region_label(BENCH_TENSOR_REGION_OUTPUT_SPILL),
                                          &case_data,
                                          spill_candidate->system_budget_bytes,
                                          spill_candidate->gpu_budget_bytes,
@@ -1460,7 +1460,7 @@ int nlo_bench_run_tensor_scaling(
                                          out_error_count);
             }
 
-            nlo_bench_destroy_case_data(&case_data);
+            bench_destroy_case_data(&case_data);
         }
     }
 

@@ -7,7 +7,7 @@ GENERATE_TREEVIEW      = YES
 RECURSIVE              = YES
 QUIET                  = YES
 
-INPUT                  = "@CMAKE_SOURCE_DIR@/src"
+INPUT                  = "@CMAKE_SOURCE_DIR@/src" "@CMAKE_SOURCE_DIR@/README.md"
 FILE_PATTERNS          = *.h *.c
 EXTRACT_ALL            = YES
 EXTRACT_STATIC         = YES
@@ -16,7 +16,7 @@ CREATE_SUBDIRS         = YES
 CREATE_SUBDIRS_LEVEL   = 8
 HAVE_DOT               = YES
 CALL_GRAPH             = YES
-DIRECTORY_GRAPH        = YES
+DIRECTORY_GRAPH        = NO
 FULL_PATH_NAMES        = YES
 STRIP_FROM_PATH        = ../..
 
@@ -28,3 +28,5 @@ FULL_SIDEBAR = NO
 HTML_EXTRA_STYLESHEET  = "@AWESOME_CSS_DIR@/doxygen-awesome.css"
 USE_MATHJAX           = YES
 MATHJAX_VERSION       = MathJax_3
+USE_MDFILE_AS_MAINPAGE = "@CMAKE_SOURCE_DIR@/README.md"
+IGNORE_PREFIX         = nlolib_ nlo_ NLO_ NLOLIB_

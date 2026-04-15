@@ -12,21 +12,21 @@ extern "C" {
 #endif
 
 typedef enum {
-    NLO_SNAPSHOT_STORE_STATUS_OK = 0,
-    NLO_SNAPSHOT_STORE_STATUS_SOFT_LIMIT = 1,
-    NLO_SNAPSHOT_STORE_STATUS_ERROR = 2
-} nlo_snapshot_store_status;
+    SNAPSHOT_STORE_STATUS_OK = 0,
+    SNAPSHOT_STORE_STATUS_SOFT_LIMIT = 1,
+    SNAPSHOT_STORE_STATUS_ERROR = 2
+} snapshot_store_status;
 
 /**
  * @brief Parameters used when opening a snapshot store.
  */
 typedef struct {
     const sim_config* config;
-    const nlo_execution_options* exec_options;
-    const nlo_storage_options* storage_options;
+    const execution_options* exec_options;
+    const storage_options* storage_options;
     size_t num_time_samples;
     size_t num_recorded_samples;
-} nlo_snapshot_store_open_params;
+} snapshot_store_open_params;
 
 /**
  * @brief Open and initialize a snapshot store.
@@ -34,9 +34,9 @@ typedef struct {
  * Returns NULL when storage is disabled or initialization fails.
  *
  * @param params Storage-open parameters.
- * @return nlo_snapshot_store* Store handle, or NULL when unavailable/failure.
+ * @return snapshot_store* Store handle, or NULL when unavailable/failure.
  */
-nlo_snapshot_store* nlo_snapshot_store_open(const nlo_snapshot_store_open_params* params);
+snapshot_store* snapshot_store_open(const snapshot_store_open_params* params);
 
 /**
  * @brief Append one captured record into the in-memory chunk buffer.
@@ -47,10 +47,10 @@ nlo_snapshot_store* nlo_snapshot_store_open(const nlo_snapshot_store_open_params
  * @param record_index Zero-based record index.
  * @param record Record buffer pointer.
  * @param num_time_samples Number of complex samples in @p record.
- * @return nlo_snapshot_store_status Write status.
+ * @return snapshot_store_status Write status.
  */
-nlo_snapshot_store_status nlo_snapshot_store_write_record(
-    nlo_snapshot_store* store,
+snapshot_store_status snapshot_store_write_record(
+    snapshot_store* store,
     size_t record_index,
     const nlo_complex* record,
     size_t num_time_samples
@@ -62,10 +62,10 @@ nlo_snapshot_store_status nlo_snapshot_store_write_record(
  * @param store Snapshot store handle.
  * @param field Final output field buffer.
  * @param num_time_samples Number of complex samples in @p field.
- * @return nlo_snapshot_store_status Write status.
+ * @return snapshot_store_status Write status.
  */
-nlo_snapshot_store_status nlo_snapshot_store_write_final_output_field(
-    nlo_snapshot_store* store,
+snapshot_store_status snapshot_store_write_final_output_field(
+    snapshot_store* store,
     const nlo_complex* field,
     size_t num_time_samples
 );
@@ -74,9 +74,9 @@ nlo_snapshot_store_status nlo_snapshot_store_write_final_output_field(
  * @brief Flush any pending chunk to persistent storage.
  *
  * @param store Snapshot store handle.
- * @return nlo_snapshot_store_status Flush status.
+ * @return snapshot_store_status Flush status.
  */
-nlo_snapshot_store_status nlo_snapshot_store_flush(nlo_snapshot_store* store);
+snapshot_store_status snapshot_store_flush(snapshot_store* store);
 
 /**
  * @brief Read all recorded snapshot chunks into a caller-provided dense buffer.
@@ -88,10 +88,10 @@ nlo_snapshot_store_status nlo_snapshot_store_flush(nlo_snapshot_store* store);
  * @param out_records Destination dense record buffer.
  * @param num_recorded_samples Number of records expected in @p out_records.
  * @param num_time_samples Number of complex samples per record.
- * @return nlo_snapshot_store_status Read status.
+ * @return snapshot_store_status Read status.
  */
-nlo_snapshot_store_status nlo_snapshot_store_read_all_records(
-    nlo_snapshot_store* store,
+snapshot_store_status snapshot_store_read_all_records(
+    snapshot_store* store,
     nlo_complex* out_records,
     size_t num_recorded_samples,
     size_t num_time_samples
@@ -103,21 +103,21 @@ nlo_snapshot_store_status nlo_snapshot_store_read_all_records(
  * @param store Snapshot store handle.
  * @param out_result Destination storage summary.
  */
-void nlo_snapshot_store_get_result(const nlo_snapshot_store* store, nlo_storage_result* out_result);
+void snapshot_store_get_result(const snapshot_store* store, storage_result* out_result);
 
 /**
  * @brief Close storage resources and finalize run metadata.
  *
  * @param store Snapshot store handle to close.
  */
-void nlo_snapshot_store_close(nlo_snapshot_store* store);
+void snapshot_store_close(snapshot_store* store);
 
 /**
  * @brief Returns nonzero when SQLite storage support is compiled in.
  *
  * @return int Nonzero when snapshot storage backend is available.
  */
-int nlo_snapshot_store_is_available(void);
+int snapshot_store_is_available(void);
 
 #ifdef __cplusplus
 }

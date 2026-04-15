@@ -31,8 +31,8 @@ from backend.spectral import (
 )
 from backend.storage import ExampleRunDB
 from nlolib import (
-    NLO_NONLINEAR_MODEL_EXPR,
-    NLO_NONLINEAR_MODEL_KERR_RAMAN,
+    NONLINEAR_MODEL_EXPR,
+    NONLINEAR_MODEL_KERR_RAMAN,
     RuntimeOperators,
 )
 
@@ -288,7 +288,7 @@ def _run(args: argparse.Namespace) -> float:
         runtime_kerr = RuntimeOperators(
             linear_factor_fn=lambda A, w: (1.0j * (0.5 * beta2)) * (w * w),
             nonlinear_fn=lambda A, I: (1.0j * gamma) * A * I,
-            nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
+            nonlinear_model=NONLINEAR_MODEL_EXPR,
             nonlinear_gamma=gamma,
             raman_fraction=0.0,
             shock_omega0=0.0,
@@ -296,7 +296,7 @@ def _run(args: argparse.Namespace) -> float:
         runtime_raman = RuntimeOperators(
             linear_factor_fn=lambda A, w: (1.0j * (0.5 * beta2)) * (w * w),
             nonlinear_fn=lambda A, I: 0.0,
-            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_model=NONLINEAR_MODEL_KERR_RAMAN,
             nonlinear_gamma=gamma,
             raman_fraction=f_r,
             raman_tau1=tau1,

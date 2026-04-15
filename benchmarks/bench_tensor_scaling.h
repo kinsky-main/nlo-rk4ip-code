@@ -18,11 +18,11 @@ typedef struct {
     size_t tensor_scale_count;
     const char* csv_path;
     const char* storage_dir;
-} nlo_bench_tensor_options;
+} bench_tensor_options;
 
-int nlo_bench_run_tensor_scaling(
-    const nlo_bench_tensor_options* options,
-    const nlo_bench_vk_context* vk_context,
+int bench_run_tensor_scaling(
+    const bench_tensor_options* options,
+    const bench_vk_context* vk_context,
     int gpu_available,
     const char* gpu_skip_reason,
     int* out_error_count

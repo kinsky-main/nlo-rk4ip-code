@@ -34,36 +34,36 @@ add_executable(bench_solver_backend
 )
 
 include(ResolveVulkan)
-nlo_resolve_vulkan(_nlo_vk_headers_available _nlo_vk_loader_available)
+resolve_vulkan(vk_headers_available vk_loader_available)
 include(NLOCblas)
-nlo_configure_cblas(_nlo_cblas_target _nlo_cblas_include_dirs)
+configure_cblas(cblas_target cblas_include_dirs)
 
 target_include_directories(bench_solver_backend PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_CURRENT_LIST_DIR}
 )
 
-target_link_libraries(bench_solver_backend PRIVATE ${_nlo_cblas_target})
+target_link_libraries(bench_solver_backend PRIVATE ${cblas_target})
 include(NLOSQLite)
-nlo_configure_sqlite(bench_solver_backend)
+configure_sqlite(bench_solver_backend)
 
 include(NLOFftw)
-nlo_configure_fftw(_nlo_fftw_target _nlo_fftw_include_dirs)
-target_link_libraries(bench_solver_backend PRIVATE ${_nlo_fftw_target})
-if(_nlo_fftw_include_dirs)
-  target_include_directories(bench_solver_backend PRIVATE ${_nlo_fftw_include_dirs})
+configure_fftw(fftw_target fftw_include_dirs)
+target_link_libraries(bench_solver_backend PRIVATE ${fftw_target})
+if(fftw_include_dirs)
+  target_include_directories(bench_solver_backend PRIVATE ${fftw_include_dirs})
 endif()
 
-set(_NLO_VKFFT_INCLUDE_DIR "${CMAKE_BINARY_DIR}/_deps/vkfft-src")
-if(EXISTS "${_NLO_VKFFT_INCLUDE_DIR}/vkFFT/vkFFT.h")
-  target_include_directories(bench_solver_backend PRIVATE "${_NLO_VKFFT_INCLUDE_DIR}")
+set(VKFFT_INCLUDE_DIR "${CMAKE_BINARY_DIR}/_deps/vkfft-src")
+if(EXISTS "${VKFFT_INCLUDE_DIR}/vkFFT/vkFFT.h")
+  target_include_directories(bench_solver_backend PRIVATE "${VKFFT_INCLUDE_DIR}")
   target_compile_definitions(bench_solver_backend PRIVATE VKFFT_BACKEND=0)
 else()
   message(FATAL_ERROR
-    "VkFFT headers were not found at ${_NLO_VKFFT_INCLUDE_DIR}.")
+    "VkFFT headers were not found at ${VKFFT_INCLUDE_DIR}.")
 endif()
 
-find_path(_NLO_GLSLANG_C_INCLUDE_DIR
+find_path(GLSLANG_C_INCLUDE_DIR
   NAMES glslang_c_interface.h
   HINTS
     ENV VULKAN_SDK
@@ -71,8 +71,8 @@ find_path(_NLO_GLSLANG_C_INCLUDE_DIR
     Include/glslang/Include
     glslang/Include
 )
-if(_NLO_GLSLANG_C_INCLUDE_DIR)
-  target_include_directories(bench_solver_backend PRIVATE ${_NLO_GLSLANG_C_INCLUDE_DIR})
+if(GLSLANG_C_INCLUDE_DIR)
+  target_include_directories(bench_solver_backend PRIVATE ${GLSLANG_C_INCLUDE_DIR})
 endif()
 
 find_package(Vulkan QUIET COMPONENTS glslang)
@@ -91,15 +91,15 @@ endif()
 if(WIN32)
   target_compile_definitions(bench_solver_backend PRIVATE NLOLIB_EXPORTS)
   target_link_options(bench_solver_backend PRIVATE /IGNORE:4099)
-  set(_nlo_runtime_hints "${NLO_SQLITE_RUNTIME_HINTS}")
-  if(NLO_CBLAS_RUNTIME_HINTS)
-    list(APPEND _nlo_runtime_hints "${NLO_CBLAS_RUNTIME_HINTS}")
+  set(runtime_hints "${SQLITE_RUNTIME_HINTS}")
+  if(CBLAS_RUNTIME_HINTS)
+    list(APPEND runtime_hints "${CBLAS_RUNTIME_HINTS}")
   endif()
   add_custom_command(TARGET bench_solver_backend POST_BUILD
     COMMAND ${CMAKE_COMMAND}
             -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:bench_solver_backend>"
             -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:bench_solver_backend>"
-            -DNLO_RUNTIME_HINTS="${_nlo_runtime_hints}"
+            -DNLO_RUNTIME_HINTS="${runtime_hints}"
             -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
   )
 endif()
@@ -110,8 +110,8 @@ endif()
 
 target_include_directories(bench_solver_backend PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
 target_link_libraries(bench_solver_backend PRIVATE Vulkan::Vulkan)
-if(TARGET nlo_vk_shaders)
-  add_dependencies(bench_solver_backend nlo_vk_shaders)
+if(TARGET vk_shaders)
+  add_dependencies(bench_solver_backend vk_shaders)
 endif()
 
 if(BUILD_TESTING)

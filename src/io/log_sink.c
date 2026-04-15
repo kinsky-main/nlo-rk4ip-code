@@ -16,13 +16,13 @@
   #include <sys/time.h>
 #endif
 
-#define NLO_LOG_STATUS_OK 0
-#define NLO_LOG_STATUS_INVALID_ARGUMENT 1
-#define NLO_LOG_STATUS_ALLOCATION_FAILED 2
+#define LOG_STATUS_OK 0
+#define LOG_STATUS_INVALID_ARGUMENT 1
+#define LOG_STATUS_ALLOCATION_FAILED 2
 
-#define NLO_LOG_BUFFER_MIN_BYTES 4096u
-#define NLO_PROGRESS_BAR_WIDTH 30u
-#define NLO_PROGRESS_RENDER_MIN_SECONDS 0.2
+#define LOG_BUFFER_MIN_BYTES 4096u
+#define PROGRESS_BAR_WIDTH 30u
+#define PROGRESS_RENDER_MIN_SECONDS 0.2
 
 typedef struct
 {
@@ -46,22 +46,22 @@ typedef struct
     size_t progress_last_step_index;
     size_t progress_last_line_len;
     int progress_line_visible;
-    nlo_progress_callback progress_callback;
+    progress_callback progress_callback;
     void* progress_callback_user_data;
     int progress_abort_requested;
-} nlo_log_state;
+} log_state;
 
-static nlo_log_state g_nlo_log_state = {
+static log_state g_nlo_log_state = {
     NULL,
     NULL,
     0u,
     0u,
     0u,
-    NLO_LOG_LEVEL_INFO,
+    LOG_LEVEL_INFO,
     1,
     5,
     0,
-    NLO_LOG_PROGRESS_STREAM_STDERR,
+    LOG_PROGRESS_STREAM_STDERR,
     0,
     0,
     0.0,
@@ -77,35 +77,35 @@ static nlo_log_state g_nlo_log_state = {
     0
 };
 
-static void nlo_progress_write_bytes(const char* text, size_t text_len)
+static void progress_write_bytes(const char* text, size_t text_len)
 {
     if (text == NULL || text_len == 0u) {
         return;
     }
 
-    if (g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_STDOUT ||
-        g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_BOTH) {
+    if (g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_STDOUT ||
+        g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_BOTH) {
         (void)fwrite(text, 1u, text_len, stdout);
     }
-    if (g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_STDERR ||
-        g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_BOTH) {
+    if (g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_STDERR ||
+        g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_BOTH) {
         (void)fwrite(text, 1u, text_len, stderr);
     }
 }
 
-static void nlo_progress_flush(void)
+static void progress_flush(void)
 {
-    if (g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_STDOUT ||
-        g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_BOTH) {
+    if (g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_STDOUT ||
+        g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_BOTH) {
         fflush(stdout);
     }
-    if (g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_STDERR ||
-        g_nlo_log_state.progress_stream_mode == NLO_LOG_PROGRESS_STREAM_BOTH) {
+    if (g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_STDERR ||
+        g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_BOTH) {
         fflush(stderr);
     }
 }
 
-static double nlo_log_now_seconds(void)
+static double log_now_seconds(void)
 {
 #if defined(_WIN32)
     LARGE_INTEGER frequency;
@@ -124,7 +124,7 @@ static double nlo_log_now_seconds(void)
 #endif
 }
 
-static void nlo_progress_format_duration(double seconds, char* out, size_t out_len)
+static void progress_format_duration(double seconds, char* out, size_t out_len)
 {
     if (out == NULL || out_len == 0u) {
         return;
@@ -149,38 +149,38 @@ static void nlo_progress_format_duration(double seconds, char* out, size_t out_l
     }
 }
 
-static void nlo_progress_make_bar(double percent, char* out, size_t out_len)
+static void progress_make_bar(double percent, char* out, size_t out_len)
 {
-    if (out == NULL || out_len <= NLO_PROGRESS_BAR_WIDTH) {
+    if (out == NULL || out_len <= PROGRESS_BAR_WIDTH) {
         return;
     }
 
-    int filled = (int)floor((percent / 100.0) * (double)NLO_PROGRESS_BAR_WIDTH);
+    int filled = (int)floor((percent / 100.0) * (double)PROGRESS_BAR_WIDTH);
     if (filled < 0) {
         filled = 0;
-    } else if (filled > (int)NLO_PROGRESS_BAR_WIDTH) {
-        filled = (int)NLO_PROGRESS_BAR_WIDTH;
+    } else if (filled > (int)PROGRESS_BAR_WIDTH) {
+        filled = (int)PROGRESS_BAR_WIDTH;
     }
 
-    for (size_t idx = 0u; idx < NLO_PROGRESS_BAR_WIDTH; ++idx) {
+    for (size_t idx = 0u; idx < PROGRESS_BAR_WIDTH; ++idx) {
         out[idx] = (idx < (size_t)filled) ? '#' : '-';
     }
-    out[NLO_PROGRESS_BAR_WIDTH] = '\0';
+    out[PROGRESS_BAR_WIDTH] = '\0';
 }
 
-static void nlo_progress_end_console_line(void)
+static void progress_end_console_line(void)
 {
     if (g_nlo_log_state.progress_line_visible == 0) {
         return;
     }
 
-    nlo_progress_write_bytes("\n", 1u);
-    nlo_progress_flush();
+    progress_write_bytes("\n", 1u);
+    progress_flush();
     g_nlo_log_state.progress_line_visible = 0;
     g_nlo_log_state.progress_last_line_len = 0u;
 }
 
-static void nlo_progress_render(
+static void progress_render(
     size_t step_index,
     double percent,
     double now_seconds,
@@ -188,7 +188,7 @@ static void nlo_progress_render(
     size_t reject_attempt
 )
 {
-    char bar[NLO_PROGRESS_BAR_WIDTH + 1u];
+    char bar[PROGRESS_BAR_WIDTH + 1u];
     char step_text[48];
     char eta_text[24];
     char elapsed_text[24];
@@ -200,8 +200,8 @@ static void nlo_progress_render(
         percent = 100.0;
     }
 
-    nlo_progress_make_bar(percent, bar, sizeof(bar));
-    (void)nlo_log_format_u64_grouped(step_text, sizeof(step_text), (uint64_t)step_index);
+    progress_make_bar(percent, bar, sizeof(bar));
+    (void)log_format_u64_grouped(step_text, sizeof(step_text), (uint64_t)step_index);
 
     double elapsed_seconds = 0.0;
     if (g_nlo_log_state.progress_start_seconds > 0.0 && now_seconds > g_nlo_log_state.progress_start_seconds) {
@@ -215,8 +215,8 @@ static void nlo_progress_render(
         remaining_seconds = elapsed_seconds * ((100.0 - percent) / percent);
     }
 
-    nlo_progress_format_duration(remaining_seconds, eta_text, sizeof(eta_text));
-    nlo_progress_format_duration(elapsed_seconds, elapsed_text, sizeof(elapsed_text));
+    progress_format_duration(remaining_seconds, eta_text, sizeof(eta_text));
+    progress_format_duration(elapsed_seconds, elapsed_text, sizeof(elapsed_text));
 
     if (reject_attempt > 0u) {
         const int written = snprintf(line,
@@ -248,16 +248,16 @@ static void nlo_progress_render(
     }
 
     size_t line_len = strlen(line);
-    nlo_progress_write_bytes("\r", 1u);
-    nlo_progress_write_bytes(line, line_len);
+    progress_write_bytes("\r", 1u);
+    progress_write_bytes(line, line_len);
 
     if (g_nlo_log_state.progress_last_line_len > line_len) {
         const size_t extra = g_nlo_log_state.progress_last_line_len - line_len;
         for (size_t idx = 0u; idx < extra; ++idx) {
-            nlo_progress_write_bytes(" ", 1u);
+            progress_write_bytes(" ", 1u);
         }
     }
-    nlo_progress_flush();
+    progress_flush();
 
     g_nlo_log_state.progress_last_line_len = line_len;
     g_nlo_log_state.progress_line_visible = 1;
@@ -265,7 +265,7 @@ static void nlo_progress_render(
     g_nlo_log_state.progress_last_percent = percent;
 }
 
-static void nlo_progress_compute_timing(
+static void progress_compute_timing(
     double percent,
     double now_seconds,
     double* out_elapsed_seconds,
@@ -293,8 +293,8 @@ static void nlo_progress_compute_timing(
     }
 }
 
-static void nlo_progress_notify_callback(
-    nlo_progress_event_type event_type,
+static void progress_notify_callback(
+    progress_event_type event_type,
     size_t step_index,
     size_t reject_attempt,
     double z,
@@ -307,15 +307,15 @@ static void nlo_progress_notify_callback(
 )
 {
     if (g_nlo_log_state.progress_callback == NULL ||
-        (g_nlo_log_state.progress_abort_requested != 0 && event_type != NLO_PROGRESS_EVENT_FINISH)) {
+        (g_nlo_log_state.progress_abort_requested != 0 && event_type != PROGRESS_EVENT_FINISH)) {
         return;
     }
 
     double elapsed_seconds = 0.0;
     double eta_seconds = NAN;
-    nlo_progress_compute_timing(percent, now_seconds, &elapsed_seconds, &eta_seconds);
+    progress_compute_timing(percent, now_seconds, &elapsed_seconds, &eta_seconds);
 
-    const nlo_progress_info info = {
+    const progress_info info = {
         event_type,
         step_index,
         reject_attempt,
@@ -334,7 +334,7 @@ static void nlo_progress_notify_callback(
     }
 }
 
-static int nlo_progress_should_render(double percent, double now_seconds, int force)
+static int progress_should_render(double percent, double now_seconds, int force)
 {
     if (force != 0) {
         return 1;
@@ -350,7 +350,7 @@ static int nlo_progress_should_render(double percent, double now_seconds, int fo
 
     if (g_nlo_log_state.progress_last_render_seconds > 0.0 &&
         now_seconds > g_nlo_log_state.progress_last_render_seconds &&
-        (now_seconds - g_nlo_log_state.progress_last_render_seconds) >= NLO_PROGRESS_RENDER_MIN_SECONDS &&
+        (now_seconds - g_nlo_log_state.progress_last_render_seconds) >= PROGRESS_RENDER_MIN_SECONDS &&
         percent > g_nlo_log_state.progress_last_percent + 1e-12) {
         return 1;
     }
@@ -358,7 +358,7 @@ static int nlo_progress_should_render(double percent, double now_seconds, int fo
     return 0;
 }
 
-static void nlo_progress_advance_milestones(double percent)
+static void progress_advance_milestones(double percent)
 {
     while (g_nlo_log_state.progress_next_milestone_percent <= 100 &&
            percent + 1e-12 >= (double)g_nlo_log_state.progress_next_milestone_percent) {
@@ -371,13 +371,13 @@ static void nlo_progress_advance_milestones(double percent)
     }
 }
 
-static int nlo_log_level_enabled(int level)
+static int log_level_enabled(int level)
 {
-    const int normalized = (level < NLO_LOG_LEVEL_ERROR) ? NLO_LOG_LEVEL_ERROR : level;
+    const int normalized = (level < LOG_LEVEL_ERROR) ? LOG_LEVEL_ERROR : level;
     return (normalized <= g_nlo_log_state.level);
 }
 
-static void nlo_log_ring_append(const char* text, size_t text_len)
+static void log_ring_append(const char* text, size_t text_len)
 {
     if (g_nlo_log_state.ring == NULL || g_nlo_log_state.ring_capacity == 0u || text == NULL || text_len == 0u) {
         return;
@@ -408,29 +408,29 @@ static void nlo_log_ring_append(const char* text, size_t text_len)
     g_nlo_log_state.ring_size += text_len;
 }
 
-int nlo_log_set_file(const char* path_utf8, int append)
+int log_set_file(const char* path_utf8, int append)
 {
     if (path_utf8 == NULL || path_utf8[0] == '\0') {
         if (g_nlo_log_state.file != NULL) {
             fclose(g_nlo_log_state.file);
             g_nlo_log_state.file = NULL;
         }
-        return NLO_LOG_STATUS_OK;
+        return LOG_STATUS_OK;
     }
 
     FILE* new_file = fopen(path_utf8, (append != 0) ? "ab" : "wb");
     if (new_file == NULL) {
-        return NLO_LOG_STATUS_INVALID_ARGUMENT;
+        return LOG_STATUS_INVALID_ARGUMENT;
     }
 
     if (g_nlo_log_state.file != NULL) {
         fclose(g_nlo_log_state.file);
     }
     g_nlo_log_state.file = new_file;
-    return NLO_LOG_STATUS_OK;
+    return LOG_STATUS_OK;
 }
 
-int nlo_log_set_buffer(size_t capacity_bytes)
+int log_set_buffer(size_t capacity_bytes)
 {
     if (capacity_bytes == 0u) {
         free(g_nlo_log_state.ring);
@@ -438,17 +438,17 @@ int nlo_log_set_buffer(size_t capacity_bytes)
         g_nlo_log_state.ring_capacity = 0u;
         g_nlo_log_state.ring_start = 0u;
         g_nlo_log_state.ring_size = 0u;
-        return NLO_LOG_STATUS_OK;
+        return LOG_STATUS_OK;
     }
 
     size_t capacity = capacity_bytes;
-    if (capacity < NLO_LOG_BUFFER_MIN_BYTES) {
-        capacity = NLO_LOG_BUFFER_MIN_BYTES;
+    if (capacity < LOG_BUFFER_MIN_BYTES) {
+        capacity = LOG_BUFFER_MIN_BYTES;
     }
 
     char* new_ring = (char*)malloc(capacity);
     if (new_ring == NULL) {
-        return NLO_LOG_STATUS_ALLOCATION_FAILED;
+        return LOG_STATUS_ALLOCATION_FAILED;
     }
 
     free(g_nlo_log_state.ring);
@@ -456,26 +456,26 @@ int nlo_log_set_buffer(size_t capacity_bytes)
     g_nlo_log_state.ring_capacity = capacity;
     g_nlo_log_state.ring_start = 0u;
     g_nlo_log_state.ring_size = 0u;
-    return NLO_LOG_STATUS_OK;
+    return LOG_STATUS_OK;
 }
 
-int nlo_log_clear_buffer(void)
+int log_clear_buffer(void)
 {
     g_nlo_log_state.ring_start = 0u;
     g_nlo_log_state.ring_size = 0u;
-    return NLO_LOG_STATUS_OK;
+    return LOG_STATUS_OK;
 }
 
-int nlo_log_read_buffer(char* dst, size_t dst_bytes, size_t* out_written, int consume)
+int log_read_buffer(char* dst, size_t dst_bytes, size_t* out_written, int consume)
 {
     if (out_written == NULL || dst == NULL || dst_bytes == 0u) {
-        return NLO_LOG_STATUS_INVALID_ARGUMENT;
+        return LOG_STATUS_INVALID_ARGUMENT;
     }
 
     *out_written = 0u;
     dst[0] = '\0';
     if (g_nlo_log_state.ring == NULL || g_nlo_log_state.ring_capacity == 0u || g_nlo_log_state.ring_size == 0u) {
-        return NLO_LOG_STATUS_OK;
+        return LOG_STATUS_OK;
     }
 
     size_t to_copy = g_nlo_log_state.ring_size;
@@ -498,19 +498,19 @@ int nlo_log_read_buffer(char* dst, size_t dst_bytes, size_t* out_written, int co
         g_nlo_log_state.ring_size -= to_copy;
     }
 
-    return NLO_LOG_STATUS_OK;
+    return LOG_STATUS_OK;
 }
 
-int nlo_log_set_level(int level)
+int log_set_level(int level)
 {
-    if (level < NLO_LOG_LEVEL_ERROR || level > NLO_LOG_LEVEL_DEBUG) {
-        return NLO_LOG_STATUS_INVALID_ARGUMENT;
+    if (level < LOG_LEVEL_ERROR || level > LOG_LEVEL_DEBUG) {
+        return LOG_STATUS_INVALID_ARGUMENT;
     }
     g_nlo_log_state.level = level;
-    return NLO_LOG_STATUS_OK;
+    return LOG_STATUS_OK;
 }
 
-int nlo_log_set_progress_options(int enabled, int milestone_percent, int emit_on_step_adjust)
+int log_set_progress_options(int enabled, int milestone_percent, int emit_on_step_adjust)
 {
     int milestone = milestone_percent;
     if (milestone <= 0) {
@@ -523,41 +523,41 @@ int nlo_log_set_progress_options(int enabled, int milestone_percent, int emit_on
     g_nlo_log_state.progress_milestone_percent = milestone;
     g_nlo_log_state.progress_emit_on_step_adjust = (emit_on_step_adjust != 0) ? 1 : 0;
     g_nlo_log_state.progress_next_milestone_percent = milestone;
-    return NLO_LOG_STATUS_OK;
+    return LOG_STATUS_OK;
 }
 
-int nlo_log_set_progress_stream(int stream_mode)
+int log_set_progress_stream(int stream_mode)
 {
-    if (stream_mode < NLO_LOG_PROGRESS_STREAM_STDERR || stream_mode > NLO_LOG_PROGRESS_STREAM_BOTH) {
-        return NLO_LOG_STATUS_INVALID_ARGUMENT;
+    if (stream_mode < LOG_PROGRESS_STREAM_STDERR || stream_mode > LOG_PROGRESS_STREAM_BOTH) {
+        return LOG_STATUS_INVALID_ARGUMENT;
     }
 
     g_nlo_log_state.progress_stream_mode = stream_mode;
-    return NLO_LOG_STATUS_OK;
+    return LOG_STATUS_OK;
 }
 
-int nlo_log_set_progress_callback(nlo_progress_callback callback, void* user_data)
+int log_set_progress_callback(progress_callback callback, void* user_data)
 {
     g_nlo_log_state.progress_callback = callback;
     g_nlo_log_state.progress_callback_user_data = user_data;
     g_nlo_log_state.progress_abort_requested = 0;
-    return NLO_LOG_STATUS_OK;
+    return LOG_STATUS_OK;
 }
 
-int nlo_log_progress_abort_requested(void)
+int log_progress_abort_requested(void)
 {
     return g_nlo_log_state.progress_abort_requested;
 }
 
-void nlo_log_emit_raw(int level, const char* text, size_t text_len)
+void log_emit_raw(int level, const char* text, size_t text_len)
 {
-    if (!nlo_log_level_enabled(level) || text == NULL || text_len == 0u) {
+    if (!log_level_enabled(level) || text == NULL || text_len == 0u) {
         return;
     }
 
     int wrote_to_sink = 0;
     if (g_nlo_log_state.ring != NULL && g_nlo_log_state.ring_capacity > 0u) {
-        nlo_log_ring_append(text, text_len);
+        log_ring_append(text, text_len);
         wrote_to_sink = 1;
     }
 
@@ -568,15 +568,15 @@ void nlo_log_emit_raw(int level, const char* text, size_t text_len)
     }
 
     if (!wrote_to_sink) {
-        nlo_progress_end_console_line();
+        progress_end_console_line();
         (void)fwrite(text, 1u, text_len, stderr);
         fflush(stderr);
     }
 }
 
-void nlo_log_emit(int level, const char* fmt, ...)
+void log_emit(int level, const char* fmt, ...)
 {
-    if (!nlo_log_level_enabled(level) || fmt == NULL) {
+    if (!log_level_enabled(level) || fmt == NULL) {
         return;
     }
 
@@ -605,10 +605,10 @@ void nlo_log_emit(int level, const char* fmt, ...)
         }
     }
 
-    nlo_log_emit_raw(level, message, length);
+    log_emit_raw(level, message, length);
 }
 
-static double nlo_progress_percent(double z, double z_start, double z_end)
+static double progress_percent(double z, double z_start, double z_end)
 {
     if (!(z_end > z_start)) {
         return 0.0;
@@ -623,7 +623,7 @@ static double nlo_progress_percent(double z, double z_start, double z_end)
     return 100.0 * ratio;
 }
 
-void nlo_log_progress_begin(double z_start, double z_end)
+void log_progress_begin(double z_start, double z_end)
 {
     if ((g_nlo_log_state.progress_enabled == 0 && g_nlo_log_state.progress_callback == NULL) ||
         !(z_end > z_start)) {
@@ -635,7 +635,7 @@ void nlo_log_progress_begin(double z_start, double z_end)
     g_nlo_log_state.progress_z_start = z_start;
     g_nlo_log_state.progress_z_end = z_end;
     g_nlo_log_state.progress_next_milestone_percent = g_nlo_log_state.progress_milestone_percent;
-    g_nlo_log_state.progress_start_seconds = nlo_log_now_seconds();
+    g_nlo_log_state.progress_start_seconds = log_now_seconds();
     g_nlo_log_state.progress_last_render_seconds = 0.0;
     g_nlo_log_state.progress_last_percent = -1.0;
     g_nlo_log_state.progress_last_step_index = 0u;
@@ -644,7 +644,7 @@ void nlo_log_progress_begin(double z_start, double z_end)
     g_nlo_log_state.progress_abort_requested = 0;
 }
 
-void nlo_log_progress_step_accepted(
+void log_progress_step_accepted(
     size_t step_index,
     double z,
     double z_end,
@@ -657,8 +657,8 @@ void nlo_log_progress_step_accepted(
         return;
     }
 
-    const double percent = nlo_progress_percent(z, g_nlo_log_state.progress_z_start, z_end);
-    const double now_seconds = nlo_log_now_seconds();
+    const double percent = progress_percent(z, g_nlo_log_state.progress_z_start, z_end);
+    const double now_seconds = log_now_seconds();
     g_nlo_log_state.progress_last_step_index = step_index;
 
     const double adjust_tol = fmax(fabs(step_size) * 1e-12, 1e-15);
@@ -666,19 +666,19 @@ void nlo_log_progress_step_accepted(
     const int force_render = (g_nlo_log_state.progress_emit_on_step_adjust != 0 && is_step_adjust != 0) ? 1 : 0;
 
     if (g_nlo_log_state.progress_enabled != 0 &&
-        nlo_progress_should_render(percent, now_seconds, force_render) != 0) {
-        nlo_progress_render(step_index,
+        progress_should_render(percent, now_seconds, force_render) != 0) {
+        progress_render(step_index,
                             percent,
                             now_seconds,
                             (is_step_adjust != 0) ? "adjust" : "running",
                             0u);
-        nlo_progress_advance_milestones(percent);
+        progress_advance_milestones(percent);
     } else if (g_nlo_log_state.progress_enabled != 0 &&
                percent + 1e-12 >= (double)g_nlo_log_state.progress_next_milestone_percent) {
-        nlo_progress_advance_milestones(percent);
+        progress_advance_milestones(percent);
     }
 
-    nlo_progress_notify_callback(NLO_PROGRESS_EVENT_ACCEPTED,
+    progress_notify_callback(PROGRESS_EVENT_ACCEPTED,
                                  step_index,
                                  0u,
                                  z,
@@ -690,7 +690,7 @@ void nlo_log_progress_step_accepted(
                                  now_seconds);
 }
 
-void nlo_log_progress_step_rejected(
+void log_progress_step_rejected(
     size_t step_index,
     double z,
     double z_end,
@@ -704,14 +704,14 @@ void nlo_log_progress_step_rejected(
         return;
     }
 
-    const double percent = nlo_progress_percent(z, g_nlo_log_state.progress_z_start, z_end);
-    const double now_seconds = nlo_log_now_seconds();
+    const double percent = progress_percent(z, g_nlo_log_state.progress_z_start, z_end);
+    const double now_seconds = log_now_seconds();
     g_nlo_log_state.progress_last_step_index = step_index;
     if (g_nlo_log_state.progress_enabled != 0) {
-        nlo_progress_render(step_index, percent, now_seconds, "reject", reject_attempt);
-        nlo_progress_advance_milestones(percent);
+        progress_render(step_index, percent, now_seconds, "reject", reject_attempt);
+        progress_advance_milestones(percent);
     }
-    nlo_progress_notify_callback(NLO_PROGRESS_EVENT_REJECTED,
+    progress_notify_callback(PROGRESS_EVENT_REJECTED,
                                  step_index,
                                  reject_attempt,
                                  z,
@@ -723,29 +723,29 @@ void nlo_log_progress_step_rejected(
                                  now_seconds);
 }
 
-void nlo_log_progress_finish(double z, double z_end, int success)
+void log_progress_finish(double z, double z_end, int success)
 {
     if (g_nlo_log_state.progress_active == 0) {
         return;
     }
 
-    const double now_seconds = nlo_log_now_seconds();
+    const double now_seconds = log_now_seconds();
     const double percent = (success != 0)
                                ? 100.0
-                               : nlo_progress_percent(z, g_nlo_log_state.progress_z_start, z_end);
+                               : progress_percent(z, g_nlo_log_state.progress_z_start, z_end);
     double elapsed_seconds = 0.0;
     if (g_nlo_log_state.progress_start_seconds > 0.0 && now_seconds > g_nlo_log_state.progress_start_seconds) {
         elapsed_seconds = now_seconds - g_nlo_log_state.progress_start_seconds;
     }
 
     if (g_nlo_log_state.progress_enabled != 0) {
-        nlo_progress_render(g_nlo_log_state.progress_last_step_index,
+        progress_render(g_nlo_log_state.progress_last_step_index,
                             percent,
                             now_seconds,
                             (success != 0) ? "complete" : "aborted",
                             0u);
-        nlo_progress_end_console_line();
-        nlo_log_emit(NLO_LOG_LEVEL_INFO,
+        progress_end_console_line();
+        log_emit(LOG_LEVEL_INFO,
                      "[nlolib] progress_summary:\n"
                      "  - state: %s\n"
                      "  - z_percent: %.1f%%\n"
@@ -758,7 +758,7 @@ void nlo_log_progress_finish(double z, double z_end, int success)
                      z,
                      z_end);
     }
-    nlo_progress_notify_callback(NLO_PROGRESS_EVENT_FINISH,
+    progress_notify_callback(PROGRESS_EVENT_FINISH,
                                  g_nlo_log_state.progress_last_step_index,
                                  0u,
                                  z,

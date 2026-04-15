@@ -12,42 +12,42 @@
  *
  * @param backend Backend handle to initialize.
  * @param config Optional Vulkan overrides (NULL enables auto-detect path).
- * @return nlo_vec_status Initialization status.
+ * @return vec_status Initialization status.
  */
-nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_backend_config* config);
+vec_status vk_backend_init(vector_backend* backend, const vk_backend_config* config);
 
 /**
  * @brief Release Vulkan backend resources.
  *
  * @param backend Backend handle to shut down.
  */
-void nlo_vk_backend_shutdown(nlo_vector_backend* backend);
+void vk_backend_shutdown(vector_backend* backend);
 
 /**
  * @brief Ensure a Vulkan simulation phase command buffer is actively recording.
  *
  * @param backend Backend handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_simulation_phase_begin(nlo_vector_backend* backend);
+vec_status vk_simulation_phase_begin(vector_backend* backend);
 
 /**
  * @brief Submit and wait for the active Vulkan simulation phase command buffer.
  *
  * @param backend Backend handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_simulation_phase_flush(nlo_vector_backend* backend);
+vec_status vk_simulation_phase_flush(vector_backend* backend);
 
 /**
  * @brief Retrieve the active simulation phase command buffer for command recording.
  *
  * @param backend Backend handle.
  * @param out_command_buffer Destination Vulkan command buffer handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_simulation_phase_command_buffer(
-    nlo_vector_backend* backend,
+vec_status vk_simulation_phase_command_buffer(
+    vector_backend* backend,
     VkCommandBuffer* out_command_buffer
 );
 
@@ -56,16 +56,16 @@ nlo_vec_status nlo_vk_simulation_phase_command_buffer(
  *
  * @param backend Backend handle.
  */
-void nlo_vk_simulation_phase_mark_commands(nlo_vector_backend* backend);
+void vk_simulation_phase_mark_commands(vector_backend* backend);
 
 /**
  * @brief Allocate Vulkan resources for one logical vector buffer.
  *
  * @param backend Backend handle.
  * @param buffer Buffer descriptor to initialize.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_buffer_create(nlo_vector_backend* backend, nlo_vec_buffer* buffer);
+vec_status vk_buffer_create(vector_backend* backend, vec_buffer* buffer);
 
 /**
  * @brief Destroy Vulkan resources for one logical vector buffer.
@@ -73,7 +73,7 @@ nlo_vec_status nlo_vk_buffer_create(nlo_vector_backend* backend, nlo_vec_buffer*
  * @param backend Backend handle.
  * @param buffer Buffer descriptor to destroy/reset.
  */
-void nlo_vk_buffer_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer);
+void vk_buffer_destroy(vector_backend* backend, vec_buffer* buffer);
 
 /**
  * @brief Upload host data into a Vulkan vector buffer.
@@ -82,11 +82,11 @@ void nlo_vk_buffer_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer);
  * @param buffer Destination Vulkan buffer.
  * @param data Source host pointer.
  * @param bytes Number of bytes to upload.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_upload(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* buffer,
+vec_status vk_upload(
+    vector_backend* backend,
+    vec_buffer* buffer,
     const void* data,
     size_t bytes
 );
@@ -98,11 +98,11 @@ nlo_vec_status nlo_vk_upload(
  * @param buffer Source Vulkan buffer.
  * @param data Destination host pointer.
  * @param bytes Number of bytes to download.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_download(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* buffer,
+vec_status vk_download(
+    vector_backend* backend,
+    const vec_buffer* buffer,
     void* data,
     size_t bytes
 );
@@ -113,9 +113,9 @@ nlo_vec_status nlo_vk_download(
  * @param backend Backend handle.
  * @param dst Destination vector.
  * @param value Fill value.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, double value);
+vec_status vk_op_real_fill(vector_backend* backend, vec_buffer* dst, double value);
 
 /**
  * @brief Copy one real-valued Vulkan vector to another.
@@ -123,9 +123,9 @@ nlo_vec_status nlo_vk_op_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* 
  * @param backend Backend handle.
  * @param dst Destination vector.
  * @param src Source vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
+vec_status vk_op_real_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
  * @brief Element-wise real multiply in place.
@@ -133,9 +133,9 @@ nlo_vec_status nlo_vk_op_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* 
  * @param backend Backend handle.
  * @param dst Destination/left operand vector.
  * @param src Right operand vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
+vec_status vk_op_real_mul_inplace(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
  * @brief Fill a complex Vulkan vector with a scalar.
@@ -143,9 +143,9 @@ nlo_vec_status nlo_vk_op_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_b
  * @param backend Backend handle.
  * @param dst Destination vector.
  * @param value Fill value.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, nlo_complex value);
+vec_status vk_op_complex_fill(vector_backend* backend, vec_buffer* dst, nlo_complex value);
 
 /**
  * @brief Copy one complex Vulkan vector to another.
@@ -153,9 +153,9 @@ nlo_vec_status nlo_vk_op_complex_fill(nlo_vector_backend* backend, nlo_vec_buffe
  * @param backend Backend handle.
  * @param dst Destination vector.
  * @param src Source vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
+vec_status vk_op_complex_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
  * @brief Compute element-wise complex magnitude squared.
@@ -163,12 +163,12 @@ nlo_vec_status nlo_vk_op_complex_copy(nlo_vector_backend* backend, nlo_vec_buffe
  * @param backend Backend handle.
  * @param src Source complex vector.
  * @param dst Destination complex vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_magnitude_squared(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* src,
-    nlo_vec_buffer* dst
+vec_status vk_op_complex_magnitude_squared(
+    vector_backend* backend,
+    const vec_buffer* src,
+    vec_buffer* dst
 );
 
 /**
@@ -177,11 +177,11 @@ nlo_vec_status nlo_vk_op_complex_magnitude_squared(
  * @param backend Backend handle.
  * @param dst Destination vector.
  * @param alpha Complex scale factor.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_scalar_mul_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
     nlo_complex alpha
 );
 
@@ -191,12 +191,12 @@ nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(
  * @param backend Backend handle.
  * @param dst Destination/left operand vector.
  * @param src Right operand vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_mul_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* src
+vec_status vk_op_complex_mul_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* src
 );
 
 /**
@@ -205,12 +205,12 @@ nlo_vec_status nlo_vk_op_complex_mul_inplace(
  * @param backend Backend handle.
  * @param dst Destination/left operand vector.
  * @param src Right operand vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_add_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* src
+vec_status vk_op_complex_add_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* src
 );
 
 /**
@@ -218,9 +218,9 @@ nlo_vec_status nlo_vk_op_complex_add_inplace(
  *
  * @param backend Backend handle.
  * @param dst Destination vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+vec_status vk_op_complex_exp_inplace(vector_backend* backend, vec_buffer* dst);
 
 /**
  * @brief Apply element-wise complex real power in place.
@@ -228,11 +228,11 @@ nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_ve
  * @param backend Backend handle.
  * @param dst Destination vector.
  * @param exponent Real exponent.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_real_pow_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_real_pow_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
     double exponent
 );
 
@@ -244,12 +244,12 @@ nlo_vec_status nlo_vk_op_complex_real_pow_inplace(
  * @param previous Previous/reference vector.
  * @param epsilon Stabilizing denominator floor.
  * @param out_error Destination scalar error.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_relative_error(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* current,
-    const nlo_vec_buffer* previous,
+vec_status vk_op_complex_relative_error(
+    vector_backend* backend,
+    const vec_buffer* current,
+    const vec_buffer* previous,
     double epsilon,
     double* out_error
 );
@@ -263,12 +263,12 @@ nlo_vec_status nlo_vk_op_complex_relative_error(
  * @param atol Absolute tolerance term.
  * @param rtol Relative tolerance term.
  * @param out_error Destination scalar error.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* fine,
-    const nlo_vec_buffer* coarse,
+vec_status vk_op_complex_weighted_rms_error(
+    vector_backend* backend,
+    const vec_buffer* fine,
+    const vec_buffer* coarse,
     double atol,
     double rtol,
     double* out_error
@@ -280,11 +280,11 @@ nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
  * @param backend Backend handle.
  * @param dst Destination axis vector.
  * @param delta Sample spacing (> 0).
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_axis_unshifted_from_delta(
+    vector_backend* backend,
+    vec_buffer* dst,
     double delta
 );
 
@@ -294,11 +294,11 @@ nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
  * @param backend Backend handle.
  * @param dst Destination axis vector.
  * @param delta Sample spacing.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_axis_centered_from_delta(
+    vector_backend* backend,
+    vec_buffer* dst,
     double delta
 );
 
@@ -311,14 +311,14 @@ nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
  * @param nt Temporal sample count.
  * @param ny Y sample count.
  * @param axis_kind Axis selector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* axis,
+vec_status vk_op_complex_mesh_from_axis_tfast(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* axis,
     size_t nt,
     size_t ny,
-    nlo_vec_mesh_axis axis_kind
+    vec_mesh_axis axis_kind
 );
 

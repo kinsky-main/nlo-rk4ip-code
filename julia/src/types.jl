@@ -1,24 +1,24 @@
-const NLO_RUNTIME_OPERATOR_CONSTANTS_MAX = 16
-const NLO_STORAGE_RUN_ID_MAX = 64
+const RUNTIME_OPERATOR_CONSTANTS_MAX = 16
+const STORAGE_RUN_ID_MAX = 64
 
-const NLO_TENSOR_LAYOUT_XYT_T_FAST = Cint(0)
+const TENSOR_LAYOUT_XYT_T_FAST = Cint(0)
 
-const NLO_NONLINEAR_MODEL_EXPR = Cint(0)
-const NLO_NONLINEAR_MODEL_KERR_RAMAN = Cint(1)
+const NONLINEAR_MODEL_EXPR = Cint(0)
+const NONLINEAR_MODEL_KERR_RAMAN = Cint(1)
 
-const NLO_VECTOR_BACKEND_CPU = Cint(0)
-const NLO_VECTOR_BACKEND_VULKAN = Cint(1)
-const NLO_VECTOR_BACKEND_AUTO = Cint(2)
+const VECTOR_BACKEND_CPU = Cint(0)
+const VECTOR_BACKEND_VULKAN = Cint(1)
+const VECTOR_BACKEND_AUTO = Cint(2)
 
-const NLO_FFT_BACKEND_AUTO = Cint(0)
-const NLO_FFT_BACKEND_FFTW = Cint(1)
-const NLO_FFT_BACKEND_VKFFT = Cint(2)
+const FFT_BACKEND_AUTO = Cint(0)
+const FFT_BACKEND_FFTW = Cint(1)
+const FFT_BACKEND_VKFFT = Cint(2)
 
-const NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = Cint(0)
-const NLO_STORAGE_DB_CAP_POLICY_FAIL = Cint(1)
+const STORAGE_DB_CAP_POLICY_STOP_WRITES = Cint(0)
+const STORAGE_DB_CAP_POLICY_FAIL = Cint(1)
 
-const NLO_PROPAGATE_OUTPUT_DENSE = Cint(0)
-const NLO_PROPAGATE_OUTPUT_FINAL_ONLY = Cint(1)
+const PROPAGATE_OUTPUT_DENSE = Cint(0)
+const PROPAGATE_OUTPUT_FINAL_ONLY = Cint(1)
 
 const NLOLIB_STATUS_OK = Cint(0)
 const NLOLIB_STATUS_INVALID_ARGUMENT = Cint(1)
@@ -35,9 +35,9 @@ const NLOLIB_PROGRESS_STREAM_STDERR = Cint(0)
 const NLOLIB_PROGRESS_STREAM_STDOUT = Cint(1)
 const NLOLIB_PROGRESS_STREAM_BOTH = Cint(2)
 
-const NLO_PROGRESS_EVENT_ACCEPTED = Cint(0)
-const NLO_PROGRESS_EVENT_REJECTED = Cint(1)
-const NLO_PROGRESS_EVENT_FINISH = Cint(2)
+const PROGRESS_EVENT_ACCEPTED = Cint(0)
+const PROGRESS_EVENT_REJECTED = Cint(1)
+const PROGRESS_EVENT_FINISH = Cint(2)
 
 struct NLOComplex
     re::Cdouble
@@ -100,7 +100,7 @@ struct RuntimeOperatorParams
     raman_response_time::Ptr{NLOComplex}
     raman_response_len::Csize_t
     num_constants::Csize_t
-    constants::NTuple{NLO_RUNTIME_OPERATOR_CONSTANTS_MAX, Cdouble}
+    constants::NTuple{RUNTIME_OPERATOR_CONSTANTS_MAX, Cdouble}
 end
 
 const PhysicsConfig = RuntimeOperatorParams
@@ -151,7 +151,7 @@ struct StorageOptions
 end
 
 struct StorageResult
-    run_id::NTuple{NLO_STORAGE_RUN_ID_MAX, Cchar}
+    run_id::NTuple{STORAGE_RUN_ID_MAX, Cchar}
     records_captured::Csize_t
     records_spilled::Csize_t
     chunks_written::Csize_t
@@ -210,27 +210,27 @@ struct PreparedValue{T}
 end
 
 _zero_chars(::Val{N}) where {N} = ntuple(_ -> Cchar(0), N)
-_zero_constants() = ntuple(_ -> 0.0, NLO_RUNTIME_OPERATOR_CONSTANTS_MAX)
+_zero_constants() = ntuple(_ -> 0.0, RUNTIME_OPERATOR_CONSTANTS_MAX)
 
 PropagationParams() = PropagationParams(0.0, 0.0, 0.0, 0.0, 0.0)
 TimeGrid() = TimeGrid(0, 0.0, 0.0, C_NULL)
 FrequencyGrid() = FrequencyGrid(C_NULL)
 SpatialGrid() = SpatialGrid(0, 0, 1.0, 1.0, C_NULL, C_NULL, C_NULL, C_NULL)
-Tensor3DDesc() = Tensor3DDesc(0, 0, 0, NLO_TENSOR_LAYOUT_XYT_T_FAST)
+Tensor3DDesc() = Tensor3DDesc(0, 0, 0, TENSOR_LAYOUT_XYT_T_FAST)
 RuntimeOperatorParams() = RuntimeOperatorParams(
     C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL,
-    NLO_NONLINEAR_MODEL_EXPR, 0.0, 0.0, 0.0, 0.0, 0.0, C_NULL, 0, 0, _zero_constants()
+    NONLINEAR_MODEL_EXPR, 0.0, 0.0, 0.0, 0.0, 0.0, C_NULL, 0, 0, _zero_constants()
 )
 SimulationConfig() = SimulationConfig(PropagationParams(), Tensor3DDesc(), TimeGrid(), FrequencyGrid(), SpatialGrid())
 VulkanBackendConfig() = VulkanBackendConfig(C_NULL, C_NULL, C_NULL, 0, C_NULL, 0, 0)
-ExecutionOptions() = ExecutionOptions(NLO_VECTOR_BACKEND_AUTO, NLO_FFT_BACKEND_AUTO, 0.70, 0, 0, VulkanBackendConfig())
+ExecutionOptions() = ExecutionOptions(VECTOR_BACKEND_AUTO, FFT_BACKEND_AUTO, 0.70, 0, 0, VulkanBackendConfig())
 RuntimeLimits() = RuntimeLimits(0, 0, 0, 0, 0, 0)
-StorageOptions() = StorageOptions(C_NULL, C_NULL, 0, 0, NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES, 0)
-StorageResult() = StorageResult(_zero_chars(Val(NLO_STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0)
+StorageOptions() = StorageOptions(C_NULL, C_NULL, 0, 0, STORAGE_DB_CAP_POLICY_STOP_WRITES, 0)
+StorageResult() = StorageResult(_zero_chars(Val(STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0)
 StepEvent() = StepEvent(0, 0.0, 0.0, 0.0, 0.0)
 
-default_execution_options(; backend_type::Integer = NLO_VECTOR_BACKEND_AUTO,
-                            fft_backend::Integer = NLO_FFT_BACKEND_AUTO,
+default_execution_options(; backend_type::Integer = VECTOR_BACKEND_AUTO,
+                            fft_backend::Integer = FFT_BACKEND_AUTO,
                             device_heap_fraction::Real = 0.70,
                             record_ring_target::Integer = 0,
                             forced_device_budget_bytes::Integer = 0,

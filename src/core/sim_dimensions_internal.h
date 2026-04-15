@@ -15,7 +15,7 @@
  * @param out Destination result on success.
  * @return int 0 on success, nonzero on overflow/invalid output pointer.
  */
-static inline int nlo_sim_dimensions_checked_mul(size_t a, size_t b, size_t* out)
+static inline int sim_dimensions_checked_mul(size_t a, size_t b, size_t* out)
 {
     if (out == NULL) {
         return -1;
@@ -48,7 +48,7 @@ static inline int nlo_sim_dimensions_checked_mul(size_t a, size_t b, size_t* out
  * @param out_explicit_nd Destination flag for explicit ND mode.
  * @return int 0 on success, nonzero when dimensions are inconsistent.
  */
-static inline int nlo_resolve_sim_dimensions_internal(
+static inline int resolve_sim_dimensions_internal(
     const sim_config* config,
     size_t total_samples,
     size_t* out_nt,
@@ -61,14 +61,14 @@ static inline int nlo_resolve_sim_dimensions_internal(
     if (config->tensor.nt > 0u) {
         if (config->tensor.nx == 0u ||
             config->tensor.ny == 0u ||
-            config->tensor.layout != NLO_TENSOR_LAYOUT_XYT_T_FAST) {
+            config->tensor.layout != TENSOR_LAYOUT_XYT_T_FAST) {
             return -1;
         }
 
         size_t ntx = 0u;
         size_t resolved_total = 0u;
-        if (nlo_sim_dimensions_checked_mul(config->tensor.nt, config->tensor.nx, &ntx) != 0 ||
-            nlo_sim_dimensions_checked_mul(ntx, config->tensor.ny, &resolved_total) != 0 ||
+        if (sim_dimensions_checked_mul(config->tensor.nt, config->tensor.nx, &ntx) != 0 ||
+            sim_dimensions_checked_mul(ntx, config->tensor.ny, &resolved_total) != 0 ||
             resolved_total != total_samples) {
             return -1;
         }
@@ -97,7 +97,7 @@ static inline int nlo_resolve_sim_dimensions_internal(
         }
 
         size_t total_points = 0u;
-        if (nlo_sim_dimensions_checked_mul(nx, ny, &total_points) != 0 ||
+        if (sim_dimensions_checked_mul(nx, ny, &total_points) != 0 ||
             total_points != total_samples) {
             return -1;
         }
@@ -125,12 +125,12 @@ static inline int nlo_resolve_sim_dimensions_internal(
     }
 
     size_t ntx = 0u;
-    if (nlo_sim_dimensions_checked_mul(configured_nt, nx, &ntx) != 0) {
+    if (sim_dimensions_checked_mul(configured_nt, nx, &ntx) != 0) {
         return -1;
     }
 
     size_t resolved_total = 0u;
-    if (nlo_sim_dimensions_checked_mul(ntx, ny, &resolved_total) != 0 ||
+    if (sim_dimensions_checked_mul(ntx, ny, &resolved_total) != 0 ||
         resolved_total != total_samples) {
         return -1;
     }

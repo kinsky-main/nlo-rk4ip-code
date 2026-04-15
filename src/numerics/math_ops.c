@@ -15,7 +15,7 @@
 
 // MARK: Public Definitions
 
-size_t nlo_real_factorial(size_t n)
+size_t real_factorial(size_t n)
 {
     if (n == 0 || n == 1) {
         return 1;

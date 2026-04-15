@@ -70,5 +70,5 @@ The script writes toolbox artifacts to `dist/` with platform suffixes:
 
 Upload these files to the corresponding GitHub Release.
 
-Note: the release scripts configure CMake with `NLO_SQLITE_USE_FETCHCONTENT=ON`,
+Note: the release scripts configure CMake with `SQLITE_USE_FETCHCONTENT=ON`,
 which statically links SQLite into `nlolib` and avoids external SQLite runtime DLL dependencies.

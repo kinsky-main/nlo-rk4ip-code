@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from ._binding import (
-    NLO_NONLINEAR_MODEL_EXPR,
-    NLO_RUNTIME_OPERATOR_CONSTANTS_MAX,
-    NLO_TENSOR_LAYOUT_XYT_T_FAST,
+    NONLINEAR_MODEL_EXPR,
+    RUNTIME_OPERATOR_CONSTANTS_MAX,
+    TENSOR_LAYOUT_XYT_T_FAST,
     NloComplex,
     NloPhysicsConfig,
     NloProgressInfo,
@@ -77,7 +77,7 @@ def _normalize_pulse_spec(pulse: PulseSpec | Mapping[str, object]) -> PulseSpec:
             tensor_nt=int(pulse["tensor_nt"]) if pulse.get("tensor_nt") is not None else None,
             tensor_nx=int(pulse["tensor_nx"]) if pulse.get("tensor_nx") is not None else None,
             tensor_ny=int(pulse["tensor_ny"]) if pulse.get("tensor_ny") is not None else None,
-            tensor_layout=int(pulse.get("tensor_layout", NLO_TENSOR_LAYOUT_XYT_T_FAST)),
+            tensor_layout=int(pulse.get("tensor_layout", TENSOR_LAYOUT_XYT_T_FAST)),
             delta_x=float(pulse.get("delta_x", 1.0)),
             delta_y=float(pulse.get("delta_y", 1.0)),
             spatial_frequency_grid=pulse.get("spatial_frequency_grid"),  # type: ignore[arg-type]
@@ -335,7 +335,7 @@ def prepare_sim_config(
     tensor_nt: int | None = None,
     tensor_nx: int | None = None,
     tensor_ny: int | None = None,
-    tensor_layout: int = NLO_TENSOR_LAYOUT_XYT_T_FAST,
+    tensor_layout: int = TENSOR_LAYOUT_XYT_T_FAST,
     frequency_grid: Sequence[complex],
     wt_axis: Sequence[complex] | None = None,
     delta_x: float = 1.0,
@@ -391,7 +391,7 @@ def prepare_sim_config(
         sim_cfg.tensor.nt = 0
         sim_cfg.tensor.nx = 0
         sim_cfg.tensor.ny = 0
-        sim_cfg.tensor.layout = int(NLO_TENSOR_LAYOUT_XYT_T_FAST)
+        sim_cfg.tensor.layout = int(TENSOR_LAYOUT_XYT_T_FAST)
 
     sim_cfg.time.nt = 0
     sim_cfg.time.pulse_period = float(pulse_period)
@@ -575,10 +575,10 @@ def prepare_sim_config(
             constants.extend(translated.constants)
             nonlinear_expr = shifted
 
-        if len(constants) > NLO_RUNTIME_OPERATOR_CONSTANTS_MAX:
+        if len(constants) > RUNTIME_OPERATOR_CONSTANTS_MAX:
             raise ValueError(
                 "runtime.constants length exceeds "
-                f"{NLO_RUNTIME_OPERATOR_CONSTANTS_MAX}"
+                f"{RUNTIME_OPERATOR_CONSTANTS_MAX}"
             )
 
         if linear_factor_expr:
@@ -623,7 +623,7 @@ def prepare_sim_config(
         physics_cfg.runtime.dispersion_factor_expr = None
         physics_cfg.runtime.dispersion_expr = None
         physics_cfg.runtime.nonlinear_expr = None
-        physics_cfg.runtime.nonlinear_model = int(NLO_NONLINEAR_MODEL_EXPR)
+        physics_cfg.runtime.nonlinear_model = int(NONLINEAR_MODEL_EXPR)
         physics_cfg.runtime.nonlinear_gamma = 0.0
         physics_cfg.runtime.raman_fraction = 0.0
         physics_cfg.runtime.raman_tau1 = 0.0

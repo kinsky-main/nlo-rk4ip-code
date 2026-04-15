@@ -5,10 +5,10 @@
 
 #include "numerics/vk_backend_internal.h"
 
-nlo_vec_status nlo_vk_op_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, double value)
+vec_status vk_op_real_fill(vector_backend* backend, vec_buffer* dst, double value)
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_REAL_FILL,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_REAL_FILL,
                                   dst,
                                   NULL,
                                   sizeof(double),
@@ -17,15 +17,15 @@ nlo_vec_status nlo_vk_op_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* 
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+vec_status vk_op_real_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
 {
-    return nlo_vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
+    return vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
 }
 
-nlo_vec_status nlo_vk_op_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+vec_status vk_op_real_mul_inplace(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_REAL_MUL_INPLACE,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_REAL_MUL_INPLACE,
                                   dst,
                                   src,
                                   sizeof(double),
@@ -34,31 +34,31 @@ nlo_vec_status nlo_vk_op_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_b
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, nlo_complex value)
+vec_status vk_op_complex_fill(vector_backend* backend, vec_buffer* dst, nlo_complex value)
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_FILL,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_FILL,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
                                   dst->length,
-                                  NLO_RE(value),
-                                  NLO_IM(value));
+                                  RE(value),
+                                  IM(value));
 }
 
-nlo_vec_status nlo_vk_op_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+vec_status vk_op_complex_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
 {
-    return nlo_vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
+    return vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
 }
 
-nlo_vec_status nlo_vk_op_complex_magnitude_squared(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* src,
-    nlo_vec_buffer* dst
+vec_status vk_op_complex_magnitude_squared(
+    vector_backend* backend,
+    const vec_buffer* src,
+    vec_buffer* dst
 )
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_MAGNITUDE_SQUARED,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_MAGNITUDE_SQUARED,
                                   dst,
                                   src,
                                   sizeof(nlo_complex),
@@ -67,30 +67,30 @@ nlo_vec_status nlo_vk_op_complex_magnitude_squared(
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_scalar_mul_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
     nlo_complex alpha
 )
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_SCALAR_MUL_INPLACE,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_SCALAR_MUL_INPLACE,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
                                   dst->length,
-                                  NLO_RE(alpha),
-                                  NLO_IM(alpha));
+                                  RE(alpha),
+                                  IM(alpha));
 }
 
-nlo_vec_status nlo_vk_op_complex_mul_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* src
+vec_status vk_op_complex_mul_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* src
 )
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_MUL_INPLACE,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_MUL_INPLACE,
                                   dst,
                                   src,
                                   sizeof(nlo_complex),
@@ -99,14 +99,14 @@ nlo_vec_status nlo_vk_op_complex_mul_inplace(
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_add_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* src
+vec_status vk_op_complex_add_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* src
 )
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_ADD_INPLACE,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_ADD_INPLACE,
                                   dst,
                                   src,
                                   sizeof(nlo_complex),
@@ -115,10 +115,10 @@ nlo_vec_status nlo_vk_op_complex_add_inplace(
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst)
+vec_status vk_op_complex_exp_inplace(vector_backend* backend, vec_buffer* dst)
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_EXP_INPLACE,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_EXP_INPLACE,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -127,14 +127,14 @@ nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_ve
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_real_pow_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_real_pow_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
     double exponent
 )
 {
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_REAL_POW_INPLACE,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_REAL_POW_INPLACE,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -143,10 +143,10 @@ nlo_vec_status nlo_vk_op_complex_real_pow_inplace(
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_relative_error(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* current,
-    const nlo_vec_buffer* previous,
+vec_status vk_op_complex_relative_error(
+    vector_backend* backend,
+    const vec_buffer* current,
+    const vec_buffer* previous,
     double epsilon,
     double* out_error
 )
@@ -154,13 +154,13 @@ nlo_vec_status nlo_vk_op_complex_relative_error(
     if (epsilon <= 0.0) {
         epsilon = 1e-12;
     }
-    return nlo_vk_dispatch_complex_relative_error(backend, current, previous, epsilon, out_error);
+    return vk_dispatch_complex_relative_error(backend, current, previous, epsilon, out_error);
 }
 
-nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* fine,
-    const nlo_vec_buffer* coarse,
+vec_status vk_op_complex_weighted_rms_error(
+    vector_backend* backend,
+    const vec_buffer* fine,
+    const vec_buffer* coarse,
     double atol,
     double rtol,
     double* out_error
@@ -175,26 +175,26 @@ nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
     if (atol == 0.0 && rtol == 0.0) {
         rtol = 1e-6;
     }
-    return nlo_vk_dispatch_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
+    return vk_dispatch_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
 }
 
-nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_axis_unshifted_from_delta(
+    vector_backend* backend,
+    vec_buffer* dst,
     double delta
 )
 {
     if (!(delta > 0.0)) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
-    if (status != NLO_VEC_STATUS_OK) {
+    vec_status status = vec_validate_buffer(backend, dst, VEC_KIND_COMPLEX64);
+    if (status != VEC_STATUS_OK) {
         return status;
     }
 
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -203,19 +203,19 @@ nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_axis_centered_from_delta(
+    vector_backend* backend,
+    vec_buffer* dst,
     double delta
 )
 {
-    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
-    if (status != NLO_VEC_STATUS_OK) {
+    vec_status status = vec_validate_buffer(backend, dst, VEC_KIND_COMPLEX64);
+    if (status != VEC_STATUS_OK) {
         return status;
     }
 
-    return nlo_vk_dispatch_kernel(backend,
-                                  NLO_VK_KERNEL_COMPLEX_AXIS_CENTERED_FROM_DELTA,
+    return vk_dispatch_kernel(backend,
+                                  VK_KERNEL_COMPLEX_AXIS_CENTERED_FROM_DELTA,
                                   dst,
                                   NULL,
                                   sizeof(nlo_complex),
@@ -224,57 +224,57 @@ nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
                                   0.0);
 }
 
-nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* axis,
+vec_status vk_op_complex_mesh_from_axis_tfast(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* axis,
     size_t nt,
     size_t ny,
-    nlo_vec_mesh_axis axis_kind
+    vec_mesh_axis axis_kind
 )
 {
-    nlo_vec_status status = nlo_vec_validate_buffer(backend, dst, NLO_VEC_KIND_COMPLEX64);
-    if (status != NLO_VEC_STATUS_OK) {
+    vec_status status = vec_validate_buffer(backend, dst, VEC_KIND_COMPLEX64);
+    if (status != VEC_STATUS_OK) {
         return status;
     }
-    status = nlo_vec_validate_buffer(backend, axis, NLO_VEC_KIND_COMPLEX64);
-    if (status != NLO_VEC_STATUS_OK) {
+    status = vec_validate_buffer(backend, axis, VEC_KIND_COMPLEX64);
+    if (status != VEC_STATUS_OK) {
         return status;
     }
     if (nt == 0u || ny == 0u) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
     if ((dst->length % nt) != 0u) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
     const size_t xy_points = dst->length / nt;
     if ((xy_points % ny) != 0u) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
     const size_t nx = xy_points / ny;
     if (nx == 0u) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
 
     size_t expected_axis_length = 0u;
-    nlo_vk_kernel_id kernel_id = NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_T;
-    if (axis_kind == NLO_VEC_MESH_AXIS_T) {
+    vk_kernel_id kernel_id = VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_T;
+    if (axis_kind == VEC_MESH_AXIS_T) {
         expected_axis_length = nt;
-        kernel_id = NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_T;
-    } else if (axis_kind == NLO_VEC_MESH_AXIS_Y) {
+        kernel_id = VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_T;
+    } else if (axis_kind == VEC_MESH_AXIS_Y) {
         expected_axis_length = ny;
-        kernel_id = NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_Y;
-    } else if (axis_kind == NLO_VEC_MESH_AXIS_X) {
+        kernel_id = VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_Y;
+    } else if (axis_kind == VEC_MESH_AXIS_X) {
         expected_axis_length = nx;
-        kernel_id = NLO_VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_X;
+        kernel_id = VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_X;
     } else {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
     if (axis->length != expected_axis_length) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    return nlo_vk_dispatch_kernel(backend,
+    return vk_dispatch_kernel(backend,
                                   kernel_id,
                                   dst,
                                   axis,

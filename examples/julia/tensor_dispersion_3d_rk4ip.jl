@@ -1,5 +1,5 @@
 using NLOLibExamples
-pushfirst!(LOAD_PATH, nlo_package_root_from(@__FILE__))
+pushfirst!(LOAD_PATH, package_root_from(@__FILE__))
 
 using CairoMakie
 using FFTW
@@ -148,7 +148,7 @@ function main(argv = ARGS)
             expr = "i*(beta2*wt*wt + beta_t*((kx*kx)+(ky*ky)))",
             params = Dict("beta2" => 0.5 * beta2, "beta_t" => beta_t),
         )
-        exec = default_execution_options(backend_type = NLO_VECTOR_BACKEND_CPU, fft_backend = NLO_FFT_BACKEND_FFTW)
+        exec = default_execution_options(backend_type = VECTOR_BACKEND_CPU, fft_backend = FFT_BACKEND_FFTW)
         storage = storage_kwargs(db; example_name = example_name, run_group = run_group, case_key = case_key, chunk_records = 2)
         result = NLOLib.propagate(
             pulse,

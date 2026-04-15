@@ -15,9 +15,9 @@
  */
 void test_nlo_make()
 {
-    nlo_complex z = nlo_make(3.0, 4.0);
-    assert(NLO_RE(z) == 3.0);
-    assert(NLO_IM(z) == 4.0);
+    nlo_complex z = make(3.0, 4.0);
+    assert(RE(z) == 3.0);
+    assert(IM(z) == 4.0);
     printf("test_nlo_make: validates complex constructor values.\n");
 }
 
@@ -26,11 +26,11 @@ void test_nlo_make()
  */
 void test_nlo_add()
 {
-    nlo_complex a = nlo_make(1.0, 2.0);
-    nlo_complex b = nlo_make(3.0, 4.0);
-    nlo_complex c = nlo_add(a, b);
-    assert(NLO_RE(c) == 4.0);
-    assert(NLO_IM(c) == 6.0);
+    nlo_complex a = make(1.0, 2.0);
+    nlo_complex b = make(3.0, 4.0);
+    nlo_complex c = add(a, b);
+    assert(RE(c) == 4.0);
+    assert(IM(c) == 6.0);
     printf("test_nlo_add: validates complex addition.\n");
 }
 
@@ -39,11 +39,11 @@ void test_nlo_add()
  */
 void test_nlo_mul()
 {
-    nlo_complex a = nlo_make(1.0, 2.0);
-    nlo_complex b = nlo_make(3.0, 4.0);
-    nlo_complex c = nlo_mul(a, b);
-    assert(NLO_RE(c) == -5.0); // 1*3 - 2*4
-    assert(NLO_IM(c) == 10.0); // 1*4 + 2*3
+    nlo_complex a = make(1.0, 2.0);
+    nlo_complex b = make(3.0, 4.0);
+    nlo_complex c = mul(a, b);
+    assert(RE(c) == -5.0); // 1*3 - 2*4
+    assert(IM(c) == 10.0); // 1*4 + 2*3
     printf("test_nlo_mul: validates complex multiplication.\n");
 }
 

@@ -20,29 +20,29 @@
 /**
  * @brief Number of steady-state full-volume work vectors used during propagation.
  */
-#ifndef NLO_WORK_VECTOR_COUNT
-#define NLO_WORK_VECTOR_COUNT 17u
+#ifndef WORK_VECTOR_COUNT
+#define WORK_VECTOR_COUNT 17u
 #endif
 
 /**
  * @brief Default fraction of device-local memory considered usable.
  */
-#ifndef NLO_DEFAULT_DEVICE_HEAP_FRACTION
-#define NLO_DEFAULT_DEVICE_HEAP_FRACTION 0.70
+#ifndef DEFAULT_DEVICE_HEAP_FRACTION
+#define DEFAULT_DEVICE_HEAP_FRACTION 0.70
 #endif
 
 /**
  * @brief Maximum number of runtime operator scalar constants.
  */
-#ifndef NLO_RUNTIME_OPERATOR_CONSTANTS_MAX
-#define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16u
+#ifndef RUNTIME_OPERATOR_CONSTANTS_MAX
+#define RUNTIME_OPERATOR_CONSTANTS_MAX 16u
 #endif
 
 /**
  * @brief Maximum length (including terminator) for persisted run IDs.
  */
-#ifndef NLO_STORAGE_RUN_ID_MAX
-#define NLO_STORAGE_RUN_ID_MAX 64u
+#ifndef STORAGE_RUN_ID_MAX
+#define STORAGE_RUN_ID_MAX 64u
 #endif
 
 /**
@@ -94,8 +94,8 @@ typedef struct {
  */
 typedef enum {
     /** Flatten with temporal index fastest: idx = ((x * ny) + y) * nt + t. */
-    NLO_TENSOR_LAYOUT_XYT_T_FAST = 0
-} nlo_tensor_layout;
+    TENSOR_LAYOUT_XYT_T_FAST = 0
+} tensor_layout;
 
 /**
  * @brief Explicit tensor descriptor for 3D runs.
@@ -105,7 +105,7 @@ typedef struct {
     size_t nx;
     size_t ny;
     int layout;
-} nlo_tensor3d_desc;
+} tensor3d_desc;
 
 /**
  * @brief Nonlinear operator execution model selector.
@@ -122,10 +122,10 @@ typedef struct {
  */
 typedef enum {
     /** Evaluate compiled runtime expression `nonlinear_expr` as the full RHS, for example \f$N(A)=iA(c_2|A|^2+V)\f$. */
-    NLO_NONLINEAR_MODEL_EXPR = 0,
+    NONLINEAR_MODEL_EXPR = 0,
     /** Use the built-in Kerr + delayed Raman (+ optional shock) model \f$N_R(A)\f$. */
-    NLO_NONLINEAR_MODEL_KERR_RAMAN = 1
-} nlo_nonlinear_model;
+    NONLINEAR_MODEL_KERR_RAMAN = 1
+} nonlinear_model;
 
 /**
  * @brief Runtime expression settings for dispersion/nonlinearity operators.
@@ -157,7 +157,7 @@ typedef enum {
  * N(A)=iA(c_2|A|^2+V).
  * \f]
  *
- * For @ref NLO_NONLINEAR_MODEL_KERR_RAMAN, the default delayed response is
+ * For @ref NONLINEAR_MODEL_KERR_RAMAN, the default delayed response is
  * normalized from
  * \f[
  * h_R(t)\propto e^{-t/\tau_2}\sin(t/\tau_1),\qquad
@@ -180,7 +180,7 @@ typedef struct {
     nlo_complex* raman_response_time;
     size_t raman_response_len;
     size_t num_constants;
-    double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
+    double constants[RUNTIME_OPERATOR_CONSTANTS_MAX];
 } runtime_operator_params;
 
 /**
@@ -188,16 +188,16 @@ typedef struct {
  */
 typedef struct {
     propagation_params propagation;
-    nlo_tensor3d_desc tensor;
+    tensor3d_desc tensor;
     time_grid time;
     frequency_grid frequency;
     spatial_grid spatial;
-} nlo_simulation_config;
+} simulation_config;
 
 /**
  * @brief Physics/operator input configuration used by runtime evaluators.
  */
-typedef runtime_operator_params nlo_physics_config;
+typedef runtime_operator_params physics_config;
 
 /**
  * @brief Full internal simulation input configuration.
@@ -206,7 +206,7 @@ typedef runtime_operator_params nlo_physics_config;
  */
 typedef struct {
     propagation_params propagation;
-    nlo_tensor3d_desc tensor;
+    tensor3d_desc tensor;
     time_grid time;
     frequency_grid frequency;
     spatial_grid spatial;
@@ -217,13 +217,13 @@ typedef struct {
  * @brief Runtime execution/backend selection and resource tuning options.
  */
 typedef struct {
-    nlo_vector_backend_type backend_type;
-    nlo_fft_backend_type fft_backend;
+    vector_backend_type backend_type;
+    fft_backend_type fft_backend;
     double device_heap_fraction;
     size_t record_ring_target;
     size_t forced_device_budget_bytes;
-    nlo_vk_backend_config vulkan;
-} nlo_execution_options;
+    vk_backend_config vulkan;
+} execution_options;
 
 /**
  * @brief Estimated runtime limits for current configuration/backend choices.
@@ -235,17 +235,17 @@ typedef struct {
     size_t estimated_required_working_set_bytes;
     size_t estimated_device_budget_bytes;
     int storage_available;
-} nlo_runtime_limits;
+} runtime_limits;
 
 /**
  * @brief Database size-limit policy for snapshot storage.
  */
 typedef enum {
     /** Stop writing new chunks once cap is reached; run continues. */
-    NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
+    STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
     /** Treat cap violation as an error status. */
-    NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
-} nlo_storage_db_cap_policy;
+    STORAGE_DB_CAP_POLICY_FAIL = 1
+} storage_db_cap_policy;
 
 /**
  * @brief Snapshot persistence controls for SQLite-backed output chunking.
@@ -255,21 +255,21 @@ typedef struct {
     const char* run_id;
     size_t sqlite_max_bytes;
     size_t chunk_records;
-    nlo_storage_db_cap_policy cap_policy;
+    storage_db_cap_policy cap_policy;
     int log_final_output_field_to_db;
-} nlo_storage_options;
+} storage_options;
 
 /**
  * @brief Summary of snapshot capture/storage results after a run.
  */
 typedef struct {
-    char run_id[NLO_STORAGE_RUN_ID_MAX];
+    char run_id[STORAGE_RUN_ID_MAX];
     size_t records_captured;
     size_t records_spilled;
     size_t chunks_written;
     size_t db_size_bytes;
     int truncated;
-} nlo_storage_result;
+} storage_result;
 
 /**
  * @brief Per-step adaptive solver telemetry for accepted RK4 steps.
@@ -280,63 +280,63 @@ typedef struct {
     double step_size;
     double next_step_size;
     double error;
-} nlo_step_event;
+} step_event;
 
 /**
  * @brief Opaque snapshot store handle.
  */
-typedef struct nlo_snapshot_store nlo_snapshot_store;
+typedef struct snapshot_store snapshot_store;
 
 /**
  * @brief Internal set of preallocated working buffers used by RK4 propagation.
  */
 typedef struct {
-    nlo_vec_buffer* ip_field_vec;
-    nlo_vec_buffer* field_working_vec;
-    nlo_vec_buffer* field_freq_vec;
-    nlo_vec_buffer* k_final_vec;
-    nlo_vec_buffer* k_temp_vec;
-    nlo_vec_buffer* dispersion_factor_vec;
-    nlo_vec_buffer* dispersion_operator_vec;
-    nlo_vec_buffer* potential_vec;
-    nlo_vec_buffer* previous_field_vec;
-    nlo_vec_buffer* raman_intensity_vec;
-    nlo_vec_buffer* raman_delayed_vec;
-    nlo_vec_buffer* raman_spectrum_vec;
-    nlo_vec_buffer* raman_mix_vec;
-    nlo_vec_buffer* raman_polarization_vec;
-    nlo_vec_buffer* raman_derivative_vec;
-    nlo_vec_buffer* raman_response_fft_vec;
-    nlo_vec_buffer* raman_derivative_factor_vec;
-    nlo_vec_buffer* wt_mesh_vec;
-    nlo_vec_buffer* kx_mesh_vec;
-    nlo_vec_buffer* ky_mesh_vec;
-    nlo_vec_buffer* t_mesh_vec;
-    nlo_vec_buffer* x_mesh_vec;
-    nlo_vec_buffer* y_mesh_vec;
+    vec_buffer* ip_field_vec;
+    vec_buffer* field_working_vec;
+    vec_buffer* field_freq_vec;
+    vec_buffer* k_final_vec;
+    vec_buffer* k_temp_vec;
+    vec_buffer* dispersion_factor_vec;
+    vec_buffer* dispersion_operator_vec;
+    vec_buffer* potential_vec;
+    vec_buffer* previous_field_vec;
+    vec_buffer* raman_intensity_vec;
+    vec_buffer* raman_delayed_vec;
+    vec_buffer* raman_spectrum_vec;
+    vec_buffer* raman_mix_vec;
+    vec_buffer* raman_polarization_vec;
+    vec_buffer* raman_derivative_vec;
+    vec_buffer* raman_response_fft_vec;
+    vec_buffer* raman_derivative_factor_vec;
+    vec_buffer* wt_mesh_vec;
+    vec_buffer* kx_mesh_vec;
+    vec_buffer* ky_mesh_vec;
+    vec_buffer* t_mesh_vec;
+    vec_buffer* x_mesh_vec;
+    vec_buffer* y_mesh_vec;
 } simulation_working_vectors;
 
 /**
  * @brief Init-only scratch buffers used to construct tensor axes and meshes.
  */
 typedef struct {
-    nlo_vec_buffer* wt_axis_vec;
-    nlo_vec_buffer* kx_axis_vec;
-    nlo_vec_buffer* ky_axis_vec;
-    nlo_vec_buffer* t_axis_vec;
-    nlo_vec_buffer* x_axis_vec;
-    nlo_vec_buffer* y_axis_vec;
+    vec_buffer* wt_axis_vec;
+    vec_buffer* kx_axis_vec;
+    vec_buffer* ky_axis_vec;
+    vec_buffer* t_axis_vec;
+    vec_buffer* x_axis_vec;
+    vec_buffer* y_axis_vec;
 } simulation_init_vectors;
 
-typedef struct nlo_fft_plan nlo_fft_plan;
+typedef struct fft_plan fft_plan;
 
 /**
  * @brief Internal mutable simulation runtime state.
  */
 typedef struct {
     const sim_config* config;
-    nlo_execution_options exec_options;
-    nlo_vector_backend* backend;
+    execution_options exec_options;
+    vector_backend* backend;
 
     size_t nt;
     size_t nx;
@@ -353,20 +353,20 @@ typedef struct {
     nlo_complex* snapshot_scratch_record;
     nlo_complex* output_records;
     size_t output_record_capacity;
-    nlo_snapshot_store* snapshot_store;
-    nlo_storage_result snapshot_result;
-    nlo_vec_status snapshot_status;
-    nlo_step_event* step_event_buffer;
+    snapshot_store* snapshot_store;
+    storage_result snapshot_result;
+    vec_status snapshot_status;
+    step_event* step_event_buffer;
     size_t step_event_capacity;
     size_t step_events_written;
     size_t step_events_dropped;
 
-    nlo_vec_buffer* current_field_vec;
-    nlo_vec_buffer* frequency_grid_vec;
+    vec_buffer* current_field_vec;
+    vec_buffer* frequency_grid_vec;
     simulation_working_vectors working_vectors;
     simulation_init_vectors init_vectors;
 
-    nlo_vec_buffer** record_ring_vec;
+    vec_buffer** record_ring_vec;
     size_t record_ring_capacity;
     size_t record_ring_head;
     size_t record_ring_size;
@@ -375,50 +375,50 @@ typedef struct {
     size_t explicit_record_z_count;
     int explicit_record_schedule_active;
 
-    nlo_fft_plan* fft_plan;
+    fft_plan* fft_plan;
 
     double current_z;
     double current_step_size;
     double current_half_step_exp;
     int dispersion_valid;
 
-    nlo_operator_program linear_factor_operator_program;
-    nlo_operator_program linear_operator_program;
-    nlo_operator_program potential_operator_program;
-    nlo_operator_program dispersion_factor_operator_program;
-    nlo_operator_program dispersion_operator_program;
-    nlo_operator_program nonlinear_operator_program;
-    nlo_nonlinear_model nonlinear_model;
+    operator_program linear_factor_operator_program;
+    operator_program linear_operator_program;
+    operator_program potential_operator_program;
+    operator_program dispersion_factor_operator_program;
+    operator_program dispersion_operator_program;
+    operator_program nonlinear_operator_program;
+    nonlinear_model nonlinear_model;
     int nonlinear_raman_active;
     int nonlinear_shock_active;
     double nonlinear_gamma;
     double raman_fraction;
     double shock_omega0;
     size_t runtime_operator_stack_slots;
-    nlo_vec_buffer* runtime_operator_stack_vec[NLO_OPERATOR_PROGRAM_MAX_STACK_SLOTS];
+    vec_buffer* runtime_operator_stack_vec[OPERATOR_PROGRAM_MAX_STACK_SLOTS];
 } simulation_state;
 
 /**
  * @brief Build default execution options for the selected backend family.
  *
  * @param backend_type Backend mode preference (CPU, Vulkan, or AUTO).
- * @return nlo_execution_options Initialized option block.
+ * @return execution_options Initialized option block.
  */
-nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type);
+execution_options execution_options_default(vector_backend_type backend_type);
 
 /**
  * @brief Build default SQLite storage options.
  *
- * @return nlo_storage_options Initialized storage option block.
+ * @return storage_options Initialized storage option block.
  */
-nlo_storage_options nlo_storage_options_default(void);
+storage_options storage_options_default(void);
 
 /**
  * @brief Build default runtime limit descriptor values.
  *
- * @return nlo_runtime_limits Initialized runtime limits descriptor.
+ * @return runtime_limits Initialized runtime limits descriptor.
  */
-nlo_runtime_limits nlo_runtime_limits_default(void);
+runtime_limits runtime_limits_default(void);
 
 /**
  * @brief Internal runtime-limit query helper used by public wrappers.
@@ -428,10 +428,10 @@ nlo_runtime_limits nlo_runtime_limits_default(void);
  * @param out_limits Destination limits descriptor.
  * @return int 0 on success, nonzero on invalid inputs/backend failure.
  */
-int nlo_query_runtime_limits_internal(
+int query_runtime_limits_internal(
     const sim_config* config,
-    const nlo_execution_options* exec_options,
-    nlo_runtime_limits* out_limits
+    const execution_options* exec_options,
+    runtime_limits* out_limits
 );
 
 /**
@@ -447,7 +447,7 @@ simulation_state* create_simulation_state(
     const sim_config* config,
     size_t num_time_samples,
     size_t num_recorded_samples,
-    const nlo_execution_options* exec_options
+    const execution_options* exec_options
 );
 
 /**
@@ -464,8 +464,8 @@ simulation_state* create_simulation_state_with_storage(
     const sim_config* config,
     size_t num_time_samples,
     size_t num_recorded_samples,
-    const nlo_execution_options* exec_options,
-    const nlo_storage_options* storage_options
+    const execution_options* exec_options,
+    const storage_options* storage_options
 );
 
 /**
@@ -495,46 +495,46 @@ void free_sim_config(sim_config* config);
  *
  * @param state Active simulation state.
  * @param field Host input field buffer with num_time_samples elements.
- * @return nlo_vec_status Upload/validation status.
+ * @return vec_status Upload/validation status.
  */
-nlo_vec_status simulation_state_upload_initial_field(simulation_state* state, const nlo_complex* field);
+vec_status simulation_state_upload_initial_field(simulation_state* state, const nlo_complex* field);
 
 /**
  * @brief Download the current backend field into host memory.
  *
  * @param state Active simulation state.
  * @param out_field Host output buffer with num_time_samples elements.
- * @return nlo_vec_status Download/validation status.
+ * @return vec_status Download/validation status.
  */
-nlo_vec_status simulation_state_download_current_field(const simulation_state* state, nlo_complex* out_field);
+vec_status simulation_state_download_current_field(const simulation_state* state, nlo_complex* out_field);
 
 /**
  * @brief Capture one snapshot record into host ring/storage buffers.
  *
  * @param state Active simulation state.
- * @return nlo_vec_status Capture status.
+ * @return vec_status Capture status.
  */
-nlo_vec_status simulation_state_capture_snapshot(simulation_state* state);
+vec_status simulation_state_capture_snapshot(simulation_state* state);
 
 /**
  * @brief Capture one snapshot record from a specific backend vector.
  *
  * @param state Active simulation state.
  * @param source_vec Backend vector used as snapshot source.
- * @return nlo_vec_status Capture status.
+ * @return vec_status Capture status.
  */
-nlo_vec_status simulation_state_capture_snapshot_from_vec(
+vec_status simulation_state_capture_snapshot_from_vec(
     simulation_state* state,
-    const nlo_vec_buffer* source_vec
+    const vec_buffer* source_vec
 );
 
 /**
  * @brief Flush any pending snapshot data to host/storage sinks.
  *
  * @param state Active simulation state.
- * @return nlo_vec_status Flush status.
+ * @return vec_status Flush status.
  */
-nlo_vec_status simulation_state_flush_snapshots(simulation_state* state);
+vec_status simulation_state_flush_snapshots(simulation_state* state);
 
 /**
  * @brief Resolve the operator-visible frequency grid for the active state.
@@ -543,9 +543,9 @@ nlo_vec_status simulation_state_flush_snapshots(simulation_state* state);
  * dedicated frequency grid vector.
  *
  * @param state Active simulation state.
- * @return const nlo_vec_buffer* Frequency-domain grid buffer, or NULL.
+ * @return const vec_buffer* Frequency-domain grid buffer, or NULL.
  */
-static inline const nlo_vec_buffer* nlo_state_operator_frequency_grid(const simulation_state* state)
+static inline const vec_buffer* state_operator_frequency_grid(const simulation_state* state)
 {
     if (state == NULL) {
         return NULL;

@@ -29,8 +29,8 @@ function zero_operator_case()
         nonlinear_expr = "0"
     )
     exec = default_execution_options(
-        backend_type = NLO_VECTOR_BACKEND_CPU,
-        fft_backend = NLO_FFT_BACKEND_FFTW
+        backend_type = VECTOR_BACKEND_CPU,
+        fft_backend = FFT_BACKEND_FFTW
     )
     field = ComplexF64.(exp.(-((collect(0:nt - 1) .- nt / 2) ./ 8) .^ 2))
 
@@ -39,7 +39,7 @@ function zero_operator_case()
 
     result = propagate(sim, phys, field;
         num_recorded_samples = 1,
-        output_mode = NLO_PROPAGATE_OUTPUT_FINAL_ONLY,
+        output_mode = PROPAGATE_OUTPUT_FINAL_ONLY,
         exec_options = exec
     )
     @test size(result.records) == (nt, 1)
@@ -56,7 +56,7 @@ function zero_operator_case()
         phys,
         reinterpret(NLOComplex, field);
         num_recorded_samples = 1,
-        output_mode = NLO_PROPAGATE_OUTPUT_FINAL_ONLY,
+        output_mode = PROPAGATE_OUTPUT_FINAL_ONLY,
         exec_options = exec
     )
     @test meta.records_written == 1
@@ -82,8 +82,8 @@ function high_level_zero_operator_case()
         frequency_grid = omega,
     )
     exec = default_execution_options(
-        backend_type = NLO_VECTOR_BACKEND_CPU,
-        fft_backend = NLO_FFT_BACKEND_FFTW
+        backend_type = VECTOR_BACKEND_CPU,
+        fft_backend = FFT_BACKEND_FFTW
     )
     result = NLOLib.propagate(
         pulse,

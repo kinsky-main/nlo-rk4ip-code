@@ -1,5 +1,5 @@
 using NLOLibExamples
-pushfirst!(LOAD_PATH, nlo_package_root_from(@__FILE__))
+pushfirst!(LOAD_PATH, package_root_from(@__FILE__))
 
 using CairoMakie
 using FFTW
@@ -349,7 +349,7 @@ function main(argv = ARGS)
         )
         nonlinear_full = OperatorSpec(expr = "i*A*(gamma*I + V)", params = Dict("gamma" => gamma_nonlinear))
         nonlinear_linear = OperatorSpec(expr = "i*A*(gamma*I + V)", params = Dict("gamma" => 0.0))
-        exec = default_execution_options(backend_type = NLO_VECTOR_BACKEND_AUTO, fft_backend = NLO_FFT_BACKEND_AUTO)
+        exec = default_execution_options(backend_type = VECTOR_BACKEND_AUTO, fft_backend = FFT_BACKEND_AUTO)
         storage_nonlinear = storage_kwargs(db; example_name = example_name, run_group = run_group, case_key = nonlinear_case_key, chunk_records = 4)
         storage_linear = storage_kwargs(db; example_name = example_name, run_group = run_group, case_key = linear_case_key, chunk_records = 4)
 

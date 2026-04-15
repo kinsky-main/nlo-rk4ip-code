@@ -88,20 +88,20 @@ typedef enum {
  * @return nlolib_status status code.
  */
 NLOLIB_API nlolib_status nlolib_query_runtime_limits(
-    const nlo_simulation_config* simulation_config,
-    const nlo_physics_config* physics_config,
-    const nlo_execution_options* exec_options,
-    nlo_runtime_limits* out_limits
+    const simulation_config* simulation_config,
+    const physics_config* physics_config,
+    const execution_options* exec_options,
+    runtime_limits* out_limits
 );
 
 // MARK: Function Declarations
 
 typedef enum {
     /** Return all requested records. */
-    NLO_PROPAGATE_OUTPUT_DENSE = 0,
+    PROPAGATE_OUTPUT_DENSE = 0,
     /** Return only the final output field record. */
-    NLO_PROPAGATE_OUTPUT_FINAL_ONLY = 1
-} nlo_propagate_output_mode;
+    PROPAGATE_OUTPUT_FINAL_ONLY = 1
+} propagate_output_mode;
 
 /**
  * @brief Unified propagation request options.
@@ -122,15 +122,15 @@ typedef enum {
  */
 typedef struct {
     size_t num_recorded_samples;
-    nlo_propagate_output_mode output_mode;
+    propagate_output_mode output_mode;
     int return_records;
-    const nlo_execution_options* exec_options;
-    const nlo_storage_options* storage_options;
+    const execution_options* exec_options;
+    const storage_options* storage_options;
     const double* explicit_record_z;
     size_t explicit_record_z_count;
-    nlo_progress_callback progress_callback;
+    progress_callback progress_callback;
     void* progress_user_data;
-} nlo_propagate_options;
+} propagate_options;
 
 /**
  * @brief Unified propagation output metadata and buffers.
@@ -149,12 +149,12 @@ typedef struct {
     nlo_complex* output_records;
     size_t output_record_capacity;
     size_t* records_written;
-    nlo_storage_result* storage_result;
-    nlo_step_event* output_step_events;
+    storage_result* storage_result;
+    step_event* output_step_events;
     size_t output_step_event_capacity;
     size_t* step_events_written;
     size_t* step_events_dropped;
-} nlo_propagate_output;
+} propagate_output;
 
 /**
  * @brief Build default propagation options.
@@ -166,16 +166,16 @@ typedef struct {
  * - AUTO backend exec options
  * - storage disabled
  *
- * @return nlo_propagate_options Initialized options.
+ * @return propagate_options Initialized options.
  */
-NLOLIB_API nlo_propagate_options nlolib_propagate_options_default(void);
+NLOLIB_API propagate_options nlolib_propagate_options_default(void);
 
 /**
  * @brief Build default propagation output descriptor.
  *
- * @return nlo_propagate_output Initialized output descriptor.
+ * @return propagate_output Initialized output descriptor.
  */
-NLOLIB_API nlo_propagate_output nlolib_propagate_output_default(void);
+NLOLIB_API propagate_output nlolib_propagate_output_default(void);
 
 /**
  * @brief Propagate an input field using split simulation/physics configs.
@@ -189,12 +189,12 @@ NLOLIB_API nlo_propagate_output nlolib_propagate_output_default(void);
  * @return nlolib_status status code.
  */
 NLOLIB_API nlolib_status nlolib_propagate(
-    const nlo_simulation_config* simulation_config,
-    const nlo_physics_config* physics_config,
+    const simulation_config* simulation_config,
+    const physics_config* physics_config,
     size_t num_time_samples,
     const nlo_complex* input_field,
-    const nlo_propagate_options* options,
-    nlo_propagate_output* output
+    const propagate_options* options,
+    propagate_output* output
 );
 
 /**

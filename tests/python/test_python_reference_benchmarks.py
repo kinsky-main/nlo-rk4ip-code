@@ -22,8 +22,8 @@ from backend.reference import (  # noqa: E402
 from nlolib import (  # noqa: E402
     NLOLIB_LOG_LEVEL_ERROR,
     NLOLIB_LOG_LEVEL_WARN,
-    NLO_VECTOR_BACKEND_AUTO,
-    NLO_VECTOR_BACKEND_CPU,
+    VECTOR_BACKEND_AUTO,
+    VECTOR_BACKEND_CPU,
     NLolib,
     RuntimeOperators,
     default_execution_options,
@@ -70,7 +70,7 @@ def _auto_backend_resolves_to_vulkan(api: NLolib) -> bool:
     api.set_log_level(2)
     api.set_log_buffer(64 * 1024)
     api.clear_log_buffer()
-    api.propagate(cfg, [0j] * n, 1, default_execution_options(NLO_VECTOR_BACKEND_AUTO))
+    api.propagate(cfg, [0j] * n, 1, default_execution_options(VECTOR_BACKEND_AUTO))
     logs = api.read_log_buffer(consume=True, max_bytes=64 * 1024)
     return "actual: VULKAN" in logs
 
@@ -155,7 +155,7 @@ def test_linear_reference_prefers_current_dispersion_sign(api: NLolib) -> None:
         runtime=RuntimeOperators(constants=[c0, 0.0, 0.0]),
     )
     final_field = np.asarray(
-        api.propagate(cfg, field0.tolist(), 2, default_execution_options(NLO_VECTOR_BACKEND_CPU)).records[1],
+        api.propagate(cfg, field0.tolist(), 2, default_execution_options(VECTOR_BACKEND_CPU)).records[1],
         dtype=np.complex128,
     )
     current_ref = exact_linear_temporal_final(field0, z_final, omega, c0)
@@ -195,7 +195,7 @@ def test_zero_operator_identity_fixed_step_cpu_and_auto(api: NLolib) -> None:
     )
 
     cpu_final = np.asarray(
-        api.propagate(cfg, field0.tolist(), 2, default_execution_options(NLO_VECTOR_BACKEND_CPU)).records[1],
+        api.propagate(cfg, field0.tolist(), 2, default_execution_options(VECTOR_BACKEND_CPU)).records[1],
         dtype=np.complex128,
     )
     cpu_error = relative_l2_error(cpu_final, field0)
@@ -206,7 +206,7 @@ def test_zero_operator_identity_fixed_step_cpu_and_auto(api: NLolib) -> None:
         return
 
     auto_final = np.asarray(
-        api.propagate(cfg, field0.tolist(), 2, default_execution_options(NLO_VECTOR_BACKEND_AUTO)).records[1],
+        api.propagate(cfg, field0.tolist(), 2, default_execution_options(VECTOR_BACKEND_AUTO)).records[1],
         dtype=np.complex128,
     )
     auto_error = relative_l2_error(auto_final, field0)

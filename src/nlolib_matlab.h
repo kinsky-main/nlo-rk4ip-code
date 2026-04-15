@@ -58,9 +58,9 @@
 /** @brief Unbounded sample-count sentinel for limit query APIs. */
 #define NT_MAX ((size_t)-1) /* Unbounded sentinel; use nlolib_query_runtime_limits(). */
 /** @brief Maximum runtime scalar constants accepted by expression programs. */
-#define NLO_RUNTIME_OPERATOR_CONSTANTS_MAX 16
+#define RUNTIME_OPERATOR_CONSTANTS_MAX 16
 /** @brief Maximum persisted run-id length (including terminator). */
-#define NLO_STORAGE_RUN_ID_MAX 64
+#define STORAGE_RUN_ID_MAX 64
 
 /* -------------------------------------------------------------------
  * nlo_complex
@@ -108,7 +108,7 @@ typedef struct
 typedef struct
 {
     nlo_complex *frequency_grid;
-} nlo_frequency_grid;
+} frequency_grid;
 
 /**
  * @brief Spatial grid metadata and optional spatial buffers.
@@ -130,8 +130,8 @@ typedef struct
  */
 typedef enum
 {
-    NLO_TENSOR_LAYOUT_XYT_T_FAST = 0
-} nlo_tensor_layout;
+    TENSOR_LAYOUT_XYT_T_FAST = 0
+} tensor_layout;
 
 /**
  * @brief Explicit tensor descriptor for 3D runs.
@@ -142,7 +142,7 @@ typedef struct
     size_t nx;
     size_t ny;
     int layout;
-} nlo_tensor3d_desc;
+} tensor3d_desc;
 
 /**
  * @brief Nonlinear operator execution model selector.
@@ -160,10 +160,10 @@ typedef struct
 typedef enum
 {
     /** Evaluate compiled runtime expression `nonlinear_expr` as the full RHS, for example \f$N(A)=iA(c_2|A|^2+V)\f$. */
-    NLO_NONLINEAR_MODEL_EXPR = 0,
+    NONLINEAR_MODEL_EXPR = 0,
     /** Use the built-in Kerr + delayed Raman (+ optional shock) model \f$N_R(A)\f$. */
-    NLO_NONLINEAR_MODEL_KERR_RAMAN = 1
-} nlo_nonlinear_model;
+    NONLINEAR_MODEL_KERR_RAMAN = 1
+} nonlinear_model;
 
 /**
  * @brief Runtime expression settings for dispersion/nonlinearity operators.
@@ -193,7 +193,7 @@ typedef enum
  * N(A)=iA(c_2|A|^2+V).
  * \f]
  *
- * For @ref NLO_NONLINEAR_MODEL_KERR_RAMAN, the default delayed response is
+ * For @ref NONLINEAR_MODEL_KERR_RAMAN, the default delayed response is
  * normalized from
  * \f[
  * h_R(t)\propto e^{-t/\tau_2}\sin(t/\tau_1),\qquad
@@ -217,7 +217,7 @@ typedef struct
     nlo_complex *raman_response_time;
     size_t raman_response_len;
     size_t num_constants;
-    double constants[NLO_RUNTIME_OPERATOR_CONSTANTS_MAX];
+    double constants[RUNTIME_OPERATOR_CONSTANTS_MAX];
 } runtime_operator_params;
 
 /**
@@ -226,16 +226,16 @@ typedef struct
 typedef struct
 {
     propagation_params propagation;
-    nlo_tensor3d_desc tensor;
+    tensor3d_desc tensor;
     time_grid time;
-    nlo_frequency_grid frequency;
+    frequency_grid frequency;
     spatial_grid spatial;
-} nlo_simulation_config;
+} simulation_config;
 
 /**
  * @brief Physics/operator input configuration.
  */
-typedef runtime_operator_params nlo_physics_config;
+typedef runtime_operator_params physics_config;
 
 /**
  * @brief Full internal simulation input configuration.
@@ -243,9 +243,9 @@ typedef runtime_operator_params nlo_physics_config;
 typedef struct
 {
     propagation_params propagation;
-    nlo_tensor3d_desc tensor;
+    tensor3d_desc tensor;
     time_grid time;
-    nlo_frequency_grid frequency;
+    frequency_grid frequency;
     spatial_grid spatial;
     runtime_operator_params runtime;
 } sim_config;
@@ -259,20 +259,20 @@ typedef struct
  */
 typedef enum
 {
-    NLO_VECTOR_BACKEND_CPU = 0,
-    NLO_VECTOR_BACKEND_VULKAN = 1,
-    NLO_VECTOR_BACKEND_AUTO = 2
-} nlo_vector_backend_type;
+    VECTOR_BACKEND_CPU = 0,
+    VECTOR_BACKEND_VULKAN = 1,
+    VECTOR_BACKEND_AUTO = 2
+} vector_backend_type;
 
 /**
  * @brief FFT implementation selector.
  */
 typedef enum
 {
-    NLO_FFT_BACKEND_AUTO = 0,
-    NLO_FFT_BACKEND_FFTW = 1,
-    NLO_FFT_BACKEND_VKFFT = 2
-} nlo_fft_backend_type;
+    FFT_BACKEND_AUTO = 0,
+    FFT_BACKEND_FFTW = 1,
+    FFT_BACKEND_VKFFT = 2
+} fft_backend_type;
 
 /* -------------------------------------------------------------------
  * Vulkan backend config (Vulkan handles replaced with opaque stubs)
@@ -295,7 +295,7 @@ typedef struct
     VkCommandPool command_pool;
     size_t descriptor_set_budget_bytes;
     uint32_t descriptor_set_count_override;
-} nlo_vk_backend_config;
+} vk_backend_config;
 
 /* -------------------------------------------------------------------
  * Execution options
@@ -306,13 +306,13 @@ typedef struct
  */
 typedef struct
 {
-    nlo_vector_backend_type backend_type;
-    nlo_fft_backend_type fft_backend;
+    vector_backend_type backend_type;
+    fft_backend_type fft_backend;
     double device_heap_fraction;
     size_t record_ring_target;
     size_t forced_device_budget_bytes;
-    nlo_vk_backend_config vulkan;
-} nlo_execution_options;
+    vk_backend_config vulkan;
+} execution_options;
 
 /**
  * @brief Runtime limits/estimates for current backend and configuration.
@@ -325,7 +325,7 @@ typedef struct
     size_t estimated_required_working_set_bytes;
     size_t estimated_device_budget_bytes;
     int storage_available;
-} nlo_runtime_limits;
+} runtime_limits;
 
 /* -------------------------------------------------------------------
  * Status codes
@@ -369,17 +369,17 @@ typedef enum
  */
 typedef enum
 {
-    NLO_PROGRESS_EVENT_ACCEPTED = 0,
-    NLO_PROGRESS_EVENT_REJECTED = 1,
-    NLO_PROGRESS_EVENT_FINISH = 2
-} nlo_progress_event_type;
+    PROGRESS_EVENT_ACCEPTED = 0,
+    PROGRESS_EVENT_REJECTED = 1,
+    PROGRESS_EVENT_FINISH = 2
+} progress_event_type;
 
 /**
  * @brief Per-event propagation progress payload for caller callbacks.
  */
 typedef struct
 {
-    nlo_progress_event_type event_type;
+    progress_event_type event_type;
     size_t step_index;
     size_t reject_attempt;
     double z;
@@ -390,21 +390,21 @@ typedef struct
     double error;
     double elapsed_seconds;
     double eta_seconds;
-} nlo_progress_info;
+} progress_info;
 
 /**
  * @brief Progress callback invoked during propagation.
  */
-typedef int (*nlo_progress_callback)(const nlo_progress_info *info, void *user_data);
+typedef int (*progress_callback)(const progress_info *info, void *user_data);
 
 /**
  * @brief Database size-limit behavior when snapshot storage reaches its cap.
  */
 typedef enum
 {
-    NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
-    NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
-} nlo_storage_db_cap_policy;
+    STORAGE_DB_CAP_POLICY_STOP_WRITES = 0,
+    STORAGE_DB_CAP_POLICY_FAIL = 1
+} storage_db_cap_policy;
 
 /**
  * @brief SQLite snapshot storage controls.
@@ -415,22 +415,22 @@ typedef struct
     const char *run_id;
     size_t sqlite_max_bytes;
     size_t chunk_records;
-    nlo_storage_db_cap_policy cap_policy;
+    storage_db_cap_policy cap_policy;
     int log_final_output_field_to_db;
-} nlo_storage_options;
+} storage_options;
 
 /**
  * @brief Summary of captured/spilled records from storage-enabled runs.
  */
 typedef struct
 {
-    char run_id[NLO_STORAGE_RUN_ID_MAX];
+    char run_id[STORAGE_RUN_ID_MAX];
     size_t records_captured;
     size_t records_spilled;
     size_t chunks_written;
     size_t db_size_bytes;
     int truncated;
-} nlo_storage_result;
+} storage_result;
 
 /**
  * @brief Per-step adaptive solver telemetry for accepted RK4 steps.
@@ -442,16 +442,16 @@ typedef struct
     double step_size;
     double next_step_size;
     double error;
-} nlo_step_event;
+} step_event;
 
 /**
  * @brief Propagation record output mode.
  */
 typedef enum
 {
-    NLO_PROPAGATE_OUTPUT_DENSE = 0,
-    NLO_PROPAGATE_OUTPUT_FINAL_ONLY = 1
-} nlo_propagate_output_mode;
+    PROPAGATE_OUTPUT_DENSE = 0,
+    PROPAGATE_OUTPUT_FINAL_ONLY = 1
+} propagate_output_mode;
 
 /**
  * @brief Unified propagation request options.
@@ -459,15 +459,15 @@ typedef enum
 typedef struct
 {
     size_t num_recorded_samples;
-    nlo_propagate_output_mode output_mode;
+    propagate_output_mode output_mode;
     int return_records;
-    const nlo_execution_options *exec_options;
-    const nlo_storage_options *storage_options;
+    const execution_options *exec_options;
+    const storage_options *storage_options;
     const double *explicit_record_z;
     size_t explicit_record_z_count;
-    nlo_progress_callback progress_callback;
+    progress_callback progress_callback;
     void *progress_user_data;
-} nlo_propagate_options;
+} propagate_options;
 
 /**
  * @brief Unified propagation output metadata and buffers.
@@ -477,12 +477,12 @@ typedef struct
     nlo_complex *output_records;
     size_t output_record_capacity;
     size_t *records_written;
-    nlo_storage_result *storage_result;
-    nlo_step_event *output_step_events;
+    storage_result *storage_result;
+    step_event *output_step_events;
     size_t output_step_event_capacity;
     size_t *step_events_written;
     size_t *step_events_dropped;
-} nlo_propagate_output;
+} propagate_output;
 
 /* -------------------------------------------------------------------
  * Public API
@@ -494,12 +494,12 @@ typedef struct
  * See `nlolib.h` for full parameter and return-value semantics.
  */
 nlolib_status nlolib_propagate(
-    const nlo_simulation_config *simulation_config,
-    const nlo_physics_config *physics_config,
+    const simulation_config *simulation_config,
+    const physics_config *physics_config,
     size_t num_time_samples,
     const nlo_complex *input_field,
-    const nlo_propagate_options *options,
-    nlo_propagate_output *output);
+    const propagate_options *options,
+    propagate_output *output);
 
 /**
  * @brief MATLAB FFI mirror of nlolib_query_runtime_limits().
@@ -507,10 +507,10 @@ nlolib_status nlolib_propagate(
  * See `nlolib.h` for full parameter and return-value semantics.
  */
 nlolib_status nlolib_query_runtime_limits(
-    const nlo_simulation_config *simulation_config,
-    const nlo_physics_config *physics_config,
-    const nlo_execution_options *exec_options,
-    nlo_runtime_limits *out_limits);
+    const simulation_config *simulation_config,
+    const physics_config *physics_config,
+    const execution_options *exec_options,
+    runtime_limits *out_limits);
 
 /**
  * @brief Return whether SQLite snapshot storage is available in this build.

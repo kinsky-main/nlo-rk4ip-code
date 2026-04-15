@@ -34,9 +34,10 @@ jobs:
           -DNLOLIB_BUILD_BENCHMARKS=OFF
           -DNLOLIB_BUILD_EXAMPLES=OFF
           -DBUILD_TESTING=OFF
-          -DNLO_ENABLE_VULKAN_BACKEND=OFF
-          -DNLO_ENABLE_VKFFT=OFF
-          -DNLO_BUMP_PATCH_ON_BUILD=OFF
+          -DENABLE_VULKAN_BACKEND=OFF
+          -DENABLE_VKFFT=OFF
+          -DBUMP_PATCH_ON_BUILD=OFF
+          -DINSTALL_GIT_HOOKS=OFF
 
       - name: Build docs
         run: cmake --build build-docs --target docs

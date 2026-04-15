@@ -15,30 +15,30 @@
 
 typedef struct {
     int enabled;
-    nlo_perf_profile_snapshot snapshot;
-} nlo_perf_profile_state;
+    perf_profile_snapshot snapshot;
+} perf_profile_state;
 
-static nlo_perf_profile_state g_nlo_perf_profile_state = {
+static perf_profile_state g_nlo_perf_profile_state = {
     0,
     {0}
 };
 
-void nlo_perf_profile_set_enabled(int enabled)
+void perf_profile_set_enabled(int enabled)
 {
     g_nlo_perf_profile_state.enabled = (enabled != 0) ? 1 : 0;
 }
 
-int nlo_perf_profile_is_enabled(void)
+int perf_profile_is_enabled(void)
 {
     return g_nlo_perf_profile_state.enabled;
 }
 
-void nlo_perf_profile_reset(void)
+void perf_profile_reset(void)
 {
     memset(&g_nlo_perf_profile_state.snapshot, 0, sizeof(g_nlo_perf_profile_state.snapshot));
 }
 
-void nlo_perf_profile_snapshot_read(nlo_perf_profile_snapshot* out_snapshot)
+void perf_profile_snapshot_read(perf_profile_snapshot* out_snapshot)
 {
     if (out_snapshot == NULL) {
         return;
@@ -47,7 +47,7 @@ void nlo_perf_profile_snapshot_read(nlo_perf_profile_snapshot* out_snapshot)
     *out_snapshot = g_nlo_perf_profile_state.snapshot;
 }
 
-void nlo_perf_profile_add_dispersion_time(double elapsed_ms)
+void perf_profile_add_dispersion_time(double elapsed_ms)
 {
     if (!g_nlo_perf_profile_state.enabled || elapsed_ms < 0.0) {
         return;
@@ -57,7 +57,7 @@ void nlo_perf_profile_add_dispersion_time(double elapsed_ms)
     g_nlo_perf_profile_state.snapshot.dispersion_calls += 1u;
 }
 
-void nlo_perf_profile_add_nonlinear_time(double elapsed_ms)
+void perf_profile_add_nonlinear_time(double elapsed_ms)
 {
     if (!g_nlo_perf_profile_state.enabled || elapsed_ms < 0.0) {
         return;
@@ -67,7 +67,7 @@ void nlo_perf_profile_add_nonlinear_time(double elapsed_ms)
     g_nlo_perf_profile_state.snapshot.nonlinear_calls += 1u;
 }
 
-void nlo_perf_profile_add_gpu_dispatch(
+void perf_profile_add_gpu_dispatch(
     uint64_t dispatch_count,
     uint64_t pass_count,
     uint64_t pass_bytes
@@ -82,7 +82,7 @@ void nlo_perf_profile_add_gpu_dispatch(
     g_nlo_perf_profile_state.snapshot.gpu_memory_pass_bytes += pass_bytes;
 }
 
-void nlo_perf_profile_add_gpu_copy(uint64_t copy_count, uint64_t bytes)
+void perf_profile_add_gpu_copy(uint64_t copy_count, uint64_t bytes)
 {
     if (!g_nlo_perf_profile_state.enabled || copy_count == 0u) {
         return;
@@ -95,12 +95,12 @@ void nlo_perf_profile_add_gpu_copy(uint64_t copy_count, uint64_t bytes)
     g_nlo_perf_profile_state.snapshot.gpu_memory_pass_bytes += 2u * bytes;
 }
 
-void nlo_perf_profile_add_gpu_device_copy(uint64_t copy_count, uint64_t bytes)
+void perf_profile_add_gpu_device_copy(uint64_t copy_count, uint64_t bytes)
 {
-    nlo_perf_profile_add_gpu_copy(copy_count, bytes);
+    perf_profile_add_gpu_copy(copy_count, bytes);
 }
 
-void nlo_perf_profile_add_gpu_host_transfer_copy(uint64_t copy_count, uint64_t bytes)
+void perf_profile_add_gpu_host_transfer_copy(uint64_t copy_count, uint64_t bytes)
 {
     if (!g_nlo_perf_profile_state.enabled || copy_count == 0u) {
         return;
@@ -113,7 +113,7 @@ void nlo_perf_profile_add_gpu_host_transfer_copy(uint64_t copy_count, uint64_t b
     g_nlo_perf_profile_state.snapshot.gpu_memory_pass_bytes += 2u * bytes;
 }
 
-void nlo_perf_profile_add_gpu_upload(uint64_t count, uint64_t bytes)
+void perf_profile_add_gpu_upload(uint64_t count, uint64_t bytes)
 {
     if (!g_nlo_perf_profile_state.enabled || count == 0u) {
         return;
@@ -123,7 +123,7 @@ void nlo_perf_profile_add_gpu_upload(uint64_t count, uint64_t bytes)
     g_nlo_perf_profile_state.snapshot.gpu_upload_bytes += bytes;
 }
 
-void nlo_perf_profile_add_gpu_download(uint64_t count, uint64_t bytes)
+void perf_profile_add_gpu_download(uint64_t count, uint64_t bytes)
 {
     if (!g_nlo_perf_profile_state.enabled || count == 0u) {
         return;
@@ -133,7 +133,7 @@ void nlo_perf_profile_add_gpu_download(uint64_t count, uint64_t bytes)
     g_nlo_perf_profile_state.snapshot.gpu_download_bytes += bytes;
 }
 
-double nlo_perf_profile_now_ms(void)
+double perf_profile_now_ms(void)
 {
 #if defined(_WIN32)
     static LARGE_INTEGER frequency = {0};

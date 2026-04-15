@@ -25,7 +25,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/fft/fft.c
 )
 
-if(NLO_ENABLE_VULKAN_BACKEND)
+if(ENABLE_VULKAN_BACKEND)
   list(APPEND NLOLIB_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/backend/vk_auto_context.c
     ${CMAKE_CURRENT_LIST_DIR}/numerics/vk_backend_resources.c
@@ -49,26 +49,26 @@ if(WIN32)
   target_compile_definitions(nlolib PRIVATE NLOLIB_EXPORTS)
 endif()
 
-if(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS)
+if(ENABLE_RK4_DEBUG_DIAGNOSTICS)
   target_compile_definitions(nlolib PRIVATE
-    $<$<CONFIG:Debug>:NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS=1>
+    $<$<CONFIG:Debug>:ENABLE_RK4_DEBUG_DIAGNOSTICS=1>
   )
 endif()
 
 add_subdirectory(fft)
 include(NLOCblas)
-nlo_configure_cblas(_nlo_cblas_target _nlo_cblas_include_dirs)
-target_link_libraries(nlolib PUBLIC nlo_fft_backend ${_nlo_cblas_target})
+configure_cblas(cblas_target cblas_include_dirs)
+target_link_libraries(nlolib PUBLIC fft_backend ${cblas_target})
 include(NLOSQLite)
-nlo_configure_sqlite(nlolib)
+configure_sqlite(nlolib)
 
 if(UNIX)
   target_link_libraries(nlolib PUBLIC m)
 endif()
 
-if(NLO_ENABLE_VULKAN_BACKEND)
+if(ENABLE_VULKAN_BACKEND)
   include(NLOVulkanBackend)
-  nlo_configure_vulkan_backend(
+  configure_vulkan_backend(
     nlolib
     "${CMAKE_CURRENT_LIST_DIR}"
     "${CMAKE_CURRENT_BINARY_DIR}"
@@ -76,22 +76,22 @@ if(NLO_ENABLE_VULKAN_BACKEND)
 endif()
 
 if(WIN32)
-  set(_nlo_runtime_hints "${NLO_SQLITE_RUNTIME_HINTS}")
-  if(NLO_CBLAS_RUNTIME_HINTS)
-    list(APPEND _nlo_runtime_hints "${NLO_CBLAS_RUNTIME_HINTS}")
+  set(runtime_hints "${SQLITE_RUNTIME_HINTS}")
+  if(CBLAS_RUNTIME_HINTS)
+    list(APPEND runtime_hints "${CBLAS_RUNTIME_HINTS}")
   endif()
   add_custom_command(TARGET nlolib POST_BUILD
     COMMAND ${CMAKE_COMMAND}
-            -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
-            -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:nlolib>"
-            -DNLO_RUNTIME_HINTS="${_nlo_runtime_hints}"
+            -DRUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
+            -DRUNTIME_DEST="$<TARGET_FILE_DIR:nlolib>"
+            -DRUNTIME_HINTS="${runtime_hints}"
             -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
   )
 endif()
 
 target_compile_definitions(nlolib PUBLIC
-  NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
-  NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+  ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
+  ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
 )
 
 

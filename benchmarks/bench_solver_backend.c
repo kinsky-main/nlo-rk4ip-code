@@ -27,44 +27,44 @@
 #include <sys/types.h>
 #endif
 
-#ifndef NLO_BENCH_MAX_SIZES
-#define NLO_BENCH_MAX_SIZES 32u
+#ifndef BENCH_MAX_SIZES
+#define BENCH_MAX_SIZES 32u
 #endif
 
-#ifndef NLO_BENCH_MAX_PATH
-#define NLO_BENCH_MAX_PATH 1024u
+#ifndef BENCH_MAX_PATH
+#define BENCH_MAX_PATH 1024u
 #endif
 
-#ifndef NLO_BENCH_NOTE_CAP
-#define NLO_BENCH_NOTE_CAP 256u
+#ifndef BENCH_NOTE_CAP
+#define BENCH_NOTE_CAP 256u
 #endif
 
-#ifndef NLO_BENCH_PI
-#define NLO_BENCH_PI 3.14159265358979323846
+#ifndef BENCH_PI
+#define BENCH_PI 3.14159265358979323846
 #endif
 
 typedef enum {
-    NLO_BENCH_SCENARIO_TEMPORAL = 0,
-    NLO_BENCH_SCENARIO_TENSOR3D_SCALING = 1
-} nlo_bench_scenario;
+    BENCH_SCENARIO_TEMPORAL = 0,
+    BENCH_SCENARIO_TENSOR3D_SCALING = 1
+} bench_scenario;
 
 typedef enum {
-    NLO_BENCH_BACKEND_CPU = 0,
-    NLO_BENCH_BACKEND_GPU = 1,
-    NLO_BENCH_BACKEND_BOTH = 2
-} nlo_bench_backend_request;
+    BENCH_BACKEND_CPU = 0,
+    BENCH_BACKEND_GPU = 1,
+    BENCH_BACKEND_BOTH = 2
+} bench_backend_request;
 
 typedef enum {
-    NLO_BENCH_RUNTIME_CPU = 0,
-    NLO_BENCH_RUNTIME_GPU = 1
-} nlo_bench_runtime_backend;
+    BENCH_RUNTIME_CPU = 0,
+    BENCH_RUNTIME_GPU = 1
+} bench_runtime_backend;
 
 typedef struct {
-    nlo_bench_scenario scenario;
-    nlo_bench_backend_request backend;
-    size_t sizes[NLO_BENCH_MAX_SIZES];
+    bench_scenario scenario;
+    bench_backend_request backend;
+    size_t sizes[BENCH_MAX_SIZES];
     size_t size_count;
-    size_t tensor_scales[NLO_BENCH_MAX_SIZES];
+    size_t tensor_scales[BENCH_MAX_SIZES];
     size_t tensor_scale_count;
     size_t warmup_runs;
     size_t measured_runs;
@@ -72,16 +72,16 @@ typedef struct {
     size_t planner_gpu_bytes;
     int dry_run;
     int csv_explicit;
-    char csv_path[NLO_BENCH_MAX_PATH];
-    char storage_dir[NLO_BENCH_MAX_PATH];
-} nlo_bench_options;
+    char csv_path[BENCH_MAX_PATH];
+    char storage_dir[BENCH_MAX_PATH];
+} bench_options;
 
 typedef struct {
     size_t sample_count;
     sim_config* config;
     nlo_complex* input_field;
     nlo_complex* output_field;
-} nlo_bench_case_data;
+} bench_case_data;
 
 typedef struct {
     double init_ms;
@@ -102,7 +102,7 @@ typedef struct {
     uint64_t gpu_download_count;
     uint64_t gpu_upload_bytes;
     uint64_t gpu_download_bytes;
-} nlo_bench_run_metrics;
+} bench_run_metrics;
 
 typedef struct {
     double mean_ms;
@@ -110,7 +110,7 @@ typedef struct {
     double min_ms;
     double max_ms;
     double stddev_ms;
-} nlo_bench_summary;
+} bench_summary;
 
 typedef struct {
 #if defined(_WIN32)
@@ -118,9 +118,9 @@ typedef struct {
 #else
     struct timespec value;
 #endif
-} nlo_bench_timestamp;
+} bench_timestamp;
 
-static void nlo_bench_copy_note(
+static void bench_copy_note(
     char* note,
     size_t note_capacity,
     const char* text
@@ -142,7 +142,7 @@ static void nlo_bench_copy_note(
 #endif
 }
 
-static int nlo_bench_string_equals_ci(const char* lhs, const char* rhs)
+static int bench_string_equals_ci(const char* lhs, const char* rhs)
 {
     if (lhs == NULL || rhs == NULL) {
         return 0;
@@ -169,7 +169,7 @@ static int nlo_bench_string_equals_ci(const char* lhs, const char* rhs)
     return (*lhs == '\0' && *rhs == '\0') ? 1 : 0;
 }
 
-static void nlo_bench_print_usage(const char* executable_name)
+static void bench_print_usage(const char* executable_name)
 {
     printf("Usage: %s [options]\n", executable_name);
     printf("Options:\n");
@@ -187,7 +187,7 @@ static void nlo_bench_print_usage(const char* executable_name)
     printf("  --help\n");
 }
 
-static void nlo_bench_set_default_options(nlo_bench_options* options)
+static void bench_set_default_options(bench_options* options)
 {
     static const size_t default_sizes[] = {1024u, 4096u, 16384u, 65536u};
     if (options == NULL) {
@@ -195,8 +195,8 @@ static void nlo_bench_set_default_options(nlo_bench_options* options)
     }
 
     memset(options, 0, sizeof(*options));
-    options->scenario = NLO_BENCH_SCENARIO_TEMPORAL;
-    options->backend = NLO_BENCH_BACKEND_BOTH;
+    options->scenario = BENCH_SCENARIO_TEMPORAL;
+    options->backend = BENCH_BACKEND_BOTH;
     options->warmup_runs = 2u;
     options->measured_runs = 8u;
 
@@ -213,7 +213,7 @@ static void nlo_bench_set_default_options(nlo_bench_options* options)
              "benchmarks/results/storage");
 }
 
-static int nlo_bench_parse_unsigned_size(const char* text, size_t* out_value)
+static int bench_parse_unsigned_size(const char* text, size_t* out_value)
 {
     if (text == NULL || out_value == NULL || *text == '\0') {
         return -1;
@@ -230,7 +230,7 @@ static int nlo_bench_parse_unsigned_size(const char* text, size_t* out_value)
     return 0;
 }
 
-static int nlo_bench_parse_size_values(
+static int bench_parse_size_values(
     const char* text,
     size_t* out_values,
     size_t max_values,
@@ -285,21 +285,21 @@ static int nlo_bench_parse_size_values(
     return 0;
 }
 
-static int nlo_bench_parse_options(
+static int bench_parse_options(
     int argc,
     char** argv,
-    nlo_bench_options* options
+    bench_options* options
 )
 {
     if (argv == NULL || options == NULL) {
         return -1;
     }
 
-    nlo_bench_set_default_options(options);
+    bench_set_default_options(options);
     for (int i = 1; i < argc; ++i) {
         const char* arg = argv[i];
         if (strcmp(arg, "--help") == 0) {
-            nlo_bench_print_usage(argv[0]);
+            bench_print_usage(argv[0]);
             return 1;
         }
         if (strcmp(arg, "--dry-run") == 0) {
@@ -309,12 +309,12 @@ static int nlo_bench_parse_options(
 
         if (strncmp(arg, "--scenario=", 11) == 0) {
             const char* value = arg + 11;
-            if (nlo_bench_string_equals_ci(value, "temporal")) {
-                options->scenario = NLO_BENCH_SCENARIO_TEMPORAL;
+            if (bench_string_equals_ci(value, "temporal")) {
+                options->scenario = BENCH_SCENARIO_TEMPORAL;
                 continue;
             }
-            if (nlo_bench_string_equals_ci(value, "tensor3d_scaling")) {
-                options->scenario = NLO_BENCH_SCENARIO_TENSOR3D_SCALING;
+            if (bench_string_equals_ci(value, "tensor3d_scaling")) {
+                options->scenario = BENCH_SCENARIO_TENSOR3D_SCALING;
                 continue;
             }
             fprintf(stderr, "Invalid scenario option: %s\n", value);
@@ -323,28 +323,28 @@ static int nlo_bench_parse_options(
 
         if (strncmp(arg, "--backend=", 10) == 0) {
             const char* value = arg + 10;
-            if (nlo_bench_string_equals_ci(value, "cpu")) {
-                options->backend = NLO_BENCH_BACKEND_CPU;
+            if (bench_string_equals_ci(value, "cpu")) {
+                options->backend = BENCH_BACKEND_CPU;
                 continue;
             }
-            if (nlo_bench_string_equals_ci(value, "gpu")) {
-                options->backend = NLO_BENCH_BACKEND_GPU;
+            if (bench_string_equals_ci(value, "gpu")) {
+                options->backend = BENCH_BACKEND_GPU;
                 continue;
             }
-            if (nlo_bench_string_equals_ci(value, "both")) {
-                options->backend = NLO_BENCH_BACKEND_BOTH;
+            if (bench_string_equals_ci(value, "both")) {
+                options->backend = BENCH_BACKEND_BOTH;
                 continue;
             }
 
             fprintf(stderr, "Invalid backend option: %s\n", value);
-            nlo_bench_print_usage(argv[0]);
+            bench_print_usage(argv[0]);
             return -1;
         }
 
         if (strncmp(arg, "--sizes=", 8) == 0) {
-            if (nlo_bench_parse_size_values(arg + 8,
+            if (bench_parse_size_values(arg + 8,
                                             options->sizes,
-                                            NLO_BENCH_MAX_SIZES,
+                                            BENCH_MAX_SIZES,
                                             &options->size_count) != 0) {
                 fprintf(stderr, "Invalid sizes list: %s\n", arg + 8);
                 return -1;
@@ -353,9 +353,9 @@ static int nlo_bench_parse_options(
         }
 
         if (strncmp(arg, "--tensor-scales=", 16) == 0) {
-            if (nlo_bench_parse_size_values(arg + 16,
+            if (bench_parse_size_values(arg + 16,
                                             options->tensor_scales,
-                                            NLO_BENCH_MAX_SIZES,
+                                            BENCH_MAX_SIZES,
                                             &options->tensor_scale_count) != 0) {
                 fprintf(stderr, "Invalid tensor scales list: %s\n", arg + 16);
                 return -1;
@@ -365,7 +365,7 @@ static int nlo_bench_parse_options(
 
         if (strncmp(arg, "--warmup=", 9) == 0) {
             size_t warmup_runs = 0u;
-            if (nlo_bench_parse_unsigned_size(arg + 9, &warmup_runs) != 0) {
+            if (bench_parse_unsigned_size(arg + 9, &warmup_runs) != 0) {
                 fprintf(stderr, "Invalid warmup count: %s\n", arg + 9);
                 return -1;
             }
@@ -375,7 +375,7 @@ static int nlo_bench_parse_options(
 
         if (strncmp(arg, "--runs=", 7) == 0) {
             size_t measured_runs = 0u;
-            if (nlo_bench_parse_unsigned_size(arg + 7, &measured_runs) != 0) {
+            if (bench_parse_unsigned_size(arg + 7, &measured_runs) != 0) {
                 fprintf(stderr, "Invalid measured run count: %s\n", arg + 7);
                 return -1;
             }
@@ -384,7 +384,7 @@ static int nlo_bench_parse_options(
         }
 
         if (strncmp(arg, "--planner-host-bytes=", 21) == 0) {
-            if (nlo_bench_parse_unsigned_size(arg + 21, &options->planner_host_bytes) != 0) {
+            if (bench_parse_unsigned_size(arg + 21, &options->planner_host_bytes) != 0) {
                 fprintf(stderr, "Invalid planner host bytes: %s\n", arg + 21);
                 return -1;
             }
@@ -392,7 +392,7 @@ static int nlo_bench_parse_options(
         }
 
         if (strncmp(arg, "--planner-gpu-bytes=", 20) == 0) {
-            if (nlo_bench_parse_unsigned_size(arg + 20, &options->planner_gpu_bytes) != 0) {
+            if (bench_parse_unsigned_size(arg + 20, &options->planner_gpu_bytes) != 0) {
                 fprintf(stderr, "Invalid planner gpu bytes: %s\n", arg + 20);
                 return -1;
             }
@@ -421,14 +421,14 @@ static int nlo_bench_parse_options(
         }
 
         fprintf(stderr, "Unknown option: %s\n", arg);
-        nlo_bench_print_usage(argv[0]);
+        bench_print_usage(argv[0]);
         return -1;
     }
 
     return 0;
 }
 
-static void nlo_bench_now(nlo_bench_timestamp* out_time)
+static void bench_now(bench_timestamp* out_time)
 {
     if (out_time == NULL) {
         return;
@@ -441,9 +441,9 @@ static void nlo_bench_now(nlo_bench_timestamp* out_time)
 #endif
 }
 
-static double nlo_bench_elapsed_ms(
-    const nlo_bench_timestamp* start_time,
-    const nlo_bench_timestamp* end_time
+static double bench_elapsed_ms(
+    const bench_timestamp* start_time,
+    const bench_timestamp* end_time
 )
 {
     if (start_time == NULL || end_time == NULL) {
@@ -468,12 +468,12 @@ static double nlo_bench_elapsed_ms(
 #endif
 }
 
-static const char* nlo_bench_backend_label(nlo_bench_runtime_backend backend)
+static const char* bench_backend_label(bench_runtime_backend backend)
 {
-    return (backend == NLO_BENCH_RUNTIME_CPU) ? "cpu" : "gpu";
+    return (backend == BENCH_RUNTIME_CPU) ? "cpu" : "gpu";
 }
 
-static int nlo_bench_file_exists(const char* path)
+static int bench_file_exists(const char* path)
 {
     if (path == NULL) {
         return 0;
@@ -488,7 +488,7 @@ static int nlo_bench_file_exists(const char* path)
     return 1;
 }
 
-static int nlo_bench_mkdir_single(const char* path)
+static int bench_mkdir_single(const char* path)
 {
     if (path == NULL || *path == '\0') {
         return 0;
@@ -506,13 +506,13 @@ static int nlo_bench_mkdir_single(const char* path)
     return -1;
 }
 
-static int nlo_bench_make_parent_dirs(const char* file_path)
+static int bench_make_parent_dirs(const char* file_path)
 {
     if (file_path == NULL || *file_path == '\0') {
         return -1;
     }
 
-    char buffer[NLO_BENCH_MAX_PATH];
+    char buffer[BENCH_MAX_PATH];
     snprintf(buffer, sizeof(buffer), "%s", file_path);
 
     char* last_slash = strrchr(buffer, '/');
@@ -546,17 +546,17 @@ static int nlo_bench_make_parent_dirs(const char* file_path)
 
         const char saved = buffer[i];
         buffer[i] = '\0';
-        if (nlo_bench_mkdir_single(buffer) != 0) {
+        if (bench_mkdir_single(buffer) != 0) {
             buffer[i] = saved;
             return -1;
         }
         buffer[i] = saved;
     }
 
-    return nlo_bench_mkdir_single(buffer);
+    return bench_mkdir_single(buffer);
 }
 
-static void nlo_bench_iso8601_utc(char* out_text, size_t out_capacity)
+static void bench_iso8601_utc(char* out_text, size_t out_capacity)
 {
     if (out_text == NULL || out_capacity == 0u) {
         return;
@@ -576,7 +576,7 @@ static void nlo_bench_iso8601_utc(char* out_text, size_t out_capacity)
     }
 }
 
-static void nlo_bench_sanitize_note(char* text)
+static void bench_sanitize_note(char* text)
 {
     if (text == NULL) {
         return;
@@ -589,7 +589,7 @@ static void nlo_bench_sanitize_note(char* text)
     }
 }
 
-static int nlo_bench_write_csv_header(FILE* csv_file)
+static int bench_write_csv_header(FILE* csv_file)
 {
     if (csv_file == NULL) {
         return -1;
@@ -607,14 +607,14 @@ static int nlo_bench_write_csv_header(FILE* csv_file)
     return fflush(csv_file);
 }
 
-static int nlo_bench_write_csv_row(
+static int bench_write_csv_row(
     FILE* csv_file,
     const char* backend_label,
     size_t size,
     size_t warmup_runs,
     size_t measured_runs,
     size_t run_index,
-    const nlo_bench_run_metrics* metrics,
+    const bench_run_metrics* metrics,
     const char* status,
     const char* notes
 )
@@ -624,11 +624,11 @@ static int nlo_bench_write_csv_row(
     }
 
     char timestamp_utc[32];
-    nlo_bench_iso8601_utc(timestamp_utc, sizeof(timestamp_utc));
+    bench_iso8601_utc(timestamp_utc, sizeof(timestamp_utc));
 
-    char note_buffer[NLO_BENCH_NOTE_CAP];
-    nlo_bench_copy_note(note_buffer, sizeof(note_buffer), (notes == NULL) ? "" : notes);
-    nlo_bench_sanitize_note(note_buffer);
+    char note_buffer[BENCH_NOTE_CAP];
+    bench_copy_note(note_buffer, sizeof(note_buffer), (notes == NULL) ? "" : notes);
+    bench_sanitize_note(note_buffer);
 
     const int written = fprintf(csv_file,
                                 "%s,%s,%zu,%zu,%zu,%zu,"
@@ -666,15 +666,15 @@ static int nlo_bench_write_csv_row(
     return fflush(csv_file);
 }
 
-static int nlo_bench_prepare_case_data(
+static int bench_prepare_case_data(
     size_t sample_count,
-    nlo_bench_case_data* out_case_data,
+    bench_case_data* out_case_data,
     char* note,
     size_t note_capacity
 )
 {
     if (sample_count == 0u || out_case_data == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "Invalid benchmark case configuration.");
+        bench_copy_note(note, note_capacity, "Invalid benchmark case configuration.");
         return -1;
     }
 
@@ -682,14 +682,14 @@ static int nlo_bench_prepare_case_data(
     out_case_data->sample_count = sample_count;
     out_case_data->config = create_sim_config(sample_count);
     if (out_case_data->config == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "Failed to allocate sim_config.");
+        bench_copy_note(note, note_capacity, "Failed to allocate sim_config.");
         return -1;
     }
 
     out_case_data->input_field = (nlo_complex*)calloc(sample_count, sizeof(nlo_complex));
     out_case_data->output_field = (nlo_complex*)calloc(sample_count, sizeof(nlo_complex));
     if (out_case_data->input_field == NULL || out_case_data->output_field == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "Failed to allocate benchmark input/output buffers.");
+        bench_copy_note(note, note_capacity, "Failed to allocate benchmark input/output buffers.");
         free(out_case_data->input_field);
         free(out_case_data->output_field);
         out_case_data->input_field = NULL;
@@ -718,8 +718,8 @@ static int nlo_bench_prepare_case_data(
         const long centered = (i <= sample_count / 2u)
                                   ? (long)i
                                   : (long)i - (long)sample_count;
-        const double omega = (2.0 * NLO_BENCH_PI * (double)centered) / (double)sample_count;
-        config->frequency.frequency_grid[i] = nlo_make(omega, 0.0);
+        const double omega = (2.0 * BENCH_PI * (double)centered) / (double)sample_count;
+        config->frequency.frequency_grid[i] = make(omega, 0.0);
     }
 
     const double half_span = 0.5 * (double)(sample_count - 1u);
@@ -727,14 +727,14 @@ static int nlo_bench_prepare_case_data(
         const double t = ((double)i - half_span) * config->time.delta_time;
         const double envelope = exp(-(t * t) / 0.02);
         const double phase = 4.0 * t * t;
-        out_case_data->input_field[i] = nlo_make(envelope * cos(phase), envelope * sin(phase));
+        out_case_data->input_field[i] = make(envelope * cos(phase), envelope * sin(phase));
     }
 
-    nlo_bench_copy_note(note, note_capacity, "");
+    bench_copy_note(note, note_capacity, "");
     return 0;
 }
 
-static void nlo_bench_destroy_case_data(nlo_bench_case_data* case_data)
+static void bench_destroy_case_data(bench_case_data* case_data)
 {
     if (case_data == NULL) {
         return;
@@ -750,16 +750,16 @@ static void nlo_bench_destroy_case_data(nlo_bench_case_data* case_data)
     case_data->output_field = NULL;
 }
 
-static int nlo_bench_execute_single_run(
-    const nlo_execution_options* exec_options,
-    const nlo_bench_case_data* case_data,
-    nlo_bench_run_metrics* out_metrics,
+static int bench_execute_single_run(
+    const execution_options* exec_options,
+    const bench_case_data* case_data,
+    bench_run_metrics* out_metrics,
     char* note,
     size_t note_capacity
 )
 {
     if (exec_options == NULL || case_data == NULL || out_metrics == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "Invalid run arguments.");
+        bench_copy_note(note, note_capacity, "Invalid run arguments.");
         return -1;
     }
 
@@ -767,87 +767,87 @@ static int nlo_bench_execute_single_run(
         case_data->input_field == NULL ||
         case_data->output_field == NULL ||
         case_data->sample_count == 0u) {
-        nlo_bench_copy_note(note, note_capacity, "Benchmark run data is uninitialized.");
+        bench_copy_note(note, note_capacity, "Benchmark run data is uninitialized.");
         return -1;
     }
 
     memset(out_metrics, 0, sizeof(*out_metrics));
 
     simulation_state* state = NULL;
-    nlo_bench_timestamp total_start;
-    nlo_bench_timestamp total_end;
-    nlo_bench_timestamp phase_start;
-    nlo_bench_timestamp phase_end;
+    bench_timestamp total_start;
+    bench_timestamp total_end;
+    bench_timestamp phase_start;
+    bench_timestamp phase_end;
 
-    nlo_perf_profile_set_enabled(1);
-    nlo_perf_profile_reset();
+    perf_profile_set_enabled(1);
+    perf_profile_reset();
 
-    nlo_bench_now(&total_start);
+    bench_now(&total_start);
 
-    nlo_bench_now(&phase_start);
-    if (nlo_init_simulation_state(case_data->config,
+    bench_now(&phase_start);
+    if (init_simulation_state(case_data->config,
                                   case_data->sample_count,
                                   1u,
                                   exec_options,
                                   NULL,
                                   &state) != 0 || state == NULL) {
-        nlo_bench_copy_note(note, note_capacity, "State initialization failed.");
-        nlo_perf_profile_set_enabled(0);
+        bench_copy_note(note, note_capacity, "State initialization failed.");
+        perf_profile_set_enabled(0);
         return -1;
     }
-    nlo_bench_now(&phase_end);
-    out_metrics->init_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_end);
+    out_metrics->init_ms = bench_elapsed_ms(&phase_start, &phase_end);
 
-    nlo_bench_now(&phase_start);
-    nlo_vec_status upload_status = simulation_state_upload_initial_field(state, case_data->input_field);
-    nlo_bench_now(&phase_end);
-    out_metrics->upload_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
-    if (upload_status != NLO_VEC_STATUS_OK) {
-        nlo_bench_now(&phase_start);
+    bench_now(&phase_start);
+    vec_status upload_status = simulation_state_upload_initial_field(state, case_data->input_field);
+    bench_now(&phase_end);
+    out_metrics->upload_ms = bench_elapsed_ms(&phase_start, &phase_end);
+    if (upload_status != VEC_STATUS_OK) {
+        bench_now(&phase_start);
         free_simulation_state(state);
-        nlo_bench_now(&phase_end);
-        out_metrics->teardown_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
-        nlo_bench_now(&total_end);
-        out_metrics->total_ms = nlo_bench_elapsed_ms(&total_start, &total_end);
+        bench_now(&phase_end);
+        out_metrics->teardown_ms = bench_elapsed_ms(&phase_start, &phase_end);
+        bench_now(&total_end);
+        out_metrics->total_ms = bench_elapsed_ms(&total_start, &total_end);
         snprintf(note,
                  note_capacity,
                  "Initial field upload failed (status=%d).",
                  (int)upload_status);
-        nlo_perf_profile_set_enabled(0);
+        perf_profile_set_enabled(0);
         return -1;
     }
 
-    nlo_bench_now(&phase_start);
+    bench_now(&phase_start);
     solve_rk4(state);
-    nlo_bench_now(&phase_end);
-    out_metrics->solve_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_end);
+    out_metrics->solve_ms = bench_elapsed_ms(&phase_start, &phase_end);
 
-    nlo_bench_now(&phase_start);
-    nlo_vec_status download_status = simulation_state_download_current_field(state, case_data->output_field);
-    nlo_bench_now(&phase_end);
-    out_metrics->download_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
-    if (download_status != NLO_VEC_STATUS_OK) {
-        nlo_bench_now(&phase_start);
+    bench_now(&phase_start);
+    vec_status download_status = simulation_state_download_current_field(state, case_data->output_field);
+    bench_now(&phase_end);
+    out_metrics->download_ms = bench_elapsed_ms(&phase_start, &phase_end);
+    if (download_status != VEC_STATUS_OK) {
+        bench_now(&phase_start);
         free_simulation_state(state);
-        nlo_bench_now(&phase_end);
-        out_metrics->teardown_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
-        nlo_bench_now(&total_end);
-        out_metrics->total_ms = nlo_bench_elapsed_ms(&total_start, &total_end);
+        bench_now(&phase_end);
+        out_metrics->teardown_ms = bench_elapsed_ms(&phase_start, &phase_end);
+        bench_now(&total_end);
+        out_metrics->total_ms = bench_elapsed_ms(&total_start, &total_end);
         snprintf(note,
                  note_capacity,
                  "Current field download failed (status=%d).",
                  (int)download_status);
-        nlo_perf_profile_set_enabled(0);
+        perf_profile_set_enabled(0);
         return -1;
     }
 
-    nlo_bench_now(&phase_start);
+    bench_now(&phase_start);
     free_simulation_state(state);
-    nlo_bench_now(&phase_end);
-    out_metrics->teardown_ms = nlo_bench_elapsed_ms(&phase_start, &phase_end);
+    bench_now(&phase_end);
+    out_metrics->teardown_ms = bench_elapsed_ms(&phase_start, &phase_end);
 
-    nlo_bench_now(&total_end);
-    out_metrics->total_ms = nlo_bench_elapsed_ms(&total_start, &total_end);
+    bench_now(&total_end);
+    out_metrics->total_ms = bench_elapsed_ms(&total_start, &total_end);
 
     if (out_metrics->total_ms > 0.0) {
         out_metrics->samples_per_sec = ((double)case_data->sample_count * 1000.0) / out_metrics->total_ms;
@@ -855,8 +855,8 @@ static int nlo_bench_execute_single_run(
         out_metrics->samples_per_sec = 0.0;
     }
 
-    nlo_perf_profile_snapshot snapshot;
-    nlo_perf_profile_snapshot_read(&snapshot);
+    perf_profile_snapshot snapshot;
+    perf_profile_snapshot_read(&snapshot);
     out_metrics->dispersion_ms = snapshot.dispersion_ms;
     out_metrics->nonlinear_ms = snapshot.nonlinear_ms;
     out_metrics->gpu_dispatch_count = snapshot.gpu_dispatch_count;
@@ -867,13 +867,13 @@ static int nlo_bench_execute_single_run(
     out_metrics->gpu_download_count = snapshot.gpu_download_count;
     out_metrics->gpu_upload_bytes = snapshot.gpu_upload_bytes;
     out_metrics->gpu_download_bytes = snapshot.gpu_download_bytes;
-    nlo_perf_profile_set_enabled(0);
+    perf_profile_set_enabled(0);
 
-    nlo_bench_copy_note(note, note_capacity, "");
+    bench_copy_note(note, note_capacity, "");
     return 0;
 }
 
-static int nlo_bench_double_compare(const void* lhs, const void* rhs)
+static int bench_double_compare(const void* lhs, const void* rhs)
 {
     const double left = *(const double*)lhs;
     const double right = *(const double*)rhs;
@@ -886,10 +886,10 @@ static int nlo_bench_double_compare(const void* lhs, const void* rhs)
     return 0;
 }
 
-static int nlo_bench_compute_summary(
+static int bench_compute_summary(
     const double* values,
     size_t count,
-    nlo_bench_summary* out_summary
+    bench_summary* out_summary
 )
 {
     if (values == NULL || count == 0u || out_summary == NULL) {
@@ -925,7 +925,7 @@ static int nlo_bench_compute_summary(
         return -1;
     }
     memcpy(sorted, values, count * sizeof(double));
-    qsort(sorted, count, sizeof(double), nlo_bench_double_compare);
+    qsort(sorted, count, sizeof(double), bench_double_compare);
 
     if ((count % 2u) == 0u) {
         out_summary->median_ms = 0.5 * (sorted[count / 2u - 1u] + sorted[count / 2u]);
@@ -937,13 +937,13 @@ static int nlo_bench_compute_summary(
     return 0;
 }
 
-static int nlo_bench_run_backend_case(
-    nlo_bench_runtime_backend backend,
-    const nlo_bench_options* options,
+static int bench_run_backend_case(
+    bench_runtime_backend backend,
+    const bench_options* options,
     size_t sample_count,
     FILE* csv_file,
     const char* skip_reason,
-    const nlo_bench_vk_context* vk_context,
+    const bench_vk_context* vk_context,
     int* out_error_count
 )
 {
@@ -951,12 +951,12 @@ static int nlo_bench_run_backend_case(
         return -1;
     }
 
-    const char* backend_label = nlo_bench_backend_label(backend);
-    nlo_bench_run_metrics empty_metrics = {0};
+    const char* backend_label = bench_backend_label(backend);
+    bench_run_metrics empty_metrics = {0};
 
     if (skip_reason != NULL && *skip_reason != '\0') {
         printf("  %-3s skipped: %s\n", backend_label, skip_reason);
-        if (nlo_bench_write_csv_row(csv_file,
+        if (bench_write_csv_row(csv_file,
                                     backend_label,
                                     sample_count,
                                     options->warmup_runs,
@@ -971,14 +971,14 @@ static int nlo_bench_run_backend_case(
         return 0;
     }
 
-    nlo_bench_case_data case_data;
-    char note[NLO_BENCH_NOTE_CAP];
-    if (nlo_bench_prepare_case_data(sample_count,
+    bench_case_data case_data;
+    char note[BENCH_NOTE_CAP];
+    if (bench_prepare_case_data(sample_count,
                                     &case_data,
                                     note,
                                     sizeof(note)) != 0) {
         printf("  %-3s error: %s\n", backend_label, note);
-        if (nlo_bench_write_csv_row(csv_file,
+        if (bench_write_csv_row(csv_file,
                                     backend_label,
                                     sample_count,
                                     options->warmup_runs,
@@ -993,14 +993,14 @@ static int nlo_bench_run_backend_case(
         return -1;
     }
 
-    nlo_execution_options exec_options;
-    if (backend == NLO_BENCH_RUNTIME_CPU) {
-        exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    execution_options exec_options;
+    if (backend == BENCH_RUNTIME_CPU) {
+        exec_options = execution_options_default(VECTOR_BACKEND_CPU);
     } else {
         if (vk_context == NULL) {
-            nlo_bench_destroy_case_data(&case_data);
-            nlo_bench_copy_note(note, sizeof(note), "Missing Vulkan context.");
-            if (nlo_bench_write_csv_row(csv_file,
+            bench_destroy_case_data(&case_data);
+            bench_copy_note(note, sizeof(note), "Missing Vulkan context.");
+            if (bench_write_csv_row(csv_file,
                                         backend_label,
                                         sample_count,
                                         options->warmup_runs,
@@ -1015,7 +1015,7 @@ static int nlo_bench_run_backend_case(
             return -1;
         }
 
-        exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_VULKAN);
+        exec_options = execution_options_default(VECTOR_BACKEND_VULKAN);
         exec_options.vulkan.physical_device = vk_context->physical_device;
         exec_options.vulkan.device = vk_context->device;
         exec_options.vulkan.queue = vk_context->queue;
@@ -1029,8 +1029,8 @@ static int nlo_bench_run_backend_case(
     double* measured_dispersion = (double*)calloc(options->measured_runs, sizeof(double));
     double* measured_nonlinear = (double*)calloc(options->measured_runs, sizeof(double));
     if (measured_totals == NULL) {
-        nlo_bench_destroy_case_data(&case_data);
-        nlo_bench_copy_note(note, sizeof(note), "Failed to allocate measurement buffer.");
+        bench_destroy_case_data(&case_data);
+        bench_copy_note(note, sizeof(note), "Failed to allocate measurement buffer.");
         *out_error_count += 1;
         return -1;
     }
@@ -1039,8 +1039,8 @@ static int nlo_bench_run_backend_case(
         free(measured_solve);
         free(measured_dispersion);
         free(measured_nonlinear);
-        nlo_bench_destroy_case_data(&case_data);
-        nlo_bench_copy_note(note, sizeof(note), "Failed to allocate measurement buffer.");
+        bench_destroy_case_data(&case_data);
+        bench_copy_note(note, sizeof(note), "Failed to allocate measurement buffer.");
         *out_error_count += 1;
         return -1;
     }
@@ -1057,16 +1057,16 @@ static int nlo_bench_run_backend_case(
     uint64_t sum_gpu_upload_bytes = 0u;
     uint64_t sum_gpu_download_bytes = 0u;
     for (size_t run = 0u; run < total_runs; ++run) {
-        nlo_bench_run_metrics metrics;
-        if (nlo_bench_execute_single_run(&exec_options,
+        bench_run_metrics metrics;
+        if (bench_execute_single_run(&exec_options,
                                          &case_data,
                                          &metrics,
                                          note,
                                          sizeof(note)) != 0) {
-            if (backend == NLO_BENCH_RUNTIME_GPU && recorded == 0u) {
+            if (backend == BENCH_RUNTIME_GPU && recorded == 0u) {
                 skipped_backend = true;
                 printf("  %-3s skipped: %s\n", backend_label, note);
-                if (nlo_bench_write_csv_row(csv_file,
+                if (bench_write_csv_row(csv_file,
                                             backend_label,
                                             sample_count,
                                             options->warmup_runs,
@@ -1082,7 +1082,7 @@ static int nlo_bench_run_backend_case(
                 had_error = true;
                 *out_error_count += 1;
                 printf("  %-3s error: %s\n", backend_label, note);
-                if (nlo_bench_write_csv_row(csv_file,
+                if (bench_write_csv_row(csv_file,
                                             backend_label,
                                             sample_count,
                                             options->warmup_runs,
@@ -1116,7 +1116,7 @@ static int nlo_bench_run_backend_case(
         sum_gpu_download_bytes += metrics.gpu_download_bytes;
         recorded += 1u;
 
-        if (nlo_bench_write_csv_row(csv_file,
+        if (bench_write_csv_row(csv_file,
                                     backend_label,
                                     sample_count,
                                     options->warmup_runs,
@@ -1132,14 +1132,14 @@ static int nlo_bench_run_backend_case(
     }
 
     if (!had_error && recorded > 0u) {
-        nlo_bench_summary total_summary;
-        nlo_bench_summary solve_summary;
-        nlo_bench_summary dispersion_summary;
-        nlo_bench_summary nonlinear_summary;
-        if (nlo_bench_compute_summary(measured_totals, recorded, &total_summary) == 0 &&
-            nlo_bench_compute_summary(measured_solve, recorded, &solve_summary) == 0 &&
-            nlo_bench_compute_summary(measured_dispersion, recorded, &dispersion_summary) == 0 &&
-            nlo_bench_compute_summary(measured_nonlinear, recorded, &nonlinear_summary) == 0) {
+        bench_summary total_summary;
+        bench_summary solve_summary;
+        bench_summary dispersion_summary;
+        bench_summary nonlinear_summary;
+        if (bench_compute_summary(measured_totals, recorded, &total_summary) == 0 &&
+            bench_compute_summary(measured_solve, recorded, &solve_summary) == 0 &&
+            bench_compute_summary(measured_dispersion, recorded, &dispersion_summary) == 0 &&
+            bench_compute_summary(measured_nonlinear, recorded, &nonlinear_summary) == 0) {
             const double solve_ms = solve_summary.mean_ms;
             const double total_ms = total_summary.mean_ms;
             const double dispersion_share_solve = (solve_ms > 0.0)
@@ -1168,7 +1168,7 @@ static int nlo_bench_run_backend_case(
             printf("      phase impact: dispersion+nonlinear = %.1f%% of total runtime\n",
                    phase_share_total);
 
-            if (backend == NLO_BENCH_RUNTIME_GPU) {
+            if (backend == BENCH_RUNTIME_GPU) {
                 const double run_count = (double)recorded;
                 const double mean_dispatch_count = (double)sum_gpu_dispatch_count / run_count;
                 const double mean_copy_count = (double)sum_gpu_copy_count / run_count;
@@ -1211,18 +1211,18 @@ static int nlo_bench_run_backend_case(
     free(measured_solve);
     free(measured_dispersion);
     free(measured_nonlinear);
-    nlo_bench_destroy_case_data(&case_data);
+    bench_destroy_case_data(&case_data);
     return had_error ? -1 : 0;
 }
 
 int main(int argc, char** argv)
 {
-    nlo_bench_options options;
-    const int parse_status = nlo_bench_parse_options(argc, argv, &options);
+    bench_options options;
+    const int parse_status = bench_parse_options(argc, argv, &options);
     int error_count = 0;
     bool gpu_available = false;
-    char gpu_skip_reason[NLO_BENCH_NOTE_CAP];
-    nlo_bench_vk_context vk_context;
+    char gpu_skip_reason[BENCH_NOTE_CAP];
+    bench_vk_context vk_context;
 
     if (parse_status > 0) {
         return 0;
@@ -1231,7 +1231,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (options.scenario == NLO_BENCH_SCENARIO_TENSOR3D_SCALING && !options.csv_explicit) {
+    if (options.scenario == BENCH_SCENARIO_TENSOR3D_SCALING && !options.csv_explicit) {
         snprintf(options.csv_path,
                  sizeof(options.csv_path),
                  "benchmarks/results/tensor_backend_scaling.csv");
@@ -1239,28 +1239,28 @@ int main(int argc, char** argv)
 
     printf("Benchmark configuration:\n");
     printf("  scenario: %s\n",
-           (options.scenario == NLO_BENCH_SCENARIO_TENSOR3D_SCALING)
+           (options.scenario == BENCH_SCENARIO_TENSOR3D_SCALING)
                ? "tensor3d_scaling"
                : "temporal");
     printf("  backend: %s\n",
-           (options.backend == NLO_BENCH_BACKEND_CPU) ? "cpu" :
-           (options.backend == NLO_BENCH_BACKEND_GPU) ? "gpu" : "both");
+           (options.backend == BENCH_BACKEND_CPU) ? "cpu" :
+           (options.backend == BENCH_BACKEND_GPU) ? "gpu" : "both");
     printf("  warmup runs: %zu\n", options.warmup_runs);
     printf("  measured runs: %zu\n", options.measured_runs);
     printf("  csv: %s\n", options.csv_path);
     printf("  storage_dir: %s\n", options.storage_dir);
     printf("  dry_run: %s\n", options.dry_run ? "true" : "false");
 
-    const bool run_cpu = (options.backend == NLO_BENCH_BACKEND_CPU ||
-                          options.backend == NLO_BENCH_BACKEND_BOTH);
-    const bool run_gpu = (options.backend == NLO_BENCH_BACKEND_GPU ||
-                          options.backend == NLO_BENCH_BACKEND_BOTH);
+    const bool run_cpu = (options.backend == BENCH_BACKEND_CPU ||
+                          options.backend == BENCH_BACKEND_BOTH);
+    const bool run_gpu = (options.backend == BENCH_BACKEND_GPU ||
+                          options.backend == BENCH_BACKEND_BOTH);
 
-    nlo_bench_copy_note(gpu_skip_reason, sizeof(gpu_skip_reason), "");
+    bench_copy_note(gpu_skip_reason, sizeof(gpu_skip_reason), "");
     memset(&vk_context, 0, sizeof(vk_context));
 
     if (run_gpu) {
-        if (nlo_bench_vk_context_init(&vk_context,
+        if (bench_vk_context_init(&vk_context,
                                       gpu_skip_reason,
                                       sizeof(gpu_skip_reason)) == 0) {
             gpu_available = true;
@@ -1269,8 +1269,8 @@ int main(int argc, char** argv)
         }
     }
 
-    if (options.scenario == NLO_BENCH_SCENARIO_TENSOR3D_SCALING) {
-        nlo_bench_tensor_options tensor_options;
+    if (options.scenario == BENCH_SCENARIO_TENSOR3D_SCALING) {
+        bench_tensor_options tensor_options;
         memset(&tensor_options, 0, sizeof(tensor_options));
         tensor_options.backend_request = (int)options.backend;
         tensor_options.warmup_runs = options.warmup_runs;
@@ -1283,42 +1283,42 @@ int main(int argc, char** argv)
         tensor_options.csv_path = options.csv_path;
         tensor_options.storage_dir = options.storage_dir;
 
-        (void)nlo_bench_run_tensor_scaling(&tensor_options,
+        (void)bench_run_tensor_scaling(&tensor_options,
                                            gpu_available ? &vk_context : NULL,
                                            gpu_available,
                                            gpu_skip_reason,
                                            &error_count);
 
         if (run_gpu && gpu_available) {
-            nlo_bench_vk_context_destroy(&vk_context);
+            bench_vk_context_destroy(&vk_context);
         }
 
         printf("\nBenchmark completed with %d error(s).\n", error_count);
         return (error_count == 0) ? 0 : 1;
     }
 
-    if (nlo_bench_make_parent_dirs(options.csv_path) != 0) {
+    if (bench_make_parent_dirs(options.csv_path) != 0) {
         fprintf(stderr, "Failed to create parent directories for CSV output: %s\n", options.csv_path);
         if (run_gpu && gpu_available) {
-            nlo_bench_vk_context_destroy(&vk_context);
+            bench_vk_context_destroy(&vk_context);
         }
         return 1;
     }
 
-    const int csv_exists = nlo_bench_file_exists(options.csv_path);
+    const int csv_exists = bench_file_exists(options.csv_path);
     FILE* csv_file = fopen(options.csv_path, "a");
     if (csv_file == NULL) {
         fprintf(stderr, "Failed to open CSV output path: %s\n", options.csv_path);
         if (run_gpu && gpu_available) {
-            nlo_bench_vk_context_destroy(&vk_context);
+            bench_vk_context_destroy(&vk_context);
         }
         return 1;
     }
 
-    if (!csv_exists && nlo_bench_write_csv_header(csv_file) != 0) {
+    if (!csv_exists && bench_write_csv_header(csv_file) != 0) {
         fclose(csv_file);
         if (run_gpu && gpu_available) {
-            nlo_bench_vk_context_destroy(&vk_context);
+            bench_vk_context_destroy(&vk_context);
         }
         fprintf(stderr, "Failed to write CSV header.\n");
         return 1;
@@ -1329,7 +1329,7 @@ int main(int argc, char** argv)
         printf("\nSize %zu samples\n", sample_count);
 
         if (run_cpu) {
-            (void)nlo_bench_run_backend_case(NLO_BENCH_RUNTIME_CPU,
+            (void)bench_run_backend_case(BENCH_RUNTIME_CPU,
                                              &options,
                                              sample_count,
                                              csv_file,
@@ -1340,7 +1340,7 @@ int main(int argc, char** argv)
 
         if (run_gpu) {
             if (!gpu_available) {
-                (void)nlo_bench_run_backend_case(NLO_BENCH_RUNTIME_GPU,
+                (void)bench_run_backend_case(BENCH_RUNTIME_GPU,
                                                  &options,
                                                  sample_count,
                                                  csv_file,
@@ -1348,7 +1348,7 @@ int main(int argc, char** argv)
                                                  NULL,
                                                  &error_count);
             } else {
-                (void)nlo_bench_run_backend_case(NLO_BENCH_RUNTIME_GPU,
+                (void)bench_run_backend_case(BENCH_RUNTIME_GPU,
                                                  &options,
                                                  sample_count,
                                                  csv_file,
@@ -1360,7 +1360,7 @@ int main(int argc, char** argv)
     }
 
     if (run_gpu && gpu_available) {
-        nlo_bench_vk_context_destroy(&vk_context);
+        bench_vk_context_destroy(&vk_context);
     }
 
     fclose(csv_file);

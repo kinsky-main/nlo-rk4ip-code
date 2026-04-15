@@ -19,7 +19,7 @@ typedef struct {
     VkQueue queue;
     uint32_t queue_family_index;
     VkCommandPool command_pool;
-} nlo_bench_vk_context;
+} bench_vk_context;
 
 /**
  * @brief Create a minimal Vulkan context for compute benchmarks.
@@ -29,18 +29,18 @@ typedef struct {
  * @param reason_capacity Size of reason buffer.
  * @return int 0 on success, non-zero on failure.
  */
-int nlo_bench_vk_context_init(
-    nlo_bench_vk_context* context,
+int bench_vk_context_init(
+    bench_vk_context* context,
     char* reason,
     size_t reason_capacity
 );
 
 /**
- * @brief Destroy all Vulkan resources created by nlo_bench_vk_context_init.
+ * @brief Destroy all Vulkan resources created by bench_vk_context_init.
  *
  * @param context Context to destroy.
  */
-void nlo_bench_vk_context_destroy(nlo_bench_vk_context* context);
+void bench_vk_context_destroy(bench_vk_context* context);
 
 #ifdef __cplusplus
 }

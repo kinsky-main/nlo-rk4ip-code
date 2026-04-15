@@ -24,4 +24,4 @@
  * @param n Non-negative integer argument.
  * @return size_t Factorial value `n!`.
  */
-size_t nlo_real_factorial(size_t n);
+size_t real_factorial(size_t n);

@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
-from ._binding import NLO_NONLINEAR_MODEL_EXPR, NLO_TENSOR_LAYOUT_XYT_T_FAST
+from ._binding import NONLINEAR_MODEL_EXPR, TENSOR_LAYOUT_XYT_T_FAST
 
 
 @dataclass
@@ -24,7 +24,7 @@ class RuntimeOperators:
     dispersion_factor_fn: Callable[..., object] | None = None
     dispersion_fn: Callable[..., object] | None = None
     nonlinear_fn: Callable[..., object] | None = None
-    nonlinear_model: int = NLO_NONLINEAR_MODEL_EXPR
+    nonlinear_model: int = NONLINEAR_MODEL_EXPR
     nonlinear_gamma: float = 0.0
     raman_fraction: float = 0.0
     raman_tau1: float = 0.0122
@@ -45,7 +45,7 @@ class PulseSpec:
     tensor_nt: int | None = None
     tensor_nx: int | None = None
     tensor_ny: int | None = None
-    tensor_layout: int = NLO_TENSOR_LAYOUT_XYT_T_FAST
+    tensor_layout: int = TENSOR_LAYOUT_XYT_T_FAST
     delta_x: float = 1.0
     delta_y: float = 1.0
     spatial_frequency_grid: Sequence[complex] | None = None

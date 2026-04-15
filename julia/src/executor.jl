@@ -46,7 +46,7 @@ function _build_low_level_result(request::NormalizedPropagateRequest,
         "records_written" => written,
         "storage_enabled" => request.sqlite_path !== nothing,
         "records_returned" => written > 0,
-        "backend_requested" => request.exec_options === nothing ? Int(NLO_VECTOR_BACKEND_AUTO) : Int(request.exec_options.backend_type),
+        "backend_requested" => request.exec_options === nothing ? Int(VECTOR_BACKEND_AUTO) : Int(request.exec_options.backend_type),
         "coupled" => Bool(Int(request.sim_cfg.spatial.nx) > 1 || Int(request.sim_cfg.spatial.ny) > 1),
         "status" => Int(status),
         "message" => status == NLOLIB_STATUS_ABORTED ? "propagate aborted by progress callback" : "propagate completed",
@@ -99,7 +99,7 @@ function execute(request::NormalizedPropagateRequest)
 
     options = PropagateOptions(
         Csize_t(request.num_records),
-        request.num_records == 1 ? NLO_PROPAGATE_OUTPUT_FINAL_ONLY : NLO_PROPAGATE_OUTPUT_DENSE,
+        request.num_records == 1 ? PROPAGATE_OUTPUT_FINAL_ONLY : PROPAGATE_OUTPUT_DENSE,
         Cint(request.return_records),
         exec_ref === nothing ? C_NULL : Base.unsafe_convert(Ptr{ExecutionOptions}, exec_ref),
         storage_ref === nothing ? C_NULL : Base.unsafe_convert(Ptr{StorageOptions}, storage_ref),

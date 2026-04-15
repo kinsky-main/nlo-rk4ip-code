@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void nlo_vk_auto_copy_reason(
+static void vk_auto_copy_reason(
     char* reason,
     size_t reason_capacity,
     const char* message
@@ -31,7 +31,7 @@ static void nlo_vk_auto_copy_reason(
 #endif
 }
 
-static void nlo_vk_auto_reset_context(nlo_vk_auto_context* context)
+static void vk_auto_reset_context(vk_auto_context* context)
 {
     if (context == NULL) {
         return;
@@ -40,7 +40,7 @@ static void nlo_vk_auto_reset_context(nlo_vk_auto_context* context)
     memset(context, 0, sizeof(*context));
 }
 
-static uint64_t nlo_vk_auto_device_local_bytes(VkPhysicalDevice physical_device)
+static uint64_t vk_auto_device_local_bytes(VkPhysicalDevice physical_device)
 {
     if (physical_device == VK_NULL_HANDLE) {
         return 0u;
@@ -59,7 +59,7 @@ static uint64_t nlo_vk_auto_device_local_bytes(VkPhysicalDevice physical_device)
     return total;
 }
 
-static int nlo_vk_auto_find_compute_queue_family(
+static int vk_auto_find_compute_queue_family(
     VkPhysicalDevice physical_device,
     uint32_t* out_queue_family_index
 )
@@ -102,11 +102,11 @@ typedef struct {
     VkPhysicalDeviceType device_type;
     uint64_t device_local_bytes;
     char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
-} nlo_vk_device_candidate;
+} vk_device_candidate;
 
-static int nlo_vk_auto_candidate_is_better(
-    const nlo_vk_device_candidate* candidate,
-    const nlo_vk_device_candidate* best,
+static int vk_auto_candidate_is_better(
+    const vk_device_candidate* candidate,
+    const vk_device_candidate* best,
     int has_best
 )
 {
@@ -132,9 +132,9 @@ static int nlo_vk_auto_candidate_is_better(
     return 0;
 }
 
-static int nlo_vk_auto_select_device(
+static int vk_auto_select_device(
     VkInstance instance,
-    nlo_vk_device_candidate* out_candidate
+    vk_device_candidate* out_candidate
 )
 {
     if (instance == VK_NULL_HANDLE || out_candidate == NULL) {
@@ -159,7 +159,7 @@ static int nlo_vk_auto_select_device(
         return -1;
     }
 
-    nlo_vk_device_candidate best = {0};
+    vk_device_candidate best = {0};
     int has_best = 0;
     for (uint32_t i = 0u; i < device_count; ++i) {
         VkPhysicalDeviceFeatures features = {0};
@@ -169,18 +169,18 @@ static int nlo_vk_auto_select_device(
         }
 
         uint32_t queue_family_index = 0u;
-        if (nlo_vk_auto_find_compute_queue_family(devices[i], &queue_family_index) != 0) {
+        if (vk_auto_find_compute_queue_family(devices[i], &queue_family_index) != 0) {
             continue;
         }
 
         VkPhysicalDeviceProperties properties = {0};
         vkGetPhysicalDeviceProperties(devices[i], &properties);
 
-        nlo_vk_device_candidate candidate = {0};
+        vk_device_candidate candidate = {0};
         candidate.physical_device = devices[i];
         candidate.queue_family_index = queue_family_index;
         candidate.device_type = properties.deviceType;
-        candidate.device_local_bytes = nlo_vk_auto_device_local_bytes(devices[i]);
+        candidate.device_local_bytes = vk_auto_device_local_bytes(devices[i]);
 #if defined(_MSC_VER)
         strncpy_s(candidate.device_name,
                   sizeof(candidate.device_name),
@@ -190,7 +190,7 @@ static int nlo_vk_auto_select_device(
         snprintf(candidate.device_name, sizeof(candidate.device_name), "%s", properties.deviceName);
 #endif
 
-        if (nlo_vk_auto_candidate_is_better(&candidate, &best, has_best)) {
+        if (vk_auto_candidate_is_better(&candidate, &best, has_best)) {
             best = candidate;
             has_best = 1;
         }
@@ -205,19 +205,19 @@ static int nlo_vk_auto_select_device(
     return 0;
 }
 
-int nlo_vk_auto_context_init(
-    nlo_vk_auto_context* context,
+int vk_auto_context_init(
+    vk_auto_context* context,
     char* reason,
     size_t reason_capacity
 )
 {
     if (context == NULL) {
-        nlo_vk_auto_copy_reason(reason, reason_capacity, "Vulkan auto-context pointer is null.");
+        vk_auto_copy_reason(reason, reason_capacity, "Vulkan auto-context pointer is null.");
         return -1;
     }
 
-    nlo_vk_auto_reset_context(context);
-    nlo_vk_auto_copy_reason(reason, reason_capacity, "");
+    vk_auto_reset_context(context);
+    vk_auto_copy_reason(reason, reason_capacity, "");
 
     VkApplicationInfo app_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -233,16 +233,16 @@ int nlo_vk_auto_context_init(
         .pApplicationInfo = &app_info
     };
     if (vkCreateInstance(&instance_info, NULL, &context->instance) != VK_SUCCESS) {
-        nlo_vk_auto_copy_reason(reason, reason_capacity, "Failed to create Vulkan instance.");
+        vk_auto_copy_reason(reason, reason_capacity, "Failed to create Vulkan instance.");
         return -1;
     }
 
-    nlo_vk_device_candidate candidate = {0};
-    if (nlo_vk_auto_select_device(context->instance, &candidate) != 0) {
-        nlo_vk_auto_copy_reason(reason,
+    vk_device_candidate candidate = {0};
+    if (vk_auto_select_device(context->instance, &candidate) != 0) {
+        vk_auto_copy_reason(reason,
                                 reason_capacity,
                                 "No compatible Vulkan device with shaderFloat64 and compute queue.");
-        nlo_vk_auto_context_destroy(context);
+        vk_auto_context_destroy(context);
         return -1;
     }
 
@@ -265,15 +265,15 @@ int nlo_vk_auto_context_init(
         .pEnabledFeatures = &device_features
     };
     if (vkCreateDevice(candidate.physical_device, &device_info, NULL, &context->device) != VK_SUCCESS) {
-        nlo_vk_auto_copy_reason(reason, reason_capacity, "Failed to create Vulkan logical device.");
-        nlo_vk_auto_context_destroy(context);
+        vk_auto_copy_reason(reason, reason_capacity, "Failed to create Vulkan logical device.");
+        vk_auto_context_destroy(context);
         return -1;
     }
 
     vkGetDeviceQueue(context->device, candidate.queue_family_index, 0u, &context->queue);
     if (context->queue == VK_NULL_HANDLE) {
-        nlo_vk_auto_copy_reason(reason, reason_capacity, "Failed to get Vulkan compute queue.");
-        nlo_vk_auto_context_destroy(context);
+        vk_auto_copy_reason(reason, reason_capacity, "Failed to get Vulkan compute queue.");
+        vk_auto_context_destroy(context);
         return -1;
     }
 
@@ -289,7 +289,7 @@ int nlo_vk_auto_context_init(
     return 0;
 }
 
-void nlo_vk_auto_context_destroy(nlo_vk_auto_context* context)
+void vk_auto_context_destroy(vk_auto_context* context)
 {
     if (context == NULL) {
         return;

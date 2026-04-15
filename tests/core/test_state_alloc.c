@@ -12,12 +12,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#ifndef NLO_TEST_TWO_PI
-#define NLO_TEST_TWO_PI 6.283185307179586476925286766559
+#ifndef TEST_TWO_PI
+#define TEST_TWO_PI 6.283185307179586476925286766559
 #endif
 
-#ifndef NLO_TEST_FREQ_EPS
-#define NLO_TEST_FREQ_EPS 1e-9
+#ifndef TEST_FREQ_EPS
+#define TEST_FREQ_EPS 1e-9
 #endif
 
 static double test_expected_omega_unshifted(size_t index, size_t num_time_samples, double omega_step)
@@ -36,9 +36,9 @@ static void test_fill_expected_omega_grid(nlo_complex* out_grid, size_t num_time
     assert(num_time_samples > 0u);
     assert(delta_time > 0.0);
 
-    const double omega_step = NLO_TEST_TWO_PI / ((double)num_time_samples * delta_time);
+    const double omega_step = TEST_TWO_PI / ((double)num_time_samples * delta_time);
     for (size_t i = 0u; i < num_time_samples; ++i) {
-        out_grid[i] = nlo_make(test_expected_omega_unshifted(i, num_time_samples, omega_step), 0.0);
+        out_grid[i] = make(test_expected_omega_unshifted(i, num_time_samples, omega_step), 0.0);
     }
 }
 
@@ -49,7 +49,7 @@ static void test_assert_grid_matches(const nlo_complex* actual, const nlo_comple
 
     for (size_t i = 0u; i < count; ++i) {
         const double expected_real = expected[i].re;
-        const double tol = NLO_TEST_FREQ_EPS * fmax(1.0, fabs(expected_real));
+        const double tol = TEST_FREQ_EPS * fmax(1.0, fabs(expected_real));
         assert(fabs(actual[i].re - expected_real) <= tol);
         assert(fabs(actual[i].im - expected[i].im) <= tol);
     }
@@ -63,12 +63,12 @@ static void test_init_state_success(void)
     sim_config* config = create_sim_config(num_time_samples);
     assert(config != NULL);
 
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
     simulation_state* state = NULL;
-    nlo_allocation_info info = {0};
+    allocation_info info = {0};
 
-    assert(nlo_init_simulation_state(config,
+    assert(init_simulation_state(config,
                                      num_time_samples,
                                      num_records,
                                      &exec_options,
@@ -81,7 +81,7 @@ static void test_init_state_success(void)
     assert(info.per_record_bytes == num_time_samples * sizeof(nlo_complex));
     assert(info.host_snapshot_bytes <= info.per_record_bytes);
     assert(info.working_vector_bytes >= info.per_record_bytes * 12u);
-    assert(info.backend_type == NLO_VECTOR_BACKEND_CPU);
+    assert(info.backend_type == VECTOR_BACKEND_CPU);
 
     free_simulation_state(state);
     free_sim_config(config);
@@ -95,20 +95,20 @@ static void test_record_count_does_not_change_init_snapshot_allocation(void)
     sim_config* config = create_sim_config(num_time_samples);
     assert(config != NULL);
 
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
     simulation_state* state_small = NULL;
     simulation_state* state_large = NULL;
-    nlo_allocation_info info_small = {0};
-    nlo_allocation_info info_large = {0};
+    allocation_info info_small = {0};
+    allocation_info info_large = {0};
 
-    assert(nlo_init_simulation_state(config,
+    assert(init_simulation_state(config,
                                      num_time_samples,
                                      2u,
                                      &exec_options,
                                      &info_small,
                                      &state_small) == 0);
-    assert(nlo_init_simulation_state(config,
+    assert(init_simulation_state(config,
                                      num_time_samples,
                                      128u,
                                      &exec_options,
@@ -132,24 +132,24 @@ static void test_record_count_does_not_change_init_snapshot_allocation(void)
 static void test_init_state_invalid_args(void)
 {
     simulation_state* state = NULL;
-    nlo_allocation_info info = {0};
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    allocation_info info = {0};
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
-    assert(nlo_init_simulation_state(NULL, 8, 1, &exec_options, &info, &state) != 0);
+    assert(init_simulation_state(NULL, 8, 1, &exec_options, &info, &state) != 0);
     assert(state == NULL);
 
     sim_config* config = create_sim_config(8);
     assert(config != NULL);
 
-    assert(nlo_init_simulation_state(config, 0, 1, &exec_options, &info, &state) != 0);
+    assert(init_simulation_state(config, 0, 1, &exec_options, &info, &state) != 0);
     assert(state == NULL);
 
-    assert(nlo_init_simulation_state(config, 8, 0, &exec_options, &info, &state) != 0);
+    assert(init_simulation_state(config, 8, 0, &exec_options, &info, &state) != 0);
     assert(state == NULL);
 
     config->spatial.nx = 3;
     config->spatial.ny = 3;
-    assert(nlo_init_simulation_state(config, 8, 1, &exec_options, &info, &state) != 0);
+    assert(init_simulation_state(config, 8, 1, &exec_options, &info, &state) != 0);
     assert(state == NULL);
 
     free_sim_config(config);
@@ -173,11 +173,11 @@ static void test_init_state_xy_shape_rejected_without_tensor(void)
     config->spatial.delta_y = 0.5;
     config->spatial.potential_grid = NULL;
 
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
     simulation_state* state = NULL;
-    nlo_allocation_info info = {0};
-    assert(nlo_init_simulation_state(config,
+    allocation_info info = {0};
+    assert(init_simulation_state(config,
                                      num_time_samples,
                                      num_records,
                                      &exec_options,
@@ -191,8 +191,8 @@ static void test_init_state_xy_shape_rejected_without_tensor(void)
 
 static void test_init_state_tensor_shape_rules(void)
 {
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
-    nlo_allocation_info info = {0};
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
+    allocation_info info = {0};
     simulation_state* state = NULL;
 
     {
@@ -206,9 +206,9 @@ static void test_init_state_tensor_shape_rules(void)
         config->tensor.nt = nt;
         config->tensor.nx = nx;
         config->tensor.ny = ny;
-        config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
+        config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
 
-        assert(nlo_init_simulation_state(config,
+        assert(init_simulation_state(config,
                                          total_samples,
                                          4u,
                                          &exec_options,
@@ -236,9 +236,9 @@ static void test_init_state_tensor_shape_rules(void)
         config->tensor.nt = nt;
         config->tensor.nx = nx;
         config->tensor.ny = ny;
-        config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
+        config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
 
-        assert(nlo_init_simulation_state(config,
+        assert(init_simulation_state(config,
                                          total_samples,
                                          2u,
                                          &exec_options,
@@ -260,8 +260,8 @@ static void test_init_state_tensor_shape_rules(void)
         config->tensor.nt = 4u;
         config->tensor.nx = 2u;
         config->tensor.ny = 3u;
-        config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
-        assert(nlo_init_simulation_state(config,
+        config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
+        assert(init_simulation_state(config,
                                          total_samples,
                                          2u,
                                          &exec_options,
@@ -278,7 +278,7 @@ static void test_init_state_tensor_shape_rules(void)
         config->tensor.nx = 2u;
         config->tensor.ny = 2u;
         config->tensor.layout = 7;
-        assert(nlo_init_simulation_state(config,
+        assert(init_simulation_state(config,
                                          16u,
                                          1u,
                                          &exec_options,
@@ -301,12 +301,12 @@ static void test_default_frequency_grid_generated_when_invalid(void)
 
     config->time.delta_time = delta_time;
     for (size_t i = 0u; i < num_time_samples; ++i) {
-        config->frequency.frequency_grid[i] = nlo_make((double)i, 0.0);
+        config->frequency.frequency_grid[i] = make((double)i, 0.0);
     }
 
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
     simulation_state* state = NULL;
-    assert(nlo_init_simulation_state(config,
+    assert(init_simulation_state(config,
                                      num_time_samples,
                                      2u,
                                      &exec_options,
@@ -320,10 +320,10 @@ static void test_default_frequency_grid_generated_when_invalid(void)
     assert(expected != NULL);
 
     test_fill_expected_omega_grid(expected, num_time_samples, delta_time);
-    assert(nlo_vec_download(state->backend,
+    assert(vec_download(state->backend,
                             state->frequency_grid_vec,
                             downloaded,
-                            num_time_samples * sizeof(nlo_complex)) == NLO_VEC_STATUS_OK);
+                            num_time_samples * sizeof(nlo_complex)) == VEC_STATUS_OK);
     test_assert_grid_matches(downloaded, expected, num_time_samples);
 
     free(expected);
@@ -345,9 +345,9 @@ static void test_frequency_grid_preserved_when_valid(void)
     config->time.delta_time = delta_time;
     test_fill_expected_omega_grid(config->frequency.frequency_grid, num_time_samples, delta_time);
 
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
     simulation_state* state = NULL;
-    assert(nlo_init_simulation_state(config,
+    assert(init_simulation_state(config,
                                      num_time_samples,
                                      2u,
                                      &exec_options,
@@ -357,10 +357,10 @@ static void test_frequency_grid_preserved_when_valid(void)
 
     nlo_complex* downloaded = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
     assert(downloaded != NULL);
-    assert(nlo_vec_download(state->backend,
+    assert(vec_download(state->backend,
                             state->frequency_grid_vec,
                             downloaded,
-                            num_time_samples * sizeof(nlo_complex)) == NLO_VEC_STATUS_OK);
+                            num_time_samples * sizeof(nlo_complex)) == VEC_STATUS_OK);
     test_assert_grid_matches(downloaded, config->frequency.frequency_grid, num_time_samples);
 
     free(downloaded);
@@ -383,7 +383,7 @@ static void test_tensor_mode_frequency_mesh_generation(void)
     config->tensor.nt = nt;
     config->tensor.nx = nx;
     config->tensor.ny = ny;
-    config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
+    config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
     config->time.delta_time = delta_time;
     config->spatial.delta_x = 1.0;
     config->spatial.delta_y = 1.0;
@@ -391,9 +391,9 @@ static void test_tensor_mode_frequency_mesh_generation(void)
     config->runtime.linear_expr = "exp(h*D)";
     config->runtime.potential_expr = "x+y+t";
 
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
     simulation_state* state = NULL;
-    assert(nlo_init_simulation_state(config,
+    assert(init_simulation_state(config,
                                      total,
                                      2u,
                                      &exec_options,
@@ -416,24 +416,24 @@ static void test_tensor_mode_frequency_mesh_generation(void)
     test_fill_expected_omega_grid(expected_axis, nt, delta_time);
 
     nlo_complex downloaded[12] = {0};
-    assert(nlo_vec_download(state->backend,
+    assert(vec_download(state->backend,
                             state->working_vectors.wt_mesh_vec,
                             downloaded,
-                            sizeof(downloaded)) == NLO_VEC_STATUS_OK);
+                            sizeof(downloaded)) == VEC_STATUS_OK);
     for (size_t block = 0u; block < (nx * ny); ++block) {
         const size_t base = block * nt;
         for (size_t t = 0u; t < nt; ++t) {
-            assert(fabs(downloaded[base + t].re - expected_axis[t].re) <= NLO_TEST_FREQ_EPS);
-            assert(fabs(downloaded[base + t].im - expected_axis[t].im) <= NLO_TEST_FREQ_EPS);
+            assert(fabs(downloaded[base + t].re - expected_axis[t].re) <= TEST_FREQ_EPS);
+            assert(fabs(downloaded[base + t].im - expected_axis[t].im) <= TEST_FREQ_EPS);
         }
     }
 
     nlo_complex potential_downloaded[12] = {0};
-    assert(nlo_vec_download(state->backend,
+    assert(vec_download(state->backend,
                             state->working_vectors.potential_vec,
                             potential_downloaded,
-                            sizeof(potential_downloaded)) == NLO_VEC_STATUS_OK);
-    assert(fabs(potential_downloaded[0].re + 1.5) <= NLO_TEST_FREQ_EPS);
+                            sizeof(potential_downloaded)) == VEC_STATUS_OK);
+    assert(fabs(potential_downloaded[0].re + 1.5) <= TEST_FREQ_EPS);
 
     free_simulation_state(state);
     free_sim_config(config);
@@ -443,16 +443,16 @@ static void test_tensor_mode_frequency_mesh_generation(void)
 
 static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
 {
-#if !NLO_ENABLE_VULKAN_BACKEND
+#if !ENABLE_VULKAN_BACKEND
     printf("test_tensor_mode_linear_factor_literal_power_vulkan: skipped (Vulkan disabled at build).\n");
     return;
 #else
-    nlo_vector_backend* probe = nlo_vector_backend_create_vulkan(NULL);
+    vector_backend* probe = vector_backend_create_vulkan(NULL);
     if (probe == NULL) {
         printf("test_tensor_mode_linear_factor_literal_power_vulkan: skipped (Vulkan unavailable).\n");
         return;
     }
-    nlo_vector_backend_destroy(probe);
+    vector_backend_destroy(probe);
 
     const size_t nt = 8u;
     const size_t nx = 4u;
@@ -464,7 +464,7 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
     config->tensor.nt = nt;
     config->tensor.nx = nx;
     config->tensor.ny = ny;
-    config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
+    config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
     config->time.delta_time = 0.25;
     config->spatial.delta_x = 0.5;
     config->spatial.delta_y = 0.5;
@@ -475,16 +475,16 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
     config->runtime.constants[0] = 0.08;
     config->runtime.constants[1] = -0.2;
 
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_AUTO);
     simulation_state* state = NULL;
-    assert(nlo_init_simulation_state(config,
+    assert(init_simulation_state(config,
                                      total,
                                      2u,
                                      &exec_options,
                                      NULL,
                                      &state) == 0);
     assert(state != NULL);
-    assert(nlo_vector_backend_get_type(state->backend) == NLO_VECTOR_BACKEND_VULKAN);
+    assert(vector_backend_get_type(state->backend) == VECTOR_BACKEND_VULKAN);
 
     free_simulation_state(state);
     free_sim_config(config);
@@ -495,7 +495,7 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
 
 static void test_snapshot_store_dense_readback(void)
 {
-    if (!nlo_snapshot_store_is_available()) {
+    if (!snapshot_store_is_available()) {
         printf("test_snapshot_store_dense_readback: skipped (storage unavailable).\n");
         return;
     }
@@ -506,24 +506,24 @@ static void test_snapshot_store_dense_readback(void)
 
     sim_config* config = create_sim_config(num_time_samples);
     assert(config != NULL);
-    nlo_execution_options exec_options = nlo_execution_options_default(NLO_VECTOR_BACKEND_CPU);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
     char db_path[256];
     (void)snprintf(db_path, sizeof(db_path), "test_snapshot_store_readback_%u.sqlite3", (unsigned)rand());
 
-    nlo_storage_options storage_options = nlo_storage_options_default();
+    storage_options storage_options = storage_options_default();
     storage_options.sqlite_path = db_path;
     storage_options.run_id = "test-snapshot-readback";
     storage_options.chunk_records = 2u;
 
-    nlo_snapshot_store_open_params open_params;
+    snapshot_store_open_params open_params;
     open_params.config = config;
     open_params.exec_options = &exec_options;
     open_params.storage_options = &storage_options;
     open_params.num_time_samples = num_time_samples;
     open_params.num_recorded_samples = num_records;
 
-    nlo_snapshot_store* store = nlo_snapshot_store_open(&open_params);
+    snapshot_store* store = snapshot_store_open(&open_params);
     assert(store != NULL);
 
     nlo_complex* expected = (nlo_complex*)calloc(total, sizeof(nlo_complex));
@@ -534,23 +534,23 @@ static void test_snapshot_store_dense_readback(void)
     for (size_t record = 0u; record < num_records; ++record) {
         for (size_t t = 0u; t < num_time_samples; ++t) {
             const size_t idx = (record * num_time_samples) + t;
-            expected[idx] = nlo_make((double)(100u * record + t), (double)(-1.0 * (double)record));
+            expected[idx] = make((double)(100u * record + t), (double)(-1.0 * (double)record));
         }
-        assert(nlo_snapshot_store_write_record(
+        assert(snapshot_store_write_record(
                    store,
                    record,
                    expected + (record * num_time_samples),
-                   num_time_samples) != NLO_SNAPSHOT_STORE_STATUS_ERROR);
+                   num_time_samples) != SNAPSHOT_STORE_STATUS_ERROR);
     }
 
-    assert(nlo_snapshot_store_read_all_records(store, restored, num_records, num_time_samples) ==
-           NLO_SNAPSHOT_STORE_STATUS_OK);
+    assert(snapshot_store_read_all_records(store, restored, num_records, num_time_samples) ==
+           SNAPSHOT_STORE_STATUS_OK);
     for (size_t i = 0u; i < total; ++i) {
-        assert(fabs(restored[i].re - expected[i].re) <= NLO_TEST_FREQ_EPS);
-        assert(fabs(restored[i].im - expected[i].im) <= NLO_TEST_FREQ_EPS);
+        assert(fabs(restored[i].re - expected[i].re) <= TEST_FREQ_EPS);
+        assert(fabs(restored[i].im - expected[i].im) <= TEST_FREQ_EPS);
     }
 
-    nlo_snapshot_store_close(store);
+    snapshot_store_close(store);
     free(expected);
     free(restored);
     free_sim_config(config);

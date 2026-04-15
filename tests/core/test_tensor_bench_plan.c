@@ -5,8 +5,8 @@
 
 static void test_shape_mapping(void)
 {
-    nlo_bench_tensor_shape shape = {0};
-    assert(nlo_bench_tensor_shape_from_scale(32u, &shape) == 0);
+    bench_tensor_shape shape = {0};
+    assert(bench_tensor_shape_from_scale(32u, &shape) == 0);
     assert(shape.scale == 32u);
     assert(shape.nt == 64u);
     assert(shape.nx == 32u);
@@ -17,7 +17,7 @@ static void test_shape_mapping(void)
 
 static void test_region_classification(void)
 {
-    nlo_bench_tensor_region_inputs inputs = {
+    bench_tensor_region_inputs inputs = {
         .working_set_bytes = 256u,
         .host_budget_bytes = 1024u,
         .gpu_budget_bytes = 512u,
@@ -25,27 +25,27 @@ static void test_region_classification(void)
         .gpu_init_ok = 1
     };
 
-    assert(nlo_bench_tensor_classify_fit_region(&inputs) == NLO_BENCH_TENSOR_REGION_GPU_FIT);
+    assert(bench_tensor_classify_fit_region(&inputs) == BENCH_TENSOR_REGION_GPU_FIT);
 
     inputs.gpu_budget_bytes = 128u;
     inputs.gpu_init_ok = 0;
-    assert(nlo_bench_tensor_classify_fit_region(&inputs) == NLO_BENCH_TENSOR_REGION_HOST_FIT_ONLY);
+    assert(bench_tensor_classify_fit_region(&inputs) == BENCH_TENSOR_REGION_HOST_FIT_ONLY);
 
     inputs.working_set_bytes = 2048u;
-    assert(nlo_bench_tensor_classify_fit_region(&inputs) == NLO_BENCH_TENSOR_REGION_TOO_LARGE);
+    assert(bench_tensor_classify_fit_region(&inputs) == BENCH_TENSOR_REGION_TOO_LARGE);
 
     inputs.cpu_init_ok = 0;
     inputs.working_set_bytes = 64u;
-    assert(nlo_bench_tensor_classify_fit_region(&inputs) == NLO_BENCH_TENSOR_REGION_TOO_LARGE);
+    assert(bench_tensor_classify_fit_region(&inputs) == BENCH_TENSOR_REGION_TOO_LARGE);
     printf("test_region_classification: tensor fit regions classified as expected.\n");
 }
 
 static void test_output_record_count(void)
 {
-    assert(nlo_bench_tensor_records_for_output_bytes(0u, 1024u) == 0u);
-    assert(nlo_bench_tensor_records_for_output_bytes(1024u, 1u) == 2u);
-    assert(nlo_bench_tensor_records_for_output_bytes(1024u, 2048u) == 2u);
-    assert(nlo_bench_tensor_records_for_output_bytes(1024u, 2500u) == 3u);
+    assert(bench_tensor_records_for_output_bytes(0u, 1024u) == 0u);
+    assert(bench_tensor_records_for_output_bytes(1024u, 1u) == 2u);
+    assert(bench_tensor_records_for_output_bytes(1024u, 2048u) == 2u);
+    assert(bench_tensor_records_for_output_bytes(1024u, 2500u) == 3u);
     printf("test_output_record_count: spill-region record planning verified.\n");
 }
 

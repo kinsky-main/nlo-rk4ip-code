@@ -4,12 +4,12 @@ import random
 import numpy as np
 
 from nlolib import (
-    NLO_NONLINEAR_MODEL_EXPR,
-    NLO_NONLINEAR_MODEL_KERR_RAMAN,
+    NONLINEAR_MODEL_EXPR,
+    NONLINEAR_MODEL_KERR_RAMAN,
     NLOLIB_LOG_LEVEL_ERROR,
     NLOLIB_LOG_LEVEL_WARN,
-    NLO_VECTOR_BACKEND_AUTO,
-    NLO_VECTOR_BACKEND_CPU,
+    VECTOR_BACKEND_AUTO,
+    VECTOR_BACKEND_CPU,
     NLolib,
     RuntimeOperators,
     default_execution_options,
@@ -701,7 +701,7 @@ def test_kerr_raman_model_reduces_to_kerr_when_fraction_zero(api, opts):
             dispersion_factor_expr="i*c0*w*w",
             nonlinear_expr="i*c1*A*I",
             constants=[0.5 * beta2, gamma, 0.0, 0.0],
-            nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
+            nonlinear_model=NONLINEAR_MODEL_EXPR,
         ),
         **common,
     )
@@ -711,7 +711,7 @@ def test_kerr_raman_model_reduces_to_kerr_when_fraction_zero(api, opts):
             dispersion_factor_expr="i*c0*w*w",
             nonlinear_expr="0",
             constants=[0.5 * beta2, 0.0, 0.0, 0.0],
-            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_model=NONLINEAR_MODEL_KERR_RAMAN,
             nonlinear_gamma=gamma,
             raman_fraction=0.0,
             shock_omega0=0.0,
@@ -755,7 +755,7 @@ def test_kerr_raman_custom_response_matches_generated_default(api, opts):
             dispersion_factor_expr="i*c0*w*w",
             nonlinear_expr="0",
             constants=[0.5 * beta2, 0.0, 0.0, 0.0],
-            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_model=NONLINEAR_MODEL_KERR_RAMAN,
             nonlinear_gamma=gamma,
             raman_fraction=f_r,
             raman_tau1=tau1,
@@ -770,7 +770,7 @@ def test_kerr_raman_custom_response_matches_generated_default(api, opts):
             dispersion_factor_expr="i*c0*w*w",
             nonlinear_expr="0",
             constants=[0.5 * beta2, 0.0, 0.0, 0.0],
-            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_model=NONLINEAR_MODEL_KERR_RAMAN,
             nonlinear_gamma=gamma,
             raman_fraction=f_r,
             raman_tau1=tau1,
@@ -810,7 +810,7 @@ def test_kerr_raman_rejects_coupled_mode(api, opts):
             dispersion_factor_expr="0",
             nonlinear_expr="0",
             constants=[0.0, 0.0, 0.0, 0.0],
-            nonlinear_model=NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_model=NONLINEAR_MODEL_KERR_RAMAN,
             nonlinear_gamma=0.8,
             raman_fraction=0.18,
             raman_tau1=0.0122,
@@ -1179,7 +1179,7 @@ def test_second_order_soliton_adaptive_vs_fixed_reference_auto_gpu(api, opts):
 
     case = _second_order_soliton_case(n=1024, window_multiple_t0=40.0)
     runtime = RuntimeOperators(constants=[0.5 * case["beta2"], 0.0, case["gamma"]])
-    gpu_opts = default_execution_options(NLO_VECTOR_BACKEND_AUTO)
+    gpu_opts = default_execution_options(VECTOR_BACKEND_AUTO)
 
     adaptive_cfg = prepare_sim_config(
         1024,
@@ -1272,7 +1272,7 @@ def test_fixed_step_linear_only_exact_cpu_vs_auto_gpu(api, opts):
             frequency_grid=[complex(om, 0.0) for om in omega],
             runtime=RuntimeOperators(constants=[c0, c1, 0.0]),
         )
-        cpu_final = api.propagate(cfg, a0, 2, default_execution_options(NLO_VECTOR_BACKEND_CPU)).records[1]
+        cpu_final = api.propagate(cfg, a0, 2, default_execution_options(VECTOR_BACKEND_CPU)).records[1]
         cpu_errors.append(_relative_l2_error(cpu_final, exact))
 
     assert max(cpu_errors) <= 5e-12, f"CPU linear-only fixed-step propagation drifted from exact solution: {cpu_errors}"
@@ -1296,7 +1296,7 @@ def test_fixed_step_linear_only_exact_cpu_vs_auto_gpu(api, opts):
             frequency_grid=[complex(om, 0.0) for om in omega],
             runtime=RuntimeOperators(constants=[c0, c1, 0.0]),
         )
-        auto_final = api.propagate(cfg, a0, 2, default_execution_options(NLO_VECTOR_BACKEND_AUTO)).records[1]
+        auto_final = api.propagate(cfg, a0, 2, default_execution_options(VECTOR_BACKEND_AUTO)).records[1]
         gpu_errors.append(_relative_l2_error(auto_final, exact))
 
     assert max(gpu_errors) <= 5e-6, f"AUTO/Vulkan linear-only fixed-step error exceeded diagnostic bound: {gpu_errors}"
@@ -1335,7 +1335,7 @@ def test_fixed_step_nonlinear_only_order_auto_gpu(api, opts):
                 constants=[0.0, 0.0, gamma],
             ),
         )
-        final_field = api.propagate(cfg, a0, 2, default_execution_options(NLO_VECTOR_BACKEND_AUTO)).records[1]
+        final_field = api.propagate(cfg, a0, 2, default_execution_options(VECTOR_BACKEND_AUTO)).records[1]
         errors.append(_relative_l2_error(final_field, exact))
 
     local_orders = [
@@ -1373,7 +1373,7 @@ def test_expr_mode_ignores_raman_parameters(api, opts):
             dispersion_factor_expr="i*c0*w*w",
             nonlinear_expr="i*c1*A*I",
             constants=[0.01, 0.7, 0.0, 0.0],
-            nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
+            nonlinear_model=NONLINEAR_MODEL_EXPR,
         ),
         **common,
     )
@@ -1383,7 +1383,7 @@ def test_expr_mode_ignores_raman_parameters(api, opts):
             dispersion_factor_expr="i*c0*w*w",
             nonlinear_expr="i*c1*A*I",
             constants=[0.01, 0.7, 0.0, 0.0],
-            nonlinear_model=NLO_NONLINEAR_MODEL_EXPR,
+            nonlinear_model=NONLINEAR_MODEL_EXPR,
             nonlinear_gamma=123.0,
             raman_fraction=0.35,
             raman_tau1=0.02,
@@ -1472,7 +1472,7 @@ def _auto_backend_resolves_to_vulkan(api):
     api.set_log_level(2)
     api.set_log_buffer(64 * 1024)
     api.clear_log_buffer()
-    api.propagate(cfg, [0j] * n, 1, default_execution_options(NLO_VECTOR_BACKEND_AUTO))
+    api.propagate(cfg, [0j] * n, 1, default_execution_options(VECTOR_BACKEND_AUTO))
     logs = api.read_log_buffer(consume=True, max_bytes=64 * 1024)
     return "actual: VULKAN" in logs
 
@@ -1484,11 +1484,11 @@ def test_fixed_step_fundamental_soliton_order_auto_gpu(api, opts):
 
     cpu_slope, cpu_errors = _fixed_step_fundamental_soliton_order_stats(
         api,
-        default_execution_options(NLO_VECTOR_BACKEND_CPU),
+        default_execution_options(VECTOR_BACKEND_CPU),
     )
     auto_slope, auto_errors = _fixed_step_fundamental_soliton_order_stats(
         api,
-        default_execution_options(NLO_VECTOR_BACKEND_AUTO),
+        default_execution_options(VECTOR_BACKEND_AUTO),
     )
     assert auto_slope >= 3.0, f"fixed-step AUTO/Vulkan soliton slope unexpectedly low: {auto_slope}"
     assert abs(auto_slope - cpu_slope) <= 0.2, (
@@ -1499,7 +1499,7 @@ def test_fixed_step_fundamental_soliton_order_auto_gpu(api, opts):
 
 def main():
     api = NLolib()
-    opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
+    opts = default_execution_options(VECTOR_BACKEND_CPU)
     test_dispersion_factor_callable_matches_string(api, opts)
     test_nonlinear_callable_matches_string(api, opts)
     test_nonlinear_legacy_multiplier_warns(api, opts)

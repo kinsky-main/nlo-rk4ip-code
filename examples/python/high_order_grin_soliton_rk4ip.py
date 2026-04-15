@@ -232,7 +232,7 @@ def _run_case(
         tensor_nt=int(nt),
         tensor_nx=int(nx),
         tensor_ny=int(ny),
-        tensor_layout=int(nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
+        tensor_layout=int(nlo.TENSOR_LAYOUT_XYT_T_FAST),
         delta_x=float(dx),
         delta_y=float(dy),
         frequency_grid=(2.0 * np.pi * np.fft.fftfreq(int(nt), d=float(dt))).astype(np.complex128).tolist(),
@@ -311,8 +311,8 @@ def _run(args: argparse.Namespace) -> float:
     ).astype(np.complex128)
 
     exec_options = nlo.default_execution_options(
-        backend_type=nlo.NLO_VECTOR_BACKEND_CPU,
-        fft_backend=nlo.NLO_FFT_BACKEND_FFTW,
+        backend_type=nlo.VECTOR_BACKEND_CPU,
+        fft_backend=nlo.FFT_BACKEND_FFTW,
     )
 
     if args.replot:
