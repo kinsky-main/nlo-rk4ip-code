@@ -300,6 +300,7 @@ Doc generation details:
 
 - If Doxygen is not found, the `docs` target is not added.
 - `doxygen-awesome-css` is fetched automatically during configure when docs are enabled.
+- HTML formulas render through MathJax, so local LaTeX is not required for equation output in generated docs.
 - Doxygen input is `src/` (`*.h`, `*.c`), with call and directory graphs enabled.
 
 ### Publish Docs to GitHub Pages (Manual Trigger)

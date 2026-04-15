@@ -109,11 +109,21 @@ typedef struct {
 
 /**
  * @brief Nonlinear operator execution model selector.
+ *
+ * Expression mode evaluates caller-supplied @c nonlinear_expr as the full
+ * nonlinear RHS. The built-in Raman mode applies
+ * \f[
+ * N_R(A)=i\gamma A\left[(1-f_R)|A|^2+f_R\left(h_R \ast |A|^2\right)\right]
+ * -\frac{\gamma}{\omega_0}\partial_t\!\left[
+ * A\left((1-f_R)|A|^2+f_R\left(h_R \ast |A|^2\right)\right)\right]
+ * \f]
+ * when self-steepening is enabled, and drops the derivative term when
+ * @c shock_omega0 is zero.
  */
 typedef enum {
-    /** Evaluate compiled runtime expression `nonlinear_expr`. */
+    /** Evaluate compiled runtime expression `nonlinear_expr` as the full RHS, for example \f$N(A)=iA(c_2|A|^2+V)\f$. */
     NLO_NONLINEAR_MODEL_EXPR = 0,
-    /** Use built-in Kerr + delayed Raman (+ optional shock) model. */
+    /** Use the built-in Kerr + delayed Raman (+ optional shock) model \f$N_R(A)\f$. */
     NLO_NONLINEAR_MODEL_KERR_RAMAN = 1
 } nlo_nonlinear_model;
 
@@ -121,6 +131,38 @@ typedef enum {
  * @brief Runtime expression settings for dispersion/nonlinearity operators.
  *
  * String expressions are compiled at runtime into operator programs.
+ *
+ * Temporal dispersion defaults follow
+ * \f[
+ * D(\omega)=i c_0 \omega^2-c_1,\qquad
+ * L_h(\omega)=\exp\!\left(hD(\omega)\right)
+ * \f]
+ * where @c dispersion_factor_expr provides \f$D\f$ and @c dispersion_expr
+ * or @c linear_expr provides \f$L_h\f$.
+ *
+ * Tensor linear expressions may depend on the symbol set
+ * \f$\omega_t, k_x, k_y, t, x, y\f$ through the runtime names @c wt, @c kx,
+ * @c ky, @c t, @c x, and @c y, and apply
+ * \f[
+ * L_h(\omega_t,k_x,k_y,t,x,y)=
+ * \exp\!\left(hD(\omega_t,k_x,k_y,t,x,y)\right)
+ * \f]
+ * for example
+ * \f[
+ * D=i\left(\beta_{2,s}\omega_t^2+\beta_t(k_x^2+k_y^2)\right).
+ * \f]
+ *
+ * The canonical expression-model nonlinear example is
+ * \f[
+ * N(A)=iA(c_2|A|^2+V).
+ * \f]
+ *
+ * For @ref NLO_NONLINEAR_MODEL_KERR_RAMAN, the default delayed response is
+ * normalized from
+ * \f[
+ * h_R(t)\propto e^{-t/\tau_2}\sin(t/\tau_1),\qquad
+ * t\ge 0,\qquad \int_0^{\infty} h_R(t)\,dt = 1.
+ * \f]
  */
 typedef struct {
     const char* linear_factor_expr;
