@@ -43,7 +43,6 @@ simOptions = backend.default_simulation_options( ...
 execOptions = backend.make_exec_options(simOptions, numRecords);
 execOptions.capture_step_history = true;
 execOptions.step_history_capacity = uint64(200000);
-stepTelemetry = empty_step_telemetry();
 
 propagateOptions = struct();
 propagateOptions.propagation_distance = zFinal;
@@ -252,7 +251,7 @@ cbar = colorbar(axMap);
 cbar.Label.String = "Normalized spectral intensity";
 
 axStep = nexttile(2);
-telemetryPlot = telemetry;
+telemetryPlot = filter_record_clipped_steps(telemetry, zAxis);
 hasSeries = false;
 if ~isempty(telemetryPlot.accepted_z)
     [zSorted, order] = sort(telemetryPlot.accepted_z, "ascend");
@@ -349,7 +348,6 @@ z = z(1:n);
 accepted = accepted(1:n);
 proposed = proposed(1:n);
 
-z0 = double(zAxis(1));
 zEnd = double(zAxis(end));
 expectedBoundaries = zAxis(2:end-1);
 if isempty(expectedBoundaries)

@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 from nlolib import (
-    NLO_VECTOR_BACKEND_CPU,
+    VECTOR_BACKEND_CPU,
     NLolib,
     OperatorSpec,
     PulseSpec,
@@ -114,7 +114,7 @@ def _legacy_ntmax_exceed_case(api: NLolib, db_path: Path) -> None:
             legacy_ntmax + 1,
             sqlite_path=str(db_path),
             chunk_records=1,
-            exec_options=default_execution_options(NLO_VECTOR_BACKEND_CPU),
+            exec_options=default_execution_options(VECTOR_BACKEND_CPU),
             return_records=False,
         )
         storage = result_obj.meta.get("storage_result", {})

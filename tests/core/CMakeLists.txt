@@ -21,7 +21,7 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/utility/state_debug.c
   ${CMAKE_SOURCE_DIR}/src/fft/fft.c
 )
-if(NLO_ENABLE_VULKAN_BACKEND)
+if(ENABLE_VULKAN_BACKEND)
   target_sources(test_core_state_alloc PRIVATE
     ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
     ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_resources.c
@@ -37,40 +37,40 @@ else()
 endif()
 
 include(ResolveVulkan)
-nlo_resolve_vulkan(_nlo_vk_headers_available _nlo_vk_loader_available)
+resolve_vulkan(vk_headers_available vk_loader_available)
 include(NLOCblas)
-nlo_configure_cblas(_nlo_cblas_target _nlo_cblas_include_dirs)
+configure_cblas(cblas_target cblas_include_dirs)
 
 target_include_directories(test_core_state_alloc PRIVATE
   ${CMAKE_SOURCE_DIR}/src
 )
-if(NLO_ENABLE_VULKAN_BACKEND)
+if(ENABLE_VULKAN_BACKEND)
   target_include_directories(test_core_state_alloc PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
 endif()
-target_link_libraries(test_core_state_alloc PRIVATE nlo_fft_backend ${_nlo_cblas_target})
+target_link_libraries(test_core_state_alloc PRIVATE fft_backend ${cblas_target})
 target_compile_definitions(test_core_state_alloc PRIVATE
-  NLO_ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${NLO_ENABLE_VULKAN_BACKEND}>,1,0>
-  NLO_ENABLE_VKFFT=$<IF:$<BOOL:${NLO_ENABLE_VKFFT}>,1,0>
+  ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
+  ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
 )
-if(NLO_ENABLE_VULKAN_BACKEND)
+if(ENABLE_VULKAN_BACKEND)
   target_link_libraries(test_core_state_alloc PRIVATE Vulkan::Vulkan)
 endif()
 include(NLOSQLite)
-nlo_configure_sqlite(test_core_state_alloc)
-if(TARGET nlo_vk_shaders)
-  add_dependencies(test_core_state_alloc nlo_vk_shaders)
+configure_sqlite(test_core_state_alloc)
+if(TARGET vk_shaders)
+  add_dependencies(test_core_state_alloc vk_shaders)
 endif()
 if(WIN32)
   target_compile_definitions(test_core_state_alloc PRIVATE NLOLIB_EXPORTS)
-  set(_nlo_runtime_hints "${NLO_SQLITE_RUNTIME_HINTS}")
-  if(NLO_CBLAS_RUNTIME_HINTS)
-    list(APPEND _nlo_runtime_hints "${NLO_CBLAS_RUNTIME_HINTS}")
+  set(runtime_hints "${SQLITE_RUNTIME_HINTS}")
+  if(CBLAS_RUNTIME_HINTS)
+    list(APPEND runtime_hints "${CBLAS_RUNTIME_HINTS}")
   endif()
   add_custom_command(TARGET test_core_state_alloc POST_BUILD
     COMMAND ${CMAKE_COMMAND}
             -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_core_state_alloc>"
             -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_core_state_alloc>"
-            -DNLO_RUNTIME_HINTS="${_nlo_runtime_hints}"
+            -DNLO_RUNTIME_HINTS="${runtime_hints}"
             -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
   )
 endif()
@@ -96,8 +96,8 @@ add_executable(test_core_log_sink
 
 target_include_directories(test_core_log_sink PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(test_core_log_sink PRIVATE
-  NLO_ENABLE_VULKAN_BACKEND=0
-  NLO_ENABLE_VKFFT=0
+  ENABLE_VULKAN_BACKEND=0
+  ENABLE_VKFFT=0
 )
 if(UNIX)
   target_link_libraries(test_core_log_sink PRIVATE m)

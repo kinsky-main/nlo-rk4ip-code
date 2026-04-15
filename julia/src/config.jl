@@ -52,7 +52,7 @@ function _coerce_pulse_spec(pulse)
             tensor_nt = isnothing(getvalue(:tensor_nt, nothing)) ? nothing : Int(getvalue(:tensor_nt)),
             tensor_nx = isnothing(getvalue(:tensor_nx, nothing)) ? nothing : Int(getvalue(:tensor_nx)),
             tensor_ny = isnothing(getvalue(:tensor_ny, nothing)) ? nothing : Int(getvalue(:tensor_ny)),
-            tensor_layout = Int(getvalue(:tensor_layout, NLO_TENSOR_LAYOUT_XYT_T_FAST)),
+            tensor_layout = Int(getvalue(:tensor_layout, TENSOR_LAYOUT_XYT_T_FAST)),
             delta_x = Float64(getvalue(:delta_x, 1.0)),
             delta_y = Float64(getvalue(:delta_y, 1.0)),
             spatial_frequency_grid = _complex_vector_or_nothing(getvalue(:spatial_frequency_grid, nothing)),
@@ -252,8 +252,8 @@ end
 _cfg_string_ptr(value::Union{Nothing, AbstractString}) = value === nothing ? C_NULL : Base.unsafe_convert(Cstring, value)
 
 function _cfg_constants_tuple(values)
-    constants = zeros(Float64, NLO_RUNTIME_OPERATOR_CONSTANTS_MAX)
-    count = min(length(values), NLO_RUNTIME_OPERATOR_CONSTANTS_MAX)
+    constants = zeros(Float64, RUNTIME_OPERATOR_CONSTANTS_MAX)
+    count = min(length(values), RUNTIME_OPERATOR_CONSTANTS_MAX)
     for idx in 1:count
         constants[idx] = Float64(values[idx])
     end
@@ -271,7 +271,7 @@ function prepare_sim_config(num_time_samples::Integer;
                             tensor_nt = nothing,
                             tensor_nx = nothing,
                             tensor_ny = nothing,
-                            tensor_layout::Integer = NLO_TENSOR_LAYOUT_XYT_T_FAST,
+                            tensor_layout::Integer = TENSOR_LAYOUT_XYT_T_FAST,
                             frequency_grid,
                             wt_axis = nothing,
                             delta_x::Real = 1.0,
@@ -389,8 +389,8 @@ function prepare_sim_config(num_time_samples::Integer;
         potential_expr = runtime.potential_expr
         nonlinear_expr = runtime.nonlinear_expr
         constants = Float64.(runtime.constants)
-        length(constants) <= NLO_RUNTIME_OPERATOR_CONSTANTS_MAX ||
-            throw(ArgumentError("runtime.constants exceeds NLO_RUNTIME_OPERATOR_CONSTANTS_MAX"))
+        length(constants) <= RUNTIME_OPERATOR_CONSTANTS_MAX ||
+            throw(ArgumentError("runtime.constants exceeds RUNTIME_OPERATOR_CONSTANTS_MAX"))
 
         raman_response = runtime.raman_response_time === nothing ? nothing : ComplexF64.(collect(runtime.raman_response_time))
         if raman_response !== nothing

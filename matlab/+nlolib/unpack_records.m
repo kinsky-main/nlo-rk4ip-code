@@ -4,7 +4,7 @@ function records = unpack_records(outPtr, numRecords, numTimeSamples, debugConte
 %
 %   records = nlolib.unpack_records(outPtr, numRecords, numTimeSamples)
 %
-%   outPtr is a libpointer('nlo_complexPtr', ...) pointing to output
+%   outPtr is a libpointer('complexPtr', ...) pointing to output
 %   records in record-major order.
 if nargin < 4
     debugContext = struct();
@@ -50,7 +50,7 @@ elseif isstruct(raw) && all(isfield(raw, {'re', 'im'}))
         % Some loadlibrary call paths collapse pointer shape metadata to scalar.
         % Rebind expected element count and retry before failing.
         try
-            setdatatype(outPtr, 'nlo_complexPtr', 1, totalComplex);
+            setdatatype(outPtr, 'complexPtr', 1, totalComplex);
             raw = outPtr.Value;
             if isstruct(raw) && all(isfield(raw, {'re', 'im'}))
                 re = [raw.re];

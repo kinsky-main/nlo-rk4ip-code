@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-typedef struct nlo_fft_plan nlo_fft_plan;
+typedef struct fft_plan fft_plan;
 
 /**
  * @brief Explicit FFT dimensionality descriptor.
@@ -20,7 +20,7 @@ typedef struct nlo_fft_plan nlo_fft_plan;
 typedef struct {
     size_t rank;
     size_t dims[3];
-} nlo_fft_shape;
+} fft_shape;
 
 /**
  * @brief Create an FFT plan using backend-default implementation selection.
@@ -28,12 +28,12 @@ typedef struct {
  * @param backend Active vector backend.
  * @param signal_size Flattened 1D signal length.
  * @param out_plan Destination FFT plan handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_fft_plan_create(
-    nlo_vector_backend* backend,
+vec_status fft_plan_create(
+    vector_backend* backend,
     size_t signal_size,
-    nlo_fft_plan** out_plan
+    fft_plan** out_plan
 );
 
 /**
@@ -43,13 +43,13 @@ nlo_vec_status nlo_fft_plan_create(
  * @param signal_size Flattened 1D signal length.
  * @param fft_backend Requested FFT backend implementation.
  * @param out_plan Destination FFT plan handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_fft_plan_create_with_backend(
-    nlo_vector_backend* backend,
+vec_status fft_plan_create_with_backend(
+    vector_backend* backend,
     size_t signal_size,
-    nlo_fft_backend_type fft_backend,
-    nlo_fft_plan** out_plan
+    fft_backend_type fft_backend,
+    fft_plan** out_plan
 );
 
 /**
@@ -59,13 +59,13 @@ nlo_vec_status nlo_fft_plan_create_with_backend(
  * @param shape FFT rank/dimensions descriptor.
  * @param fft_backend Requested FFT backend implementation.
  * @param out_plan Destination FFT plan handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
-    nlo_vector_backend* backend,
-    const nlo_fft_shape* shape,
-    nlo_fft_backend_type fft_backend,
-    nlo_fft_plan** out_plan
+vec_status fft_plan_create_shaped_with_backend(
+    vector_backend* backend,
+    const fft_shape* shape,
+    fft_backend_type fft_backend,
+    fft_plan** out_plan
 );
 
 /**
@@ -73,7 +73,7 @@ nlo_vec_status nlo_fft_plan_create_shaped_with_backend(
  *
  * @param plan Plan handle to destroy (NULL is allowed).
  */
-void nlo_fft_plan_destroy(nlo_fft_plan* plan);
+void fft_plan_destroy(fft_plan* plan);
 
 /**
  * @brief Execute a forward FFT on backend buffers.
@@ -81,12 +81,12 @@ void nlo_fft_plan_destroy(nlo_fft_plan* plan);
  * @param plan FFT plan handle.
  * @param input Input vector.
  * @param output Output vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_fft_forward_vec(
-    nlo_fft_plan* plan,
-    const nlo_vec_buffer* input,
-    nlo_vec_buffer* output
+vec_status fft_forward_vec(
+    fft_plan* plan,
+    const vec_buffer* input,
+    vec_buffer* output
 );
 
 /**
@@ -95,12 +95,12 @@ nlo_vec_status nlo_fft_forward_vec(
  * @param plan FFT plan handle.
  * @param input Input vector.
  * @param output Output vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_fft_inverse_vec(
-    nlo_fft_plan* plan,
-    const nlo_vec_buffer* input,
-    nlo_vec_buffer* output
+vec_status fft_inverse_vec(
+    fft_plan* plan,
+    const vec_buffer* input,
+    vec_buffer* output
 );
 
 #ifdef __cplusplus

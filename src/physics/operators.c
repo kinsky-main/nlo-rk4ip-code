@@ -8,98 +8,98 @@
 #include "utility/perf_profile.h"
 #include <assert.h>
 
-#ifndef NLO_RK4_STRICT_STATUS_CHECKS
+#ifndef RK4_STRICT_STATUS_CHECKS
 #if defined(NDEBUG)
-#define NLO_RK4_STRICT_STATUS_CHECKS 0
+#define RK4_STRICT_STATUS_CHECKS 0
 #else
-#define NLO_RK4_STRICT_STATUS_CHECKS 1
+#define RK4_STRICT_STATUS_CHECKS 1
 #endif
 #endif
 
-#if NLO_RK4_STRICT_STATUS_CHECKS
-#define NLO_RK4_CALL(expr)                          \
+#if RK4_STRICT_STATUS_CHECKS
+#define RK4_CALL(expr)                          \
     do                                              \
     {                                               \
-        const nlo_vec_status call_status_ = (expr); \
-        if (call_status_ != NLO_VEC_STATUS_OK)      \
+        const vec_status call_status_ = (expr); \
+        if (call_status_ != VEC_STATUS_OK)      \
         {                                           \
             return call_status_;                    \
         }                                           \
     } while (0)
 #else
-#define NLO_RK4_CALL(expr)                          \
+#define RK4_CALL(expr)                          \
     do                                              \
     {                                               \
-        const nlo_vec_status call_status_ = (expr); \
-        assert(call_status_ == NLO_VEC_STATUS_OK);  \
+        const vec_status call_status_ = (expr); \
+        assert(call_status_ == VEC_STATUS_OK);  \
         (void)call_status_;                         \
     } while (0)
 #endif
 
-static nlo_vec_status nlo_apply_nonlinear_operator_stage_raman(
+static vec_status apply_nonlinear_operator_stage_raman(
     simulation_state* state,
-    const nlo_vec_buffer* field,
-    nlo_vec_buffer* out_field
+    const vec_buffer* field,
+    vec_buffer* out_field
 )
 {
     if (state == NULL || state->backend == NULL || state->fft_plan == NULL || field == NULL || out_field == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
     simulation_working_vectors* work = &state->working_vectors;
 
     const double f_r = state->raman_fraction;
-    nlo_vec_status status = nlo_vec_complex_magnitude_squared(state->backend, field, work->raman_intensity_vec);
-    if (status != NLO_VEC_STATUS_OK) {
+    vec_status status = vec_complex_magnitude_squared(state->backend, field, work->raman_intensity_vec);
+    if (status != VEC_STATUS_OK) {
         return status;
     }
 
     if (f_r > 0.0) {
-        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_delayed_vec, work->raman_intensity_vec));
-        NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->raman_delayed_vec, work->raman_spectrum_vec));
-        NLO_RK4_CALL(nlo_vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_response_fft_vec));
-        NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_delayed_vec));
+        RK4_CALL(vec_complex_copy(state->backend, work->raman_delayed_vec, work->raman_intensity_vec));
+        RK4_CALL(fft_forward_vec(state->fft_plan, work->raman_delayed_vec, work->raman_spectrum_vec));
+        RK4_CALL(vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_response_fft_vec));
+        RK4_CALL(fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_delayed_vec));
 
-        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec));
-        NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend, work->raman_mix_vec, nlo_make(1.0 - f_r, 0.0)));
-        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_polarization_vec, work->raman_delayed_vec));
-        NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend, work->raman_polarization_vec, nlo_make(f_r, 0.0)));
-        NLO_RK4_CALL(nlo_vec_complex_add_inplace(state->backend, work->raman_mix_vec, work->raman_polarization_vec));
+        RK4_CALL(vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(state->backend, work->raman_mix_vec, make(1.0 - f_r, 0.0)));
+        RK4_CALL(vec_complex_copy(state->backend, work->raman_polarization_vec, work->raman_delayed_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(state->backend, work->raman_polarization_vec, make(f_r, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(state->backend, work->raman_mix_vec, work->raman_polarization_vec));
     } else {
-        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec));
+        RK4_CALL(vec_complex_copy(state->backend, work->raman_mix_vec, work->raman_intensity_vec));
     }
 
-    NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_polarization_vec, field));
-    NLO_RK4_CALL(nlo_vec_complex_mul_inplace(state->backend, work->raman_polarization_vec, work->raman_mix_vec));
+    RK4_CALL(vec_complex_copy(state->backend, work->raman_polarization_vec, field));
+    RK4_CALL(vec_complex_mul_inplace(state->backend, work->raman_polarization_vec, work->raman_mix_vec));
 
-    NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, out_field, work->raman_polarization_vec));
-    NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(state->backend, out_field, nlo_make(0.0, state->nonlinear_gamma)));
+    RK4_CALL(vec_complex_copy(state->backend, out_field, work->raman_polarization_vec));
+    RK4_CALL(vec_complex_scalar_mul_inplace(state->backend, out_field, make(0.0, state->nonlinear_gamma)));
 
     if (state->nonlinear_shock_active) {
-        NLO_RK4_CALL(nlo_vec_complex_copy(state->backend, work->raman_derivative_vec, work->raman_polarization_vec));
-        NLO_RK4_CALL(nlo_fft_forward_vec(state->fft_plan, work->raman_derivative_vec, work->raman_spectrum_vec));
-        NLO_RK4_CALL(nlo_vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_derivative_factor_vec));
-        NLO_RK4_CALL(nlo_fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_derivative_vec));
-        NLO_RK4_CALL(nlo_vec_complex_scalar_mul_inplace(
+        RK4_CALL(vec_complex_copy(state->backend, work->raman_derivative_vec, work->raman_polarization_vec));
+        RK4_CALL(fft_forward_vec(state->fft_plan, work->raman_derivative_vec, work->raman_spectrum_vec));
+        RK4_CALL(vec_complex_mul_inplace(state->backend, work->raman_spectrum_vec, work->raman_derivative_factor_vec));
+        RK4_CALL(fft_inverse_vec(state->fft_plan, work->raman_spectrum_vec, work->raman_derivative_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(
             state->backend,
             work->raman_derivative_vec,
-            nlo_make(-(state->nonlinear_gamma / state->shock_omega0), 0.0)
+            make(-(state->nonlinear_gamma / state->shock_omega0), 0.0)
         ));
-        NLO_RK4_CALL(nlo_vec_complex_add_inplace(state->backend, out_field, work->raman_derivative_vec));
+        RK4_CALL(vec_complex_add_inplace(state->backend, out_field, work->raman_derivative_vec));
     }
 
-    return NLO_VEC_STATUS_OK;
+    return VEC_STATUS_OK;
 }
 
-nlo_vec_status nlo_apply_dispersion_operator_stage(
+vec_status apply_dispersion_operator_stage(
     simulation_state* state,
-    nlo_vec_buffer* freq_domain_envelope
+    vec_buffer* freq_domain_envelope
 )
 {
 
-    const double start_ms = nlo_perf_profile_now_ms();
-    nlo_vec_status status = NLO_VEC_STATUS_OK;
+    const double start_ms = perf_profile_now_ms();
+    vec_status status = VEC_STATUS_OK;
     if (state->tensor_mode_active) {
-        const nlo_operator_eval_context linear_eval_ctx = {
+        const operator_eval_context linear_eval_ctx = {
             .frequency_grid = state->frequency_grid_vec,
             .wt_grid = state->working_vectors.wt_mesh_vec,
             .kx_grid = state->working_vectors.kx_mesh_vec,
@@ -112,48 +112,48 @@ nlo_vec_status nlo_apply_dispersion_operator_stage(
             .potential = state->working_vectors.potential_vec,
             .half_step_size = state->current_half_step_exp
         };
-        status = nlo_operator_program_execute(state->backend,
+        status = operator_program_execute(state->backend,
                                               &state->linear_operator_program,
                                               &linear_eval_ctx,
                                               state->runtime_operator_stack_vec,
                                               state->runtime_operator_stack_slots,
                                               state->working_vectors.dispersion_operator_vec);
-        if (status == NLO_VEC_STATUS_OK) {
-            status = nlo_vec_complex_mul_inplace(state->backend,
+        if (status == VEC_STATUS_OK) {
+            status = vec_complex_mul_inplace(state->backend,
                                                  freq_domain_envelope,
                                                  state->working_vectors.dispersion_operator_vec);
         }
     } else {
-        const nlo_operator_eval_context eval_ctx = {
+        const operator_eval_context eval_ctx = {
             .frequency_grid = state->frequency_grid_vec,
             .field = freq_domain_envelope,
             .dispersion_factor = state->working_vectors.dispersion_factor_vec,
             .potential = state->working_vectors.potential_vec,
             .half_step_size = state->current_half_step_exp
         };
-        status = nlo_operator_program_execute(state->backend,
+        status = operator_program_execute(state->backend,
                                               &state->dispersion_operator_program,
                                               &eval_ctx,
                                               state->runtime_operator_stack_vec,
                                               state->runtime_operator_stack_slots,
                                               state->working_vectors.dispersion_operator_vec);
-        if (status == NLO_VEC_STATUS_OK) {
-            status = nlo_vec_complex_mul_inplace(state->backend,
+        if (status == VEC_STATUS_OK) {
+            status = vec_complex_mul_inplace(state->backend,
                                                  freq_domain_envelope,
                                                  state->working_vectors.dispersion_operator_vec);
         }
     }
-    const double end_ms = nlo_perf_profile_now_ms();
-    if (status == NLO_VEC_STATUS_OK) {
-        nlo_perf_profile_add_dispersion_time(end_ms - start_ms);
+    const double end_ms = perf_profile_now_ms();
+    if (status == VEC_STATUS_OK) {
+        perf_profile_add_dispersion_time(end_ms - start_ms);
     }
     return status;
 }
 
-nlo_vec_status nlo_apply_nonlinear_operator_stage(
+vec_status apply_nonlinear_operator_stage(
     simulation_state* state,
-    const nlo_vec_buffer* field,
-    nlo_vec_buffer* out_field
+    const vec_buffer* field,
+    vec_buffer* out_field
 )
 {
     if (state == NULL ||
@@ -161,15 +161,15 @@ nlo_vec_status nlo_apply_nonlinear_operator_stage(
         state->config == NULL ||
         field == NULL ||
         out_field == NULL) {
-        return NLO_VEC_STATUS_INVALID_ARGUMENT;
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
 
-    const double start_ms = nlo_perf_profile_now_ms();
-    nlo_vec_status status = NLO_VEC_STATUS_OK;
-    if (state->nonlinear_model == NLO_NONLINEAR_MODEL_KERR_RAMAN) {
-        status = nlo_apply_nonlinear_operator_stage_raman(state, field, out_field);
+    const double start_ms = perf_profile_now_ms();
+    vec_status status = VEC_STATUS_OK;
+    if (state->nonlinear_model == NONLINEAR_MODEL_KERR_RAMAN) {
+        status = apply_nonlinear_operator_stage_raman(state, field, out_field);
     } else {
-        const nlo_operator_eval_context eval_ctx = {
+        const operator_eval_context eval_ctx = {
             .frequency_grid = state->frequency_grid_vec,
             .wt_grid = state->tensor_mode_active ? state->working_vectors.wt_mesh_vec : NULL,
             .kx_grid = state->tensor_mode_active ? state->working_vectors.kx_mesh_vec : NULL,
@@ -182,16 +182,16 @@ nlo_vec_status nlo_apply_nonlinear_operator_stage(
             .potential = state->working_vectors.potential_vec,
             .half_step_size = state->current_half_step_exp
         };
-        status = nlo_operator_program_execute(state->backend,
+        status = operator_program_execute(state->backend,
                                               &state->nonlinear_operator_program,
                                               &eval_ctx,
                                               state->runtime_operator_stack_vec,
                                               state->runtime_operator_stack_slots,
                                               out_field);
     }
-    const double end_ms = nlo_perf_profile_now_ms();
-    if (status == NLO_VEC_STATUS_OK) {
-        nlo_perf_profile_add_nonlinear_time(end_ms - start_ms);
+    const double end_ms = perf_profile_now_ms();
+    if (status == VEC_STATUS_OK) {
+        perf_profile_add_nonlinear_time(end_ms - start_ms);
     }
     return status;
 }

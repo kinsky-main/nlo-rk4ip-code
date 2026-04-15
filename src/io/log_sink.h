@@ -12,14 +12,14 @@
 typedef enum
 {
     /** Only error logs are emitted. */
-    NLO_LOG_LEVEL_ERROR = 0,
+    LOG_LEVEL_ERROR = 0,
     /** Warnings and errors are emitted. */
-    NLO_LOG_LEVEL_WARN = 1,
+    LOG_LEVEL_WARN = 1,
     /** Informational, warning, and error logs are emitted. */
-    NLO_LOG_LEVEL_INFO = 2,
+    LOG_LEVEL_INFO = 2,
     /** Verbose debug logs are emitted. */
-    NLO_LOG_LEVEL_DEBUG = 3
-} nlo_log_level;
+    LOG_LEVEL_DEBUG = 3
+} log_level;
 
 /**
  * @brief Output stream selection for runtime progress TUI rendering.
@@ -27,12 +27,12 @@ typedef enum
 typedef enum
 {
     /** Render progress updates to stderr only. */
-    NLO_LOG_PROGRESS_STREAM_STDERR = 0,
+    LOG_PROGRESS_STREAM_STDERR = 0,
     /** Render progress updates to stdout only. */
-    NLO_LOG_PROGRESS_STREAM_STDOUT = 1,
+    LOG_PROGRESS_STREAM_STDOUT = 1,
     /** Render progress updates to both stderr and stdout. */
-    NLO_LOG_PROGRESS_STREAM_BOTH = 2
-} nlo_log_progress_stream_mode;
+    LOG_PROGRESS_STREAM_BOTH = 2
+} log_progress_stream_mode;
 
 /**
  * @brief Configure an optional file sink for nlolib logs.
@@ -42,7 +42,7 @@ typedef enum
  * @param append Nonzero appends to file; zero truncates file.
  * @return int Zero on success; nonzero on error.
  */
-int nlo_log_set_file(const char* path_utf8, int append);
+int log_set_file(const char* path_utf8, int append);
 
 /**
  * @brief Configure an in-memory ring buffer sink for logs.
@@ -51,14 +51,14 @@ int nlo_log_set_file(const char* path_utf8, int append);
  *        Pass zero to disable buffering.
  * @return int Zero on success; nonzero on error.
  */
-int nlo_log_set_buffer(size_t capacity_bytes);
+int log_set_buffer(size_t capacity_bytes);
 
 /**
  * @brief Clear buffered in-memory logs.
  *
  * @return int Zero on success; nonzero on error.
  */
-int nlo_log_clear_buffer(void);
+int log_clear_buffer(void);
 
 /**
  * @brief Read buffered logs into caller-provided memory.
@@ -69,15 +69,15 @@ int nlo_log_clear_buffer(void);
  * @param consume Nonzero consumes copied bytes from ring buffer.
  * @return int Zero on success; nonzero on error.
  */
-int nlo_log_read_buffer(char* dst, size_t dst_bytes, size_t* out_written, int consume);
+int log_read_buffer(char* dst, size_t dst_bytes, size_t* out_written, int consume);
 
 /**
  * @brief Set global log level threshold.
  *
- * @param level Desired level in @ref nlo_log_level range.
+ * @param level Desired level in @ref log_level range.
  * @return int Zero on success; nonzero on error.
  */
-int nlo_log_set_level(int level);
+int log_set_level(int level);
 
 /**
  * @brief Configure runtime progress TUI behavior.
@@ -88,15 +88,15 @@ int nlo_log_set_level(int level);
  *        step-size adjustment events.
  * @return int Zero on success; nonzero on error.
  */
-int nlo_log_set_progress_options(int enabled, int milestone_percent, int emit_on_step_adjust);
+int log_set_progress_options(int enabled, int milestone_percent, int emit_on_step_adjust);
 
 /**
  * @brief Configure output stream selection for runtime progress TUI lines.
  *
- * @param stream_mode Stream mode in @ref nlo_log_progress_stream_mode range.
+ * @param stream_mode Stream mode in @ref log_progress_stream_mode range.
  * @return int Zero on success; nonzero on error.
  */
-int nlo_log_set_progress_stream(int stream_mode);
+int log_set_progress_stream(int stream_mode);
 
 /**
  * @brief Register an optional per-propagation progress callback.
@@ -105,14 +105,14 @@ int nlo_log_set_progress_stream(int stream_mode);
  * @param user_data Caller-owned opaque context pointer.
  * @return int Zero on success; nonzero on error.
  */
-int nlo_log_set_progress_callback(nlo_progress_callback callback, void* user_data);
+int log_set_progress_callback(progress_callback callback, void* user_data);
 
 /**
  * @brief Return whether the active progress callback has requested abort.
  *
  * @return int Nonzero when abort has been requested.
  */
-int nlo_log_progress_abort_requested(void);
+int log_progress_abort_requested(void);
 
 /**
  * @brief Emit a formatted log line through active sinks.
@@ -120,7 +120,7 @@ int nlo_log_progress_abort_requested(void);
  * @param level Severity level of this entry.
  * @param fmt Printf-style format string.
  */
-void nlo_log_emit(int level, const char* fmt, ...);
+void log_emit(int level, const char* fmt, ...);
 
 /**
  * @brief Emit preformatted text through active sinks.
@@ -129,7 +129,7 @@ void nlo_log_emit(int level, const char* fmt, ...);
  * @param text Message bytes to emit.
  * @param text_len Length of @p text (bytes).
  */
-void nlo_log_emit_raw(int level, const char* text, size_t text_len);
+void log_emit_raw(int level, const char* text, size_t text_len);
 
 /**
  * @brief Begin a progress tracking span.
@@ -137,7 +137,7 @@ void nlo_log_emit_raw(int level, const char* text, size_t text_len);
  * @param z_start Starting z-coordinate.
  * @param z_end Final z-coordinate.
  */
-void nlo_log_progress_begin(double z_start, double z_end);
+void log_progress_begin(double z_start, double z_end);
 
 /**
  * @brief Emit progress state for an accepted step.
@@ -149,7 +149,7 @@ void nlo_log_progress_begin(double z_start, double z_end);
  * @param error Adaptive error estimate.
  * @param next_step_size Next candidate step size.
  */
-void nlo_log_progress_step_accepted(
+void log_progress_step_accepted(
     size_t step_index,
     double z,
     double z_end,
@@ -169,7 +169,7 @@ void nlo_log_progress_step_accepted(
  * @param retry_step Next retry step size.
  * @param reject_attempt Rejection attempt count.
  */
-void nlo_log_progress_step_rejected(
+void log_progress_step_rejected(
     size_t step_index,
     double z,
     double z_end,
@@ -186,4 +186,4 @@ void nlo_log_progress_step_rejected(
  * @param z_end Final requested z-coordinate.
  * @param success Nonzero when run completed successfully.
  */
-void nlo_log_progress_finish(double z, double z_end, int success);
+void log_progress_finish(double z, double z_end, int success);

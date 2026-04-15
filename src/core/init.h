@@ -34,8 +34,8 @@ typedef struct {
     size_t working_vector_bytes;
     size_t device_ring_capacity;
     size_t device_budget_bytes;
-    nlo_vector_backend_type backend_type;
-} nlo_allocation_info;
+    vector_backend_type backend_type;
+} allocation_info;
 
 /**
  * @brief Initialize solver state and compute allocation diagnostics.
@@ -44,16 +44,16 @@ typedef struct {
  * @param num_time_samples Flattened sample count per record.
  * @param num_recorded_samples Number of records requested by caller.
  * @param exec_options Optional backend/runtime options (NULL for defaults).
- * @param allocation_info Optional allocation summary output (can be NULL).
+ * @param out_allocation_info Optional allocation summary output (can be NULL).
  * @param out_state Destination state handle.
  * @return int 0 on success, nonzero on failure.
  */
-NLOLIB_API int nlo_init_simulation_state(
+NLOLIB_API int init_simulation_state(
     const sim_config* config,
     size_t num_time_samples,
     size_t num_recorded_samples,
-    const nlo_execution_options* exec_options,
-    nlo_allocation_info* allocation_info,
+    const execution_options* exec_options,
+    allocation_info* out_allocation_info,
     simulation_state** out_state
 );
 
@@ -65,17 +65,17 @@ NLOLIB_API int nlo_init_simulation_state(
  * @param num_recorded_samples Number of records requested by caller.
  * @param exec_options Optional backend/runtime options (NULL for defaults).
  * @param storage_options Optional storage options (NULL disables storage).
- * @param allocation_info Optional allocation summary output (can be NULL).
+ * @param out_allocation_info Optional allocation summary output (can be NULL).
  * @param out_state Destination state handle.
  * @return int 0 on success, nonzero on failure.
  */
-NLOLIB_API int nlo_init_simulation_state_with_storage(
+NLOLIB_API int init_simulation_state_with_storage(
     const sim_config* config,
     size_t num_time_samples,
     size_t num_recorded_samples,
-    const nlo_execution_options* exec_options,
-    const nlo_storage_options* storage_options,
-    nlo_allocation_info* allocation_info,
+    const execution_options* exec_options,
+    const storage_options* storage_options,
+    allocation_info* out_allocation_info,
     simulation_state** out_state
 );
 

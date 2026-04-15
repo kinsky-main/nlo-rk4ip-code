@@ -11,7 +11,7 @@ Base.@kwdef struct RuntimeOperators
     dispersion_factor_fn::Any = nothing
     dispersion_fn::Any = nothing
     nonlinear_fn::Any = nothing
-    nonlinear_model::Int = Int(NLO_NONLINEAR_MODEL_EXPR)
+    nonlinear_model::Int = Int(NONLINEAR_MODEL_EXPR)
     nonlinear_gamma::Float64 = 0.0
     raman_fraction::Float64 = 0.0
     raman_tau1::Float64 = 0.0122
@@ -31,7 +31,7 @@ Base.@kwdef mutable struct PulseSpec
     tensor_nt::Union{Nothing, Int} = nothing
     tensor_nx::Union{Nothing, Int} = nothing
     tensor_ny::Union{Nothing, Int} = nothing
-    tensor_layout::Int = Int(NLO_TENSOR_LAYOUT_XYT_T_FAST)
+    tensor_layout::Int = Int(TENSOR_LAYOUT_XYT_T_FAST)
     delta_x::Float64 = 1.0
     delta_y::Float64 = 1.0
     spatial_frequency_grid::Union{Nothing, Vector{ComplexF64}} = nothing

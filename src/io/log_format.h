@@ -17,7 +17,7 @@
  * @param value Integer value to format.
  * @return size_t Number of bytes written excluding the null terminator.
  */
-size_t nlo_log_format_u64_grouped(char* dst, size_t dst_size, uint64_t value);
+size_t log_format_u64_grouped(char* dst, size_t dst_size, uint64_t value);
 
 /**
  * @brief Format a byte-count as a human-readable IEC unit string.
@@ -27,7 +27,7 @@ size_t nlo_log_format_u64_grouped(char* dst, size_t dst_size, uint64_t value);
  * @param bytes Raw byte count.
  * @return size_t Number of bytes written excluding the null terminator.
  */
-size_t nlo_log_format_bytes_human(char* dst, size_t dst_size, size_t bytes);
+size_t log_format_bytes_human(char* dst, size_t dst_size, size_t bytes);
 
 /**
  * @brief Format a byte-count as a human-readable IEC unit with raw bytes.
@@ -41,4 +41,4 @@ size_t nlo_log_format_bytes_human(char* dst, size_t dst_size, size_t bytes);
  * @param bytes Raw byte count.
  * @return size_t Number of bytes written excluding the null terminator.
  */
-size_t nlo_log_format_bytes_summary(char* dst, size_t dst_size, size_t bytes);
+size_t log_format_bytes_summary(char* dst, size_t dst_size, size_t bytes);

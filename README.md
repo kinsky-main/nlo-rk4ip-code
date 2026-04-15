@@ -4,6 +4,52 @@
 
 Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-code/.
 
+## Default Operator Forms
+
+The rendered API docs use these default operator forms as the reference model
+for the public runtime-operator configuration.
+
+Temporal dispersion factor and half-step linear operator:
+
+\f[
+D(\omega)=i c_0 \omega^2-c_1,\qquad
+L_h(\omega)=\exp\!\left(hD(\omega)\right)
+\f]
+
+Canonical expression-model nonlinear RHS:
+
+\f[
+N(A)=iA(c_2|A|^2+V)
+\f]
+
+Built-in Kerr + delayed Raman model with optional self-steepening:
+
+\f[
+N_R(A)=i\gamma A\left[(1-f_R)|A|^2+f_R\left(h_R \ast |A|^2\right)\right]
+-\frac{\gamma}{\omega_0}\partial_t\!\left[
+A\left((1-f_R)|A|^2+f_R\left(h_R \ast |A|^2\right)\right)\right]
+\f]
+
+Default normalized Raman response:
+
+\f[
+h_R(t)\propto e^{-t/\tau_2}\sin(t/\tau_1),\qquad
+t\ge 0,\qquad \int_0^{\infty} h_R(t)\,dt = 1
+\f]
+
+Tensor linear operator semantics:
+
+\f[
+L_h(\omega_t,k_x,k_y,t,x,y)=
+\exp\!\left(hD(\omega_t,k_x,k_y,t,x,y)\right)
+\f]
+
+Example tensor dispersion operator used by the validation examples:
+
+\f[
+D=i\left(\beta_{2,s}\omega_t^2+\beta_t(k_x^2+k_y^2)\right)
+\f]
+
 ## Prerequisites
 
 ### Required for core build
@@ -12,7 +58,7 @@ Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-c
 - C99 compiler toolchain
 - FFTW build prerequisites (handled by CMake fetch/in-tree build)
 - OpenBLAS/CBLAS dependency (auto-resolved by CMake from system install, fetched source, or fetched Windows binary)
-- Vulkan toolchain only when `NLO_ENABLE_VULKAN_BACKEND=ON`:
+- Vulkan toolchain only when `ENABLE_VULKAN_BACKEND=ON`:
   - Vulkan loader library (runtime + link-time)
   - Vulkan headers (auto-discovered or fetched by CMake)
   - Vulkan SDK/glslang development components that provide CMake target `Vulkan::glslang`
@@ -29,8 +75,8 @@ Full API documentation is available at https://kinsky-main.github.io/nlo-rk4ip-c
 
 ```powershell
 cmake -S . -B build `
-  -DNLO_INSTALL_GIT_HOOKS=OFF `
-  -DNLO_BUMP_PATCH_ON_BUILD=OFF
+  -DINSTALL_GIT_HOOKS=OFF `
+  -DBUMP_PATCH_ON_BUILD=OFF
 
 cmake --build build --config Debug
 ctest --test-dir build --build-config Debug --output-on-failure
@@ -60,8 +106,8 @@ Configure, build, and test:
 
 ```bash
 cmake -S . -B build \
-  -DNLO_INSTALL_GIT_HOOKS=OFF \
-  -DNLO_BUMP_PATCH_ON_BUILD=OFF
+  -DINSTALL_GIT_HOOKS=OFF \
+  -DBUMP_PATCH_ON_BUILD=OFF
 
 cmake --build build
 ctest --test-dir build --output-on-failure
@@ -70,7 +116,7 @@ ctest --test-dir build --output-on-failure
 Repo helper script (Linux/macOS shell environments):
 
 ```bash
-./setup.sh --build --cmake-arg -DNLO_INSTALL_GIT_HOOKS=OFF --cmake-arg -DNLO_BUMP_PATCH_ON_BUILD=OFF
+./setup.sh --build --cmake-arg -DINSTALL_GIT_HOOKS=OFF --cmake-arg -DBUMP_PATCH_ON_BUILD=OFF
 ```
 
 Script flags:
@@ -86,22 +132,22 @@ Current top-level CMake options and cache variables:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS` | `ON` | Enables RK4/dispersion debug diagnostics in `Debug` builds. |
-| `NLO_INSTALL_GIT_HOOKS` | `ON` | Installs project pre-commit hook for automatic version bump behavior. |
+| `ENABLE_RK4_DEBUG_DIAGNOSTICS` | `ON` | Enables RK4/dispersion debug diagnostics in `Debug` builds. |
+| `INSTALL_GIT_HOOKS` | `ON` | Installs project pre-commit hook for automatic version bump behavior. |
 | `NLOLIB_BUILD_DOCS` | `ON` | Enables `docs` target when Doxygen is found. |
 | `NLOLIB_BUILD_BENCHMARKS` | `ON` | Builds benchmark targets in `benchmarks/`. |
 | `NLOLIB_BUILD_EXAMPLES` | `ON` | Builds example targets in `examples/`. |
 | `NLOLIB_BUILD_MATLAB_TESTS` | `OFF` | Enables optional MATLAB parser/runtime tests under `tests/matlab` when MATLAB is available. |
-| `NLO_ENABLE_VULKAN_BACKEND` | `ON` | Enables Vulkan backend and shader compilation path. |
-| `NLO_ENABLE_VKFFT` | `ON` | Enables VkFFT FFT path (auto-forced `OFF` when Vulkan backend is disabled). |
-| `NLO_BUMP_PATCH_ON_BUILD` | `ON` | Adds `nlo_patch_bump_on_build` target to patch-bump version on successful build. |
-| `NLO_SQLITE_USE_FETCHCONTENT` | `ON` | Deprecated compatibility toggle; SQLite amalgamation is always used. |
-| `NLO_CBLAS_PREFER_SYSTEM` | `ON` on Linux/macOS, `OFF` on Windows | Prefer a system OpenBLAS install before fetching OpenBLAS. |
-| `NLO_OPENBLAS_URL` | OpenBLAS `v0.3.30` tarball | OpenBLAS source archive used for in-tree static CBLAS builds on non-Windows platforms. |
-| `NLO_OPENBLAS_WINDOWS_URL` | OpenBLAS `v0.3.30` x64 zip | Prebuilt OpenBLAS package fetched for Windows builds. |
-| `NLO_VULKAN_HEADERS_URL` | Khronos main zip | Vulkan-Headers fetch URL fallback when headers are not local. |
-| `NLO_SQLITE_AMALGAMATION_URL` | sqlite.org zip | SQLite amalgamation fetch URL fallback. |
-| `NLO_FFTW_GIT_TAG` | `fftw-3.3.10` | FFTW tarball tag used in CMake fetch/build. |
+| `ENABLE_VULKAN_BACKEND` | `ON` | Enables Vulkan backend and shader compilation path. |
+| `ENABLE_VKFFT` | `ON` | Enables VkFFT FFT path (auto-forced `OFF` when Vulkan backend is disabled). |
+| `BUMP_PATCH_ON_BUILD` | `ON` | Adds `patch_bump_on_build` target to patch-bump version on successful build. |
+| `SQLITE_USE_FETCHCONTENT` | `ON` | Deprecated compatibility toggle; SQLite amalgamation is always used. |
+| `CBLAS_PREFER_SYSTEM` | `ON` on Linux/macOS, `OFF` on Windows | Prefer a system OpenBLAS install before fetching OpenBLAS. |
+| `OPENBLAS_URL` | OpenBLAS `v0.3.30` tarball | OpenBLAS source archive used for in-tree static CBLAS builds on non-Windows platforms. |
+| `OPENBLAS_WINDOWS_URL` | OpenBLAS `v0.3.30` x64 zip | Prebuilt OpenBLAS package fetched for Windows builds. |
+| `VULKAN_HEADERS_URL` | Khronos main zip | Vulkan-Headers fetch URL fallback when headers are not local. |
+| `SQLITE_AMALGAMATION_URL` | sqlite.org zip | SQLite amalgamation fetch URL fallback. |
+| `FFTW_GIT_TAG` | `fftw-3.3.10` | FFTW tarball tag used in CMake fetch/build. |
 | `BUILD_TESTING` | `ON` (via CTest default) | Enables test targets under `tests/`. |
 
 Build configuration types:
@@ -118,13 +164,13 @@ Multi-config generators use `--config <type>` during build/test.
 
 - FFTW is resolved through CMake FetchContent and linked as static FFTW3 target.
 - CPU CBLAS is resolved through OpenBLAS:
-  - Linux/macOS prefer a system OpenBLAS install when `NLO_CBLAS_PREFER_SYSTEM=ON`, otherwise CMake fetches and builds a static OpenBLAS.
+  - Linux/macOS prefer a system OpenBLAS install when `CBLAS_PREFER_SYSTEM=ON`, otherwise CMake fetches and builds a static OpenBLAS.
   - Windows fetches a pinned prebuilt OpenBLAS package, links the provided import library, and copies the matching DLL beside built binaries.
-- When `NLO_ENABLE_VKFFT=ON`, VkFFT is fetched via CMake FetchContent for Vulkan FFT integration.
-- When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan headers are found via `find_package(Vulkan)` or fetched from `NLO_VULKAN_HEADERS_URL`.
-- When `NLO_ENABLE_VULKAN_BACKEND=ON`, Vulkan loader must be present locally (`vulkan`/`vulkan-1` library).
-- When `NLO_ENABLE_VULKAN_BACKEND=ON`, `glslangValidator` is required to compile compute shaders to SPIR-V during build.
-- When `NLO_ENABLE_VKFFT=ON`, CMake target `Vulkan::glslang` must be resolvable for FFT backend linking.
+- When `ENABLE_VKFFT=ON`, VkFFT is fetched via CMake FetchContent for Vulkan FFT integration.
+- When `ENABLE_VULKAN_BACKEND=ON`, Vulkan headers are found via `find_package(Vulkan)` or fetched from `VULKAN_HEADERS_URL`.
+- When `ENABLE_VULKAN_BACKEND=ON`, Vulkan loader must be present locally (`vulkan`/`vulkan-1` library).
+- When `ENABLE_VULKAN_BACKEND=ON`, `glslangValidator` is required to compile compute shaders to SPIR-V during build.
+- When `ENABLE_VKFFT=ON`, CMake target `Vulkan::glslang` must be resolvable for FFT backend linking.
 - SQLite is linked from the fetched amalgamation as a static library (no external `sqlite3.dll` runtime dependency).
 
 ## Runtime Operator Semantics
@@ -133,15 +179,15 @@ Multi-config generators use `--config <type>` during build/test.
 - `nonlinear_expr` is interpreted as the full nonlinear RHS `N(A)` and is written directly by the solver.
 - Legacy multiplier-form nonlinear expressions must be migrated to include `A`.
 - `runtime.nonlinear_model` selects nonlinear execution mode:
-  - `0` (`NLO_NONLINEAR_MODEL_EXPR`): evaluate `nonlinear_expr` (default).
-  - `1` (`NLO_NONLINEAR_MODEL_KERR_RAMAN`): built-in Kerr + delayed Raman model with optional self-steepening.
-- `NLO_NONLINEAR_MODEL_KERR_RAMAN` parameters (Python `RuntimeOperators`, MATLAB `cfg.runtime`):
+  - `0` (`NONLINEAR_MODEL_EXPR`): evaluate `nonlinear_expr` (default).
+  - `1` (`NONLINEAR_MODEL_KERR_RAMAN`): built-in Kerr + delayed Raman model with optional self-steepening.
+- `NONLINEAR_MODEL_KERR_RAMAN` parameters (Python `RuntimeOperators`, MATLAB `cfg.runtime`):
   - `nonlinear_gamma` Kerr coefficient `gamma`.
   - `raman_fraction` delayed Raman fraction `f_R` in `[0, 1]`.
   - `raman_tau1`, `raman_tau2` default Raman kernel shape constants (`0.0122`, `0.0320`).
   - `raman_response_time` optional custom time-domain Raman response (`num_time_samples` complex values); when omitted, the normalized default response is generated from `tau1/tau2`.
   - `shock_omega0` enables self-steepening when `> 0` (set `0` to disable).
-- Current limitation: `NLO_NONLINEAR_MODEL_KERR_RAMAN` is supported for temporal-only runs (not tensor-coupled `tensor_nt*tensor_nx*tensor_ny` grids).
+- Current limitation: `NONLINEAR_MODEL_KERR_RAMAN` is supported for temporal-only runs (not tensor-coupled `tensor_nt*tensor_nx*tensor_ny` grids).
 
 Common migration examples:
 
@@ -300,7 +346,9 @@ Doc generation details:
 
 - If Doxygen is not found, the `docs` target is not added.
 - `doxygen-awesome-css` is fetched automatically during configure when docs are enabled.
-- Doxygen input is `src/` (`*.h`, `*.c`), with call and directory graphs enabled.
+- HTML formulas render through MathJax, so local LaTeX is not required for equation output in generated docs.
+- Doxygen input includes `src/` plus `README.md`, with call graphs enabled.
+- The rendered docs homepage uses `README.md`, so the default operator expressions stay visible on the landing page.
 
 ### Publish Docs to GitHub Pages (Manual Trigger)
 

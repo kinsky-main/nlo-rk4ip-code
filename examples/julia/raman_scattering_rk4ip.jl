@@ -1,5 +1,5 @@
 using NLOLibExamples
-pushfirst!(LOAD_PATH, nlo_package_root_from(@__FILE__))
+pushfirst!(LOAD_PATH, package_root_from(@__FILE__))
 
 using CairoMakie
 using FFTW
@@ -132,7 +132,7 @@ function main(argv = ARGS)
         run_group = begin_group(db, example_name, isempty(args[:run_group]) ? nothing : args[:run_group])
         pulse = PulseSpec(samples = field0, delta_time = dt, pulse_period = n * dt, frequency_grid = ComplexF64.(omega))
         linear = OperatorSpec(expr = "i*beta2*w*w", params = Dict("beta2" => 0.5 * beta2))
-        exec = default_execution_options(backend_type = NLO_VECTOR_BACKEND_CPU, fft_backend = NLO_FFT_BACKEND_FFTW)
+        exec = default_execution_options(backend_type = VECTOR_BACKEND_CPU, fft_backend = FFT_BACKEND_FFTW)
 
         base_kwargs = (
             t_span = (0.0, z_final),
@@ -167,7 +167,7 @@ function main(argv = ARGS)
             linear,
             "none";
             base_kwargs...,
-            nonlinear_model = NLO_NONLINEAR_MODEL_KERR_RAMAN,
+            nonlinear_model = NONLINEAR_MODEL_KERR_RAMAN,
             nonlinear_gamma = gamma,
             raman_fraction = f_r,
             raman_tau1 = tau1,

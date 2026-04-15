@@ -112,7 +112,8 @@ def _pulse_supported_time_indices(
             profile[time_index] = float(np.sum(np.abs(frame) ** 2))
         else:
             profile[time_index] = float(np.sum(np.clip(frame, 0.0, None)))
-
+    print(f"Number of time samples: {time_count}, peak profile value: {float(np.max(profile)):.3g}")
+    print(f"Range of time values: min={float(np.min(time_count)):.3g}, mean={float(np.mean(time_count)):.3g}, max={float(np.max(profile)):.3g}")
     peak = float(np.max(profile))
     if peak <= 0.0:
         return _evenly_spaced_indices(time_count, max_count=max_count)
@@ -134,19 +135,6 @@ def _pulse_supported_time_indices(
     if supported_count <= max_count:
         return np.arange(start, stop + 1, dtype=np.int64)
     return np.unique(np.rint(np.linspace(float(start), float(stop), int(max_count))).astype(np.int64))
-
-
-def _axis_edges(axis: np.ndarray) -> np.ndarray:
-    values = np.asarray(axis, dtype=np.float64).reshape(-1)
-    if values.size == 0:
-        raise ValueError("axis must not be empty.")
-    if values.size == 1:
-        delta = 1.0
-        return np.asarray([values[0] - 0.5 * delta, values[0] + 0.5 * delta], dtype=np.float64)
-    midpoints = 0.5 * (values[1:] + values[:-1])
-    first = values[0] - 0.5 * (values[1] - values[0])
-    last = values[-1] + 0.5 * (values[-1] - values[-2])
-    return np.concatenate(([first], midpoints, [last]))
 
 
 def configure_plot_saving(
@@ -670,16 +658,18 @@ def plot_3d_intensity_contours_propagation(
     output_path: Path,
     *,
     intensity_cutoff: float = 0.05,
-    num_levels: int = 7,
-    max_x_samples: int = 48,
-    max_y_samples: int = 48,
-    max_z_samples: int = 18,
+    num_levels: int = 20,
+    max_x_samples: int = 64,
+    max_y_samples: int = 64,
+    max_z_samples: int = 64,
     alpha_min: float = 0.05,
     alpha_max: float = 0.90,
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
     z_label: str = "z",
     annotation_text: str | None = None,
+    xy_crop_inset: float = 0.12,
+    xy_crop_padding: float = 0.16,
 ) -> Path | None:
 
     image = _render_3d_intensity_contours_frame(
@@ -698,6 +688,8 @@ def plot_3d_intensity_contours_propagation(
         normalization_peak=normalization_peak,
         z_label=z_label,
         annotation_text=annotation_text,
+        xy_crop_inset=xy_crop_inset,
+        xy_crop_padding=xy_crop_padding,
     )
     if image is None:
         return None
@@ -733,6 +725,8 @@ def _render_3d_intensity_contours_frame(
     normalization_peak: float | None,
     z_label: str,
     annotation_text: str | None,
+    xy_crop_inset: float = 0.12,
+    xy_crop_padding: float = 0.16,
 ) -> np.ndarray | None:
     if input_is_intensity:
         records = np.asarray(field_records, dtype=np.float64)
@@ -755,11 +749,15 @@ def _render_3d_intensity_contours_frame(
         raise ValueError("max_x_samples/max_y_samples/max_z_samples must be positive.")
     if alpha_min < 0.0 or alpha_min > 1.0 or alpha_max < 0.0 or alpha_max > 1.0 or alpha_min > alpha_max:
         raise ValueError("alpha_min/alpha_max must satisfy 0 <= alpha_min <= alpha_max <= 1.")
+    if xy_crop_inset < 0.0 or xy_crop_inset >= 1.0:
+        raise ValueError("xy_crop_inset must be in [0, 1).")
+    if xy_crop_padding < 0.0 or xy_crop_padding >= 1.0:
+        raise ValueError("xy_crop_padding must be in [0, 1).")
     if input_is_intensity:
         intensity = np.asarray(records, dtype=np.float64)
     else:
         intensity = np.abs(records) ** 2
-    intensity, _ = _normalized_nonnegative_data(intensity, normalization_peak=normalization_peak)
+    # intensity, _ = _normalized_nonnegative_data(intensity, normalization_peak=normalization_peak)
     if float(np.max(intensity)) <= 0.0:
         print("intensity is zero everywhere; skipping 3D propagation contour-surface plot.")
         return None
@@ -783,6 +781,15 @@ def _render_3d_intensity_contours_frame(
     max_intensity = float(np.max(intensity_small))
     level_upper = min(0.92, max_intensity)
     levels = np.linspace(float(intensity_cutoff), level_upper, int(num_levels), dtype=np.float64)
+    x_small, y_small, intensity_small = _crop_xy_within_low_contour(
+        x_small,
+        y_small,
+        intensity_small,
+        intensity_cutoff=float(intensity_cutoff),
+        level_upper=float(level_upper),
+        xy_crop_inset=float(xy_crop_inset),
+        xy_crop_padding=float(xy_crop_padding),
+    )
 
     volume_xyz = np.transpose(intensity_small, (2, 1, 0))
     grid = pv.RectilinearGrid(x_small, y_small, z_small)
@@ -794,7 +801,6 @@ def _render_3d_intensity_contours_frame(
     plotter.enable_parallel_projection()
     plotter.set_scale(1.0, 1.0, 1.0)
 
-    any_surface = False
     scalar_bar_added = False
     for level in levels:
         contour = grid.contour(isosurfaces=[float(level)], scalars="intensity")
@@ -849,6 +855,71 @@ def _render_3d_intensity_contours_frame(
     return image
 
 
+def _crop_xy_within_low_contour(
+    x_axis: np.ndarray,
+    y_axis: np.ndarray,
+    intensity_zyx: np.ndarray,
+    *,
+    intensity_cutoff: float,
+    level_upper: float,
+    xy_crop_inset: float,
+    xy_crop_padding: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    x = np.asarray(x_axis, dtype=np.float64).reshape(-1)
+    y = np.asarray(y_axis, dtype=np.float64).reshape(-1)
+    intensity = np.asarray(intensity_zyx, dtype=np.float64)
+    if intensity.ndim != 3 or x.size < 6 or y.size < 6:
+        return x, y, intensity
+    if intensity.shape[1] != y.size or intensity.shape[2] != x.size:
+        return x, y, intensity
+
+    crop_threshold = float(intensity_cutoff) + float(xy_crop_inset) * max(float(level_upper) - float(intensity_cutoff), 0.0)
+    crop_threshold = min(float(level_upper), max(float(intensity_cutoff), crop_threshold))
+    support_xy = np.max(intensity, axis=0) >= crop_threshold
+    if not np.any(support_xy):
+        return x, y, intensity
+
+    y_idx, x_idx = np.nonzero(support_xy)
+    x0 = int(np.min(x_idx))
+    x1 = int(np.max(x_idx))
+    y0 = int(np.min(y_idx))
+    y1 = int(np.max(y_idx))
+
+    x_pad_value = max(float(xy_crop_padding) * max(float(x[-1] - x[0]), 0.0), _median_axis_step(x))
+    y_pad_value = max(float(xy_crop_padding) * max(float(y[-1] - y[0]), 0.0), _median_axis_step(y))
+    x0, x1 = _expand_crop_window_by_value(x, x0, x1, pad_value=x_pad_value)
+    y0, y1 = _expand_crop_window_by_value(y, y0, y1, pad_value=y_pad_value)
+
+    if x0 == 0 and x1 == (x.size - 1) and y0 == 0 and y1 == (y.size - 1):
+        return x, y, intensity
+
+    return x[x0:x1 + 1], y[y0:y1 + 1], intensity[:, y0:y1 + 1, x0:x1 + 1]
+
+
+def _median_axis_step(axis: np.ndarray) -> float:
+    values = np.asarray(axis, dtype=np.float64).reshape(-1)
+    if values.size < 2:
+        return 0.0
+    diffs = np.diff(values)
+    diffs = diffs[np.isfinite(diffs) & (diffs > 0.0)]
+    if diffs.size == 0:
+        return 0.0
+    return float(np.median(diffs))
+
+
+def _expand_crop_window_by_value(axis: np.ndarray, start: int, stop: int, *, pad_value: float) -> tuple[int, int]:
+    values = np.asarray(axis, dtype=np.float64).reshape(-1)
+    if values.size == 0:
+        return int(start), int(stop)
+    target_min = max(float(values[0]), float(values[int(start)]) - float(pad_value))
+    target_max = min(float(values[-1]), float(values[int(stop)]) + float(pad_value))
+    start_idx = int(np.searchsorted(values, target_min, side="left"))
+    stop_idx = int(np.searchsorted(values, target_max, side="right") - 1)
+    start_idx = max(0, min(start_idx, values.size - 1))
+    stop_idx = max(start_idx, min(stop_idx, values.size - 1))
+    return start_idx, stop_idx
+
+
 def save_3d_intensity_time_sweep_video(
     t_axis: np.ndarray,
     x_axis: np.ndarray,
@@ -859,11 +930,11 @@ def save_3d_intensity_time_sweep_video(
     *,
     max_time_frames: int = 128,
     fps: int = 24,
-    intensity_cutoff: float = 0.02,
+    intensity_cutoff: float = 0.05,
     num_levels: int = 20,
-    max_x_samples: int = 48,
-    max_y_samples: int = 48,
-    max_z_samples: int = 18,
+    max_x_samples: int = 64,
+    max_y_samples: int = 64,
+    max_z_samples: int = 100,
     alpha_min: float = 0.05,
     alpha_max: float = 0.90,
 ) -> Path | None:
@@ -893,7 +964,7 @@ def save_3d_intensity_time_sweep_video(
     frame_indices = _pulse_supported_time_indices(
         records,
         max_count=int(max_time_frames),
-        support_threshold=max(0.01, 0.25 * float(intensity_cutoff)),
+        support_threshold=max(0.01, float(intensity_cutoff)),
     )
     if frame_indices.size == 0:
         print("time-sweep video skipped because there are no valid time samples.")

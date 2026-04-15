@@ -29,7 +29,7 @@ end
 
 nlolib.NLolib.ensure_types_loaded();
 keepalive = {};
-maxConstants = 16;            % NLO_RUNTIME_OPERATOR_CONSTANTS_MAX from nlolib_matlab.h
+maxConstants = 16;            % RUNTIME_OPERATOR_CONSTANTS_MAX from nlolib_matlab.h
 
 numTs = double(cfg.num_time_samples);
 
@@ -202,7 +202,7 @@ end
 simMl.frequency = struct('frequency_grid', freqPtr);
 simMl.spatial = spatialMl;
 
-simCfgPtr = libstruct('nlo_simulation_config', simMl);
+simCfgPtr = libstruct('simulation_config', simMl);
 physicsCfgPtr = libstruct('runtime_operator_params', runtimeMl);
 end
 

@@ -8,13 +8,13 @@
 #include "numerics/vk_vector_ops.h"
 #include <string.h>
 
-static nlo_vec_status nlo_vk_unavailable_status(void)
+static vec_status vk_unavailable_status(void)
 {
-    return NLO_VEC_STATUS_UNSUPPORTED;
+    return VEC_STATUS_UNSUPPORTED;
 }
 
-int nlo_vk_auto_context_init(
-    nlo_vk_auto_context* context,
+int vk_auto_context_init(
+    vk_auto_context* context,
     char* reason,
     size_t reason_capacity
 )
@@ -33,39 +33,39 @@ int nlo_vk_auto_context_init(
     return -1;
 }
 
-void nlo_vk_auto_context_destroy(nlo_vk_auto_context* context)
+void vk_auto_context_destroy(vk_auto_context* context)
 {
     if (context != NULL) {
         memset(context, 0, sizeof(*context));
     }
 }
 
-nlo_vec_status nlo_vk_backend_init(nlo_vector_backend* backend, const nlo_vk_backend_config* config)
+vec_status vk_backend_init(vector_backend* backend, const vk_backend_config* config)
 {
     (void)backend;
     (void)config;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-void nlo_vk_backend_shutdown(nlo_vector_backend* backend)
+void vk_backend_shutdown(vector_backend* backend)
 {
     (void)backend;
 }
 
-nlo_vec_status nlo_vk_simulation_phase_begin(nlo_vector_backend* backend)
+vec_status vk_simulation_phase_begin(vector_backend* backend)
 {
     (void)backend;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_simulation_phase_flush(nlo_vector_backend* backend)
+vec_status vk_simulation_phase_flush(vector_backend* backend)
 {
     (void)backend;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_simulation_phase_command_buffer(
-    nlo_vector_backend* backend,
+vec_status vk_simulation_phase_command_buffer(
+    vector_backend* backend,
     VkCommandBuffer* out_command_buffer
 )
 {
@@ -73,30 +73,30 @@ nlo_vec_status nlo_vk_simulation_phase_command_buffer(
     if (out_command_buffer != NULL) {
         *out_command_buffer = VK_NULL_HANDLE;
     }
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-void nlo_vk_simulation_phase_mark_commands(nlo_vector_backend* backend)
+void vk_simulation_phase_mark_commands(vector_backend* backend)
 {
     (void)backend;
 }
 
-nlo_vec_status nlo_vk_buffer_create(nlo_vector_backend* backend, nlo_vec_buffer* buffer)
-{
-    (void)backend;
-    (void)buffer;
-    return nlo_vk_unavailable_status();
-}
-
-void nlo_vk_buffer_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer)
+vec_status vk_buffer_create(vector_backend* backend, vec_buffer* buffer)
 {
     (void)backend;
     (void)buffer;
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_upload(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* buffer,
+void vk_buffer_destroy(vector_backend* backend, vec_buffer* buffer)
+{
+    (void)backend;
+    (void)buffer;
+}
+
+vec_status vk_upload(
+    vector_backend* backend,
+    vec_buffer* buffer,
     const void* data,
     size_t bytes
 )
@@ -105,12 +105,12 @@ nlo_vec_status nlo_vk_upload(
     (void)buffer;
     (void)data;
     (void)bytes;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_download(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* buffer,
+vec_status vk_download(
+    vector_backend* backend,
+    const vec_buffer* buffer,
     void* data,
     size_t bytes
 )
@@ -119,120 +119,120 @@ nlo_vec_status nlo_vk_download(
     (void)buffer;
     (void)data;
     (void)bytes;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, double value)
+vec_status vk_op_real_fill(vector_backend* backend, vec_buffer* dst, double value)
 {
     (void)backend;
     (void)dst;
     (void)value;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+vec_status vk_op_real_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
 {
     (void)backend;
     (void)dst;
     (void)src;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+vec_status vk_op_real_mul_inplace(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
 {
     (void)backend;
     (void)dst;
     (void)src;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, nlo_complex value)
+vec_status vk_op_complex_fill(vector_backend* backend, vec_buffer* dst, nlo_complex value)
 {
     (void)backend;
     (void)dst;
     (void)value;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src)
+vec_status vk_op_complex_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
 {
     (void)backend;
     (void)dst;
     (void)src;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_magnitude_squared(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* src,
-    nlo_vec_buffer* dst
+vec_status vk_op_complex_magnitude_squared(
+    vector_backend* backend,
+    const vec_buffer* src,
+    vec_buffer* dst
 )
 {
     (void)backend;
     (void)src;
     (void)dst;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_scalar_mul_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_scalar_mul_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
     nlo_complex alpha
 )
 {
     (void)backend;
     (void)dst;
     (void)alpha;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_mul_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* src
+vec_status vk_op_complex_mul_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* src
 )
 {
     (void)backend;
     (void)dst;
     (void)src;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_add_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* src
+vec_status vk_op_complex_add_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* src
 )
 {
     (void)backend;
     (void)dst;
     (void)src;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst)
+vec_status vk_op_complex_exp_inplace(vector_backend* backend, vec_buffer* dst)
 {
     (void)backend;
     (void)dst;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_real_pow_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_real_pow_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
     double exponent
 )
 {
     (void)backend;
     (void)dst;
     (void)exponent;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_relative_error(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* current,
-    const nlo_vec_buffer* previous,
+vec_status vk_op_complex_relative_error(
+    vector_backend* backend,
+    const vec_buffer* current,
+    const vec_buffer* previous,
     double epsilon,
     double* out_error
 )
@@ -244,13 +244,13 @@ nlo_vec_status nlo_vk_op_complex_relative_error(
     if (out_error != NULL) {
         *out_error = 0.0;
     }
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* fine,
-    const nlo_vec_buffer* coarse,
+vec_status vk_op_complex_weighted_rms_error(
+    vector_backend* backend,
+    const vec_buffer* fine,
+    const vec_buffer* coarse,
     double atol,
     double rtol,
     double* out_error
@@ -264,40 +264,40 @@ nlo_vec_status nlo_vk_op_complex_weighted_rms_error(
     if (out_error != NULL) {
         *out_error = 0.0;
     }
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_axis_unshifted_from_delta(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_axis_unshifted_from_delta(
+    vector_backend* backend,
+    vec_buffer* dst,
     double delta
 )
 {
     (void)backend;
     (void)dst;
     (void)delta;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_axis_centered_from_delta(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vk_op_complex_axis_centered_from_delta(
+    vector_backend* backend,
+    vec_buffer* dst,
     double delta
 )
 {
     (void)backend;
     (void)dst;
     (void)delta;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }
 
-nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* axis,
+vec_status vk_op_complex_mesh_from_axis_tfast(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* axis,
     size_t nt,
     size_t ny,
-    nlo_vec_mesh_axis axis_kind
+    vec_mesh_axis axis_kind
 )
 {
     (void)backend;
@@ -306,5 +306,5 @@ nlo_vec_status nlo_vk_op_complex_mesh_from_axis_tfast(
     (void)nt;
     (void)ny;
     (void)axis_kind;
-    return nlo_vk_unavailable_status();
+    return vk_unavailable_status();
 }

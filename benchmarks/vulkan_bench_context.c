@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void nlo_bench_copy_reason(
+static void bench_copy_reason(
     char* reason,
     size_t reason_capacity,
     const char* message
@@ -31,7 +31,7 @@ static void nlo_bench_copy_reason(
 #endif
 }
 
-static int nlo_bench_find_compute_queue_family(
+static int bench_find_compute_queue_family(
     VkPhysicalDevice physical_device,
     uint32_t* out_queue_family_index
 )
@@ -67,7 +67,7 @@ static int nlo_bench_find_compute_queue_family(
     return found ? 0 : -1;
 }
 
-static int nlo_bench_pick_physical_device(
+static int bench_pick_physical_device(
     VkInstance instance,
     VkPhysicalDevice* out_physical_device,
     uint32_t* out_queue_family_index
@@ -106,7 +106,7 @@ static int nlo_bench_pick_physical_device(
         }
 
         uint32_t queue_family_index = 0u;
-        if (nlo_bench_find_compute_queue_family(devices[i], &queue_family_index) != 0) {
+        if (bench_find_compute_queue_family(devices[i], &queue_family_index) != 0) {
             continue;
         }
 
@@ -120,19 +120,19 @@ static int nlo_bench_pick_physical_device(
     return found ? 0 : -1;
 }
 
-int nlo_bench_vk_context_init(
-    nlo_bench_vk_context* context,
+int bench_vk_context_init(
+    bench_vk_context* context,
     char* reason,
     size_t reason_capacity
 )
 {
     if (context == NULL) {
-        nlo_bench_copy_reason(reason, reason_capacity, "Vulkan context pointer is null.");
+        bench_copy_reason(reason, reason_capacity, "Vulkan context pointer is null.");
         return -1;
     }
 
     memset(context, 0, sizeof(*context));
-    nlo_bench_copy_reason(reason, reason_capacity, "");
+    bench_copy_reason(reason, reason_capacity, "");
 
     VkApplicationInfo app_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -149,17 +149,17 @@ int nlo_bench_vk_context_init(
     };
 
     if (vkCreateInstance(&instance_info, NULL, &context->instance) != VK_SUCCESS) {
-        nlo_bench_copy_reason(reason, reason_capacity, "Failed to create Vulkan instance.");
+        bench_copy_reason(reason, reason_capacity, "Failed to create Vulkan instance.");
         return -1;
     }
 
-    if (nlo_bench_pick_physical_device(context->instance,
+    if (bench_pick_physical_device(context->instance,
                                        &context->physical_device,
                                        &context->queue_family_index) != 0) {
-        nlo_bench_copy_reason(reason,
+        bench_copy_reason(reason,
                               reason_capacity,
                               "No suitable Vulkan physical device with compute + shaderFloat64.");
-        nlo_bench_vk_context_destroy(context);
+        bench_vk_context_destroy(context);
         return -1;
     }
 
@@ -183,15 +183,15 @@ int nlo_bench_vk_context_init(
     };
 
     if (vkCreateDevice(context->physical_device, &device_info, NULL, &context->device) != VK_SUCCESS) {
-        nlo_bench_copy_reason(reason, reason_capacity, "Failed to create Vulkan logical device.");
-        nlo_bench_vk_context_destroy(context);
+        bench_copy_reason(reason, reason_capacity, "Failed to create Vulkan logical device.");
+        bench_vk_context_destroy(context);
         return -1;
     }
 
     vkGetDeviceQueue(context->device, context->queue_family_index, 0u, &context->queue);
     if (context->queue == VK_NULL_HANDLE) {
-        nlo_bench_copy_reason(reason, reason_capacity, "Failed to get Vulkan queue.");
-        nlo_bench_vk_context_destroy(context);
+        bench_copy_reason(reason, reason_capacity, "Failed to get Vulkan queue.");
+        bench_vk_context_destroy(context);
         return -1;
     }
 
@@ -202,16 +202,16 @@ int nlo_bench_vk_context_init(
     };
 
     if (vkCreateCommandPool(context->device, &pool_info, NULL, &context->command_pool) != VK_SUCCESS) {
-        nlo_bench_copy_reason(reason, reason_capacity, "Failed to create Vulkan command pool.");
-        nlo_bench_vk_context_destroy(context);
+        bench_copy_reason(reason, reason_capacity, "Failed to create Vulkan command pool.");
+        bench_vk_context_destroy(context);
         return -1;
     }
 
-    nlo_bench_copy_reason(reason, reason_capacity, "");
+    bench_copy_reason(reason, reason_capacity, "");
     return 0;
 }
 
-void nlo_bench_vk_context_destroy(nlo_bench_vk_context* context)
+void bench_vk_context_destroy(bench_vk_context* context)
 {
     if (context == NULL) {
         return;

@@ -11,49 +11,49 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifndef NLO_LOG_DEFAULT_DISPERSION_FACTOR_EXPR
-#define NLO_LOG_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
+#ifndef LOG_DEFAULT_DISPERSION_FACTOR_EXPR
+#define LOG_DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
 #endif
 
-#ifndef NLO_LOG_DEFAULT_LINEAR_FACTOR_EXPR
-#define NLO_LOG_DEFAULT_LINEAR_FACTOR_EXPR "i*c0*wt*wt-c1"
+#ifndef LOG_DEFAULT_LINEAR_FACTOR_EXPR
+#define LOG_DEFAULT_LINEAR_FACTOR_EXPR "i*c0*wt*wt-c1"
 #endif
 
-#ifndef NLO_LOG_DEFAULT_DISPERSION_EXPR
-#define NLO_LOG_DEFAULT_DISPERSION_EXPR "exp(h*D)"
+#ifndef LOG_DEFAULT_DISPERSION_EXPR
+#define LOG_DEFAULT_DISPERSION_EXPR "exp(h*D)"
 #endif
 
-#ifndef NLO_LOG_DEFAULT_LINEAR_EXPR
-#define NLO_LOG_DEFAULT_LINEAR_EXPR "exp(h*D)"
+#ifndef LOG_DEFAULT_LINEAR_EXPR
+#define LOG_DEFAULT_LINEAR_EXPR "exp(h*D)"
 #endif
 
-#ifndef NLO_LOG_DEFAULT_POTENTIAL_EXPR
-#define NLO_LOG_DEFAULT_POTENTIAL_EXPR "0"
+#ifndef LOG_DEFAULT_POTENTIAL_EXPR
+#define LOG_DEFAULT_POTENTIAL_EXPR "0"
 #endif
 
-#ifndef NLO_LOG_DEFAULT_NONLINEAR_EXPR
-#define NLO_LOG_DEFAULT_NONLINEAR_EXPR "i*A*(c2*I + V)"
+#ifndef LOG_DEFAULT_NONLINEAR_EXPR
+#define LOG_DEFAULT_NONLINEAR_EXPR "i*A*(c2*I + V)"
 #endif
 
-static const char* nlo_backend_type_to_string(nlo_vector_backend_type backend_type)
+static const char* backend_type_to_string(vector_backend_type backend_type)
 {
-    if (backend_type == NLO_VECTOR_BACKEND_CPU) {
+    if (backend_type == VECTOR_BACKEND_CPU) {
         return "CPU";
     }
-    if (backend_type == NLO_VECTOR_BACKEND_VULKAN) {
+    if (backend_type == VECTOR_BACKEND_VULKAN) {
         return "VULKAN";
     }
-    if (backend_type == NLO_VECTOR_BACKEND_AUTO) {
+    if (backend_type == VECTOR_BACKEND_AUTO) {
         return "AUTO";
     }
 
     return "UNKNOWN";
 }
 
-static void nlo_format_or_mark_non_vulkan(
+static void format_or_mark_non_vulkan(
     char* dst,
     size_t dst_size,
-    nlo_vector_backend_type actual_backend,
+    vector_backend_type actual_backend,
     size_t value_bytes
 )
 {
@@ -61,18 +61,18 @@ static void nlo_format_or_mark_non_vulkan(
         return;
     }
 
-    if (actual_backend != NLO_VECTOR_BACKEND_VULKAN) {
+    if (actual_backend != VECTOR_BACKEND_VULKAN) {
         (void)snprintf(dst, dst_size, "n/a (non-Vulkan backend)");
         return;
     }
 
-    (void)nlo_log_format_bytes_summary(dst, dst_size, value_bytes);
+    (void)log_format_bytes_summary(dst, dst_size, value_bytes);
 }
 
-static void nlo_format_count_or_mark_non_vulkan(
+static void format_count_or_mark_non_vulkan(
     char* dst,
     size_t dst_size,
-    nlo_vector_backend_type actual_backend,
+    vector_backend_type actual_backend,
     size_t value_count
 )
 {
@@ -80,15 +80,15 @@ static void nlo_format_count_or_mark_non_vulkan(
         return;
     }
 
-    if (actual_backend != NLO_VECTOR_BACKEND_VULKAN) {
+    if (actual_backend != VECTOR_BACKEND_VULKAN) {
         (void)snprintf(dst, dst_size, "n/a (non-Vulkan backend)");
         return;
     }
 
-    (void)nlo_log_format_u64_grouped(dst, dst_size, (uint64_t)value_count);
+    (void)log_format_u64_grouped(dst, dst_size, (uint64_t)value_count);
 }
 
-static size_t nlo_compute_input_bytes(size_t count, size_t stride)
+static size_t compute_input_bytes(size_t count, size_t stride)
 {
     if (stride == 0u || count > (SIZE_MAX / stride)) {
         return 0u;
@@ -97,9 +97,9 @@ static size_t nlo_compute_input_bytes(size_t count, size_t stride)
     return count * stride;
 }
 
-static size_t nlo_compute_record_bytes(size_t num_recorded_samples, size_t num_time_samples)
+static size_t compute_record_bytes(size_t num_recorded_samples, size_t num_time_samples)
 {
-    const size_t per_record_bytes = nlo_compute_input_bytes(num_time_samples, sizeof(nlo_complex));
+    const size_t per_record_bytes = compute_input_bytes(num_time_samples, sizeof(nlo_complex));
     if (per_record_bytes == 0u || num_recorded_samples > (SIZE_MAX / per_record_bytes)) {
         return 0u;
     }
@@ -107,7 +107,7 @@ static size_t nlo_compute_record_bytes(size_t num_recorded_samples, size_t num_t
     return per_record_bytes * num_recorded_samples;
 }
 
-static const char* nlo_resolve_runtime_expr_alias(const char* primary, const char* alias)
+static const char* resolve_runtime_expr_alias(const char* primary, const char* alias)
 {
     if (primary != NULL && primary[0] != '\0') {
         return primary;
@@ -118,33 +118,33 @@ static const char* nlo_resolve_runtime_expr_alias(const char* primary, const cha
     return NULL;
 }
 
-void nlo_log_propagate_request(
+void log_propagate_request(
     const sim_config* config,
     size_t num_time_samples,
     const nlo_complex* input_field,
     size_t num_recorded_samples,
     nlo_complex* output_records,
-    const nlo_execution_options* exec_options
+    const execution_options* exec_options
 )
 {
-    const nlo_execution_options local_exec_options =
+    const execution_options local_exec_options =
         (exec_options != NULL)
             ? *exec_options
-            : nlo_execution_options_default(NLO_VECTOR_BACKEND_AUTO);
+            : execution_options_default(VECTOR_BACKEND_AUTO);
 
-    const size_t field_bytes = nlo_compute_input_bytes(num_time_samples, sizeof(nlo_complex));
-    const size_t records_bytes = nlo_compute_record_bytes(num_recorded_samples, num_time_samples);
+    const size_t field_bytes = compute_input_bytes(num_time_samples, sizeof(nlo_complex));
+    const size_t records_bytes = compute_record_bytes(num_recorded_samples, num_time_samples);
     size_t nt = 0u;
     size_t nx = 0u;
     size_t ny = 0u;
     int explicit_nd = 0;
     const int has_spatial_shape =
-        (nlo_resolve_sim_dimensions_internal(config, num_time_samples, &nt, &nx, &ny, &explicit_nd) == 0);
+        (resolve_sim_dimensions_internal(config, num_time_samples, &nt, &nx, &ny, &explicit_nd) == 0);
     size_t frequency_grid_samples = num_time_samples;
     if (has_spatial_shape && nt > 0u) {
         frequency_grid_samples = nt;
     }
-    const size_t frequency_grid_bytes = nlo_compute_input_bytes(frequency_grid_samples, sizeof(nlo_complex));
+    const size_t frequency_grid_bytes = compute_input_bytes(frequency_grid_samples, sizeof(nlo_complex));
     const int tensor_mode_active = (config != NULL && config->tensor.nt > 0u) ? 1 : 0;
 
     char num_time_samples_text[48];
@@ -159,23 +159,23 @@ void nlo_log_propagate_request(
     char nx_text[48];
     char ny_text[48];
 
-    (void)nlo_log_format_u64_grouped(num_time_samples_text,
+    (void)log_format_u64_grouped(num_time_samples_text,
                                      sizeof(num_time_samples_text),
                                      (uint64_t)num_time_samples);
-    (void)nlo_log_format_u64_grouped(num_recorded_samples_text,
+    (void)log_format_u64_grouped(num_recorded_samples_text,
                                      sizeof(num_recorded_samples_text),
                                      (uint64_t)num_recorded_samples);
-    (void)nlo_log_format_u64_grouped(field_bytes_text, sizeof(field_bytes_text), (uint64_t)field_bytes);
-    (void)nlo_log_format_u64_grouped(records_bytes_text, sizeof(records_bytes_text), (uint64_t)records_bytes);
-    (void)nlo_log_format_u64_grouped(runtime_constants_text,
+    (void)log_format_u64_grouped(field_bytes_text, sizeof(field_bytes_text), (uint64_t)field_bytes);
+    (void)log_format_u64_grouped(records_bytes_text, sizeof(records_bytes_text), (uint64_t)records_bytes);
+    (void)log_format_u64_grouped(runtime_constants_text,
                                      sizeof(runtime_constants_text),
                                      (uint64_t)((config != NULL) ? config->runtime.num_constants : 0u));
-    (void)nlo_log_format_u64_grouped(nt_text, sizeof(nt_text), (uint64_t)nt);
-    (void)nlo_log_format_u64_grouped(nx_text, sizeof(nx_text), (uint64_t)nx);
-    (void)nlo_log_format_u64_grouped(ny_text, sizeof(ny_text), (uint64_t)ny);
-    (void)nlo_log_format_bytes_summary(field_size_text, sizeof(field_size_text), field_bytes);
-    (void)nlo_log_format_bytes_summary(records_size_text, sizeof(records_size_text), records_bytes);
-    (void)nlo_log_format_bytes_summary(frequency_size_text,
+    (void)log_format_u64_grouped(nt_text, sizeof(nt_text), (uint64_t)nt);
+    (void)log_format_u64_grouped(nx_text, sizeof(nx_text), (uint64_t)nx);
+    (void)log_format_u64_grouped(ny_text, sizeof(ny_text), (uint64_t)ny);
+    (void)log_format_bytes_summary(field_size_text, sizeof(field_size_text), field_bytes);
+    (void)log_format_bytes_summary(records_size_text, sizeof(records_size_text), records_bytes);
+    (void)log_format_bytes_summary(frequency_size_text,
                                        sizeof(frequency_size_text),
                                        frequency_grid_bytes);
 
@@ -184,9 +184,9 @@ void nlo_log_propagate_request(
     constants_lines[0] = '\0';
     if (config != NULL && config->runtime.num_constants > 0u) {
         const size_t max_constants =
-            (config->runtime.num_constants < NLO_RUNTIME_OPERATOR_CONSTANTS_MAX)
+            (config->runtime.num_constants < RUNTIME_OPERATOR_CONSTANTS_MAX)
                 ? config->runtime.num_constants
-                : NLO_RUNTIME_OPERATOR_CONSTANTS_MAX;
+                : RUNTIME_OPERATOR_CONSTANTS_MAX;
         for (size_t idx = 0u; idx < max_constants; ++idx) {
             const int written = snprintf(constants_lines + constants_len,
                                          sizeof(constants_lines) - constants_len,
@@ -214,35 +214,35 @@ void nlo_log_propagate_request(
     const char* nonlinear_op = NULL;
     if (config != NULL) {
         linear_factor_op = tensor_mode_active
-                               ? nlo_resolve_runtime_expr_alias(config->runtime.linear_factor_expr,
+                               ? resolve_runtime_expr_alias(config->runtime.linear_factor_expr,
                                                                 config->runtime.dispersion_factor_expr)
-                               : nlo_resolve_runtime_expr_alias(config->runtime.dispersion_factor_expr,
+                               : resolve_runtime_expr_alias(config->runtime.dispersion_factor_expr,
                                                                 config->runtime.linear_factor_expr);
         if (linear_factor_op == NULL || linear_factor_op[0] == '\0') {
             linear_factor_op = tensor_mode_active
-                                   ? NLO_LOG_DEFAULT_LINEAR_FACTOR_EXPR
-                                   : NLO_LOG_DEFAULT_DISPERSION_FACTOR_EXPR;
+                                   ? LOG_DEFAULT_LINEAR_FACTOR_EXPR
+                                   : LOG_DEFAULT_DISPERSION_FACTOR_EXPR;
         }
 
         linear_op = tensor_mode_active
-                        ? nlo_resolve_runtime_expr_alias(config->runtime.linear_expr,
+                        ? resolve_runtime_expr_alias(config->runtime.linear_expr,
                                                          config->runtime.dispersion_expr)
-                        : nlo_resolve_runtime_expr_alias(config->runtime.dispersion_expr,
+                        : resolve_runtime_expr_alias(config->runtime.dispersion_expr,
                                                          config->runtime.linear_expr);
         if (linear_op == NULL || linear_op[0] == '\0') {
             linear_op = tensor_mode_active
-                            ? NLO_LOG_DEFAULT_LINEAR_EXPR
-                            : NLO_LOG_DEFAULT_DISPERSION_EXPR;
+                            ? LOG_DEFAULT_LINEAR_EXPR
+                            : LOG_DEFAULT_DISPERSION_EXPR;
         }
 
         potential_op = config->runtime.potential_expr;
         if (potential_op == NULL || potential_op[0] == '\0') {
-            potential_op = NLO_LOG_DEFAULT_POTENTIAL_EXPR;
+            potential_op = LOG_DEFAULT_POTENTIAL_EXPR;
         }
 
         nonlinear_op = config->runtime.nonlinear_expr;
         if (nonlinear_op == NULL || nonlinear_op[0] == '\0') {
-            nonlinear_op = NLO_LOG_DEFAULT_NONLINEAR_EXPR;
+            nonlinear_op = LOG_DEFAULT_NONLINEAR_EXPR;
         }
     }
 
@@ -277,7 +277,7 @@ void nlo_log_propagate_request(
         "    - delta_y: %.9e\n"
         "    - spatial_frequency_grid: %p\n"
         "    - potential_grid: %p\n",
-        nlo_backend_type_to_string(local_exec_options.backend_type),
+        backend_type_to_string(local_exec_options.backend_type),
         num_time_samples_text,
         num_recorded_samples_text,
         field_size_text,
@@ -307,22 +307,22 @@ void nlo_log_propagate_request(
 
     if (written > 0) {
         const size_t length = (size_t)((written < (int)sizeof(message)) ? written : (int)(sizeof(message) - 1u));
-        nlo_log_emit_raw(NLO_LOG_LEVEL_INFO, message, length);
+        log_emit_raw(LOG_LEVEL_INFO, message, length);
     }
 }
 
-void nlo_log_propagate_allocation_summary(
-    nlo_vector_backend_type requested_backend,
-    nlo_vector_backend_type actual_backend,
-    const nlo_allocation_info* allocation_info,
-    const nlo_vec_backend_memory_info* mem_info
+void log_propagate_allocation_summary(
+    vector_backend_type requested_backend,
+    vector_backend_type actual_backend,
+    const allocation_info* allocation_summary,
+    const vec_backend_memory_info* mem_info
 )
 {
-    const nlo_allocation_info empty_allocation = {0};
-    const nlo_vec_backend_memory_info empty_mem_info = {0};
-    const nlo_allocation_info* safe_allocation =
-        (allocation_info != NULL) ? allocation_info : &empty_allocation;
-    const nlo_vec_backend_memory_info* safe_mem_info =
+    const allocation_info empty_allocation = {0};
+    const vec_backend_memory_info empty_mem_info = {0};
+    const allocation_info* safe_allocation =
+        (allocation_summary != NULL) ? allocation_summary : &empty_allocation;
+    const vec_backend_memory_info* safe_mem_info =
         (mem_info != NULL) ? mem_info : &empty_mem_info;
 
     size_t record_ring_bytes = 0u;
@@ -340,45 +340,45 @@ void nlo_log_propagate_allocation_summary(
     char total_device_text[48];
     char available_device_text[48];
 
-    (void)nlo_log_format_bytes_summary(per_record_text,
+    (void)log_format_bytes_summary(per_record_text,
                                        sizeof(per_record_text),
                                        safe_allocation->per_record_bytes);
-    (void)nlo_log_format_bytes_summary(working_vector_text,
+    (void)log_format_bytes_summary(working_vector_text,
                                        sizeof(working_vector_text),
                                        safe_allocation->working_vector_bytes);
-    (void)nlo_log_format_bytes_summary(host_snapshot_text,
+    (void)log_format_bytes_summary(host_snapshot_text,
                                        sizeof(host_snapshot_text),
                                        safe_allocation->host_snapshot_bytes);
-    nlo_format_count_or_mark_non_vulkan(ring_capacity_text,
+    format_count_or_mark_non_vulkan(ring_capacity_text,
                                         sizeof(ring_capacity_text),
                                         actual_backend,
                                         safe_allocation->device_ring_capacity);
-    nlo_format_or_mark_non_vulkan(ring_bytes_text,
+    format_or_mark_non_vulkan(ring_bytes_text,
                                   sizeof(ring_bytes_text),
                                   actual_backend,
                                   record_ring_bytes);
-    nlo_format_or_mark_non_vulkan(device_budget_text,
+    format_or_mark_non_vulkan(device_budget_text,
                                   sizeof(device_budget_text),
                                   actual_backend,
                                   safe_allocation->device_budget_bytes);
-    nlo_format_or_mark_non_vulkan(total_device_text,
+    format_or_mark_non_vulkan(total_device_text,
                                   sizeof(total_device_text),
                                   actual_backend,
                                   safe_mem_info->device_local_total_bytes);
-    nlo_format_or_mark_non_vulkan(available_device_text,
+    format_or_mark_non_vulkan(available_device_text,
                                   sizeof(available_device_text),
                                   actual_backend,
                                   safe_mem_info->device_local_available_bytes);
 
-    nlo_log_emit(NLO_LOG_LEVEL_INFO,
+    log_emit(LOG_LEVEL_INFO,
                  "[nlolib] backend resolved:\n"
                  "  - requested: %s\n"
                  "  - actual: %s",
-                 nlo_backend_type_to_string(requested_backend),
-                 nlo_backend_type_to_string(actual_backend));
+                 backend_type_to_string(requested_backend),
+                 backend_type_to_string(actual_backend));
 
-    nlo_log_emit(
-        NLO_LOG_LEVEL_INFO,
+    log_emit(
+        LOG_LEVEL_INFO,
         "[nlolib] allocation summary:\n"
         "  - per_record_bytes: %s\n"
         "  - working_vector_bytes_estimate: %s\n"

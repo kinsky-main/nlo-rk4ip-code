@@ -113,6 +113,39 @@ class ExampleRunDB:
             return None
         return str(row["run_group"])
 
+    def _ordered_run_groups(self, example_name: str) -> list[str]:
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT run_group FROM ex_run_groups WHERE example_name=? "
+                "ORDER BY created_utc DESC, run_group DESC;",
+                (example_name,),
+            ).fetchall()
+        return [str(row["run_group"]) for row in rows]
+
+    def _case_keys_for_group(self, example_name: str, run_group: str) -> set[str]:
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT case_key FROM ex_case_runs WHERE example_name=? AND run_group=?;",
+                (example_name, run_group),
+            ).fetchall()
+        return {str(row["case_key"]) for row in rows}
+
+    def _matching_replot_groups(
+        self,
+        example_name: str,
+        required_case_keys: set[str] | None = None,
+    ) -> list[str]:
+        required = set(required_case_keys or ())
+        matches: list[str] = []
+        for run_group in self._ordered_run_groups(example_name):
+            case_keys = self._case_keys_for_group(example_name, run_group)
+            if not case_keys:
+                continue
+            if required and not required.issubset(case_keys):
+                continue
+            matches.append(run_group)
+        return matches
+
     def nth_latest_run_group(self, example_name: str, run_number: int) -> str | None:
         if run_number <= 0:
             return None
@@ -126,23 +159,51 @@ class ExampleRunDB:
             return None
         return str(row["run_group"])
 
-    def resolve_replot_group(self, example_name: str, run_group: str | None) -> str:
+    def resolve_replot_group(
+        self,
+        example_name: str,
+        run_group: str | None,
+        *,
+        required_case_keys: list[str] | tuple[str, ...] | set[str] | None = None,
+    ) -> str:
+        required = {str(key).strip() for key in (required_case_keys or ()) if str(key).strip()}
+        available_replot_groups = self._matching_replot_groups(example_name, required)
         if run_group:
             selector = str(run_group).strip()
             if selector.isdigit():
                 run_number = int(selector)
-                resolved = self.nth_latest_run_group(example_name, run_number)
+                resolved = (
+                    available_replot_groups[run_number - 1]
+                    if 0 < run_number <= len(available_replot_groups)
+                    else None
+                )
                 if resolved is None:
+                    qualifier = (
+                        f" with required cases {sorted(required)!r}" if required else ""
+                    )
                     raise RuntimeError(
                         f"run number {run_number} is not available for example '{example_name}' "
-                        f"in DB: {self.db_path}"
+                        f"{qualifier} in DB: {self.db_path}"
                     )
                 return resolved
+            if required:
+                available_case_keys = self._case_keys_for_group(example_name, selector)
+                if not available_case_keys:
+                    raise RuntimeError(
+                        f"run_group '{selector}' has no saved cases for example '{example_name}' "
+                        f"in DB: {self.db_path}"
+                    )
+                if not required.issubset(available_case_keys):
+                    raise RuntimeError(
+                        f"run_group '{selector}' is incomplete for example '{example_name}'; "
+                        f"required cases={sorted(required)!r}, available cases={sorted(available_case_keys)!r}"
+                    )
             return selector
-        latest = self.latest_run_group(example_name)
+        latest = available_replot_groups[0] if available_replot_groups else None
         if latest is None:
+            qualifier = f" with required cases {sorted(required)!r}" if required else ""
             raise RuntimeError(
-                f"no stored run groups found for example '{example_name}' in DB: {self.db_path}"
+                f"no stored run groups found for example '{example_name}'{qualifier} in DB: {self.db_path}"
             )
         return latest
 

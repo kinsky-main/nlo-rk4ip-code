@@ -4,16 +4,16 @@ function ptr = pack_complex_array(values)
 %
 %   ptr = nlolib.pack_complex_array(values)
 %
-%   Returns a typed libpointer('nlo_complexPtr', ...) whose payload is a
+%   Returns a typed libpointer('complexPtr', ...) whose payload is a
 %   struct array with fields .re and .im.
 vals = values(:).';
 re = num2cell(real(vals));
 im = num2cell(imag(vals));
 arr = struct('re', re, 'im', im);
-ptr = libpointer('nlo_complexPtr', arr);
+ptr = libpointer('complexPtr', arr);
 if ~isempty(vals)
     try
-        setdatatype(ptr, 'nlo_complexPtr', 1, numel(vals));
+        setdatatype(ptr, 'complexPtr', 1, numel(vals));
     catch
         % Some MATLAB parser modes may not support explicit size binding.
         % Keep best-effort pointer construction as fallback.

@@ -8,16 +8,16 @@
 #include "core/state.h"
 #include <stddef.h>
 
-#if defined(NLO_ENABLE_RK4_DEBUG_DIAGNOSTICS) || !defined(NDEBUG)
-#define NLO_RK4_DEBUG_ACTIVE 1
+#if defined(ENABLE_RK4_DEBUG_DIAGNOSTICS) || !defined(NDEBUG)
+#define RK4_DEBUG_ACTIVE 1
 #else
-#define NLO_RK4_DEBUG_ACTIVE 0
+#define RK4_DEBUG_ACTIVE 0
 #endif
 
 /**
  * @brief Reset per-run RK4 debug accumulators/counters.
  */
-void nlo_rk4_debug_reset_run(void);
+void rk4_debug_reset_run(void);
 
 /**
  * @brief Log vector summary statistics for a debug stage.
@@ -29,9 +29,9 @@ void nlo_rk4_debug_reset_run(void);
  * @param z Current propagation coordinate.
  * @param step Current step size.
  */
-void nlo_rk4_debug_log_vec_stats(
+void rk4_debug_log_vec_stats(
     const simulation_state* state,
-    const nlo_vec_buffer* vec,
+    const vec_buffer* vec,
     const char* stage,
     size_t step_index,
     double z,
@@ -48,7 +48,7 @@ void nlo_rk4_debug_log_vec_stats(
  * @param scale Applied error scale/normalization term.
  * @param next_step Candidate next step size.
  */
-void nlo_rk4_debug_log_error_control(
+void rk4_debug_log_error_control(
     size_t step_index,
     double z,
     double step,
@@ -65,9 +65,9 @@ void nlo_rk4_debug_log_error_control(
  * @param num_dispersion_terms Number of expression terms used.
  * @param step_size Current propagation step size.
  */
-void nlo_rk4_debug_log_dispersion_factor(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* dispersion_factor,
+void rk4_debug_log_dispersion_factor(
+    vector_backend* backend,
+    const vec_buffer* dispersion_factor,
     size_t num_dispersion_terms,
     double step_size
 );

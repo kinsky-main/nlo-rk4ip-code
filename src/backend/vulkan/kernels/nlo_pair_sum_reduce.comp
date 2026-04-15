@@ -10,17 +10,17 @@ layout(push_constant) uniform PushConstants {
     double scalar1;
 } pc;
 
-struct nlo_vk_error_pair {
+struct vk_error_pair {
     double numerator;
     double denominator;
 };
 
 layout(set = 0, binding = 0, std430) buffer DstBuffer {
-    nlo_vk_error_pair dst_pairs[];
+    vk_error_pair dst_pairs[];
 };
 
 layout(set = 0, binding = 1, std430) readonly buffer SrcBuffer {
-    nlo_vk_error_pair src_pairs[];
+    vk_error_pair src_pairs[];
 };
 
 shared double shared_num[64];

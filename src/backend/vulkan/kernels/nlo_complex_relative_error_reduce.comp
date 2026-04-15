@@ -2,7 +2,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
 #extension GL_GOOGLE_include_directive : require
 
-#include "nlo_complex_device.glslinc"
+#include "complex_device.glslinc"
 
 layout(local_size_x = 64) in;
 
@@ -18,11 +18,11 @@ layout(set = 0, binding = 0, std430) buffer DstBuffer {
 };
 
 layout(set = 0, binding = 1, std430) readonly buffer CurrentBuffer {
-    nlo_vk_complex64 current_vals[];
+    vk_complex64 current_vals[];
 };
 
 layout(set = 0, binding = 2, std430) readonly buffer PreviousBuffer {
-    nlo_vk_complex64 previous_vals[];
+    vk_complex64 previous_vals[];
 };
 
 shared double shared_max[64];

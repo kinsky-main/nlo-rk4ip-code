@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from ._binding import (
-    NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
+    STORAGE_DB_CAP_POLICY_STOP_WRITES,
     NloExecutionOptions,
     NloPhysicsConfig,
     NloSimulationConfig,
@@ -81,7 +81,7 @@ class PropagateRequestBuilder:
         run_id = kwargs.pop("run_id", None)
         sqlite_max_bytes = int(kwargs.pop("sqlite_max_bytes", 0))
         chunk_records = int(kwargs.pop("chunk_records", 0))
-        cap_policy = int(kwargs.pop("cap_policy", NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES))
+        cap_policy = int(kwargs.pop("cap_policy", STORAGE_DB_CAP_POLICY_STOP_WRITES))
         log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
@@ -184,7 +184,7 @@ class PropagateRequestBuilder:
         run_id = kwargs.pop("run_id", None)
         sqlite_max_bytes = int(kwargs.pop("sqlite_max_bytes", 0))
         chunk_records = int(kwargs.pop("chunk_records", 0))
-        cap_policy = int(kwargs.pop("cap_policy", NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES))
+        cap_policy = int(kwargs.pop("cap_policy", STORAGE_DB_CAP_POLICY_STOP_WRITES))
         log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))

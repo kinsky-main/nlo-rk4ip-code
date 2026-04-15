@@ -21,7 +21,7 @@ function repo_root_from(path::AbstractString)
     error("unable to locate repository root from $path")
 end
 
-function nlo_package_root_from(path::AbstractString)
+function package_root_from(path::AbstractString)
     candidates = [
         normpath(joinpath(dirname(path), "..", "..", "julia")),
         normpath(joinpath(dirname(path), "..", "..", "..")),

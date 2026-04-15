@@ -1,7 +1,7 @@
-#ifndef NLO_COMPLEX_DEVICE_GLSLINC
-#define NLO_COMPLEX_DEVICE_GLSLINC
+#ifndef COMPLEX_DEVICE_GLSLINC
+#define COMPLEX_DEVICE_GLSLINC
 
-struct nlo_vk_complex64 {
+struct vk_complex64 {
     double re;
     double im;
 };

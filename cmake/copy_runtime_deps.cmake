@@ -1,29 +1,29 @@
-if(NOT DEFINED NLO_RUNTIME_SOURCE OR NOT EXISTS "${NLO_RUNTIME_SOURCE}")
-  message(FATAL_ERROR "NLO_RUNTIME_SOURCE is required and must exist.")
+if(NOT DEFINED RUNTIME_SOURCE OR NOT EXISTS "${RUNTIME_SOURCE}")
+  message(FATAL_ERROR "RUNTIME_SOURCE is required and must exist.")
 endif()
-if(NOT DEFINED NLO_RUNTIME_DEST OR NLO_RUNTIME_DEST STREQUAL "")
-  message(FATAL_ERROR "NLO_RUNTIME_DEST is required.")
+if(NOT DEFINED RUNTIME_DEST OR RUNTIME_DEST STREQUAL "")
+  message(FATAL_ERROR "RUNTIME_DEST is required.")
 endif()
 
-file(MAKE_DIRECTORY "${NLO_RUNTIME_DEST}")
+file(MAKE_DIRECTORY "${RUNTIME_DEST}")
 
-set(_nlo_runtime_directories "")
-if(DEFINED NLO_RUNTIME_HINTS AND NOT NLO_RUNTIME_HINTS STREQUAL "")
-  foreach(_nlo_hint IN LISTS NLO_RUNTIME_HINTS)
-    if(EXISTS "${_nlo_hint}")
-      get_filename_component(_nlo_hint_dir "${_nlo_hint}" DIRECTORY)
-      if(EXISTS "${_nlo_hint_dir}")
-        list(APPEND _nlo_runtime_directories "${_nlo_hint_dir}")
+set(runtime_directories "")
+if(DEFINED RUNTIME_HINTS AND NOT RUNTIME_HINTS STREQUAL "")
+  foreach(hint IN LISTS RUNTIME_HINTS)
+    if(EXISTS "${hint}")
+      get_filename_component(hint_dir "${hint}" DIRECTORY)
+      if(EXISTS "${hint_dir}")
+        list(APPEND runtime_directories "${hint_dir}")
       endif()
     endif()
   endforeach()
-  list(REMOVE_DUPLICATES _nlo_runtime_directories)
+  list(REMOVE_DUPLICATES runtime_directories)
 endif()
 
 file(GET_RUNTIME_DEPENDENCIES
-  RESOLVED_DEPENDENCIES_VAR _nlo_runtime_deps
-  UNRESOLVED_DEPENDENCIES_VAR _nlo_unresolved_runtime_deps
-  DIRECTORIES ${_nlo_runtime_directories}
+  RESOLVED_DEPENDENCIES_VAR runtime_deps
+  UNRESOLVED_DEPENDENCIES_VAR unresolved_runtime_deps
+  DIRECTORIES ${runtime_directories}
   POST_EXCLUDE_REGEXES
     "^api-ms-win-.*"
     "^ext-ms-.*"
@@ -32,39 +32,39 @@ file(GET_RUNTIME_DEPENDENCIES
     "^/System/Library/.*"
     "^/usr/lib/.*"
     "^/lib/.*"
-  LIBRARIES "${NLO_RUNTIME_SOURCE}"
+  LIBRARIES "${RUNTIME_SOURCE}"
 )
 
-foreach(_nlo_dep IN LISTS _nlo_runtime_deps)
-  string(TOLOWER "${_nlo_dep}" _nlo_dep_lower)
-  if(_nlo_dep_lower MATCHES "^[a-z]:[/\\\\]windows[/\\\\].*" OR
-     _nlo_dep_lower MATCHES "^[a-z]:[/\\\\]program files[/\\\\]matlab[/\\\\].*" OR
-     _nlo_dep_lower MATCHES "^/system/library/.*" OR
-     _nlo_dep_lower MATCHES "^/usr/lib/.*" OR
-     _nlo_dep_lower MATCHES "^/lib/.*")
+foreach(dep IN LISTS runtime_deps)
+  string(TOLOWER "${dep}" dep_lower)
+  if(dep_lower MATCHES "^[a-z]:[/\\\\]windows[/\\\\].*" OR
+     dep_lower MATCHES "^[a-z]:[/\\\\]program files[/\\\\]matlab[/\\\\].*" OR
+     dep_lower MATCHES "^/system/library/.*" OR
+     dep_lower MATCHES "^/usr/lib/.*" OR
+     dep_lower MATCHES "^/lib/.*")
     continue()
   endif()
-  if(EXISTS "${_nlo_dep}")
-    file(COPY "${_nlo_dep}" DESTINATION "${NLO_RUNTIME_DEST}")
+  if(EXISTS "${dep}")
+    file(COPY "${dep}" DESTINATION "${RUNTIME_DEST}")
   endif()
 endforeach()
 
-if(DEFINED NLO_RUNTIME_HINTS AND NOT NLO_RUNTIME_HINTS STREQUAL "")
-  foreach(_nlo_hint IN LISTS NLO_RUNTIME_HINTS)
-    if(EXISTS "${_nlo_hint}")
-      file(COPY "${_nlo_hint}" DESTINATION "${NLO_RUNTIME_DEST}")
+if(DEFINED RUNTIME_HINTS AND NOT RUNTIME_HINTS STREQUAL "")
+  foreach(hint IN LISTS RUNTIME_HINTS)
+    if(EXISTS "${hint}")
+      file(COPY "${hint}" DESTINATION "${RUNTIME_DEST}")
     endif()
   endforeach()
 endif()
 
-set(_nlo_unresolved_filtered "")
-foreach(_nlo_missing IN LISTS _nlo_unresolved_runtime_deps)
-  if(_nlo_missing MATCHES "^api-ms-win-.*" OR _nlo_missing MATCHES "^ext-ms-.*")
+set(unresolved_filtered "")
+foreach(missing IN LISTS unresolved_runtime_deps)
+  if(missing MATCHES "^api-ms-win-.*" OR missing MATCHES "^ext-ms-.*")
     continue()
   endif()
-  list(APPEND _nlo_unresolved_filtered "${_nlo_missing}")
+  list(APPEND unresolved_filtered "${missing}")
 endforeach()
 
-if(_nlo_unresolved_filtered)
-  message(WARNING "Unresolved runtime dependencies for ${NLO_RUNTIME_SOURCE}: ${_nlo_unresolved_filtered}")
+if(unresolved_filtered)
+  message(WARNING "Unresolved runtime dependencies for ${RUNTIME_SOURCE}: ${unresolved_filtered}")
 endif()

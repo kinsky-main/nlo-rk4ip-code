@@ -62,7 +62,7 @@ def _run(args: argparse.Namespace) -> float:
             tensor_nt=2,
             tensor_nx=1,
             tensor_ny=1,
-            tensor_layout=int(nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
+            tensor_layout=int(nlo.TENSOR_LAYOUT_XYT_T_FAST),
             frequency_grid=[complex(1.0, 0.0), complex(-1.0, 0.0)],
             delta_x=1.0,
             delta_y=1.0,
@@ -70,8 +70,8 @@ def _run(args: argparse.Namespace) -> float:
         linear_operator = nlo.OperatorSpec(fn=lambda A, w: (1.0j * kappa) * w)
         nonlinear_operator = nlo.OperatorSpec(fn=lambda A, I: 0.0)
         exec_options = nlo.default_execution_options(
-            backend_type=nlo.NLO_VECTOR_BACKEND_AUTO,
-            fft_backend=nlo.NLO_FFT_BACKEND_AUTO,
+            backend_type=nlo.VECTOR_BACKEND_AUTO,
+            fft_backend=nlo.FFT_BACKEND_AUTO,
         )
         storage_kwargs = db.storage_kwargs(
             example_name=example_name,

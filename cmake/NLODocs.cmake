@@ -1,4 +1,4 @@
-function(nlo_configure_docs_target)
+function(configure_docs_target)
   if(NOT NLOLIB_BUILD_DOCS)
     return()
   endif()

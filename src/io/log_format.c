@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-size_t nlo_log_format_u64_grouped(char* dst, size_t dst_size, uint64_t value)
+size_t log_format_u64_grouped(char* dst, size_t dst_size, uint64_t value)
 {
     if (dst == NULL || dst_size == 0u) {
         return 0u;
@@ -43,7 +43,7 @@ size_t nlo_log_format_u64_grouped(char* dst, size_t dst_size, uint64_t value)
     return out_index;
 }
 
-size_t nlo_log_format_bytes_human(char* dst, size_t dst_size, size_t bytes)
+size_t log_format_bytes_human(char* dst, size_t dst_size, size_t bytes)
 {
     if (dst == NULL || dst_size == 0u) {
         return 0u;
@@ -86,7 +86,7 @@ size_t nlo_log_format_bytes_human(char* dst, size_t dst_size, size_t bytes)
     return (size_t)written;
 }
 
-size_t nlo_log_format_bytes_summary(char* dst, size_t dst_size, size_t bytes)
+size_t log_format_bytes_summary(char* dst, size_t dst_size, size_t bytes)
 {
     if (dst == NULL || dst_size == 0u) {
         return 0u;
@@ -94,8 +94,8 @@ size_t nlo_log_format_bytes_summary(char* dst, size_t dst_size, size_t bytes)
 
     char human[32];
     char grouped[48];
-    (void)nlo_log_format_bytes_human(human, sizeof(human), bytes);
-    (void)nlo_log_format_u64_grouped(grouped, sizeof(grouped), (uint64_t)bytes);
+    (void)log_format_bytes_human(human, sizeof(human), bytes);
+    (void)log_format_u64_grouped(grouped, sizeof(grouped), (uint64_t)bytes);
 
     if (bytes < 1024u) {
         const int written = snprintf(dst, dst_size, "%s", human);

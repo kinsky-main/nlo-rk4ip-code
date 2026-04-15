@@ -88,7 +88,7 @@ def _build_case(runner: NloExampleRunner, scale: int, *, step_size: float):
         tensor_nt=nt,
         tensor_nx=nx,
         tensor_ny=ny,
-        tensor_layout=nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST,
+        tensor_layout=nlo.TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[complex(value, 0.0) for value in omega],
         delta_x=dx,
         delta_y=dy,
@@ -110,12 +110,8 @@ def _run_case(
     step_size: float,
 ) -> BenchmarkRow:
     nlo = runner.nlo
-    config, field0, total_samples = _build_case(runner, scale, step_size=step_size)
-    backend_type = (
-        nlo.NLO_VECTOR_BACKEND_CPU
-        if backend == "cpu"
-        else nlo.NLO_VECTOR_BACKEND_VULKAN
-    )
+    config, field0, nt, nx, ny, total_samples = _build_case(runner, scale)
+    backend_type = nlo.VECTOR_BACKEND_CPU if backend == "cpu" else nlo.VECTOR_BACKEND_VULKAN
     exec_options = nlo.default_execution_options(backend_type)
 
     timings_ms: list[float] = []

@@ -44,8 +44,8 @@ def _run(args: argparse.Namespace) -> None:
             fn=lambda A, I: (1.0j * 0.0) * I,
         )
         exec_options = nlolib.default_execution_options(
-            backend_type=nlolib.NLO_VECTOR_BACKEND_AUTO,
-            fft_backend=nlolib.NLO_FFT_BACKEND_VKFFT,
+            backend_type=nlolib.VECTOR_BACKEND_AUTO,
+            fft_backend=nlolib.FFT_BACKEND_VKFFT,
         )
         storage_kwargs = db.storage_kwargs(
             example_name=example_name,

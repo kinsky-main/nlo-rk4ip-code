@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
-# @NLO_HOOK_MARKER@
+# @HOOK_MARKER@
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 if [ "$branch" != "main" ]; then
   exit 0
 fi
 
-"@CMAKE_COMMAND@" -DVERSION_FILE="@NLO_HOOK_VERSION_FILE@" -DBUMP_KIND=MINOR -DPROJECT_ROOT="@NLO_HOOK_PROJECT_ROOT@" -P "@NLO_HOOK_BUMP_SCRIPT@"
-git add "@NLO_HOOK_VERSION_FILE@"
+"@CMAKE_COMMAND@" -DVERSION_FILE="@HOOK_VERSION_FILE@" -DBUMP_KIND=MINOR -DPROJECT_ROOT="@HOOK_PROJECT_ROOT@" -P "@HOOK_BUMP_SCRIPT@"
+git add "@HOOK_VERSION_FILE@"

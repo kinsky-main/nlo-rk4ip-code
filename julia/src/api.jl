@@ -5,8 +5,8 @@ _string_ptr(value::Union{Nothing, AbstractString}) =
     value === nothing ? C_NULL : Base.unsafe_convert(Cstring, value)
 
 function _constants_tuple(values)
-    constants = zeros(Float64, NLO_RUNTIME_OPERATOR_CONSTANTS_MAX)
-    count = min(length(values), NLO_RUNTIME_OPERATOR_CONSTANTS_MAX)
+    constants = zeros(Float64, RUNTIME_OPERATOR_CONSTANTS_MAX)
+    count = min(length(values), RUNTIME_OPERATOR_CONSTANTS_MAX)
     for i in 1:count
         constants[i] = Float64(values[i])
     end
@@ -41,7 +41,7 @@ function _num_time_samples(output::AbstractMatrix)
     return size(output, 1)
 end
 
-function _decode_run_id(chars::NTuple{NLO_STORAGE_RUN_ID_MAX, Cchar})
+function _decode_run_id(chars::NTuple{STORAGE_RUN_ID_MAX, Cchar})
     bytes = UInt8[UInt8(Int(c) & 0xff) for c in chars]
     stop = findfirst(==(0x00), bytes)
     data = stop === nothing ? bytes : bytes[1:stop - 1]
@@ -55,7 +55,7 @@ function physics_config(;
     dispersion_factor_expr::Union{Nothing, AbstractString} = nothing,
     dispersion_expr::Union{Nothing, AbstractString} = nothing,
     nonlinear_expr::Union{Nothing, AbstractString} = nothing,
-    nonlinear_model::Integer = NLO_NONLINEAR_MODEL_EXPR,
+    nonlinear_model::Integer = NONLINEAR_MODEL_EXPR,
     nonlinear_gamma::Real = 0.0,
     raman_fraction::Real = 0.0,
     raman_tau1::Real = 0.0,
@@ -88,7 +88,7 @@ function physics_config(;
         Cdouble(shock_omega0),
         _complex_ptr_or_null(raman_response_time),
         Csize_t(raman_response_time === nothing ? 0 : length(raman_response_time)),
-        Csize_t(min(length(constants), NLO_RUNTIME_OPERATOR_CONSTANTS_MAX)),
+        Csize_t(min(length(constants), RUNTIME_OPERATOR_CONSTANTS_MAX)),
         _constants_tuple(constants)
     )
     return PreparedValue(value, keepalive)
@@ -99,7 +99,7 @@ function storage_options(;
     run_id::Union{Nothing, AbstractString} = nothing,
     sqlite_max_bytes::Integer = 0,
     chunk_records::Integer = 0,
-    cap_policy::Integer = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
+    cap_policy::Integer = STORAGE_DB_CAP_POLICY_STOP_WRITES,
     log_final_output_field_to_db::Bool = false
 )
     keepalive = (sqlite_path, run_id)
@@ -212,7 +212,7 @@ function propagate!(output,
         error("output buffer capacity is smaller than num_recorded_samples")
     end
 
-    mode = output_mode === nothing ? (num_records == 1 ? NLO_PROPAGATE_OUTPUT_FINAL_ONLY : NLO_PROPAGATE_OUTPUT_DENSE) : Cint(output_mode)
+    mode = output_mode === nothing ? (num_records == 1 ? PROPAGATE_OUTPUT_FINAL_ONLY : PROPAGATE_OUTPUT_DENSE) : Cint(output_mode)
     sim_ref = Ref(sim_raw)
     phys_ref = Ref(phys_raw)
     exec_ref = exec_raw === nothing ? nothing : Ref(exec_raw)

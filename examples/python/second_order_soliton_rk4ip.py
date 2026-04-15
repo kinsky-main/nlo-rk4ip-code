@@ -405,7 +405,7 @@ def ensure_finite_records_or_raise(
 
 
 def make_eta_abort_progress_callback(
-    nlo_module,
+    module,
     eta_threshold_seconds: float = 1800.0,
 ):
     prompted = False
@@ -414,7 +414,7 @@ def make_eta_abort_progress_callback(
     def _callback(info) -> int:
         nonlocal prompted, warned_noninteractive
 
-        if int(info.event_type) == int(nlo_module.NLO_PROGRESS_EVENT_FINISH):
+        if int(info.event_type) == int(module.PROGRESS_EVENT_FINISH):
             return 1
         if prompted:
             return 1
@@ -616,7 +616,10 @@ def _run(args: argparse.Namespace) -> float:
         raise RuntimeError("analytical spectral map contains non-finite values; refusing to render blank output.")
 
     z_map_norm = np.asarray(z_map, dtype=np.float64) / z0
-    telemetry_plot = normalize_step_telemetry(telemetry, z0)
+    telemetry_plot = normalize_step_telemetry(
+        select_step_telemetry_for_plot(telemetry, z_records),
+        z0,
+    )
 
     output_dir = args.output_dir
     save_plots(

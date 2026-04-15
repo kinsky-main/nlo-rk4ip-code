@@ -2,7 +2,7 @@
 # ResolveVulkan.cmake - resolve Vulkan headers and loader across platforms
 #
 # Provides:
-#   nlo_resolve_vulkan(<out_headers_available> <out_loader_available>)
+#   resolve_vulkan(<out_headers_available> <out_loader_available>)
 #
 # Behavior:
 #   1) Tries CMake's FindVulkan module first.
@@ -11,7 +11,7 @@
 
 include_guard(GLOBAL)
 
-function(_nlo_define_vulkan_headers_target include_dir)
+function(define_vulkan_headers_target include_dir)
   if(TARGET Vulkan::Headers)
     return()
   endif()
@@ -20,12 +20,12 @@ function(_nlo_define_vulkan_headers_target include_dir)
     return()
   endif()
 
-  add_library(nlo_vulkan_headers INTERFACE)
-  target_include_directories(nlo_vulkan_headers INTERFACE "${include_dir}")
-  add_library(Vulkan::Headers ALIAS nlo_vulkan_headers)
+  add_library(vulkan_headers INTERFACE)
+  target_include_directories(vulkan_headers INTERFACE "${include_dir}")
+  add_library(Vulkan::Headers ALIAS vulkan_headers)
 endfunction()
 
-function(_nlo_define_vulkan_loader_target loader_lib include_dir)
+function(define_vulkan_loader_target loader_lib include_dir)
   if(TARGET Vulkan::Vulkan)
     return()
   endif()
@@ -46,7 +46,7 @@ function(_nlo_define_vulkan_loader_target loader_lib include_dir)
   endif()
 endfunction()
 
-function(nlo_resolve_vulkan out_headers_available out_loader_available)
+function(resolve_vulkan out_headers_available out_loader_available)
   set(_headers_available OFF)
   set(_loader_available OFF)
   set(_header_include_dir "")
@@ -62,7 +62,7 @@ function(nlo_resolve_vulkan out_headers_available out_loader_available)
 
     if(_header_include_dir)
       set(_headers_available ON)
-      _nlo_define_vulkan_headers_target("${_header_include_dir}")
+      define_vulkan_headers_target("${_header_include_dir}")
     endif()
 
     if(TARGET Vulkan::Vulkan)
@@ -71,7 +71,7 @@ function(nlo_resolve_vulkan out_headers_available out_loader_available)
   endif()
 
   if(NOT _headers_available)
-    find_path(_nlo_vulkan_header_dir
+    find_path(vulkan_header_dir
       NAMES vulkan/vulkan.h
       HINTS
         ENV VULKAN_SDK
@@ -79,28 +79,28 @@ function(nlo_resolve_vulkan out_headers_available out_loader_available)
         include
     )
 
-    if(_nlo_vulkan_header_dir)
-      set(_header_include_dir "${_nlo_vulkan_header_dir}")
+    if(vulkan_header_dir)
+      set(_header_include_dir "${vulkan_header_dir}")
       set(_headers_available ON)
-      _nlo_define_vulkan_headers_target("${_header_include_dir}")
+      define_vulkan_headers_target("${_header_include_dir}")
     else()
       include(FetchContent)
       FetchContent_Declare(
         vulkan_headers
-        URL "${NLO_VULKAN_HEADERS_URL}"
+        URL "${VULKAN_HEADERS_URL}"
       )
       FetchContent_MakeAvailable(vulkan_headers)
 
       if(EXISTS "${vulkan_headers_SOURCE_DIR}/include/vulkan/vulkan.h")
         set(_header_include_dir "${vulkan_headers_SOURCE_DIR}/include")
         set(_headers_available ON)
-        _nlo_define_vulkan_headers_target("${_header_include_dir}")
+        define_vulkan_headers_target("${_header_include_dir}")
       endif()
     endif()
   endif()
 
   if(NOT _loader_available)
-    find_library(_nlo_vulkan_loader_lib
+    find_library(vulkan_loader_lib
       NAMES
         vulkan-1
         vulkan
@@ -111,8 +111,8 @@ function(nlo_resolve_vulkan out_headers_available out_loader_available)
         lib
     )
 
-    if(_nlo_vulkan_loader_lib)
-      _nlo_define_vulkan_loader_target("${_nlo_vulkan_loader_lib}" "${_header_include_dir}")
+    if(vulkan_loader_lib)
+      define_vulkan_loader_target("${vulkan_loader_lib}" "${_header_include_dir}")
       set(_loader_available ON)
     endif()
   endif()

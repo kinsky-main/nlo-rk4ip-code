@@ -1,14 +1,14 @@
 include_guard(GLOBAL)
 
-function(_nlo_get_target_interface_includes target out_var)
-  get_target_property(_nlo_include_dirs ${target} INTERFACE_INCLUDE_DIRECTORIES)
-  if(NOT _nlo_include_dirs OR _nlo_include_dirs STREQUAL "_nlo_include_dirs-NOTFOUND")
-    set(_nlo_include_dirs "")
+function(get_target_interface_includes target out_var)
+  get_target_property(include_dirs ${target} INTERFACE_INCLUDE_DIRECTORIES)
+  if(NOT include_dirs OR include_dirs STREQUAL "include_dirs-NOTFOUND")
+    set(include_dirs "")
   endif()
-  set(${out_var} "${_nlo_include_dirs}" PARENT_SCOPE)
+  set(${out_var} "${include_dirs}" PARENT_SCOPE)
 endfunction()
 
-function(nlo_configure_fftw out_target out_include_dirs)
+function(configure_fftw out_target out_include_dirs)
   if(NOT TARGET FFTW3::fftw3)
     include(FetchContent)
 
@@ -26,7 +26,7 @@ function(nlo_configure_fftw out_target out_include_dirs)
 
     FetchContent_Declare(
       fftw
-      URL "https://www.fftw.org/${NLO_FFTW_GIT_TAG}.tar.gz"
+      URL "https://www.fftw.org/${FFTW_GIT_TAG}.tar.gz"
     )
     FetchContent_MakeAvailable(fftw)
 
@@ -48,7 +48,7 @@ function(nlo_configure_fftw out_target out_include_dirs)
     message(FATAL_ERROR "FFTW target FFTW3::fftw3 was not resolved.")
   endif()
 
-  _nlo_get_target_interface_includes(FFTW3::fftw3 _nlo_fftw_include_dirs)
+  get_target_interface_includes(FFTW3::fftw3 fftw_include_dirs)
   set(${out_target} "FFTW3::fftw3" PARENT_SCOPE)
-  set(${out_include_dirs} "${_nlo_fftw_include_dirs}" PARENT_SCOPE)
+  set(${out_include_dirs} "${fftw_include_dirs}" PARENT_SCOPE)
 endfunction()

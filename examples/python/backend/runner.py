@@ -59,17 +59,17 @@ class SimulationOptions:
 
     def to_ctypes(self, nlo):
         opts = nlo.default_execution_options(
-            backend_type=nlo.NLO_VECTOR_BACKEND_AUTO,
-            fft_backend=nlo.NLO_FFT_BACKEND_AUTO,
+            backend_type=nlo.VECTOR_BACKEND_AUTO,
+            fft_backend=nlo.FFT_BACKEND_AUTO,
         )
         opts.device_heap_fraction = float(self.device_heap_fraction)
         opts.record_ring_target = int(self.record_ring_target)
         opts.forced_device_budget_bytes = int(self.forced_device_budget_bytes)
 
         fft_backend_map = {
-            "auto": nlo.NLO_FFT_BACKEND_AUTO,
-            "fftw": nlo.NLO_FFT_BACKEND_FFTW,
-            "vkfft": nlo.NLO_FFT_BACKEND_VKFFT,
+            "auto": nlo.FFT_BACKEND_AUTO,
+            "fftw": nlo.FFT_BACKEND_FFTW,
+            "vkfft": nlo.FFT_BACKEND_VKFFT,
         }
         fft_backend = str(self.fft_backend).strip().lower()
         if fft_backend not in fft_backend_map:
@@ -87,10 +87,10 @@ class SimulationOptions:
             raise TypeError("backend must be a string or dict when provided.")
 
         if backend_type == "cpu":
-            opts.backend_type = nlo.NLO_VECTOR_BACKEND_CPU
+            opts.backend_type = nlo.VECTOR_BACKEND_CPU
             return opts
         if backend_type == "auto":
-            opts.backend_type = nlo.NLO_VECTOR_BACKEND_AUTO
+            opts.backend_type = nlo.VECTOR_BACKEND_AUTO
             return opts
         if backend_type != "vulkan":
             raise ValueError("backend type must be one of: 'cpu', 'auto', or 'vulkan'.")
@@ -106,7 +106,7 @@ class SimulationOptions:
                 + ", ".join(missing)
             )
 
-        opts.backend_type = nlo.NLO_VECTOR_BACKEND_VULKAN
+        opts.backend_type = nlo.VECTOR_BACKEND_VULKAN
         opts.vulkan.physical_device = _to_vk_handle(vk_cfg.get("physical_device"))
         opts.vulkan.device = _to_vk_handle(vk_cfg.get("device"))
         opts.vulkan.queue = _to_vk_handle(vk_cfg.get("queue"))
@@ -358,7 +358,7 @@ class NloExampleRunner:
             tensor_nt=nt_resolved,
             tensor_nx=nx_resolved,
             tensor_ny=ny_resolved,
-            tensor_layout=int(self.nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
+            tensor_layout=int(self.nlo.TENSOR_LAYOUT_XYT_T_FAST),
             frequency_grid=freq_values.tolist(),
             delta_x=float(delta_x),
             delta_y=float(delta_y),

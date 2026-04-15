@@ -14,11 +14,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef NLO_ENABLE_VULKAN_BACKEND
-#define NLO_ENABLE_VULKAN_BACKEND 1
+#ifndef ENABLE_VULKAN_BACKEND
+#define ENABLE_VULKAN_BACKEND 1
 #endif
 
-#if NLO_ENABLE_VULKAN_BACKEND
+#if ENABLE_VULKAN_BACKEND
 #include <vulkan/vulkan.h>
 #else
 typedef void* VkPhysicalDevice;
@@ -41,33 +41,33 @@ extern "C" {
  * @brief Available vector backend implementations.
  */
 typedef enum {
-    NLO_VECTOR_BACKEND_CPU = 0,
-    NLO_VECTOR_BACKEND_VULKAN = 1,
-    NLO_VECTOR_BACKEND_AUTO = 2
-} nlo_vector_backend_type;
+    VECTOR_BACKEND_CPU = 0,
+    VECTOR_BACKEND_VULKAN = 1,
+    VECTOR_BACKEND_AUTO = 2
+} vector_backend_type;
 
 /**
  * @brief Logical buffer element type.
  */
 typedef enum {
-    NLO_VEC_KIND_REAL64 = 0,
-    NLO_VEC_KIND_COMPLEX64 = 1
-} nlo_vec_kind;
+    VEC_KIND_REAL64 = 0,
+    VEC_KIND_COMPLEX64 = 1
+} vec_kind;
 
 /**
  * @brief Status codes returned by vector backend APIs.
  */
 typedef enum {
-    NLO_VEC_STATUS_OK = 0,
-    NLO_VEC_STATUS_INVALID_ARGUMENT = 1,
-    NLO_VEC_STATUS_ALLOCATION_FAILED = 2,
-    NLO_VEC_STATUS_BACKEND_UNAVAILABLE = 3,
-    NLO_VEC_STATUS_TRANSFER_FORBIDDEN = 4,
-    NLO_VEC_STATUS_UNSUPPORTED = 5
-} nlo_vec_status;
+    VEC_STATUS_OK = 0,
+    VEC_STATUS_INVALID_ARGUMENT = 1,
+    VEC_STATUS_ALLOCATION_FAILED = 2,
+    VEC_STATUS_BACKEND_UNAVAILABLE = 3,
+    VEC_STATUS_TRANSFER_FORBIDDEN = 4,
+    VEC_STATUS_UNSUPPORTED = 5
+} vec_status;
 
-typedef struct nlo_vector_backend nlo_vector_backend;
-typedef struct nlo_vec_buffer nlo_vec_buffer;
+typedef struct vector_backend vector_backend;
+typedef struct vec_buffer vec_buffer;
 
 /**
  * @brief Backend memory/dispatch limits used for chunk planning heuristics.
@@ -78,43 +78,43 @@ typedef struct {
     size_t max_storage_buffer_range;
     size_t max_compute_workgroups_x;
     size_t max_kernel_chunk_bytes;
-} nlo_vec_backend_memory_info;
+} vec_backend_memory_info;
 
 /**
  * @brief Axis selector used when expanding one axis vector to a 3D mesh.
  */
 typedef enum {
     /** Expand temporal axis (t-fast layout index). */
-    NLO_VEC_MESH_AXIS_T = 0,
+    VEC_MESH_AXIS_T = 0,
     /** Expand y axis (t-fast layout index). */
-    NLO_VEC_MESH_AXIS_Y = 1,
+    VEC_MESH_AXIS_Y = 1,
     /** Expand x axis (t-fast layout index). */
-    NLO_VEC_MESH_AXIS_X = 2
-} nlo_vec_mesh_axis;
+    VEC_MESH_AXIS_X = 2
+} vec_mesh_axis;
 
 // MARK: Backend Lifecycle
 
 /**
  * @brief Create a CPU backend (host-resident buffers).
  *
- * @return nlo_vector_backend* Backend handle, or NULL on failure.
+ * @return vector_backend* Backend handle, or NULL on failure.
  */
-nlo_vector_backend* nlo_vector_backend_create_cpu(void);
+vector_backend* vector_backend_create_cpu(void);
 
 /**
  * @brief Destroy a backend and any internal resources it owns.
  *
  * @param backend Backend handle to destroy (NULL is allowed).
  */
-void nlo_vector_backend_destroy(nlo_vector_backend* backend);
+void vector_backend_destroy(vector_backend* backend);
 
 /**
  * @brief Get the backend type.
  *
  * @param backend Backend handle.
- * @return nlo_vector_backend_type Backend type enum value.
+ * @return vector_backend_type Backend type enum value.
  */
-nlo_vector_backend_type nlo_vector_backend_get_type(const nlo_vector_backend* backend);
+vector_backend_type vector_backend_get_type(const vector_backend* backend);
 
 /**
  * @brief Returns true while backend transfers are guarded by simulation mode.
@@ -122,7 +122,7 @@ nlo_vector_backend_type nlo_vector_backend_get_type(const nlo_vector_backend* ba
  * @param backend Backend handle.
  * @return bool True when simulation mode is active.
  */
-bool nlo_vec_is_in_simulation(const nlo_vector_backend* backend);
+bool vec_is_in_simulation(const vector_backend* backend);
 
 /**
  * @brief Vulkan backend configuration (expects externally-created device/queue).
@@ -146,7 +146,7 @@ typedef struct {
      *        Set to 0 to use runtime budget-based sizing.
      */
     uint32_t descriptor_set_count_override;
-} nlo_vk_backend_config;
+} vk_backend_config;
 
 /**
  * @brief Create a Vulkan backend (device-resident buffers).
@@ -154,9 +154,9 @@ typedef struct {
  *        available hardware.
  *
  * @param config Optional Vulkan configuration overrides.
- * @return nlo_vector_backend* Backend handle, or NULL on failure.
+ * @return vector_backend* Backend handle, or NULL on failure.
  */
-nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config* config);
+vector_backend* vector_backend_create_vulkan(const vk_backend_config* config);
 
 // MARK: Simulation Guard
 
@@ -164,28 +164,28 @@ nlo_vector_backend* nlo_vector_backend_create_vulkan(const nlo_vk_backend_config
  * @brief Mark the start of a simulation. Transfers are blocked until end.
  *
  * @param backend Backend handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_begin_simulation(nlo_vector_backend* backend);
+vec_status vec_begin_simulation(vector_backend* backend);
 
 /**
  * @brief Mark the end of a simulation. Transfers are allowed again.
  *
  * @param backend Backend handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_end_simulation(nlo_vector_backend* backend);
+vec_status vec_end_simulation(vector_backend* backend);
 
 /**
  * @brief Query backend memory and dispatch limits used for chunk planning.
  *
  * @param backend Backend handle.
  * @param out_info Destination memory info descriptor.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_query_memory_info(
-    const nlo_vector_backend* backend,
-    nlo_vec_backend_memory_info* out_info
+vec_status vec_query_memory_info(
+    const vector_backend* backend,
+    vec_backend_memory_info* out_info
 );
 
 // MARK: Buffer Lifecycle
@@ -197,13 +197,13 @@ nlo_vec_status nlo_vec_query_memory_info(
  * @param kind Logical element type for the buffer.
  * @param length Element count.
  * @param out_buffer Destination buffer handle.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_create(
-    nlo_vector_backend* backend,
-    nlo_vec_kind kind,
+vec_status vec_create(
+    vector_backend* backend,
+    vec_kind kind,
     size_t length,
-    nlo_vec_buffer** out_buffer
+    vec_buffer** out_buffer
 );
 
 /**
@@ -212,7 +212,7 @@ nlo_vec_status nlo_vec_create(
  * @param backend Backend that owns the buffer.
  * @param buffer Buffer handle to destroy (NULL is allowed).
  */
-void nlo_vec_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer);
+void vec_destroy(vector_backend* backend, vec_buffer* buffer);
 
 // MARK: Host Transfers (blocked during simulation)
 
@@ -223,11 +223,11 @@ void nlo_vec_destroy(nlo_vector_backend* backend, nlo_vec_buffer* buffer);
  * @param buffer Destination backend buffer.
  * @param data Source host pointer.
  * @param bytes Number of bytes to upload.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_upload(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* buffer,
+vec_status vec_upload(
+    vector_backend* backend,
+    vec_buffer* buffer,
     const void* data,
     size_t bytes
 );
@@ -239,42 +239,42 @@ nlo_vec_status nlo_vec_upload(
  * @param buffer Source backend buffer.
  * @param data Destination host pointer.
  * @param bytes Number of bytes to download.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_download(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* buffer,
+vec_status vec_download(
+    vector_backend* backend,
+    const vec_buffer* buffer,
     void* data,
     size_t bytes
 );
 
 /**
  * @brief Get a direct host pointer for CPU buffers.
- *        Returns NLO_VEC_STATUS_UNSUPPORTED on non-CPU backends.
+ *        Returns VEC_STATUS_UNSUPPORTED on non-CPU backends.
  *
  * @param backend Backend handle.
  * @param buffer Buffer handle.
  * @param out_ptr Destination pointer to mapped host memory.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_get_host_ptr(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* buffer,
+vec_status vec_get_host_ptr(
+    vector_backend* backend,
+    vec_buffer* buffer,
     void** out_ptr
 );
 
 /**
  * @brief Get a direct const host pointer for CPU buffers.
- *        Returns NLO_VEC_STATUS_UNSUPPORTED on non-CPU backends.
+ *        Returns VEC_STATUS_UNSUPPORTED on non-CPU backends.
  *
  * @param backend Backend handle.
  * @param buffer Buffer handle.
  * @param out_ptr Destination pointer to const mapped host memory.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_get_const_host_ptr(
-    const nlo_vector_backend* backend,
-    const nlo_vec_buffer* buffer,
+vec_status vec_get_const_host_ptr(
+    const vector_backend* backend,
+    const vec_buffer* buffer,
     const void** out_ptr
 );
 
@@ -286,9 +286,9 @@ nlo_vec_status nlo_vec_get_const_host_ptr(
  * @param backend Backend handle.
  * @param dst Destination real vector.
  * @param value Fill value.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, double value);
+vec_status vec_real_fill(vector_backend* backend, vec_buffer* dst, double value);
 
 /**
  * @brief Copy one real-valued backend vector into another.
@@ -296,9 +296,9 @@ nlo_vec_status nlo_vec_real_fill(nlo_vector_backend* backend, nlo_vec_buffer* ds
  * @param backend Backend handle.
  * @param dst Destination real vector.
  * @param src Source real vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
+vec_status vec_real_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
  * @brief Element-wise real multiply in place: @p dst[i] *= @p src[i].
@@ -306,9 +306,9 @@ nlo_vec_status nlo_vec_real_copy(nlo_vector_backend* backend, nlo_vec_buffer* ds
  * @param backend Backend handle.
  * @param dst Destination/left operand real vector.
  * @param src Right operand real vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
+vec_status vec_real_mul_inplace(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
  * @brief Raise each real element to an integer power.
@@ -317,9 +317,9 @@ nlo_vec_status nlo_vec_real_mul_inplace(nlo_vector_backend* backend, nlo_vec_buf
  * @param base Input real vector.
  * @param out Destination real vector.
  * @param power Non-negative integer exponent.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_real_pow_int(nlo_vector_backend* backend, const nlo_vec_buffer* base, nlo_vec_buffer* out, unsigned int power);
+vec_status vec_real_pow_int(vector_backend* backend, const vec_buffer* base, vec_buffer* out, unsigned int power);
 
 /**
  * @brief Fill a complex backend vector with a constant value.
@@ -327,9 +327,9 @@ nlo_vec_status nlo_vec_real_pow_int(nlo_vector_backend* backend, const nlo_vec_b
  * @param backend Backend handle.
  * @param dst Destination complex vector.
  * @param value Fill value.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_fill(nlo_vector_backend* backend, nlo_vec_buffer* dst, nlo_complex value);
+vec_status vec_complex_fill(vector_backend* backend, vec_buffer* dst, nlo_complex value);
 
 /**
  * @brief Copy one complex backend vector into another.
@@ -337,9 +337,9 @@ nlo_vec_status nlo_vec_complex_fill(nlo_vector_backend* backend, nlo_vec_buffer*
  * @param backend Backend handle.
  * @param dst Destination complex vector.
  * @param src Source complex vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
+vec_status vec_complex_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
  * @brief Compute element-wise magnitude squared into a complex-valued output.
@@ -347,9 +347,9 @@ nlo_vec_status nlo_vec_complex_copy(nlo_vector_backend* backend, nlo_vec_buffer*
  * @param backend Backend handle.
  * @param src Source complex vector.
  * @param dst Destination complex vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_magnitude_squared(nlo_vector_backend* backend, const nlo_vec_buffer* src, nlo_vec_buffer* dst);
+vec_status vec_complex_magnitude_squared(vector_backend* backend, const vec_buffer* src, vec_buffer* dst);
 
 /**
  * @brief Complex AXPY with real input: @p dst[i] += alpha * src[i].
@@ -358,9 +358,9 @@ nlo_vec_status nlo_vec_complex_magnitude_squared(nlo_vector_backend* backend, co
  * @param dst Destination complex vector.
  * @param src Source real vector.
  * @param alpha Complex scale factor.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_axpy_real(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src, nlo_complex alpha);
+vec_status vec_complex_axpy_real(vector_backend* backend, vec_buffer* dst, const vec_buffer* src, nlo_complex alpha);
 
 /**
  * @brief Multiply each complex element by a scalar in place.
@@ -368,9 +368,9 @@ nlo_vec_status nlo_vec_complex_axpy_real(nlo_vector_backend* backend, nlo_vec_bu
  * @param backend Backend handle.
  * @param dst Destination complex vector.
  * @param alpha Complex scale factor.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_scalar_mul_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, nlo_complex alpha);
+vec_status vec_complex_scalar_mul_inplace(vector_backend* backend, vec_buffer* dst, nlo_complex alpha);
 
 /**
  * @brief Element-wise complex multiply in place: @p dst[i] *= @p src[i].
@@ -378,9 +378,9 @@ nlo_vec_status nlo_vec_complex_scalar_mul_inplace(nlo_vector_backend* backend, n
  * @param backend Backend handle.
  * @param dst Destination/left operand complex vector.
  * @param src Right operand complex vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_mul_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
+vec_status vec_complex_mul_inplace(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
  * @brief Element-wise complex power with integer exponent.
@@ -389,9 +389,9 @@ nlo_vec_status nlo_vec_complex_mul_inplace(nlo_vector_backend* backend, nlo_vec_
  * @param base Input complex vector.
  * @param out Destination complex vector.
  * @param exponent Non-negative integer exponent.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_pow(nlo_vector_backend* backend, const nlo_vec_buffer* base, nlo_vec_buffer* out, unsigned int exponent);
+vec_status vec_complex_pow(vector_backend* backend, const vec_buffer* base, vec_buffer* out, unsigned int exponent);
 
 /**
  * @brief Element-wise complex power in place with integer exponent.
@@ -399,9 +399,9 @@ nlo_vec_status nlo_vec_complex_pow(nlo_vector_backend* backend, const nlo_vec_bu
  * @param backend Backend handle.
  * @param dst Complex vector updated in place.
  * @param exponent Non-negative integer exponent.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_pow_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, unsigned int exponent);
+vec_status vec_complex_pow_inplace(vector_backend* backend, vec_buffer* dst, unsigned int exponent);
 /**
  * @brief Element-wise complex power with complex exponent inplace:
  *        dst[i] = dst[i] ^ exponent[i].
@@ -409,12 +409,12 @@ nlo_vec_status nlo_vec_complex_pow_inplace(nlo_vector_backend* backend, nlo_vec_
  * @param backend Backend handle.
  * @param dst Complex base vector updated in place.
  * @param exponent Complex exponent vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_pow_elementwise_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* exponent
+vec_status vec_complex_pow_elementwise_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* exponent
 );
 /**
  * @brief Element-wise complex real power inplace: dst[i] = dst[i] ^ exponent.
@@ -422,11 +422,11 @@ nlo_vec_status nlo_vec_complex_pow_elementwise_inplace(
  * @param backend Backend handle.
  * @param dst Complex vector updated in place.
  * @param exponent Real exponent.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_real_pow_inplace(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vec_complex_real_pow_inplace(
+    vector_backend* backend,
+    vec_buffer* dst,
     double exponent
 );
 
@@ -436,42 +436,42 @@ nlo_vec_status nlo_vec_complex_real_pow_inplace(
  * @param backend Backend handle.
  * @param dst Destination/left operand vector.
  * @param src Right operand vector.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_add_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst, const nlo_vec_buffer* src);
+vec_status vec_complex_add_inplace(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
  * @brief Apply element-wise complex exponential in place.
  *
  * @param backend Backend handle.
  * @param dst Complex vector updated in place.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_exp_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+vec_status vec_complex_exp_inplace(vector_backend* backend, vec_buffer* dst);
 /**
  * @brief Element-wise complex natural logarithm inplace: dst[i] = log(dst[i]).
  *
  * @param backend Backend handle.
  * @param dst Complex vector updated in place.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_log_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+vec_status vec_complex_log_inplace(vector_backend* backend, vec_buffer* dst);
 /**
  * @brief Element-wise complex sine inplace: dst[i] = sin(dst[i]).
  *
  * @param backend Backend handle.
  * @param dst Complex vector updated in place.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_sin_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+vec_status vec_complex_sin_inplace(vector_backend* backend, vec_buffer* dst);
 /**
  * @brief Element-wise complex cosine inplace: dst[i] = cos(dst[i]).
  *
  * @param backend Backend handle.
  * @param dst Complex vector updated in place.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_cos_inplace(nlo_vector_backend* backend, nlo_vec_buffer* dst);
+vec_status vec_complex_cos_inplace(vector_backend* backend, vec_buffer* dst);
 
 /**
  * @brief Build one unshifted angular-frequency axis from sample spacing.
@@ -482,11 +482,11 @@ nlo_vec_status nlo_vec_complex_cos_inplace(nlo_vector_backend* backend, nlo_vec_
  * @param backend Backend handle.
  * @param dst Destination complex axis vector.
  * @param delta Sample spacing (> 0).
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_axis_unshifted_from_delta(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vec_complex_axis_unshifted_from_delta(
+    vector_backend* backend,
+    vec_buffer* dst,
     double delta
 );
 
@@ -498,11 +498,11 @@ nlo_vec_status nlo_vec_complex_axis_unshifted_from_delta(
  * @param backend Backend handle.
  * @param dst Destination complex axis vector.
  * @param delta Sample spacing.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_axis_centered_from_delta(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
+vec_status vec_complex_axis_centered_from_delta(
+    vector_backend* backend,
+    vec_buffer* dst,
     double delta
 );
 
@@ -517,15 +517,15 @@ nlo_vec_status nlo_vec_complex_axis_centered_from_delta(
  * @param nt Temporal sample count.
  * @param ny Y sample count.
  * @param axis_kind Axis role for expansion.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_mesh_from_axis_tfast(
-    nlo_vector_backend* backend,
-    nlo_vec_buffer* dst,
-    const nlo_vec_buffer* axis,
+vec_status vec_complex_mesh_from_axis_tfast(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* axis,
     size_t nt,
     size_t ny,
-    nlo_vec_mesh_axis axis_kind
+    vec_mesh_axis axis_kind
 );
 
 /**
@@ -537,12 +537,12 @@ nlo_vec_status nlo_vec_complex_mesh_from_axis_tfast(
  * @param previous Previous/reference solution vector.
  * @param epsilon Stabilizing floor for denominator.
  * @param out_error Destination scalar error value.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_relative_error(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* current,
-    const nlo_vec_buffer* previous,
+vec_status vec_complex_relative_error(
+    vector_backend* backend,
+    const vec_buffer* current,
+    const vec_buffer* previous,
     double epsilon,
     double* out_error
 );
@@ -557,12 +557,12 @@ nlo_vec_status nlo_vec_complex_relative_error(
  * @param atol Absolute tolerance term.
  * @param rtol Relative tolerance term.
  * @param out_error Destination scalar error value.
- * @return nlo_vec_status Operation status.
+ * @return vec_status Operation status.
  */
-nlo_vec_status nlo_vec_complex_weighted_rms_error(
-    nlo_vector_backend* backend,
-    const nlo_vec_buffer* fine,
-    const nlo_vec_buffer* coarse,
+vec_status vec_complex_weighted_rms_error(
+    vector_backend* backend,
+    const vec_buffer* fine,
+    const vec_buffer* coarse,
     double atol,
     double rtol,
     double* out_error

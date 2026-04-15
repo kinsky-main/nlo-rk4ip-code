@@ -16,7 +16,7 @@ static void fill_input_field(double delta_time, nlo_complex* out_field)
         const double t = ((double)i - center) * delta_time;
         const double envelope = exp(-pow(t / 0.25, 2.0));
         const double phase = -8.0 * t;
-        out_field[i] = nlo_make(envelope * cos(phase), envelope * sin(phase));
+        out_field[i] = make(envelope * cos(phase), envelope * sin(phase));
     }
 }
 
@@ -30,7 +30,7 @@ static void fill_frequency_grid(double delta_time, nlo_complex* out_grid)
             (i <= half)
                 ? ((double)i * factor)
                 : (-(double)(DEMO_NUM_TIME_SAMPLES - i) * factor);
-        out_grid[i] = nlo_make(2.0 * DEMO_PI * cycles, 0.0);
+        out_grid[i] = make(2.0 * DEMO_PI * cycles, 0.0);
     }
 }
 
@@ -67,11 +67,11 @@ int main(void)
     const double beta2 = 0.05;
     static const char* k_runtime_dispersion_factor_expr = "i*c0*w*w";
 
-    static nlo_simulation_config sim_cfg;
-    static nlo_physics_config physics_cfg;
-    static nlo_execution_options exec_options;
-    static nlo_propagate_options propagate_options;
-    static nlo_propagate_output propagate_output;
+    static simulation_config sim_cfg;
+    static physics_config physics_cfg;
+    static execution_options exec_options;
+    static propagate_options propagate_options;
+    static propagate_output propagate_output;
     size_t records_written = 0u;
     static nlo_complex input_field[DEMO_NUM_TIME_SAMPLES];
     static nlo_complex frequency_grid[DEMO_NUM_TIME_SAMPLES];
@@ -113,8 +113,8 @@ int main(void)
     physics_cfg.constants[1] = 0.0;
     physics_cfg.constants[2] = 0.01;
 
-    exec_options.backend_type = NLO_VECTOR_BACKEND_CPU;
-    exec_options.fft_backend = NLO_FFT_BACKEND_FFTW;
+    exec_options.backend_type = VECTOR_BACKEND_CPU;
+    exec_options.fft_backend = FFT_BACKEND_FFTW;
     exec_options.device_heap_fraction = 0.70;
     exec_options.record_ring_target = 0u;
     exec_options.forced_device_budget_bytes = 0u;

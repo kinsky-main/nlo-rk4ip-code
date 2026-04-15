@@ -7,9 +7,9 @@ from __future__ import annotations
 import ctypes
 
 from ._binding import (
-    NLO_PROPAGATE_OUTPUT_DENSE,
-    NLO_PROPAGATE_OUTPUT_FINAL_ONLY,
-    NLO_VECTOR_BACKEND_AUTO,
+    PROPAGATE_OUTPUT_DENSE,
+    PROPAGATE_OUTPUT_FINAL_ONLY,
+    VECTOR_BACKEND_AUTO,
     NLOLIB_STATUS_ABORTED,
     NLOLIB_STATUS_OK,
     NloComplex,
@@ -77,9 +77,9 @@ class PropagationExecutor:
         )
         propagate_options.num_recorded_samples = request.num_records
         propagate_options.output_mode = (
-            NLO_PROPAGATE_OUTPUT_FINAL_ONLY
+            PROPAGATE_OUTPUT_FINAL_ONLY
             if request.num_records == 1
-            else NLO_PROPAGATE_OUTPUT_DENSE
+            else PROPAGATE_OUTPUT_DENSE
         )
         propagate_options.return_records = int(bool(request.return_records))
         propagate_options.exec_options = (
@@ -203,7 +203,7 @@ class PropagationExecutor:
             "backend_requested": (
                 int(request.exec_options.backend_type)
                 if request.exec_options is not None
-                else int(NLO_VECTOR_BACKEND_AUTO)
+                else int(VECTOR_BACKEND_AUTO)
             ),
             "coupled": bool(
                 int(request.sim_cfg.spatial.nx) > 1 or int(request.sim_cfg.spatial.ny) > 1

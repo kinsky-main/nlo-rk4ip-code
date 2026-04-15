@@ -12,16 +12,16 @@ from typing import Sequence
 
 NT_MAX = ctypes.c_size_t(-1).value  # Unbounded sentinel; prefer query_runtime_limits().
 LEGACY_NT_MAX = 1 << 20
-NLO_RUNTIME_OPERATOR_CONSTANTS_MAX = 16
-NLO_STORAGE_RUN_ID_MAX = 64
+RUNTIME_OPERATOR_CONSTANTS_MAX = 16
+STORAGE_RUN_ID_MAX = 64
 
-NLO_VECTOR_BACKEND_CPU = 0
-NLO_VECTOR_BACKEND_VULKAN = 1
-NLO_VECTOR_BACKEND_AUTO = 2
+VECTOR_BACKEND_CPU = 0
+VECTOR_BACKEND_VULKAN = 1
+VECTOR_BACKEND_AUTO = 2
 
-NLO_FFT_BACKEND_AUTO = 0
-NLO_FFT_BACKEND_FFTW = 1
-NLO_FFT_BACKEND_VKFFT = 2
+FFT_BACKEND_AUTO = 0
+FFT_BACKEND_FFTW = 1
+FFT_BACKEND_VKFFT = 2
 
 NLOLIB_STATUS_OK = 0
 NLOLIB_STATUS_INVALID_ARGUMENT = 1
@@ -36,18 +36,18 @@ NLOLIB_LOG_LEVEL_DEBUG = 3
 NLOLIB_PROGRESS_STREAM_STDERR = 0
 NLOLIB_PROGRESS_STREAM_STDOUT = 1
 NLOLIB_PROGRESS_STREAM_BOTH = 2
-NLO_PROGRESS_EVENT_ACCEPTED = 0
-NLO_PROGRESS_EVENT_REJECTED = 1
-NLO_PROGRESS_EVENT_FINISH = 2
+PROGRESS_EVENT_ACCEPTED = 0
+PROGRESS_EVENT_REJECTED = 1
+PROGRESS_EVENT_FINISH = 2
 
-NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES = 0
-NLO_STORAGE_DB_CAP_POLICY_FAIL = 1
-NLO_PROPAGATE_OUTPUT_DENSE = 0
-NLO_PROPAGATE_OUTPUT_FINAL_ONLY = 1
+STORAGE_DB_CAP_POLICY_STOP_WRITES = 0
+STORAGE_DB_CAP_POLICY_FAIL = 1
+PROPAGATE_OUTPUT_DENSE = 0
+PROPAGATE_OUTPUT_FINAL_ONLY = 1
 
-NLO_NONLINEAR_MODEL_EXPR = 0
-NLO_NONLINEAR_MODEL_KERR_RAMAN = 1
-NLO_TENSOR_LAYOUT_XYT_T_FAST = 0
+NONLINEAR_MODEL_EXPR = 0
+NONLINEAR_MODEL_KERR_RAMAN = 1
+TENSOR_LAYOUT_XYT_T_FAST = 0
 
 
 class NloComplex(ctypes.Structure):
@@ -134,7 +134,7 @@ class RuntimeOperatorParams(ctypes.Structure):
         ("raman_response_time", ctypes.POINTER(NloComplex)),
         ("raman_response_len", ctypes.c_size_t),
         ("num_constants", ctypes.c_size_t),
-        ("constants", ctypes.c_double * NLO_RUNTIME_OPERATOR_CONSTANTS_MAX),
+        ("constants", ctypes.c_double * RUNTIME_OPERATOR_CONSTANTS_MAX),
     ]
 
 
@@ -187,7 +187,7 @@ class NloStorageOptions(ctypes.Structure):
 
 class NloStorageResult(ctypes.Structure):
     _fields_ = [
-        ("run_id", ctypes.c_char * NLO_STORAGE_RUN_ID_MAX),
+        ("run_id", ctypes.c_char * STORAGE_RUN_ID_MAX),
         ("records_captured", ctypes.c_size_t),
         ("records_spilled", ctypes.c_size_t),
         ("chunks_written", ctypes.c_size_t),
@@ -384,8 +384,8 @@ def load(path: Path | None= None) -> ctypes.CDLL:
     except AttributeError:
         lib._has_set_progress_stream = False # pyright: ignore[reportAttributeAccessIssue]
 
-    lib._nlo_loaded_path = str(lib_path) if lib_path is not None else "" # pyright: ignore[reportAttributeAccessIssue]
-    lib._nlo_dll_dir_handles = dll_dir_handles # pyright: ignore[reportAttributeAccessIssue]
+    lib.loaded_path = str(lib_path) if lib_path is not None else "" # pyright: ignore[reportAttributeAccessIssue]
+    lib.dll_dir_handles = dll_dir_handles # pyright: ignore[reportAttributeAccessIssue]
     return lib
 
 
@@ -414,8 +414,8 @@ def complex_array_to_list(values: ctypes.Array, count: int) -> list[complex]:
 
 
 def default_execution_options(
-    backend_type: int = NLO_VECTOR_BACKEND_AUTO,
-    fft_backend: int = NLO_FFT_BACKEND_AUTO,
+    backend_type: int = VECTOR_BACKEND_AUTO,
+    fft_backend: int = FFT_BACKEND_AUTO,
 ) -> NloExecutionOptions:
     """
     Build default execution options matching C defaults.
@@ -442,7 +442,7 @@ def default_storage_options(
     run_id: str | None = None,
     sqlite_max_bytes: int = 0,
     chunk_records: int = 0,
-    cap_policy: int = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES,
+    cap_policy: int = STORAGE_DB_CAP_POLICY_STOP_WRITES,
     log_final_output_field_to_db: bool = False,
 ) -> tuple[NloStorageOptions, list[bytes]]:
     """

@@ -279,7 +279,7 @@ classdef NLolib < handle
             else
                 execOptsStruct = nlolib.NLolib.make_exec_options(execOptions);
             end
-            execOptsPtr = libpointer('nlo_execution_optionsPtr', execOptsStruct);
+            execOptsPtr = libpointer('execution_optionsPtr', execOptsStruct);
 
             streamLogs = false;
             streamLogBufferBytes = uint64(262144);
@@ -336,15 +336,15 @@ classdef NLolib < handle
             if storageEnabled
                 [storageOptsStruct, storageKeepalive] = ...
                     nlolib.NLolib.make_storage_options(storageOptions); %#ok<NASGU>
-                storageOptsPtr = libpointer('nlo_storage_optionsPtr', storageOptsStruct);
-                storageResultRaw = libstruct('nlo_storage_result');
-                storageResultPtr = libpointer('nlo_storage_resultPtr', storageResultRaw);
+                storageOptsPtr = libpointer('storage_optionsPtr', storageOptsStruct);
+                storageResultRaw = libstruct('storage_result');
+                storageResultPtr = libpointer('storage_resultPtr', storageResultRaw);
             else
-                storageOptsPtr = libpointer('nlo_storage_optionsPtr');
-                storageResultPtr = libpointer('nlo_storage_resultPtr');
+                storageOptsPtr = libpointer('storage_optionsPtr');
+                storageResultPtr = libpointer('storage_resultPtr');
             end
 
-            propagateOptions = libstruct('nlo_propagate_options');
+            propagateOptions = libstruct('propagate_options');
             propagateOptions.num_recorded_samples = numRecordedSamples;
             if numRecordedSamples == uint64(1)
                 propagateOptions.output_mode = int32(1);
@@ -356,7 +356,7 @@ classdef NLolib < handle
             propagateOptions.storage_options = storageOptsPtr;
 
             recordsWrittenPtr = libpointer('uint64Ptr', uint64(0));
-            propagateOutput = libstruct('nlo_propagate_output');
+            propagateOutput = libstruct('propagate_output');
             if returnRecords
                 propagateOutput.output_records = outBuffer;
                 propagateOutput.output_record_capacity = numRecordedSamples;
@@ -368,7 +368,7 @@ classdef NLolib < handle
             propagateOutput.storage_result = storageResultPtr;
             if captureStepHistory
                 stepEventsLen = double(stepHistoryCapacity);
-                stepEventsBuffer = repmat(libstruct('nlo_step_event'), 1, stepEventsLen);
+                stepEventsBuffer = repmat(libstruct('step_event'), 1, stepEventsLen);
                 propagateOutput.output_step_events = stepEventsBuffer;
                 propagateOutput.output_step_event_capacity = stepHistoryCapacity;
             else
@@ -718,7 +718,7 @@ classdef NLolib < handle
 
             [simCfgPtr, physicsCfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>
             execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
-            out = libstruct('nlo_runtime_limits');
+            out = libstruct('runtime_limits');
             statusRaw = calllib(obj.LIBNAME, 'nlolib_query_runtime_limits', ...
                                 simCfgPtr, physicsCfgPtr, execOptsPtr, out);
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
@@ -855,11 +855,11 @@ classdef NLolib < handle
             end
 
             try
-                fg = libstruct('nlo_frequency_grid', ...
+                fg = libstruct('frequency_grid', ...
                                struct('frequency_grid', struct('re', 0.0, 'im', 0.0))); %#ok<NASGU>
             catch ME
                 error('nlolib:simConfigTypeUnavailable', ...
-                      ['MATLAB failed to construct nlo_frequency_grid.\n' ...
+                      ['MATLAB failed to construct frequency_grid.\n' ...
                        'This points to a header parse mismatch for frequency pointer fields.\n' ...
                        'Run:\n' ...
                        '  nlolib.NLolib.unload();\n' ...
@@ -869,7 +869,7 @@ classdef NLolib < handle
             end
 
             try
-                maxConstants = 16;   % NLO_RUNTIME_OPERATOR_CONSTANTS_MAX
+                maxConstants = 16;   % RUNTIME_OPERATOR_CONSTANTS_MAX
                 rt = libstruct('runtime_operator_params', ...
                                struct('linear_factor_expr', 'a', ...
                                       'linear_expr', 'w', ...
@@ -899,11 +899,11 @@ classdef NLolib < handle
             end
 
             try
-                popts = libstruct('nlo_propagate_options'); %#ok<NASGU>
-                pout = libstruct('nlo_propagate_output'); %#ok<NASGU>
+                popts = libstruct('propagate_options'); %#ok<NASGU>
+                pout = libstruct('propagate_output'); %#ok<NASGU>
             catch ME
                 error('nlolib:simConfigTypeUnavailable', ...
-                      ['MATLAB failed to construct nlo_propagate_options/output types.\n' ...
+                      ['MATLAB failed to construct propagate_options/output types.\n' ...
                        'This points to a header parse mismatch for unified propagate ABI fields.\n' ...
                        'Run:\n' ...
                        '  nlolib.NLolib.unload();\n' ...
@@ -1070,8 +1070,8 @@ classdef NLolib < handle
         end
 
         function ptr = make_exec_options(opts)
-            %MAKE_EXEC_OPTIONS Build a nlo_execution_options libstruct.
-            s = libstruct('nlo_execution_options');
+            %MAKE_EXEC_OPTIONS Build a execution_options libstruct.
+            s = libstruct('execution_options');
 
             if isfield(opts, 'backend_type')
                 s.backend_type = int32(opts.backend_type);
@@ -1113,7 +1113,7 @@ classdef NLolib < handle
         end
 
         function [opts, keepalive] = make_storage_options(storage)
-            %MAKE_STORAGE_OPTIONS Build nlo_storage_options libstruct.
+            %MAKE_STORAGE_OPTIONS Build storage_options libstruct.
             keepalive = {};
             if ~isstruct(storage)
                 error('nlolib:invalidStorageOptions', 'storage options must be a struct');
@@ -1123,7 +1123,7 @@ classdef NLolib < handle
                       'storage.sqlite_path must be a non-empty string');
             end
 
-            opts = libstruct('nlo_storage_options');
+            opts = libstruct('storage_options');
             sqlitePathPtr = libpointer('cstring', char(string(storage.sqlite_path)));
             keepalive{end + 1} = sqlitePathPtr; %#ok<AGROW>
             opts.sqlite_path = sqlitePathPtr;
@@ -1145,7 +1145,7 @@ classdef NLolib < handle
         end
 
         function out = to_storage_result_struct(storageResultRaw)
-            %TO_STORAGE_RESULT_STRUCT Convert nlo_storage_result to MATLAB struct.
+            %TO_STORAGE_RESULT_STRUCT Convert storage_result to MATLAB struct.
             out = struct();
             runIdRaw = char(storageResultRaw.run_id(:).');
             nul = find(runIdRaw == char(0), 1);

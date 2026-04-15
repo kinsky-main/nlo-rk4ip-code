@@ -7,11 +7,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifndef NLO_ENABLE_VULKAN_BACKEND
-#define NLO_ENABLE_VULKAN_BACKEND 1
+#ifndef ENABLE_VULKAN_BACKEND
+#define ENABLE_VULKAN_BACKEND 1
 #endif
 
-#if NLO_ENABLE_VULKAN_BACKEND
+#if ENABLE_VULKAN_BACKEND
 #include <vulkan/vulkan.h>
 #else
 typedef void* VkInstance;
@@ -36,7 +36,7 @@ typedef struct {
     VkPhysicalDeviceType device_type;
     uint64_t device_local_bytes;
     char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
-} nlo_vk_auto_context;
+} vk_auto_context;
 
 /**
  * @brief Create a minimal Vulkan context by selecting a suitable device/queue.
@@ -46,8 +46,8 @@ typedef struct {
  * @param reason_capacity Size of @p reason in bytes.
  * @return int 0 on success, nonzero on failure.
  */
-int nlo_vk_auto_context_init(
-    nlo_vk_auto_context* context,
+int vk_auto_context_init(
+    vk_auto_context* context,
     char* reason,
     size_t reason_capacity
 );
@@ -57,4 +57,4 @@ int nlo_vk_auto_context_init(
  *
  * @param context Context to destroy/reset.
  */
-void nlo_vk_auto_context_destroy(nlo_vk_auto_context* context);
+void vk_auto_context_destroy(vk_auto_context* context);

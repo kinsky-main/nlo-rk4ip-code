@@ -14,17 +14,17 @@
 // MARK: Typedefs
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-  #define NLO_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+  #define STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
 #else
-  #define NLO_STATIC_ASSERT_CONCAT_(a, b) a##b
-  #define NLO_STATIC_ASSERT_CONCAT(a, b) NLO_STATIC_ASSERT_CONCAT_(a, b)
-  #define NLO_STATIC_ASSERT(cond, msg) \
-    typedef char NLO_STATIC_ASSERT_CONCAT(nlo_static_assert_, __LINE__)[(cond) ? 1 : -1]
+  #define STATIC_ASSERT_CONCAT_(a, b) a##b
+  #define STATIC_ASSERT_CONCAT(a, b) STATIC_ASSERT_CONCAT_(a, b)
+  #define STATIC_ASSERT(cond, msg) \
+    typedef char STATIC_ASSERT_CONCAT(static_assert_, __LINE__)[(cond) ? 1 : -1]
 #endif
 
 typedef struct { double re, im; } nlo_complex;
-#define NLO_RE(z) ((z).re)
-#define NLO_IM(z) ((z).im)
+#define RE(z) ((z).re)
+#define IM(z) ((z).im)
 
 // MARK: Function Declarations
 
@@ -35,7 +35,7 @@ typedef struct { double re, im; } nlo_complex;
  * @param im Imaginary component.
  * @return nlo_complex Constructed complex value.
  */
-static inline nlo_complex nlo_make(double re, double im)
+static inline nlo_complex make(double re, double im)
 {
     nlo_complex z;
 
@@ -50,10 +50,10 @@ static inline nlo_complex nlo_make(double re, double im)
  * @param b Right operand.
  * @return nlo_complex Sum `a + b`.
  */
-static inline nlo_complex nlo_add(nlo_complex a, nlo_complex b)
+static inline nlo_complex add(nlo_complex a, nlo_complex b)
 {
-    return nlo_make(NLO_RE(a) + NLO_RE(b),
-                    NLO_IM(a) + NLO_IM(b));
+    return make(RE(a) + RE(b),
+                    IM(a) + IM(b));
 }
 
 /**
@@ -63,8 +63,8 @@ static inline nlo_complex nlo_add(nlo_complex a, nlo_complex b)
  * @param b Right operand.
  * @return nlo_complex Product `a * b`.
  */
-static inline nlo_complex nlo_mul(nlo_complex a, nlo_complex b)
+static inline nlo_complex mul(nlo_complex a, nlo_complex b)
 {
-    return nlo_make(NLO_RE(a) * NLO_RE(b) - NLO_IM(a) * NLO_IM(b),
-                    NLO_RE(a) * NLO_IM(b) + NLO_IM(a) * NLO_RE(b));
+    return make(RE(a) * RE(b) - IM(a) * IM(b),
+                    RE(a) * IM(b) + IM(a) * RE(b));
 }

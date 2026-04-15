@@ -8,42 +8,42 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef NLO_DEFAULT_RAMAN_TAU1
-#define NLO_DEFAULT_RAMAN_TAU1 0.0122
+#ifndef DEFAULT_RAMAN_TAU1
+#define DEFAULT_RAMAN_TAU1 0.0122
 #endif
 
-#ifndef NLO_DEFAULT_RAMAN_TAU2
-#define NLO_DEFAULT_RAMAN_TAU2 0.0320
+#ifndef DEFAULT_RAMAN_TAU2
+#define DEFAULT_RAMAN_TAU2 0.0320
 #endif
 
-nlo_execution_options nlo_execution_options_default(nlo_vector_backend_type backend_type)
+execution_options execution_options_default(vector_backend_type backend_type)
 {
-    nlo_execution_options options;
+    execution_options options;
     memset(&options, 0, sizeof(options));
     options.backend_type = backend_type;
-    options.fft_backend = NLO_FFT_BACKEND_AUTO;
-    options.device_heap_fraction = NLO_DEFAULT_DEVICE_HEAP_FRACTION;
+    options.fft_backend = FFT_BACKEND_AUTO;
+    options.device_heap_fraction = DEFAULT_DEVICE_HEAP_FRACTION;
     options.record_ring_target = 0u;
     options.forced_device_budget_bytes = 0u;
     return options;
 }
 
-nlo_storage_options nlo_storage_options_default(void)
+storage_options storage_options_default(void)
 {
-    nlo_storage_options options;
+    storage_options options;
     memset(&options, 0, sizeof(options));
     options.sqlite_path = NULL;
     options.run_id = NULL;
     options.sqlite_max_bytes = 0u;
     options.chunk_records = 0u;
-    options.cap_policy = NLO_STORAGE_DB_CAP_POLICY_STOP_WRITES;
+    options.cap_policy = STORAGE_DB_CAP_POLICY_STOP_WRITES;
     options.log_final_output_field_to_db = 0;
     return options;
 }
 
-nlo_runtime_limits nlo_runtime_limits_default(void)
+runtime_limits runtime_limits_default(void)
 {
-    nlo_runtime_limits limits;
+    runtime_limits limits;
     memset(&limits, 0, sizeof(limits));
     limits.max_num_time_samples_runtime = 0u;
     limits.max_num_recorded_samples_in_memory = 0u;
@@ -53,7 +53,7 @@ nlo_runtime_limits nlo_runtime_limits_default(void)
             : (size_t)9007199254740991ull;
     limits.estimated_required_working_set_bytes = 0u;
     limits.estimated_device_budget_bytes = 0u;
-    limits.storage_available = nlo_snapshot_store_is_available();
+    limits.storage_available = snapshot_store_is_available();
     return limits;
 }
 
@@ -72,7 +72,7 @@ sim_config* create_sim_config(size_t num_time_samples)
     config->tensor.nt = 0u;
     config->tensor.nx = 0u;
     config->tensor.ny = 0u;
-    config->tensor.layout = NLO_TENSOR_LAYOUT_XYT_T_FAST;
+    config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
     config->time.nt = 0u;
     config->time.wt_axis = NULL;
     config->spatial.nx = num_time_samples;
@@ -89,11 +89,11 @@ sim_config* create_sim_config(size_t num_time_samples)
     config->runtime.dispersion_factor_expr = NULL;
     config->runtime.dispersion_expr = NULL;
     config->runtime.nonlinear_expr = NULL;
-    config->runtime.nonlinear_model = NLO_NONLINEAR_MODEL_EXPR;
+    config->runtime.nonlinear_model = NONLINEAR_MODEL_EXPR;
     config->runtime.nonlinear_gamma = 0.0;
     config->runtime.raman_fraction = 0.0;
-    config->runtime.raman_tau1 = NLO_DEFAULT_RAMAN_TAU1;
-    config->runtime.raman_tau2 = NLO_DEFAULT_RAMAN_TAU2;
+    config->runtime.raman_tau1 = DEFAULT_RAMAN_TAU1;
+    config->runtime.raman_tau2 = DEFAULT_RAMAN_TAU2;
     config->runtime.shock_omega0 = 0.0;
     config->runtime.raman_response_time = NULL;
     config->runtime.raman_response_len = 0u;

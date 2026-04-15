@@ -2,8 +2,8 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
 #extension GL_GOOGLE_include_directive : require
 
-#include "nlo_complex_device.glslinc"
-#include "nlo_double_math.glslinc"
+#include "complex_device.glslinc"
+#include "double_math.glslinc"
 
 layout(local_size_x = 64) in;
 
@@ -15,7 +15,7 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 layout(set = 0, binding = 0, std430) buffer DstBuffer {
-    nlo_vk_complex64 dst[];
+    vk_complex64 dst[];
 };
 
 void main()
@@ -41,12 +41,12 @@ void main()
         return;
     }
 
-    const double angle = nlo_atan2_double(im, re);
+    const double angle = atan2_double(im, re);
     const double scaled_angle = exponent * angle;
-    const double scaled_radius = nlo_pow_double(radius, exponent);
+    const double scaled_radius = pow_double(radius, exponent);
     double sin_angle = 0.0;
     double cos_angle = 0.0;
-    nlo_sincos_double(scaled_angle, sin_angle, cos_angle);
+    sincos_double(scaled_angle, sin_angle, cos_angle);
 
     dst[idx].re = scaled_radius * cos_angle;
     dst[idx].im = scaled_radius * sin_angle;

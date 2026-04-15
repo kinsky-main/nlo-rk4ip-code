@@ -4,10 +4,9 @@ from nlolib import (
     NLOLIB_PROGRESS_STREAM_BOTH,
     NLOLIB_PROGRESS_STREAM_STDERR,
     NLOLIB_STATUS_ABORTED,
-    NLO_VECTOR_BACKEND_AUTO,
-    NLO_VECTOR_BACKEND_CPU,
-    NLO_VECTOR_BACKEND_VULKAN,
-    NLO_TENSOR_LAYOUT_XYT_T_FAST,
+    VECTOR_BACKEND_AUTO,
+    VECTOR_BACKEND_CPU,
+    TENSOR_LAYOUT_XYT_T_FAST,
     NLolib,
     OperatorSpec,
     PropagationAbortedError,
@@ -51,7 +50,7 @@ def main():
     api.clear_log_buffer()
     print("test_python_api_smoke: runtime log API configured.")
 
-    cpu_opts = default_execution_options(NLO_VECTOR_BACKEND_CPU)
+    cpu_opts = default_execution_options(VECTOR_BACKEND_CPU)
     limits = api.query_runtime_limits(exec_options=cpu_opts)
     assert int(limits.max_num_time_samples_runtime) > 0
     assert int(limits.max_num_recorded_samples_with_storage) > 0
@@ -68,7 +67,7 @@ def main():
     assert "field_size" in log_text
     print("test_python_api_smoke: CPU 1D propagation returned expected record-major shape.")
 
-    auto_opts = default_execution_options(NLO_VECTOR_BACKEND_AUTO)
+    auto_opts = default_execution_options(VECTOR_BACKEND_AUTO)
     identity_distance = 0.02
     identity_cfg = prepare_sim_config(
         n,
@@ -156,7 +155,7 @@ def main():
         tensor_nt=1,
         tensor_nx=nx,
         tensor_ny=ny,
-        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
+        tensor_layout=TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[0j],
         potential_grid=[1 + 0j] * nxy,
         runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0]),
@@ -182,7 +181,7 @@ def main():
         tensor_nt=nt,
         tensor_nx=nx3,
         tensor_ny=ny3,
-        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
+        tensor_layout=TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[0j] * nt,
         potential_grid=[0j] * n3,
         runtime=RuntimeOperators(constants=[0.0, 0.0, 1.0, 0.0]),
@@ -254,7 +253,7 @@ def main():
         tensor_nt=nt_c,
         tensor_nx=nx_c,
         tensor_ny=ny_c,
-        tensor_layout=NLO_TENSOR_LAYOUT_XYT_T_FAST,
+        tensor_layout=TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[0j] * nt_c,
         potential_grid=[0j] * n_c,
     )

@@ -2,7 +2,7 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
 #extension GL_GOOGLE_include_directive : require
 
-#include "nlo_complex_device.glslinc"
+#include "complex_device.glslinc"
 
 layout(local_size_x = 64) in;
 
@@ -14,10 +14,10 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 layout(set = 0, binding = 0, std430) buffer DstBuffer {
-    nlo_vk_complex64 dst[];
+    vk_complex64 dst[];
 };
 
-const double NLO_TWO_PI = 6.283185307179586476925286766559;
+const double TWO_PI = 6.283185307179586476925286766559;
 
 void main()
 {
@@ -31,7 +31,7 @@ void main()
         return;
     }
 
-    double step = NLO_TWO_PI / (double(pc.count) * pc.scalar0);
+    double step = TWO_PI / (double(pc.count) * pc.scalar0);
     uint positive_limit = (pc.count - 1u) / 2u;
     double value = 0.0;
     if (idx <= positive_limit) {

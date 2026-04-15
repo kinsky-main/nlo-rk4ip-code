@@ -1,5 +1,5 @@
 using NLOLibExamples
-pushfirst!(LOAD_PATH, nlo_package_root_from(@__FILE__))
+pushfirst!(LOAD_PATH, package_root_from(@__FILE__))
 
 using CairoMakie
 using FFTW
@@ -71,17 +71,6 @@ function grin_potential_grid(x_axis, y_axis, grin_strength)
     return potential
 end
 
-function intensity_error_curve(records_tyx, launch_tyx)
-    reference = abs2.(ComplexF64.(launch_tyx))
-    denom = max(norm(vec(reference)), 1e-30)
-    out = Vector{Float64}(undef, size(records_tyx, 1))
-    for ridx in axes(records_tyx, 1)
-        intensity = abs2.(ComplexF64.(records_tyx[ridx, :, :, :]))
-        out[ridx] = norm(vec(intensity .- reference)) / denom
-    end
-    return out
-end
-
 function overlap_fidelity_curve(records_tyx, launch_tyx)
     reference = vec(ComplexF64.(launch_tyx))
     ref_norm = max(norm(reference), 1e-30)
@@ -122,8 +111,9 @@ function rms_temporal_width_curve(records_tyx, t_axis)
     return out
 end
 
-peak_intensity_curve(records_tyx) = [maximum(abs2.(ComplexF64.(records_tyx[ridx, :, :, :]))) for ridx in axes(records_tyx, 1)]
 total_power_curve(records_tyx) = [sum(abs2.(ComplexF64.(records_tyx[ridx, :, :, :]))) for ridx in axes(records_tyx, 1)]
+relative_power_drift_curve(power_curve) = abs.(Float64.(power_curve) .- Float64(power_curve[1])) ./ max(Float64(power_curve[1]), 1e-30)
+peak_transverse_intensity_curve(records_xy) = [maximum(Float64.(records_xy[ridx, :, :])) for ridx in axes(records_xy, 1)]
 
 function centerline_intensity_map(records_tyx)
     center_row = Int(cld(size(records_tyx, 3), 2))
@@ -150,7 +140,7 @@ function temporal_marginal_curve(records_tyx)
     return out
 end
 
-function save_grin_plots(output_dir, z_axis, t_axis, x_axis, y_axis, field0_tyx, nonlinear_records, linear_records, nonlinear_radius, linear_radius, nonlinear_temporal_width, linear_temporal_width, nonlinear_peak, linear_peak, nonlinear_overlap, linear_overlap, nonlinear_error, linear_error)
+function save_grin_plots(output_dir, z_axis, t_axis, x_axis, y_axis, field0_tyx, nonlinear_records, linear_records, nonlinear_radius, linear_radius, nonlinear_temporal_width, linear_temporal_width, nonlinear_peak, linear_peak, nonlinear_overlap, linear_overlap, nonlinear_power_drift, linear_power_drift)
     mkpath(output_dir)
 
     nonlinear_xy = time_integrated_xy_records(nonlinear_records)
@@ -182,7 +172,7 @@ function save_grin_plots(output_dir, z_axis, t_axis, x_axis, y_axis, field0_tyx,
     save_example_figure(joinpath(output_dir, "high_order_grin_soliton_rms_radius.png"), fig3)
 
     fig4 = styled_figure()
-    ax4 = Axis(fig4[1, 1], xlabel = "z / L_D", ylabel = "Peak intensity", title = "Peak intensity")
+    ax4 = Axis(fig4[1, 1], xlabel = "z / L_D", ylabel = "Peak transverse intensity", title = "Peak transverse intensity")
     lines!(ax4, z_axis, nonlinear_peak, label = "Nonlinear")
     lines!(ax4, z_axis, linear_peak, label = "Linear baseline")
     axislegend(ax4, position = :rt)
@@ -203,11 +193,11 @@ function save_grin_plots(output_dir, z_axis, t_axis, x_axis, y_axis, field0_tyx,
     save_example_figure(joinpath(output_dir, "high_order_grin_soliton_overlap_fidelity.png"), fig6)
 
     fig7 = styled_figure()
-    ax7 = Axis(fig7[1, 1], xlabel = "z / L_D", ylabel = "Relative launch-intensity error", title = "Launch-intensity error")
-    lines!(ax7, z_axis, nonlinear_error, label = "Nonlinear")
-    lines!(ax7, z_axis, linear_error, label = "Linear baseline")
+    ax7 = Axis(fig7[1, 1], xlabel = "z / L_D", ylabel = "Relative power drift", title = "Power drift")
+    lines!(ax7, z_axis, nonlinear_power_drift, label = "Nonlinear")
+    lines!(ax7, z_axis, linear_power_drift, label = "Linear baseline")
     axislegend(ax7, position = :rt)
-    save_example_figure(joinpath(output_dir, "high_order_grin_soliton_launch_intensity_error.png"), fig7)
+    save_example_figure(joinpath(output_dir, "high_order_grin_soliton_power_drift.png"), fig7)
 
     fig8 = styled_figure()
     ax8 = Axis(fig8[1, 1], xlabel = "x / w0", ylabel = "Center-line intensity", title = "Final center-line comparison")
@@ -244,10 +234,6 @@ function save_grin_plots(output_dir, z_axis, t_axis, x_axis, y_axis, field0_tyx,
         linear_xy,
         joinpath(output_dir, "high_order_grin_soliton_linear_3d_intensity_contour_surfaces.png");
         input_is_intensity = true,
-        num_levels = 20,
-        max_x_samples = 48,
-        max_y_samples = 48,
-        max_z_samples = 72,
         z_label = "z / L_D",
     )
 
@@ -258,10 +244,6 @@ function save_grin_plots(output_dir, z_axis, t_axis, x_axis, y_axis, field0_tyx,
         nonlinear_xy,
         joinpath(output_dir, "high_order_grin_soliton_nonlinear_3d_intensity_contour_surfaces.png");
         input_is_intensity = true,
-        num_levels = 20,
-        max_x_samples = 48,
-        max_y_samples = 48,
-        max_z_samples = 72,
         z_label = "z / L_D",
     )
 end
@@ -276,7 +258,7 @@ function main(argv = ARGS)
     nonlinear_case_key = "nonlinear"
     linear_case_key = "linear_baseline"
 
-    nt = 256
+    nt = 1024
     nx = 64
     ny = 64
     dt = 0.06
@@ -284,15 +266,15 @@ function main(argv = ARGS)
     dy = 0.24
     temporal_width = 0.30
     soliton_order = 1.0
-    mode_width = 2.4
+    mode_width = 1.0
     spatial_chirp = 0.0
     beta2 = -0.08
     beta_t = -0.08
-    grin_strength = 1.5e-3
+    grin_strength = 1.5e-5
     gamma_nonlinear = 1.0
     z_period = soliton_period(beta2, temporal_width)
-    z_final = 2.0 * z_period
-    num_records = 72
+    z_final = 6.0 * z_period
+    num_records = 120
 
     t_axis = centered_time_grid(nt, dt)
     x_axis = centered_spatial_grid(nx, dx)
@@ -367,7 +349,7 @@ function main(argv = ARGS)
         )
         nonlinear_full = OperatorSpec(expr = "i*A*(gamma*I + V)", params = Dict("gamma" => gamma_nonlinear))
         nonlinear_linear = OperatorSpec(expr = "i*A*(gamma*I + V)", params = Dict("gamma" => 0.0))
-        exec = default_execution_options(backend_type = NLO_VECTOR_BACKEND_AUTO, fft_backend = NLO_FFT_BACKEND_AUTO)
+        exec = default_execution_options(backend_type = VECTOR_BACKEND_AUTO, fft_backend = FFT_BACKEND_AUTO)
         storage_nonlinear = storage_kwargs(db; example_name = example_name, run_group = run_group, case_key = nonlinear_case_key, chunk_records = 4)
         storage_linear = storage_kwargs(db; example_name = example_name, run_group = run_group, case_key = linear_case_key, chunk_records = 4)
 
@@ -425,18 +407,20 @@ function main(argv = ARGS)
         save_case_from_solver_meta!(db; example_name = example_name, run_group = run_group, case_key = linear_case_key, solver_meta = result_linear.meta, meta = meta)
     end
 
+    nonlinear_xy = time_integrated_xy_records(nonlinear_records)
+    linear_xy = time_integrated_xy_records(linear_records)
     nonlinear_radius = rms_radius_curve(nonlinear_records, x_axis, y_axis)
     linear_radius = rms_radius_curve(linear_records, x_axis, y_axis)
     nonlinear_temporal_width = rms_temporal_width_curve(nonlinear_records, t_axis)
     linear_temporal_width = rms_temporal_width_curve(linear_records, t_axis)
-    nonlinear_peak = peak_intensity_curve(nonlinear_records)
-    linear_peak = peak_intensity_curve(linear_records)
+    nonlinear_peak = peak_transverse_intensity_curve(nonlinear_xy)
+    linear_peak = peak_transverse_intensity_curve(linear_xy)
     nonlinear_overlap = overlap_fidelity_curve(nonlinear_records, field0_tyx)
     linear_overlap = overlap_fidelity_curve(linear_records, field0_tyx)
-    nonlinear_error = intensity_error_curve(nonlinear_records, field0_tyx)
-    linear_error = intensity_error_curve(linear_records, field0_tyx)
     nonlinear_power = total_power_curve(nonlinear_records)
     linear_power = total_power_curve(linear_records)
+    nonlinear_power_drift_curve = relative_power_drift_curve(nonlinear_power)
+    linear_power_drift_curve = relative_power_drift_curve(linear_power)
     z_period = soliton_period(beta2, temporal_width)
     ld = dispersion_length(beta2, temporal_width)
     lnl = 1.0 / (gamma_nonlinear * fundamental_soliton_power(beta2, gamma_nonlinear, temporal_width))
@@ -464,12 +448,12 @@ function main(argv = ARGS)
         linear_peak,
         nonlinear_overlap,
         linear_overlap,
-        nonlinear_error,
-        linear_error,
+        nonlinear_power_drift_curve,
+        linear_power_drift_curve,
     )
 
-    nonlinear_power_drift = abs(nonlinear_power[end] - nonlinear_power[1]) / max(nonlinear_power[1], 1e-30)
-    linear_power_drift = abs(linear_power[end] - linear_power[1]) / max(linear_power[1], 1e-30)
+    nonlinear_power_drift = nonlinear_power_drift_curve[end]
+    linear_power_drift = linear_power_drift_curve[end]
 
     println("high-order GRIN soliton summary")
     println("  nonlinear final radius / launch radius = $(nonlinear_radius[end] / nonlinear_radius[1])")
@@ -480,16 +464,16 @@ function main(argv = ARGS)
     println("  linear final temporal width / launch width = $(linear_temporal_width[end] / linear_temporal_width[1])")
     println("  nonlinear min overlap fidelity = $(minimum(nonlinear_overlap))")
     println("  linear min overlap fidelity = $(minimum(linear_overlap))")
-    println("  nonlinear final launch-intensity error = $(nonlinear_error[end])")
-    println("  linear final launch-intensity error = $(linear_error[end])")
     println("  nonlinear power drift = $(nonlinear_power_drift)")
     println("  linear power drift = $(linear_power_drift)")
+    println("  nonlinear max power drift = $(maximum(nonlinear_power_drift_curve))")
+    println("  linear max power drift = $(maximum(linear_power_drift_curve))")
     println("  L_D = $(ld)")
     println("  L_NL(fundamental) = $(lnl)")
     println("  L_diff = $(ldiff)")
     println("  soliton period / L_D = $(z_period / ld)")
     println("  periods covered = $(z_final / z_period)")
-    return max(maximum(nonlinear_error), maximum(linear_error))
+    return max(maximum(nonlinear_power_drift_curve), maximum(linear_power_drift_curve))
 end
 
 if abspath(PROGRAM_FILE) == abspath(@__FILE__)

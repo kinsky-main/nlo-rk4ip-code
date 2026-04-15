@@ -130,16 +130,6 @@ def unflatten_tfast_records(
     return np.transpose(flat, (0, 3, 2, 1))
 
 
-def intensity_error_curve(records_tyx: np.ndarray, launch_tyx: np.ndarray) -> np.ndarray:
-    reference = np.abs(np.asarray(launch_tyx, dtype=np.complex128)) ** 2
-    denom = max(float(np.linalg.norm(reference)), 1.0e-30)
-    out = np.empty(int(records_tyx.shape[0]), dtype=np.float64)
-    for idx in range(int(records_tyx.shape[0])):
-        intensity = np.abs(np.asarray(records_tyx[idx], dtype=np.complex128)) ** 2
-        out[idx] = float(np.linalg.norm(intensity - reference) / denom)
-    return out
-
-
 def overlap_fidelity_curve(records_tyx: np.ndarray, launch_tyx: np.ndarray) -> np.ndarray:
     reference = np.asarray(launch_tyx, dtype=np.complex128).reshape(-1)
     reference_norm = max(float(np.linalg.norm(reference)), 1.0e-30)
@@ -179,6 +169,12 @@ def peak_intensity_curve(records_tyx: np.ndarray) -> np.ndarray:
 
 def total_power_curve(records_tyx: np.ndarray) -> np.ndarray:
     return np.asarray([float(np.sum(np.abs(record) ** 2)) for record in records_tyx], dtype=np.float64)
+
+
+def relative_power_drift_curve(power_curve: np.ndarray) -> np.ndarray:
+    power = np.asarray(power_curve, dtype=np.float64).reshape(-1)
+    baseline = max(float(power[0]), 1.0e-30)
+    return np.abs(power - float(power[0])) / baseline
 
 
 def centerline_intensity_map(records_tyx: np.ndarray) -> np.ndarray:
@@ -236,7 +232,7 @@ def _run_case(
         tensor_nt=int(nt),
         tensor_nx=int(nx),
         tensor_ny=int(ny),
-        tensor_layout=int(nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST),
+        tensor_layout=int(nlo.TENSOR_LAYOUT_XYT_T_FAST),
         delta_x=float(dx),
         delta_y=float(dy),
         frequency_grid=(2.0 * np.pi * np.fft.fftfreq(int(nt), d=float(dt))).astype(np.complex128).tolist(),
@@ -315,12 +311,16 @@ def _run(args: argparse.Namespace) -> float:
     ).astype(np.complex128)
 
     exec_options = nlo.default_execution_options(
-        backend_type=nlo.NLO_VECTOR_BACKEND_CPU,
-        fft_backend=nlo.NLO_FFT_BACKEND_FFTW,
+        backend_type=nlo.VECTOR_BACKEND_CPU,
+        fft_backend=nlo.FFT_BACKEND_FFTW,
     )
 
     if args.replot:
-        run_group = db.resolve_replot_group(example_name, args.run_group)
+        run_group = db.resolve_replot_group(
+            example_name,
+            args.run_group,
+            required_case_keys=[nonlinear_case_key, linear_case_key],
+        )
         loaded_nonlinear = db.load_case(example_name=example_name, run_group=run_group, case_key=nonlinear_case_key)
         loaded_linear = db.load_case(example_name=example_name, run_group=run_group, case_key=linear_case_key)
         meta = loaded_nonlinear.meta
@@ -463,10 +463,10 @@ def _run(args: argparse.Namespace) -> float:
     linear_peak = peak_intensity_curve(linear_records)
     nonlinear_overlap = overlap_fidelity_curve(nonlinear_records, field0_tyx)
     linear_overlap = overlap_fidelity_curve(linear_records, field0_tyx)
-    nonlinear_error = intensity_error_curve(nonlinear_records, field0_tyx)
-    linear_error = intensity_error_curve(linear_records, field0_tyx)
     nonlinear_power = total_power_curve(nonlinear_records)
     linear_power = total_power_curve(linear_records)
+    nonlinear_power_drift_curve = relative_power_drift_curve(nonlinear_power)
+    linear_power_drift_curve = relative_power_drift_curve(linear_power)
 
     nonlinear_centerline = centerline_intensity_map(nonlinear_records)
     linear_centerline = centerline_intensity_map(linear_records)
@@ -545,13 +545,13 @@ def _run(args: argparse.Namespace) -> float:
     )
     plot_two_curve_comparison(
         z_scaled,
-        nonlinear_error,
-        linear_error,
-        output_dir / "high_order_grin_soliton_launch_intensity_error.png",
+        nonlinear_power_drift_curve,
+        linear_power_drift_curve,
+        output_dir / "high_order_grin_soliton_power_drift.png",
         label_a="Nonlinear",
         label_b="Linear baseline",
         x_label="z / L_D",
-        y_label="Relative launch-intensity error",
+        y_label="Relative power drift",
     )
     plot_three_curve_drift(
         x_scaled,
@@ -602,10 +602,6 @@ def _run(args: argparse.Namespace) -> float:
         linear_xy,
         output_dir / "high_order_grin_soliton_linear_3d_intensity_contour_surfaces.png",
         input_is_intensity=True,
-        num_levels=20,
-        max_x_samples=48,
-        max_y_samples=48,
-        max_z_samples=72,
         z_label="z / L_D",
     )
     plot_3d_intensity_contours_propagation(
@@ -615,10 +611,6 @@ def _run(args: argparse.Namespace) -> float:
         nonlinear_xy,
         output_dir / "high_order_grin_soliton_nonlinear_3d_intensity_contour_surfaces.png",
         input_is_intensity=True,
-        num_levels=20,
-        max_x_samples=48,
-        max_y_samples=48,
-        max_z_samples=72,
         z_label="z / L_D",
     )
     save_3d_intensity_time_sweep_video(
@@ -630,8 +622,8 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "high_order_grin_soliton_nonlinear_time_sweep.mp4",
     )
 
-    nonlinear_power_drift = abs(float(nonlinear_power[-1] - nonlinear_power[0])) / max(float(nonlinear_power[0]), 1.0e-30)
-    linear_power_drift = abs(float(linear_power[-1] - linear_power[0])) / max(float(linear_power[0]), 1.0e-30)
+    nonlinear_power_drift = float(nonlinear_power_drift_curve[-1])
+    linear_power_drift = float(linear_power_drift_curve[-1])
 
     print("high-order GRIN soliton summary")
     print(f"  nonlinear final radius / launch radius = {float(nonlinear_radius[-1] / nonlinear_radius[0]):.6f}")
@@ -642,16 +634,16 @@ def _run(args: argparse.Namespace) -> float:
     print(f"  linear final temporal width / launch width = {float(linear_temporal_width[-1] / linear_temporal_width[0]):.6f}")
     print(f"  nonlinear min overlap fidelity = {float(np.min(nonlinear_overlap)):.6f}")
     print(f"  linear min overlap fidelity = {float(np.min(linear_overlap)):.6f}")
-    print(f"  nonlinear final launch-intensity error = {float(nonlinear_error[-1]):.6e}")
-    print(f"  linear final launch-intensity error = {float(linear_error[-1]):.6e}")
     print(f"  nonlinear power drift = {nonlinear_power_drift:.6e}")
     print(f"  linear power drift = {linear_power_drift:.6e}")
+    print(f"  nonlinear max power drift = {float(np.max(nonlinear_power_drift_curve)):.6e}")
+    print(f"  linear max power drift = {float(np.max(linear_power_drift_curve)):.6e}")
     print(f"  L_D = {ld:.6f}")
     print(f"  L_NL(fundamental) = {lnl:.6f}")
     print(f"  L_diff = {ldiff:.6f}")
     print(f"  soliton period / L_D = {float(z_period / ld):.6f}")
     print(f"  periods covered = {float(z_final / z_period):.2f}")
-    return float(max(np.max(nonlinear_error), np.max(linear_error)))
+    return float(max(np.max(nonlinear_power_drift_curve), np.max(linear_power_drift_curve)))
 
 
 class HighOrderGrinSolitonApp(ExampleAppBase):
