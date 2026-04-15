@@ -443,7 +443,7 @@ python3 examples/python/high_order_grin_soliton_rk4ip.py
 Tensor-grid backend timing example:
 
 ```powershell
-python examples/python/tensor_backend_scaling_rk4ip.py --gpu-fit-scales 8,16,32 --host-fit-scales 48,64 --spill-scale 32 --spill-records 128,256,512
+python examples/python/tensor_backend_scaling_rk4ip.py --field-scales 8,16,32,48 --record-scale 32 --record-counts 1,8,16,32,64
 ```
 
 Build wheel artifacts manually:
