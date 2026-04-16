@@ -1,0 +1,321 @@
+# nlolib
+
+`nlolib` is a C99 nonlinear optics library with CPU CBLAS and Vulkan compute
+backends, plus Python, MATLAB, and Julia bindings.
+
+Full rendered documentation is available at
+[kinsky-main.github.io/nlo-rk4ip-code](https://kinsky-main.github.io/nlo-rk4ip-code/).
+
+## What to Read
+
+- Rendered docs home: `docs/index.md`
+- Runtime operator mathematics: `docs/runtime_operators.md`
+- Build and install guide: `docs/build_and_install.md`
+- Python binding guide: `python/README.md`
+- MATLAB binding guide: `matlab/README.md`
+- Julia binding guide: `julia/README.md`
+
+## Quick Start
+
+### Windows
+
+```powershell
+cmake -S . -B build `
+  -DINSTALL_GIT_HOOKS=OFF `
+  -DBUMP_PATCH_ON_BUILD=OFF
+
+cmake --build build --config Debug
+ctest --test-dir build --build-config Debug --output-on-failure
+```
+
+### Linux
+
+```bash
+cmake -S . -B build \
+  -DINSTALL_GIT_HOOKS=OFF \
+  -DBUMP_PATCH_ON_BUILD=OFF
+
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+## Default Operator Forms
+
+The public runtime-operator configuration uses the reference forms:
+
+- `D(w) = i c0 w^2 - c1`
+- `N(A) = i A (c2 |A|^2 + V)`
+
+For the common quadratic GLSE form:
+
+- `D(w) = i (beta2 / 2) w^2 - alpha_amp`
+- `c0 = beta2 / 2`
+- `c1 = alpha_amp`
+- `c2 = gamma`
+
+If your loss coefficient is written as the common power-loss term
+`-alpha_pow A / 2`, pass `c1 = alpha_pow / 2`.
+
+Higher-order dispersion uses the scalar constant table `constants[]` through
+successive symbols `c0`, `c1`, `c2`, ... rather than an array-valued `c0`.
+
+## Docs Build
+
+```bash
+cmake -S . -B build -DNLOLIB_BUILD_DOCS=ON
+cmake --build build --target docs --config Release
+```
+
+Generated output:
+
+- `build/docs/html/index.html`
+
+## Bindings
+
+- Python package and docs-facing guide: `python/README.md`
+- MATLAB package guide: `matlab/README.md`
+- Julia package guide: `julia/README.md`
+
+<<<<<<< HEAD
+The PyPI/package readme remains `python/README_PYPI.md`.
+=======
+### Publish Docs to GitHub Pages (Manual Trigger)
+
+The repository includes a manual GitHub Actions workflow at
+`.github/workflows/docs-pages.yml` that builds docs and deploys
+`build-docs/docs/html` to GitHub Pages.
+
+One-time GitHub Pages setup can be done with the existing secret token:
+
+```powershell
+$token = Get-Secret -Name GithubAdminToken -AsPlainText
+$origin = git remote get-url origin
+$null = $origin -match 'github\.com[:/](?<owner>[^/]+)/(?<repo>[^/.]+)(\.git)?$'
+$owner = $Matches.owner
+$repo = $Matches.repo
+$headers = @{
+  Authorization = "Bearer $token"
+  Accept = "application/vnd.github+json"
+  "User-Agent" = "nlolib-pages-setup"
+  "X-GitHub-Api-Version" = "2022-11-28"
+}
+$body = @{ build_type = "workflow" } | ConvertTo-Json
+try {
+  Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$owner/$repo/pages" -Headers $headers -Body $body -ContentType "application/json"
+} catch {
+  Invoke-RestMethod -Method Put -Uri "https://api.github.com/repos/$owner/$repo/pages" -Headers $headers -Body $body -ContentType "application/json"
+}
+```
+
+```bash
+token="$GITHUB_TOKEN"
+origin="$(git remote get-url origin)"
+owner="$(echo "$origin" | sed -E 's#.*github.com[:/]([^/]+)/([^/.]+)(\\.git)?#\\1#')"
+repo="$(echo "$origin" | sed -E 's#.*github.com[:/]([^/]+)/([^/.]+)(\\.git)?#\\2#')"
+payload='{"build_type":"workflow"}'
+curl -L -X POST \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer ${token}" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "https://api.github.com/repos/${owner}/${repo}/pages" \
+  -d "${payload}" || \
+curl -L -X PUT \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer ${token}" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  "https://api.github.com/repos/${owner}/${repo}/pages" \
+  -d "${payload}"
+```
+
+For Linux/macOS, set `GITHUB_TOKEN` to a token with Pages admin permission
+before running the command.
+
+Then run the workflow from GitHub Actions UI:
+
+- Workflow: `docs-pages`
+- Trigger: `Run workflow`
+- Branch: `main`
+
+After a successful run, the site is published at:
+
+- `https://<owner>.github.io/<repo>/`
+
+Troubleshooting:
+
+- If configure says Doxygen is missing, install Doxygen and rerun.
+- First Pages deployment may require a short propagation delay before URL is live.
+
+## Python Usage
+
+`python/CMakeLists.txt` places the built shared library next to the Python package for direct `ctypes` loading.
+
+Example environment setup:
+
+```powershell
+python -m pip install -r examples\python\requirements.txt
+$env:PYTHONPATH="$PWD/python"
+$env:NLOLIB_LIBRARY="$PWD/python/nlolib.dll"
+python examples/python/runtime_temporal_demo.py
+python examples/python/high_order_grin_soliton_rk4ip.py
+```
+
+On Linux:
+
+```bash
+python3 -m pip install -r examples/python/requirements.txt
+export PYTHONPATH="$PWD/python"
+export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
+python3 examples/python/runtime_temporal_demo.py
+python3 examples/python/high_order_grin_soliton_rk4ip.py
+```
+
+Tensor-grid backend timing example:
+
+```powershell
+python examples/python/tensor_backend_scaling_rk4ip.py --field-scales 8,16,32,48 --record-scale 32 --record-counts 1,8,16,32,64
+```
+
+Build wheel artifacts manually:
+
+```powershell
+.\tools\release\build_wheel_windows.ps1 -BuildDir build-wheel-win -Config Release
+```
+
+```bash
+./tools/release/build_wheel_linux.sh build-wheel-linux Release
+./tools/release/build_wheel_macos.sh build-wheel-macos Release
+```
+
+These release scripts use CMake-managed patch bumps (`x.y.Z`) and then sync
+`pyproject.toml` from `CMakeLists.txt` so Python and MATLAB distribution
+versions stay aligned.
+
+## MATLAB Usage
+
+Stage MATLAB package artifacts:
+
+```powershell
+cmake --build build --config Release --target matlab_stage
+```
+
+Then in MATLAB:
+
+```matlab
+addpath('build/matlab_toolbox');
+nlolib_setup();
+api = nlolib.NLolib();
+```
+
+From source tree without staging:
+
+```matlab
+addpath('matlab');
+nlolib_setup();
+```
+
+`matlab_stage` copies:
+
+- `matlab/+nlolib`
+- `matlab/nlolib_setup.m`
+- `examples/matlab`
+- shared library into `build/matlab_toolbox/lib`
+- `src/nlolib_matlab.h` into `build/matlab_toolbox/lib`
+
+You can override runtime library lookup with `NLOLIB_LIBRARY`.
+
+Create a toolbox bundle manually:
+
+```powershell
+matlab -batch "addpath('matlab'); package_mltbx('build', 'Release')"
+```
+
+```bash
+matlab -batch "addpath('matlab'); package_mltbx('build', 'Release')"
+```
+
+Additional manual publication steps are documented in `docs/release_manual.md`.
+
+## Julia Usage
+
+Stage the Julia package artifacts:
+
+```powershell
+cmake --build build --config Release --target julia_stage
+```
+
+```bash
+cmake --build build --config Release --target julia_stage
+```
+
+Then in Julia:
+
+```julia
+using Pkg
+Pkg.activate("build/julia_package")
+using NLOLib
+
+NLOLib.load()
+```
+
+Stage and run the Julia examples:
+
+```powershell
+julia --project=examples/julia -e "using Pkg; Pkg.instantiate()"
+$env:NLOLIB_LIBRARY="$PWD\\python\\Release\\nlolib.dll"
+julia --project=examples/julia examples\julia\second_order_soliton_rk4ip.jl
+julia --project=examples/julia examples\julia\raman_scattering_rk4ip.jl
+julia --project=examples/julia examples\julia\tensor_dispersion_3d_rk4ip.jl
+julia --project=examples/julia examples\julia\high_order_grin_soliton_rk4ip.jl
+```
+
+```bash
+julia --project=examples/julia -e 'using Pkg; Pkg.instantiate()'
+export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
+julia --project=examples/julia examples/julia/second_order_soliton_rk4ip.jl
+julia --project=examples/julia examples/julia/raman_scattering_rk4ip.jl
+julia --project=examples/julia examples/julia/tensor_dispersion_3d_rk4ip.jl
+julia --project=examples/julia examples/julia/high_order_grin_soliton_rk4ip.jl
+```
+
+The Python and Julia examples share the SQLite directory
+`examples/output/db`, with one database file per example, so runs can be
+replayed across bindings with `--replot`.
+
+From the source tree without staging, point Julia at a built shared library:
+
+```powershell
+$env:NLOLIB_LIBRARY="$PWD\\python\\Release\\nlolib.dll"
+julia --project=julia
+```
+
+```bash
+export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
+julia --project=julia
+```
+
+The Julia wrapper is intentionally low-level and performance-first:
+
+- results are returned as typed dense arrays instead of nested language objects
+- `propagate` returns records as a column-major matrix shaped `(num_time_samples, num_records)`
+- `propagate!` writes directly into caller-owned output buffers
+- pointer-backed helper views use Julia FFI primitives (`ccall`, `GC.@preserve`, `unsafe_wrap`, `reinterpret`)
+
+`julia_stage` copies:
+
+- `julia/src`
+- `julia/test`
+- `julia/Project.toml`
+- `examples/julia`
+- shared library into `build/julia_package/lib`
+- `src/nlolib.h` into `build/julia_package/lib`
+
+## Preset Workflow (Optional)
+
+This repo includes `CMakeUserPresets.json` with a local Windows preset example:
+
+```powershell
+cmake --preset local-custom-path-debug
+cmake --build --preset local-custom-path-debug-build
+ctest --preset local-custom-path-debug-test
+```
+>>>>>>> ed0f671e0b522abbe7f53b88f4c59f593986e4d0
