@@ -380,6 +380,7 @@ $env:PYTHONPATH="$PWD/python"
 $env:NLOLIB_LIBRARY="$PWD/python/nlolib.dll"
 python examples/python/runtime_temporal_demo.py
 python examples/python/high_order_grin_soliton_rk4ip.py
+python examples/python/spm_dispersion_comparison_rk4ip.py
 ```
 
 On Linux:
@@ -390,6 +391,7 @@ export PYTHONPATH="$PWD/python"
 export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
 python3 examples/python/runtime_temporal_demo.py
 python3 examples/python/high_order_grin_soliton_rk4ip.py
+python3 examples/python/spm_dispersion_comparison_rk4ip.py
 ```
 
 Tensor-grid backend timing example:
