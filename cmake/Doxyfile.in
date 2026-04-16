@@ -7,8 +7,12 @@ GENERATE_TREEVIEW      = YES
 RECURSIVE              = YES
 QUIET                  = YES
 
-INPUT                  = "@CMAKE_SOURCE_DIR@/src" "@CMAKE_SOURCE_DIR@/README.md"
-FILE_PATTERNS          = *.h *.c
+INPUT                  = "@CMAKE_SOURCE_DIR@/src" \
+                         "@CMAKE_SOURCE_DIR@/docs" \
+                         "@CMAKE_SOURCE_DIR@/python/README.md" \
+                         "@CMAKE_SOURCE_DIR@/matlab/README.md" \
+                         "@CMAKE_SOURCE_DIR@/julia/README.md"
+FILE_PATTERNS          = *.h *.c *.md *.dox *.py
 EXTRACT_ALL            = YES
 EXTRACT_STATIC         = YES
 EXTRACT_PRIVATE        = YES
@@ -26,7 +30,9 @@ WARN_IF_DOC_ERROR      = YES
 DISABLE_INDEX = NO
 FULL_SIDEBAR = NO
 HTML_EXTRA_STYLESHEET  = "@AWESOME_CSS_DIR@/doxygen-awesome.css"
+LAYOUT_FILE            = "@CMAKE_SOURCE_DIR@/docs/DoxygenLayout.xml"
 USE_MATHJAX           = YES
 MATHJAX_VERSION       = MathJax_3
-USE_MDFILE_AS_MAINPAGE = "@CMAKE_SOURCE_DIR@/README.md"
+USE_MDFILE_AS_MAINPAGE = "@CMAKE_SOURCE_DIR@/docs/index.md"
 IGNORE_PREFIX         = nlolib_ nlo_ NLO_ NLOLIB_
+PYTHON_DOCSTRING      = NO

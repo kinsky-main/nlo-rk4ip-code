@@ -122,8 +122,8 @@ class TemporalSimulationConfig:
     """
     Example convenience config mapped to operator-default runtime constants.
 
-    When ``runtime`` is omitted, ``gamma``, ``beta2``, and ``alpha`` map to
-    default constants ``c2``, ``c0``, and ``c1`` respectively.
+    When ``runtime`` is omitted, this helper uses the quadratic GLSE mapping
+    ``c0 = beta2 / 2``, ``c1 = alpha / 2`` and ``c2 = gamma``.
     """
 
     gamma: float

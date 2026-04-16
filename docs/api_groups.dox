@@ -1,0 +1,36 @@
+/**
+ * @file api_groups.dox
+ * @brief Doxygen groups for the public C API and binding references.
+ */
+
+/**
+ * @defgroup c_api C API
+ * @brief Public C structs, enums, and entry points.
+ *
+ * Start with @ref nlolib_propagate, @ref nlolib_query_runtime_limits,
+ * @ref simulation_config, @ref physics_config, and
+ * @ref runtime_operator_params.
+ */
+
+/**
+ * @defgroup python_binding Python Binding
+ * @brief User-facing Python wrapper reference.
+ *
+ * This group covers the public `nlolib` package surface exposed through the
+ * docs-only Python shim.
+ */
+
+/**
+ * @defgroup matlab_binding MATLAB Binding
+ * @brief User-facing MATLAB wrapper reference.
+ *
+ * This group documents the public MATLAB package surface, centered on the
+ * native class name \c %nlolib.NLolib.
+ */
+
+/**
+ * @defgroup julia_binding Julia Binding
+ * @brief User-facing Julia wrapper reference.
+ *
+ * This group documents the exported \c NLOLib module surface.
+ */
