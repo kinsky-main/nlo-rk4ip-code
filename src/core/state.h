@@ -108,6 +108,7 @@ typedef struct {
 } tensor3d_desc;
 
 /**
+ * @ingroup c_api
  * @brief Nonlinear operator execution model selector.
  *
  * Expression mode evaluates caller-supplied @c nonlinear_expr as the full
@@ -128,6 +129,7 @@ typedef enum {
 } nonlinear_model;
 
 /**
+ * @ingroup c_api
  * @brief Runtime expression settings for dispersion/nonlinearity operators.
  *
  * String expressions are compiled at runtime into operator programs.
@@ -139,6 +141,23 @@ typedef enum {
  * \f]
  * where @c dispersion_factor_expr provides \f$D\f$ and @c dispersion_expr
  * or @c linear_expr provides \f$L_h\f$.
+ *
+ * For the common quadratic GLSE form,
+ * \f[
+ * D(\omega)=i\frac{\beta_2}{2}\omega^2-\alpha_{\mathrm{amp}}
+ * \f]
+ * so the default runtime mapping is \f$c_0=\beta_2/2\f$,
+ * \f$c_1=\alpha_{\mathrm{amp}}\f$, and \f$c_2=\gamma\f$. If a model uses
+ * the common power-loss convention \f$-\alpha_{\mathrm{pow}}A/2\f$, pass
+ * \f$c_1=\alpha_{\mathrm{pow}}/2\f$.
+ *
+ * Runtime constants are stored in @c constants[] and referenced as scalar
+ * symbols @c c0, @c c1, @c c2, ... inside expressions. Higher-order
+ * dispersion therefore uses successive constants, for example
+ * \f[
+ * D(\omega)=i\left(c_0\omega^2+c_1\omega^3+c_2\omega^4\right)-c_3,
+ * \f]
+ * rather than an array-valued \f$c_0\f$.
  *
  * Tensor linear expressions may depend on the symbol set
  * \f$\omega_t, k_x, k_y, t, x, y\f$ through the runtime names @c wt, @c kx,
@@ -184,6 +203,7 @@ typedef struct {
 } runtime_operator_params;
 
 /**
+ * @ingroup c_api
  * @brief Simulation-only input configuration (no runtime physics program).
  */
 typedef struct {
@@ -195,6 +215,7 @@ typedef struct {
 } simulation_config;
 
 /**
+ * @ingroup c_api
  * @brief Physics/operator input configuration used by runtime evaluators.
  */
 typedef runtime_operator_params physics_config;
@@ -214,6 +235,7 @@ typedef struct {
 } sim_config;
 
 /**
+ * @ingroup c_api
  * @brief Runtime execution/backend selection and resource tuning options.
  */
 typedef struct {
@@ -226,6 +248,7 @@ typedef struct {
 } execution_options;
 
 /**
+ * @ingroup c_api
  * @brief Estimated runtime limits for current configuration/backend choices.
  */
 typedef struct {
@@ -248,6 +271,7 @@ typedef enum {
 } storage_db_cap_policy;
 
 /**
+ * @ingroup c_api
  * @brief Snapshot persistence controls for SQLite-backed output chunking.
  */
 typedef struct {
@@ -260,6 +284,7 @@ typedef struct {
 } storage_options;
 
 /**
+ * @ingroup c_api
  * @brief Summary of snapshot capture/storage results after a run.
  */
 typedef struct {
@@ -272,6 +297,7 @@ typedef struct {
 } storage_result;
 
 /**
+ * @ingroup c_api
  * @brief Per-step adaptive solver telemetry for accepted RK4 steps.
  */
 typedef struct {

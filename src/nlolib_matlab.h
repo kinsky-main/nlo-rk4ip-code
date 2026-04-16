@@ -176,6 +176,23 @@ typedef enum
  * where @c dispersion_factor_expr provides \f$D\f$ and @c dispersion_expr
  * or @c linear_expr provides \f$L_h\f$.
  *
+ * For the common quadratic GLSE form,
+ * \f[
+ * D(\omega)=i\frac{\beta_2}{2}\omega^2-\alpha_{\mathrm{amp}}
+ * \f]
+ * so the default runtime mapping is \f$c_0=\beta_2/2\f$,
+ * \f$c_1=\alpha_{\mathrm{amp}}\f$, and \f$c_2=\gamma\f$. If a model uses
+ * the common power-loss convention \f$-\alpha_{\mathrm{pow}}A/2\f$, pass
+ * \f$c_1=\alpha_{\mathrm{pow}}/2\f$.
+ *
+ * Runtime constants are stored in @c constants[] and referenced as scalar
+ * symbols @c c0, @c c1, @c c2, ... inside expressions. Higher-order
+ * dispersion therefore uses successive constants, for example
+ * \f[
+ * D(\omega)=i\left(c_0\omega^2+c_1\omega^3+c_2\omega^4\right)-c_3,
+ * \f]
+ * rather than an array-valued \f$c_0\f$.
+ *
  * Tensor linear expressions may depend on the symbol set
  * \f$\omega_t, k_x, k_y, t, x, y\f$ through the runtime names @c wt, @c kx,
  * @c ky, @c t, @c x, and @c y, and apply

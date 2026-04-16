@@ -52,6 +52,7 @@ typedef enum {
 } nlolib_status;
 
 /**
+ * @ingroup c_api
  * @brief Public log-level thresholds for nlolib runtime logging.
  */
 typedef enum {
@@ -66,6 +67,7 @@ typedef enum {
 } nlolib_log_level;
 
 /**
+ * @ingroup c_api
  * @brief Output stream selection for runtime progress TUI rendering.
  */
 typedef enum {
@@ -78,6 +80,7 @@ typedef enum {
 } nlolib_progress_stream_mode;
 
 /**
+ * @ingroup c_api
  * @brief Query runtime-derived limits for current backend/config selection.
  *
  * @param simulation_config Optional simulation configuration used to estimate
@@ -104,6 +107,7 @@ typedef enum {
 } propagate_output_mode;
 
 /**
+ * @ingroup c_api
  * @brief Unified propagation request options.
  *
  * @param num_recorded_samples Number of records to compute.
@@ -133,6 +137,7 @@ typedef struct {
 } propagate_options;
 
 /**
+ * @ingroup c_api
  * @brief Unified propagation output metadata and buffers.
  *
  * @param output_records Optional destination records buffer.
@@ -157,6 +162,7 @@ typedef struct {
 } propagate_output;
 
 /**
+ * @ingroup c_api
  * @brief Build default propagation options.
  *
  * Defaults:
@@ -171,6 +177,7 @@ typedef struct {
 NLOLIB_API propagate_options nlolib_propagate_options_default(void);
 
 /**
+ * @ingroup c_api
  * @brief Build default propagation output descriptor.
  *
  * @return propagate_output Initialized output descriptor.
@@ -178,6 +185,7 @@ NLOLIB_API propagate_options nlolib_propagate_options_default(void);
 NLOLIB_API propagate_output nlolib_propagate_output_default(void);
 
 /**
+ * @ingroup c_api
  * @brief Propagate an input field using split simulation/physics configs.
  *
  * @param simulation_config Simulation configuration parameters.
@@ -198,6 +206,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
 );
 
 /**
+ * @ingroup c_api
  * @brief Returns nonzero when SQLite storage support is available.
  *
  * @return int Nonzero when storage backend support is compiled in.

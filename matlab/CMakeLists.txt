@@ -41,14 +41,14 @@ add_custom_command(TARGET matlab_stage POST_BUILD
         "$<TARGET_FILE:nlolib>"
         "${MATLAB_STAGE_DIR}/lib/${MATLAB_PLATFORM_SUBDIR}/$<TARGET_FILE_NAME:nlolib>"
     COMMAND ${CMAKE_COMMAND}
-        -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
-        -DNLO_RUNTIME_DEST="${MATLAB_STAGE_DIR}/lib"
-        -DNLO_RUNTIME_HINTS="${SQLITE_RUNTIME_HINTS}"
+        -DRUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
+        -DRUNTIME_DEST="${MATLAB_STAGE_DIR}/lib"
+        -DRUNTIME_HINTS="${SQLITE_RUNTIME_HINTS}"
         -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
     COMMAND ${CMAKE_COMMAND}
-        -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
-        -DNLO_RUNTIME_DEST="${MATLAB_STAGE_DIR}/lib/${MATLAB_PLATFORM_SUBDIR}"
-        -DNLO_RUNTIME_HINTS="${SQLITE_RUNTIME_HINTS}"
+        -DRUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
+        -DRUNTIME_DEST="${MATLAB_STAGE_DIR}/lib/${MATLAB_PLATFORM_SUBDIR}"
+        -DRUNTIME_HINTS="${SQLITE_RUNTIME_HINTS}"
         -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
     COMMENT "Copying MATLAB wrapper, setup script, examples, header, and shared library to ${MATLAB_STAGE_DIR}"
 )

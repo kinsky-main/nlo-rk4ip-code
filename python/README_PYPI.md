@@ -2,6 +2,11 @@
 
 Python package for the nlolib nonlinear-optics runtime.
 
+Full rendered documentation, including the Python guide and API reference, is
+available at https://kinsky-main.github.io/nlo-rk4ip-code/.
+
+For the docs-facing Python usage guide in this repository, see `python/README.md`.
+
 ## Runtime behavior
 
 - Wheels are intended to bundle `nlolib` and non-system dependencies required by the wrapper.
