@@ -382,6 +382,29 @@ typedef enum
 } nlolib_progress_stream_mode;
 
 /**
+ * @brief Snapshot of accumulated runtime performance counters.
+ */
+typedef struct
+{
+    double dispersion_ms;
+    double nonlinear_ms;
+    uint64_t dispersion_calls;
+    uint64_t nonlinear_calls;
+    uint64_t gpu_dispatch_count;
+    uint64_t gpu_copy_count;
+    uint64_t gpu_device_copy_count;
+    uint64_t gpu_device_copy_bytes;
+    uint64_t gpu_host_transfer_copy_count;
+    uint64_t gpu_host_transfer_copy_bytes;
+    uint64_t gpu_memory_pass_count;
+    uint64_t gpu_memory_pass_bytes;
+    uint64_t gpu_upload_count;
+    uint64_t gpu_download_count;
+    uint64_t gpu_upload_bytes;
+    uint64_t gpu_download_bytes;
+} nlo_perf_profile_snapshot;
+
+/**
  * @brief Progress event class reported during propagation.
  */
 typedef enum
@@ -491,7 +514,7 @@ typedef struct
  */
 typedef struct
 {
-    nlo_complex *output_records;
+    double *output_records;
     size_t output_record_capacity;
     size_t *records_written;
     storage_result *storage_result;
@@ -528,6 +551,34 @@ nlolib_status nlolib_query_runtime_limits(
     const physics_config *physics_config,
     const execution_options *exec_options,
     runtime_limits *out_limits);
+
+/**
+ * @brief Enable or disable runtime performance counter accumulation.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_perf_profile_set_enabled(int enabled);
+
+/**
+ * @brief Query whether runtime performance counters are enabled.
+ *
+ * See `nlolib.h` for full return-value semantics.
+ */
+int nlolib_perf_profile_is_enabled(void);
+
+/**
+ * @brief Reset all runtime performance counters.
+ *
+ * See `nlolib.h` for full return-value semantics.
+ */
+nlolib_status nlolib_perf_profile_reset(void);
+
+/**
+ * @brief Read current runtime performance counters into caller memory.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_perf_profile_read(nlo_perf_profile_snapshot *out_snapshot);
 
 /**
  * @brief Return whether SQLite snapshot storage is available in this build.

@@ -314,6 +314,14 @@ def _run(args) -> float:
         np.isfinite(step_sizes_norm) & np.isfinite(fixed_errors_analytic) & (step_sizes_norm > 0.0) & (fixed_errors_analytic > 0.0),
         dtype=bool,
     )
+    if fixed_fit_mask.size > 0:
+        excluded = 0
+        for idx in np.argsort(step_sizes_norm):
+            if fixed_fit_mask[int(idx)]:
+                fixed_fit_mask[int(idx)] = False
+                excluded += 1
+                if excluded >= 1:
+                    break
     fixed_fitted_order, fixed_fitted_intercept, fixed_fit_mask_valid = _fit_loglog_slope(
         step_sizes_norm,
         fixed_errors_analytic,
@@ -329,6 +337,14 @@ def _run(args) -> float:
         np.isfinite(tolerances) & np.isfinite(adaptive_errors_analytic) & (tolerances > 0.0) & (adaptive_errors_analytic > 0.0),
         dtype=bool,
     )
+    if adaptive_fit_mask.size > 0:
+        excluded = 0
+        for idx in np.argsort(tolerances):
+            if adaptive_fit_mask[int(idx)]:
+                adaptive_fit_mask[int(idx)] = False
+                excluded += 1
+                if excluded >= 2:
+                    break
     adaptive_fitted_order, adaptive_fitted_intercept, adaptive_fit_mask_valid = _fit_loglog_slope(
         tolerances,
         adaptive_errors_analytic,
@@ -343,8 +359,8 @@ def _run(args) -> float:
         fixed_fitted_order,
         fixed_fitted_intercept,
         output_dir / "error_vs_fixed_step_size.png",
-        x_label="Normalized step size Delta z / Z0",
-        y_label="Filtered relative L2 final-field error",
+        x_label=r"Step size $z$ / $Z_0$",
+        y_label=r"L2 error $\mathbb{L}$",
     )
     plot_convergence_loglog(
         tolerances,
@@ -353,9 +369,10 @@ def _run(args) -> float:
         adaptive_fitted_order,
         adaptive_fitted_intercept,
         output_dir / "error_vs_adaptive_tolerance.png",
-        x_label="Adaptive relative local error tolerance",
-        y_label="Filtered relative L2 final-field error",
+        x_label="Error tolerance",
+        y_label=r"L2 error $\mathbb{L}$",
         reference_order=1.0,
+        legend_label_parts=[r"Fitted power law $\propto tol^{", r"}$"]
     )
 
     print(f"fixed-step soliton convergence summary (run_group={run_group}):")

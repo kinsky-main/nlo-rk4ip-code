@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 import numpy as np
 
@@ -68,6 +68,54 @@ def _resolve_cmap(plt, cmap):
     if cmap is None or cmap == _STYLE_CMAP_NAME:
         return _default_colormap()
     return cmap
+
+
+def _rc_color(name: str, fallback: str) -> str:
+    value = plt.rcParams.get(name, fallback)
+    try:
+        from matplotlib.colors import to_hex
+
+        return str(to_hex(value, keep_alpha=False))
+    except Exception:
+        return str(fallback)
+
+
+def _rc_float(name: str, fallback: float) -> float:
+    value = plt.rcParams.get(name, fallback)
+    try:
+        return float(value)
+    except Exception:
+        return float(fallback)
+
+
+def _rc_font_family() -> str:
+    family = plt.rcParams.get("font.family", "Arial")
+    if isinstance(family, (list, tuple)):
+        if not family:
+            return "Arial"
+        return str(family[0])
+    return str(family)
+
+
+def _pyvista_font_family() -> str:
+    family = _rc_font_family().lower()
+    if "times" in family or "roman" in family:
+        return "times"
+    if "courier" in family or "mono" in family:
+        return "courier"
+    return "arial"
+
+
+def _pyvista_style_from_mpl() -> dict[str, Any]:
+    base_size = max(1, int(round(_rc_float("font.size", 12.0))))
+    return {
+        "background": _rc_color("figure.facecolor", "#ffffff"),
+        "foreground": _rc_color("text.color", _rc_color("axes.labelcolor", "#000000")),
+        "edge": _rc_color("axes.edgecolor", "#000000"),
+        "font_family": _pyvista_font_family(),
+        "font_size": base_size,
+        "label_font_size": max(1, int(round(_rc_float("axes.labelsize", float(base_size))))),
+    }
 
 
 def _normalized_nonnegative_data(values: np.ndarray, *, normalization_peak: float | None) -> tuple[np.ndarray, float]:
@@ -442,6 +490,7 @@ def plot_convergence_loglog(
     x_label: str = "Step size Delta z (m)",
     y_label: str = "Mean pointwise abs-relative error",
     reference_order: float = 4.0,
+    legend_label_parts: List[str] = [r"Fitted power law $\propto h^{", r"}$"],
 ) -> Path | None:
 
 
@@ -456,9 +505,15 @@ def plot_convergence_loglog(
     fit_line = np.exp(fitted_intercept) * (step_sizes_plot**fitted_order)
 
     fig, ax = plt.subplots()
-    ax.loglog(step_sizes_plot, fit_line, "--", lw=1.6, color="C3", label="Fitted power law")
-    ax.loglog(step_sizes_plot, ref, "--", lw=1.5, label=r"Reference $O(\Delta z^{%g})$" % reference_order)
-    ax.loglog(step_sizes_plot, errors_plot, "o", lw=1.8, ms=3.0, label="Numerical error")
+    ax.loglog(
+        step_sizes_plot[fit_mask_plot],
+        fit_line[fit_mask_plot],
+        "--",
+        lw=1.6,
+        color="C3",
+        label=legend_label_parts[0] + f"{fitted_order:.0f}" + legend_label_parts[1],
+    )
+    ax.loglog(step_sizes_plot, errors_plot, "o", color="C1", lw=1.8, ms=3.0)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.grid(True, which="both", alpha=0.3)
@@ -496,10 +551,9 @@ def plot_wavelength_step_history(
     *,
     accepted_z: np.ndarray | None = None,
     accepted_step_sizes: np.ndarray | None = None,
-    proposed_step_sizes: np.ndarray | None = None,
-    map_x_label: str = "Propagation distance z (m)",
+    map_x_label: str = r"Propagation distance $z$ (m)",
     map_y_label: str = "Wavelength (nm)",
-    step_x_label: str = "Propagation distance z (m)",
+    step_x_label: str = r"Propagation distance $z$ (m)",
     step_y_label: str = "Step size (m)",
     normalization_peak: float | None = None,
 ) -> Path | None:
@@ -534,7 +588,7 @@ def plot_wavelength_step_history(
     ax_map.set_xlabel(map_x_label)
     ax_map.set_ylabel(map_y_label)
     ax_map.set_box_aspect(1.0)
-    cbar = fig.colorbar(mesh, ax=ax_map, pad=0.02)
+    cbar = fig.colorbar(mesh, ax=ax_map, pad=0.05, shrink=0.79)
     cbar.set_label("Normalized spectral intensity")
 
     ax_step = fig.add_subplot(grid[1, 0])
@@ -542,34 +596,17 @@ def plot_wavelength_step_history(
     if accepted_z is not None and accepted_step_sizes is not None:
         z_plot = np.asarray(accepted_z, dtype=np.float64).reshape(-1)
         step_plot = np.asarray(accepted_step_sizes, dtype=np.float64).reshape(-1)
-        next_plot = (
-            np.asarray(proposed_step_sizes, dtype=np.float64).reshape(-1)
-            if proposed_step_sizes is not None
-            else None
-        )
         n = min(z_plot.size, step_plot.size)
-        if next_plot is not None:
-            n = min(n, next_plot.size)
         if n > 0:
             order = np.argsort(z_plot[:n])
             z_sorted = z_plot[:n][order]
             step_sorted = step_plot[:n][order]
             ax_step.plot(
                 z_sorted,
-                step_sorted,
+                step_sorted * 1000,
                 lw=1.2,
                 color="C1",
-                label="Accepted step size",
             )
-            if next_plot is not None:
-                ax_step.plot(
-                    z_sorted,
-                    next_plot[:n][order],
-                    lw=1.0,
-                    ls="--",
-                    color="C0",
-                    label="Next candidate step size",
-                )
             has_series = True
 
     if has_series:
@@ -577,7 +614,6 @@ def plot_wavelength_step_history(
         ax_step.set_ylabel(step_y_label)
         ax_step.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3), useOffset=False)
         ax_step.grid(True, alpha=0.3)
-        ax_step.legend()
     else:
         ax_step.text(
             0.5,
@@ -615,10 +651,10 @@ def plot_final_intensity_comparison(
     out_intensity = np.abs(np.asarray(final_field, dtype=np.complex128)) ** 2
 
     fig, ax = plt.subplots()
-    ax.plot(x_axis, ref_intensity, lw=2.0, color="C0", label=f"{reference_label} |A|^2")
-    ax.plot(x_axis, out_intensity, lw=1.5, ls="--", color="C1", label=f"{final_label} |A|^2")
+    ax.plot(x_axis, ref_intensity, lw=2.0, color="C0", label=f"{reference_label} $|A|^2$")
+    ax.plot(x_axis, out_intensity, lw=1.5, ls="--", color="C1", label=f"{final_label} $|A|^2$")
     ax.set_xlabel(x_label)
-    ax.set_ylabel("Intensity |A|^2")
+    ax.set_ylabel(r"Intensity $|A|^2$")
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
@@ -636,16 +672,180 @@ def plot_total_error_over_propagation(
 ) -> Path | None:
 
 
+    z_values = np.asarray(z_axis, dtype=np.float64).reshape(-1)
     errors = np.asarray(error_curve, dtype=np.float64)
+    if errors.ndim == 0:
+        errors = np.full(z_values.shape, float(errors), dtype=np.float64)
+    else:
+        errors = errors.reshape(-1)
+        if errors.size == 1 and z_values.size > 1:
+            errors = np.full(z_values.shape, float(errors[0]), dtype=np.float64)
+        elif errors.size != z_values.size:
+            raise ValueError(
+                "error_curve must be a scalar or have the same length as z_axis."
+            )
     errors = np.nan_to_num(errors, nan=0.0, posinf=0.0, neginf=0.0)
     errors = np.clip(errors, 0.0, None)
 
     fig, ax = plt.subplots()
-    ax.plot(z_axis, errors, lw=1.8, color="C3")
+    ax.plot(z_values, errors, lw=1.8, color="C3")
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     ax.grid(True, alpha=0.3)
     saved = _save_figure(fig, output_path, bbox_inches="tight")
+    plt.close(fig)
+    return saved
+
+
+def plot_frequency_time_propagation_grid(
+    frequency_axis: np.ndarray,
+    time_axis: np.ndarray,
+    z_axis: np.ndarray,
+    upper_frequency_map: np.ndarray,
+    upper_time_map: np.ndarray,
+    lower_frequency_map: np.ndarray,
+    lower_time_map: np.ndarray,
+    output_path: Path,
+    *,
+    upper_row_label: str,
+    lower_row_label: str,
+    left_title: str = "Frequency-domain intensity",
+    right_title: str = "Time-domain intensity",
+    colorbar_label: str = "Normalized intensity",
+    upper_left_annotation: str | None = None,
+    lower_left_annotation: str | None = None,
+    cmap="nlolib_hdr",
+) -> Path | None:
+    frequency_values = np.asarray(frequency_axis, dtype=np.float64).reshape(-1)
+    time_values = np.asarray(time_axis, dtype=np.float64).reshape(-1)
+    z_values = np.asarray(z_axis, dtype=np.float64).reshape(-1)
+    maps = [
+        np.asarray(upper_frequency_map, dtype=np.float64),
+        np.asarray(upper_time_map, dtype=np.float64),
+        np.asarray(lower_frequency_map, dtype=np.float64),
+        np.asarray(lower_time_map, dtype=np.float64),
+    ]
+    expected_frequency_shape = (z_values.size, frequency_values.size)
+    expected_time_shape = (z_values.size, time_values.size)
+    if maps[0].shape != expected_frequency_shape or maps[2].shape != expected_frequency_shape:
+        raise ValueError("frequency intensity maps must have shape [record, frequency].")
+    if maps[1].shape != expected_time_shape or maps[3].shape != expected_time_shape:
+        raise ValueError("time intensity maps must have shape [record, time].")
+
+    normalized_maps = []
+    for data in maps:
+        normalized, _ = _normalized_nonnegative_data(data, normalization_peak=None)
+        normalized_maps.append(normalized)
+
+    fig, axes = plt.subplots(
+        2,
+        2,
+        figsize=(4.0, 2.64),
+        sharey=True,
+        constrained_layout=True,
+    )
+    mask_1 = np.abs(frequency_values) < 2.5
+    mask_2 = np.abs(time_values) < 2.5
+    plot_specs = (
+        (
+            axes[0, 0],
+            frequency_values,
+            normalized_maps[0],
+            f"",
+            r"",
+            r"Propagation $z$",
+        ),
+        (
+            axes[0, 1],
+            time_values[mask_2],
+            normalized_maps[1][:, mask_2],
+            f"",
+            r"",
+            "",
+        ),
+        (
+            axes[1, 0],
+            frequency_values[mask_1],
+            normalized_maps[2][:, mask_1],
+            f"",
+            r"Frequency detuning ($1/t$)",
+            r"Propagation $z$",
+        ),
+        (
+            axes[1, 1],
+            time_values,
+            normalized_maps[3],
+            f"",
+            r"Time $t$",
+            "",
+        ),
+    )
+
+    last_mesh = None
+    resolved_cmap = _resolve_cmap(plt, cmap)
+    for num, (ax, x_values, data, title, x_label, y_label) in enumerate(plot_specs):
+        last_mesh = ax.pcolormesh(
+            x_values,
+            z_values,
+            data,
+            shading="auto",
+            cmap=resolved_cmap,
+            vmin=0.0,
+            vmax=1.0,
+        )
+        ax.set_title(title)
+        ax.set_xlabel(x_label)
+
+        
+        if num == 0 :
+            ax.set_xlim(-20, 20)
+        else:
+            ax.set_xlim(-2, 2)
+        if y_label:
+            ax.set_ylabel(y_label)
+        if num == 2:
+            ax.set_xlim(-2, 2)
+
+    if last_mesh is not None:
+        cbar = fig.colorbar(last_mesh, ax=axes, shrink=0.96, pad=0.02)
+        cbar.set_label(colorbar_label)
+
+    if upper_left_annotation:
+        axes[0, 0].text(
+            0.04,
+            0.94,
+            upper_left_annotation,
+            transform=axes[0, 0].transAxes,
+            ha="left",
+            va="top",
+            fontsize=12,
+            fontweight="bold",
+            color="black",
+            bbox={
+                "boxstyle": "round,pad=0.22",
+                "facecolor": (1.0, 1.0, 1.0, 0.72),
+                "edgecolor": "none",
+            },
+        )
+    if lower_left_annotation:
+        axes[1, 0].text(
+            0.04,
+            0.94,
+            lower_left_annotation,
+            transform=axes[1, 0].transAxes,
+            ha="left",
+            va="top",
+            fontsize=12,
+            fontweight="bold",
+            color="black",
+            bbox={
+                "boxstyle": "round,pad=0.22",
+                "facecolor": (1.0, 1.0, 1.0, 0.72),
+                "edgecolor": "none",
+            },
+        )
+
+    saved = _save_figure(fig, output_path, dpi=220, bbox_inches="tight")
     plt.close(fig)
     return saved
 
@@ -657,16 +857,16 @@ def plot_3d_intensity_contours_propagation(
     field_records: np.ndarray,
     output_path: Path,
     *,
-    intensity_cutoff: float = 0.05,
+    intensity_cutoff: float = 0.01,
     num_levels: int = 20,
-    max_x_samples: int = 64,
-    max_y_samples: int = 64,
-    max_z_samples: int = 64,
-    alpha_min: float = 0.05,
-    alpha_max: float = 0.90,
+    max_x_samples: int = 128,
+    max_y_samples: int = 128,
+    max_z_samples: int = 128,
+    alpha_min: float = 0.12,
+    alpha_max: float = 0.72,
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
-    z_label: str = "z",
+    z_label: str = r"$z$",
     annotation_text: str | None = None,
     xy_crop_inset: float = 0.12,
     xy_crop_padding: float = 0.16,
@@ -779,7 +979,7 @@ def _render_3d_intensity_contours_frame(
         ) from exc
 
     max_intensity = float(np.max(intensity_small))
-    level_upper = min(0.92, max_intensity)
+    level_upper = max_intensity
     levels = np.linspace(float(intensity_cutoff), level_upper, int(num_levels), dtype=np.float64)
     x_small, y_small, intensity_small = _crop_xy_within_low_contour(
         x_small,
@@ -795,24 +995,32 @@ def _render_3d_intensity_contours_frame(
     grid = pv.RectilinearGrid(x_small, y_small, z_small)
     grid.point_data["intensity"] = np.ascontiguousarray(volume_xyz).ravel(order="F")
     cmap = _resolve_cmap(plt, None)
+    pv_style = _pyvista_style_from_mpl()
 
     plotter = pv.Plotter(off_screen=True, window_size=(1320, 960))
-    plotter.set_background("white")
+    plotter.set_background(pv_style["background"])
     plotter.enable_parallel_projection()
     plotter.set_scale(1.0, 1.0, 1.0)
 
     scalar_bar_added = False
+    level_span = float(level_upper - float(intensity_cutoff))
     for level in levels:
         contour = grid.contour(isosurfaces=[float(level)], scalars="intensity")
         if contour.n_points == 0:
             continue
-        opacity = alpha_min + (alpha_max - alpha_min) * float(level)
+        if level_span > 0.0:
+            level_fraction = (float(level) - float(intensity_cutoff)) / level_span
+        else:
+            level_fraction = 1.0
+        level_fraction = float(np.clip(level_fraction, 0.0, 1.0))
+        opacity = alpha_min + (alpha_max - alpha_min) * level_fraction
+        opacity = float(np.clip(opacity, 0.0, 1.0))
         plotter.add_mesh(
             contour,
             scalars="intensity",
             clim=(0.0, 1.0),
             cmap=cmap,
-            opacity=float(opacity),
+            opacity=opacity,
             smooth_shading=True,
             show_edges=False,
             specular=0.08,
@@ -821,34 +1029,35 @@ def _render_3d_intensity_contours_frame(
             show_scalar_bar=not scalar_bar_added,
             scalar_bar_args={
                 "title": "Normalized intensity",
-                "color": "black",
+                "color": pv_style["foreground"],
                 "vertical": True,
             },
         )
         scalar_bar_added = True
 
     plotter.show_bounds(
-        xtitle="x",
-        ytitle="y",
+        xtitle=r"$x$",
+        ytitle=r"$y$",
         ztitle=z_label,
-        color="black",
-        font_size=14,
+        color=pv_style["edge"],
+        font_size=max(1, int(pv_style["label_font_size"])),
+        font_family=pv_style["font_family"],
         location="outer",
-        grid=None,
         ticks="outside",
         minor_ticks=False,
         n_xlabels=5,
         n_ylabels=5,
         n_zlabels=5,
     )
-    plotter.add_bounding_box(color="black", line_width=1.0)
+    plotter.add_bounding_box(color=pv_style["edge"], line_width=1.0)
     plotter.view_isometric()
     if annotation_text:
         plotter.add_text(
             str(annotation_text),
             position="upper_left",
-            font_size=16,
-            color="black",
+            font_size=max(1, int(round(1.6 * float(pv_style["font_size"])))),
+            color=pv_style["foreground"],
+            font=pv_style["font_family"],
         )
     image = np.asarray(plotter.screenshot(return_img=True))
     plotter.close()

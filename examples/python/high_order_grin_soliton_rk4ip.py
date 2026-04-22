@@ -277,9 +277,9 @@ def _run(args: argparse.Namespace) -> float:
     nonlinear_case_key = "nonlinear"
     linear_case_key = "linear_baseline"
 
-    nt = 128
-    nx = 40
-    ny = 40
+    nt = 1024
+    nx = 64
+    ny = 64
     dt = 0.06
     dx = 0.24
     dy = 0.24
@@ -613,14 +613,14 @@ def _run(args: argparse.Namespace) -> float:
         input_is_intensity=True,
         z_label="z / L_D",
     )
-    save_3d_intensity_time_sweep_video(
-        t_scaled,
-        x_scaled,
-        y_scaled,
-        z_scaled,
-        nonlinear_records,
-        output_dir / "high_order_grin_soliton_nonlinear_time_sweep.mp4",
-    )
+    # save_3d_intensity_time_sweep_video(
+    #     t_scaled,
+    #     x_scaled,
+    #     y_scaled,
+    #     z_scaled,
+    #     nonlinear_records,
+    #     output_dir / "high_order_grin_soliton_nonlinear_time_sweep.mp4",
+    # )
 
     nonlinear_power_drift = float(nonlinear_power_drift_curve[-1])
     linear_power_drift = float(linear_power_drift_curve[-1])

@@ -11,6 +11,7 @@
 // MARK: Includes
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "nlo_progress.h"
 #include "core/state.h"
@@ -80,7 +81,61 @@ typedef enum {
 } nlolib_progress_stream_mode;
 
 /**
- * @ingroup c_api
+ * @brief Snapshot of accumulated runtime performance counters.
+ */
+#ifndef NLO_PERF_PROFILE_SNAPSHOT_DEFINED
+#define NLO_PERF_PROFILE_SNAPSHOT_DEFINED 1
+typedef struct {
+    double dispersion_ms;
+    double nonlinear_ms;
+    uint64_t dispersion_calls;
+    uint64_t nonlinear_calls;
+    uint64_t gpu_dispatch_count;
+    uint64_t gpu_copy_count;
+    uint64_t gpu_device_copy_count;
+    uint64_t gpu_device_copy_bytes;
+    uint64_t gpu_host_transfer_copy_count;
+    uint64_t gpu_host_transfer_copy_bytes;
+    uint64_t gpu_memory_pass_count;
+    uint64_t gpu_memory_pass_bytes;
+    uint64_t gpu_upload_count;
+    uint64_t gpu_download_count;
+    uint64_t gpu_upload_bytes;
+    uint64_t gpu_download_bytes;
+} nlo_perf_profile_snapshot;
+#endif
+
+/**
+ * @brief Enable or disable runtime performance counter accumulation.
+ *
+ * @param enabled Nonzero enables profiling; zero disables profiling.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_perf_profile_set_enabled(int enabled);
+
+/**
+ * @brief Query whether runtime performance counters are enabled.
+ *
+ * @return int Nonzero when profiling is enabled.
+ */
+NLOLIB_API int nlolib_perf_profile_is_enabled(void);
+
+/**
+ * @brief Reset all runtime performance counters.
+ *
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_perf_profile_reset(void);
+
+/**
+ * @brief Read current runtime performance counters into caller memory.
+ *
+ * @param out_snapshot Destination snapshot.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_perf_profile_read(nlo_perf_profile_snapshot* out_snapshot);
+
+/**
  * @brief Query runtime-derived limits for current backend/config selection.
  *
  * @param simulation_config Optional simulation configuration used to estimate

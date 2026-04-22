@@ -13,6 +13,7 @@
 #include "io/propagate_log.h"
 #include "io/snapshot_store.h"
 #include "numerics/rk4_kernel.h"
+#include "utility/perf_profile.h"
 #include <float.h>
 #include <math.h>
 #include <stddef.h>
@@ -215,6 +216,32 @@ static sim_config merge_simulation_and_physics(
         merged.runtime = *physics_config;
     }
     return merged;
+}
+
+NLOLIB_API nlolib_status nlolib_perf_profile_set_enabled(int enabled)
+{
+    nlo_perf_profile_set_enabled(enabled);
+    return NLOLIB_STATUS_OK;
+}
+
+NLOLIB_API int nlolib_perf_profile_is_enabled(void)
+{
+    return nlo_perf_profile_is_enabled();
+}
+
+NLOLIB_API nlolib_status nlolib_perf_profile_reset(void)
+{
+    nlo_perf_profile_reset();
+    return NLOLIB_STATUS_OK;
+}
+
+NLOLIB_API nlolib_status nlolib_perf_profile_read(nlo_perf_profile_snapshot* out_snapshot)
+{
+    if (out_snapshot == NULL) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    nlo_perf_profile_snapshot_read(out_snapshot);
+    return NLOLIB_STATUS_OK;
 }
 
 NLOLIB_API nlolib_status nlolib_query_runtime_limits(

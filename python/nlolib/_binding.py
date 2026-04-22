@@ -174,6 +174,27 @@ class NloRuntimeLimits(ctypes.Structure):
     ]
 
 
+class NloPerfProfileSnapshot(ctypes.Structure):
+    _fields_ = [
+        ("dispersion_ms", ctypes.c_double),
+        ("nonlinear_ms", ctypes.c_double),
+        ("dispersion_calls", ctypes.c_uint64),
+        ("nonlinear_calls", ctypes.c_uint64),
+        ("gpu_dispatch_count", ctypes.c_uint64),
+        ("gpu_copy_count", ctypes.c_uint64),
+        ("gpu_device_copy_count", ctypes.c_uint64),
+        ("gpu_device_copy_bytes", ctypes.c_uint64),
+        ("gpu_host_transfer_copy_count", ctypes.c_uint64),
+        ("gpu_host_transfer_copy_bytes", ctypes.c_uint64),
+        ("gpu_memory_pass_count", ctypes.c_uint64),
+        ("gpu_memory_pass_bytes", ctypes.c_uint64),
+        ("gpu_upload_count", ctypes.c_uint64),
+        ("gpu_download_count", ctypes.c_uint64),
+        ("gpu_upload_bytes", ctypes.c_uint64),
+        ("gpu_download_bytes", ctypes.c_uint64),
+    ]
+
+
 class NloStorageOptions(ctypes.Structure):
     _fields_ = [
         ("sqlite_path", ctypes.c_char_p),
@@ -314,6 +335,18 @@ def load(path: Path | None= None) -> ctypes.CDLL:
         lib._has_query_runtime_limits = True # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError:
         lib._has_query_runtime_limits = False # pyright: ignore[reportAttributeAccessIssue]
+    try:
+        lib.nlolib_perf_profile_set_enabled.argtypes = [ctypes.c_int]
+        lib.nlolib_perf_profile_set_enabled.restype = ctypes.c_int
+        lib.nlolib_perf_profile_is_enabled.argtypes = []
+        lib.nlolib_perf_profile_is_enabled.restype = ctypes.c_int
+        lib.nlolib_perf_profile_reset.argtypes = []
+        lib.nlolib_perf_profile_reset.restype = ctypes.c_int
+        lib.nlolib_perf_profile_read.argtypes = [ctypes.POINTER(NloPerfProfileSnapshot)]
+        lib.nlolib_perf_profile_read.restype = ctypes.c_int
+        lib._has_perf_profile = True # pyright: ignore[reportAttributeAccessIssue]
+    except AttributeError:
+        lib._has_perf_profile = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
         lib.nlolib_propagate_options_default.argtypes = []

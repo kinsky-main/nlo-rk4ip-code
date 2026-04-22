@@ -5,6 +5,7 @@
 font.family: serif
 font.serif: Times New Roman
 font.size: 10
+mathtext.fontset: cm
 axes.labelsize: 10
 axes.titlesize: 10
 legend.fontsize: 10

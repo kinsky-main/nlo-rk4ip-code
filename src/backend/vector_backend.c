@@ -229,7 +229,20 @@ static bool vk_try_query_device_local_available_bytes(
 }
 #endif
 
-static vector_backend* vector_backend_create_auto(const vk_backend_config* config_template);
+static nlo_vector_backend* nlo_vector_backend_create_auto(const nlo_vk_backend_config* config_template);
+
+static int nlo_vk_config_has_explicit_handles(const nlo_vk_backend_config* config)
+{
+    if (config == NULL) {
+        return 0;
+    }
+
+    return (config->physical_device != VK_NULL_HANDLE ||
+            config->device != VK_NULL_HANDLE ||
+            config->queue != VK_NULL_HANDLE)
+               ? 1
+               : 0;
+}
 
 vec_status vec_validate_backend(const vector_backend* backend)
 {
@@ -322,9 +335,16 @@ vector_backend* vector_backend_create_vulkan(const vk_backend_config* config)
     if (config == NULL) {
         return vector_backend_create_auto(NULL);
     }
+
+    if (!nlo_vk_config_has_explicit_handles(config)) {
+        return nlo_vector_backend_create_auto(config);
+    }
+
     if (config->physical_device == VK_NULL_HANDLE ||
         config->device == VK_NULL_HANDLE ||
         config->queue == VK_NULL_HANDLE) {
+        fprintf(stderr,
+                "[nlolib] Vulkan backend config is incomplete: physical_device/device/queue must either all be set or all be omitted for auto selection.\n");
         return NULL;
     }
 

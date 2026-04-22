@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from backend.app_base import ExampleAppBase
-from backend.metrics import relative_l2_error_curve
+from backend.metrics import relative_l2_intensity_error_curve
 from backend.plotting import (
     plot_final_intensity_comparison,
     plot_final_re_im_comparison,
@@ -128,19 +128,23 @@ def _run(args: argparse.Namespace) -> float:
         0.5 * beta2,
         0.0,
     )
-    error_curve = 100.0 * relative_l2_error_curve(records, reference_records)
+    error_curve = 100.0 * relative_l2_intensity_error_curve(records, reference_records)
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[Path] = []
 
+    central_band_mask = np.abs(t) <= 1.5
+    t_plot = t[central_band_mask]
+    records_plot = records[:, central_band_mask]
+
     saved = plot_intensity_colormap_vs_propagation(
-        t,
-        z_records,
-        np.abs(records) ** 2,
+        t_plot,
+        z_records / ((sigma / 1.665236) ** 2 / abs(beta2)),
+        np.abs(records_plot) ** 2,
         output_dir / "linear_drift_intensity_propagation_map.png",
-        x_label="Time t",
-        
+        x_label=r"Time $t$",
+        y_label=r"Propagation Distance $z / L_D$",
         colorbar_label="Normalized intensity",
     )
     if saved is not None:
@@ -151,7 +155,7 @@ def _run(args: argparse.Namespace) -> float:
         records[0],
         records[-1],
         output_dir / "linear_drift_final_re_im_comparison.png",
-        x_label="Time t",
+        x_label=r"Time $t$",
         
         reference_label="Initial",
         final_label="Final",
