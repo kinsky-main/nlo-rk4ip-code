@@ -304,7 +304,7 @@ def save_plots(
         output_dir / "soliton_wavelength_intensity_colormap.png",
         accepted_z=telemetry_plot.accepted_z,
         accepted_step_sizes=telemetry_plot.accepted_step_sizes[3:-1],
-        map_x_label=r"Soliton Period ($z$ / $Z_0$)",
+        map_x_label=r"Soliton Period $z$ / $Z_0$",
         map_y_label=r"Linearized wavelength $\lambda_{lin}$ (nm)",
         step_x_label=r"Soliton Period ($z$ / $Z_0$)",
         step_y_label=r"Step Size ($z$ / $Z_0 \times 10^{-3}$)",

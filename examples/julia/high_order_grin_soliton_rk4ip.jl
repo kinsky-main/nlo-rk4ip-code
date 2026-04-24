@@ -245,6 +245,7 @@ function save_grin_plots(output_dir, z_axis, t_axis, x_axis, y_axis, field0_tyx,
         joinpath(output_dir, "high_order_grin_soliton_nonlinear_3d_intensity_contour_surfaces.png");
         input_is_intensity = true,
         z_label = "z / L_D",
+        xy_crop_inset = 0.5,
     )
 end
 

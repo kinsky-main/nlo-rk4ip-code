@@ -768,7 +768,7 @@ def plot_frequency_time_propagation_grid(
             frequency_values[mask_1],
             normalized_maps[2][:, mask_1],
             f"",
-            r"Frequency detuning ($1/t$)",
+            r"Frequency detuning $1/t$",
             r"Propagation $z$",
         ),
         (
