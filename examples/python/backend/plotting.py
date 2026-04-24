@@ -744,8 +744,6 @@ def plot_frequency_time_propagation_grid(
         sharey=True,
         constrained_layout=True,
     )
-    mask_1 = np.abs(frequency_values) < 2.5
-    mask_2 = np.abs(time_values) < 2.5
     plot_specs = (
         (
             axes[0, 0],
@@ -757,16 +755,16 @@ def plot_frequency_time_propagation_grid(
         ),
         (
             axes[0, 1],
-            time_values[mask_2],
-            normalized_maps[1][:, mask_2],
+            time_values,
+            normalized_maps[1],
             f"",
             r"",
             "",
         ),
         (
             axes[1, 0],
-            frequency_values[mask_1],
-            normalized_maps[2][:, mask_1],
+            frequency_values,
+            normalized_maps[2],
             f"",
             r"Frequency detuning $1/t$",
             r"Propagation $z$",
@@ -804,7 +802,7 @@ def plot_frequency_time_propagation_grid(
         if y_label:
             ax.set_ylabel(y_label)
         if num == 2:
-            ax.set_xlim(-2, 2)
+            ax.set_xlim(-4, 0)
 
     if last_mesh is not None:
         cbar = fig.colorbar(last_mesh, ax=axes, shrink=0.96, pad=0.02)
