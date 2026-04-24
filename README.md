@@ -77,3 +77,17 @@ Generated output:
 - Julia package guide: `julia/README.md`
 
 The PyPI/package readme remains `python/README_PYPI.md`.
+
+## Python Benchmarks
+
+Run the nlolib-only tensor CPU vs GPU benchmark with:
+
+```powershell
+python examples/python/tensor_backend_scaling_nlolib_rk4ip.py
+```
+
+The mixed nlolib/MMTools runtime comparison remains:
+
+```powershell
+python examples/python/tensor_backend_scaling_rk4ip.py
+```

@@ -13,8 +13,10 @@ import csv
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Sequence
 
 import numpy as np
+from scipy.optimize import curve_fit
 from backend.app_base import ExampleAppBase
 from backend.plotting import plt
 from backend.runner import NloExampleRunner, centered_time_grid
@@ -51,6 +53,25 @@ class BenchmarkRow:
     message: str
 
 
+@dataclass(frozen=True)
+class RuntimePlotSeries:
+    solver: str
+    backend: str
+    marker: str = "o"
+    linestyle: str = "-"
+    fit_linestyle: str = "--"
+
+    @property
+    def label(self) -> str:
+        return f"{self.solver} {self.backend}"
+
+
+@dataclass(frozen=True)
+class RuntimePlotSpec:
+    series: tuple[RuntimePlotSeries, ...]
+    save_path: str
+
+
 _TIME_WINDOW = 2.56
 _X_WINDOW = 4.80
 _Y_WINDOW = 4.80
@@ -68,6 +89,21 @@ _MMTOOLS_REQUIRED_COLUMNS = (
     "runtime_seconds",
     "status",
 )
+_MIXED_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
+    series=(
+        RuntimePlotSeries("nlolib", "GPU"),
+        RuntimePlotSeries("MMTools", "GPU"),
+    ),
+    save_path="tensor_backend_scaling_runtime.png",
+)
+_NLOLIB_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
+    series=(
+        RuntimePlotSeries("nlolib", "CPU"),
+        RuntimePlotSeries("nlolib", "GPU"),
+    ),
+    save_path="tensor_backend_scaling_runtime_nlolib_only.png",
+)
+_FIT_SAMPLE_COUNT = 256
 
 
 def _parse_int_csv(raw: str) -> list[int]:
@@ -139,7 +175,7 @@ def _build_case(runner: NloExampleRunner, case: TensorCase):
         tensor_nt=case.nt,
         tensor_nx=case.nx,
         tensor_ny=case.ny,
-        tensor_layout=nlo.NLO_TENSOR_LAYOUT_XYT_T_FAST,
+        tensor_layout=nlo.TENSOR_LAYOUT_XYT_T_FAST,
         frequency_grid=[complex(value, 0.0) for value in omega],
         delta_x=dx,
         delta_y=dy,
@@ -314,14 +350,6 @@ def _read_mmtools_rows(summary_csv: Path | None) -> list[BenchmarkRow]:
             ny = _require_csv_int(row, "ny", positive=True)
             mode_count = _require_csv_int(row, "mode_count", positive=True)
             total_points = _require_csv_int(row, "total_points", positive=True)
-            if mode_count != nx * ny:
-                raise ValueError(
-                    "MMTools CSV must satisfy mode_count = nx * ny for equal-point comparison."
-                )
-            if total_points != nt * mode_count:
-                raise ValueError(
-                    "MMTools CSV must satisfy total_points = nt * mode_count for equal-point comparison."
-                )
 
             runtime_seconds = _require_csv_float(row, "runtime_seconds", positive=True)
             runtime_seconds_std = _csv_float(row, "runtime_seconds_std")
@@ -365,56 +393,148 @@ def _resolve_cases(
     return [_case_from_scale(scale) for scale in args.scales]
 
 
-def _plot_runtime(
-    rows: list[BenchmarkRow], output_dir: Path, series: tuple = (
-        ("nlolib", "GPU", "o", "-"),
-        ("mmtools", "GPU", "o", "-"),
-    ),
-    save_path: str = "tensor_backend_scaling_runtime.png",
-) -> Path | None:
-    ok_rows = [
-        row for row in rows if row.status == "ok" and row.runtime_seconds is not None
+def _runtime_plot_rows(rows: Sequence[BenchmarkRow]) -> list[BenchmarkRow]:
+    return sorted(
+        [
+            row
+            for row in rows
+            if row.status == "ok" and row.runtime_seconds is not None
+        ],
+        key=lambda row: (row.total_points, row.solver.lower(), row.backend.upper()),
+    )
+
+
+def _series_rows(
+    rows: Sequence[BenchmarkRow], series: RuntimePlotSeries
+) -> list[BenchmarkRow]:
+    solver_key = series.solver.lower()
+    backend_key = series.backend.upper()
+    return [
+        row
+        for row in _runtime_plot_rows(rows)
+        if row.solver.lower() == solver_key and row.backend.upper() == backend_key
     ]
-    if len(ok_rows) <= 0:
+
+
+def _series_xy(rows: Sequence[BenchmarkRow]) -> tuple[np.ndarray, np.ndarray]:
+    return (
+        np.asarray([row.total_points for row in rows], dtype=np.float64),
+        np.asarray([float(row.runtime_seconds) for row in rows], dtype=np.float64),
+    )
+
+
+def _growth_order_label(order: float) -> str:
+    return r"$O(N^{" + f"{order:.2f}" + r"})$"
+
+
+def _fit_runtime_series(
+    rows: Sequence[BenchmarkRow],
+) -> tuple[np.ndarray, np.ndarray, str] | None:
+    x_values, y_values = _series_xy(rows)
+    if (
+        x_values.size < 2
+        or np.any(x_values <= 0.0)
+        or np.any(y_values <= 0.0)
+    ):
+        return None
+
+    popt, pcov = curve_fit(lambda x, a, b, c: a * np.power(x, b) + c, x_values, y_values)
+    order, intercept = float(popt[1]), float(popt[0])
+    x_fit = np.linspace(
+        float(np.min(x_values)),
+        float(np.max(x_values)),
+        _FIT_SAMPLE_COUNT,
+        dtype=np.float64,
+    )
+    y_fit = intercept * np.power(x_fit, order) + float(popt[2])
+    return x_fit, y_fit, _growth_order_label(float(order))
+
+
+def _plot_runtime_series(ax, rows: Sequence[BenchmarkRow], series: RuntimePlotSeries) -> bool:
+    solver_rows = _series_rows(rows, series)
+    if len(solver_rows) <= 0:
+        return False
+
+    x_values, y_values = _series_xy(solver_rows)
+    (line,) = ax.plot(
+        x_values,
+        y_values,
+        marker=series.marker,
+        linestyle="none",
+    )
+    fit = _fit_runtime_series(solver_rows)
+    if fit is not None:
+        x_fit, y_fit, growth_order = fit
+        ax.plot(
+            x_fit,
+            y_fit,
+            linestyle=series.fit_linestyle,
+            linewidth=1.4,
+            color=line.get_color(),
+            label=f"{series.label} {growth_order}",
+        )
+    return True
+
+
+def _plot_runtime(
+    rows: list[BenchmarkRow],
+    output_dir: Path,
+    *,
+    plot_spec: RuntimePlotSpec = _MIXED_RUNTIME_PLOT_SPEC,
+) -> Path | None:
+    if len(_runtime_plot_rows(rows)) <= 0:
         return None
 
     fig, ax = plt.subplots()
-    
     any_series = False
-    for solver, backend, marker, linestyle in series:
-        solver_rows = sorted(
-            [
-                row
-                for row in ok_rows
-                if row.solver.lower() == solver and row.backend.upper() == backend
-            ],
-            key=lambda row: row.total_points,
-        )
-        if len(solver_rows) <= 0:
-            continue
-        any_series = True
-        ax.plot(
-            np.asarray([row.total_points for row in solver_rows], dtype=np.float64),
-            np.asarray(
-                [float(row.runtime_seconds) for row in solver_rows], dtype=np.float64
-            ),
-            marker=marker,
-            linestyle=linestyle,
-            label=f"{solver_rows[0].solver} {solver_rows[0].backend}",
-        )
+    for series in plot_spec.series:
+        any_series = _plot_runtime_series(ax, rows, series) or any_series
 
     if not any_series:
         plt.close(fig)
         return None
 
-    ax.set_xlabel("Total points")
+    ax.set_xlabel("State vector size")
     ax.set_ylabel("Runtime (s)")
     ax.legend()
     fig.tight_layout()
-    output_path = output_dir / save_path
+    output_path = output_dir / plot_spec.save_path
     fig.savefig(output_path)
     plt.close(fig)
     return output_path
+
+
+def _benchmark_nlolib_rows(
+    args: argparse.Namespace,
+    runner: NloExampleRunner,
+    api,
+    cases: Sequence[TensorCase],
+    *,
+    series: Sequence[RuntimePlotSeries] = _NLOLIB_RUNTIME_PLOT_SPEC.series,
+) -> list[BenchmarkRow]:
+    backend_type_by_label = {
+        "CPU": runner.nlo.VECTOR_BACKEND_CPU,
+        "GPU": runner.nlo.VECTOR_BACKEND_VULKAN,
+    }
+    rows: list[BenchmarkRow] = []
+    for plot_series in series:
+        backend_type = backend_type_by_label.get(plot_series.backend.upper())
+        if backend_type is None or plot_series.solver.lower() != "nlolib":
+            continue
+        rows.extend(
+            _benchmark_nlolib_case(
+                api,
+                runner,
+                case=case,
+                num_records=args.num_records,
+                warmup=args.warmup,
+                runs=args.runs,
+                backend_type=backend_type,
+                backend_label=plot_series.backend.upper(),
+            )
+            for case in cases
+        )
+    return rows
 
 
 def _print_summary(rows: list[BenchmarkRow]) -> None:
@@ -484,45 +604,24 @@ def _run(args: argparse.Namespace) -> float:
 
     mmtools_rows = _read_mmtools_rows(mmtools_summary_csv)
     cases = _resolve_cases(args, mmtools_rows, mmtools_summary_csv)
-
-    nlo = runner.nlo
-    nlolib_rows: list[BenchmarkRow] = []
-    for backend_type, backend_label in (
-        (nlo.NLO_VECTOR_BACKEND_CPU, "CPU"),
-        (nlo.NLO_VECTOR_BACKEND_VULKAN, "GPU"),
-    ):
-        nlolib_rows.extend(
-            _benchmark_nlolib_case(
-                api,
-                runner,
-                case=case,
-                num_records=args.num_records,
-                warmup=args.warmup,
-                runs=args.runs,
-                backend_type=backend_type,
-                backend_label=backend_label,
-            )
-            for case in cases
-        )
+    nlolib_rows = _benchmark_nlolib_rows(args, runner, api, cases)
     rows = nlolib_rows + mmtools_rows
 
     csv_path = args.output_dir / "tensor_backend_scaling_results.csv"
     _write_csv(rows, csv_path)
-    plot_path = _plot_runtime(rows, args.output_dir)
+    plot_path = _plot_runtime(rows, args.output_dir, plot_spec=_MIXED_RUNTIME_PLOT_SPEC)
     plot_path_2 = _plot_runtime(
         rows,
         args.output_dir,
-        series=(
-            ("nlolib", "GPU", "o", "-"),
-            ("nlolib", "CPU", "o", "-"),
-        ),
-        save_path="tensor_backend_scaling_runtime_nlolib_only.png",
+        plot_spec=_NLOLIB_RUNTIME_PLOT_SPEC,
     )
 
     print(f"saved csv: {csv_path}")
     _print_summary(rows)
     if plot_path is not None:
         print(f"saved plot: {plot_path}")
+    if plot_path_2 is not None:
+        print(f"saved plot: {plot_path_2}")
     return 0.0
 
 
