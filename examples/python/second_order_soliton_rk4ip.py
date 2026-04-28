@@ -306,8 +306,8 @@ def save_plots(
         accepted_step_sizes=telemetry_plot.accepted_step_sizes[3:-1],
         map_x_label=r"Soliton Period $z$ / $Z_0$",
         map_y_label=r"Linearized wavelength $\lambda_{lin}$ (nm)",
-        step_x_label=r"Soliton Period ($z$ / $Z_0$)",
-        step_y_label=r"Step Size ($z$ / $Z_0 \times 10^{-3}$)",
+        step_x_label=r"Soliton Period $z$ / $Z_0$",
+        step_y_label=r"Step Size $z$ / $Z_0 (10^{-3})$",
         normalization_peak=map_peak,
     )
     if p1 is not None:
@@ -319,7 +319,7 @@ def save_plots(
         spectral_map_true,
         output_dir / "soliton_wavelength_intensity_colormap_analytical.png",
         x_label=r"Linearized wavelength $\lambda_{lin}$ (nm)",
-        y_label=r"Soliton Period ($z$ / $Z_0$)",
+        y_label=r"Soliton Period $z$ / $Z_0$",
         colorbar_label="Normalized spectral intensity",
         normalization_peak=map_peak,
     )
@@ -345,7 +345,6 @@ def save_plots(
         U_num,
         output_dir / "soliton_final_intensity_comparison.png",
         x_label=r"Dimensionless time $\tau = T/T0$",
-        
         reference_label="Analytical",
         final_label="Numerical",
     )

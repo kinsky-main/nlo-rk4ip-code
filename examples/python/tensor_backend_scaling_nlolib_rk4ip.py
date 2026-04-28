@@ -69,8 +69,8 @@ class TensorBackendScalingNlolibApp(ExampleAppBase):
             default=1,
             help="Recorded snapshots per run. Use 1 to benchmark final-only output.",
         )
-        parser.add_argument("--warmup", type=int, default=0, help="Warmup runs per benchmark point.")
-        parser.add_argument("--runs", type=int, default=1, help="Measured runs per benchmark point.")
+        parser.add_argument("--warmup", type=int, default=7, help="Warmup runs per benchmark point.")
+        parser.add_argument("--runs", type=int, default=5, help="Measured runs per benchmark point.")
 
     def run(self) -> float:
         return _run(self.args)

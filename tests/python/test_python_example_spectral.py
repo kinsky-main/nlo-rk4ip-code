@@ -16,6 +16,10 @@ from backend.spectral import (  # noqa: E402
     omega_centroid_to_wavelength_nm,
     omega_detuning_to_wavelength_nm,
 )
+from high_order_grin_soliton_rk4ip import (  # noqa: E402
+    spectral_marginal_curve,
+    temporal_frequency_axis,
+)
 
 
 def _check_close(actual: float, expected: float, tol: float = 1e-9) -> None:
@@ -53,10 +57,30 @@ def test_omega_centroid_to_wavelength_nm() -> None:
         raise AssertionError("positive frequency detuning should reduce wavelength")
 
 
+def test_high_order_grin_spectral_marginal_shape() -> None:
+    records = np.ones((3, 8, 2, 2), dtype=np.complex128)
+    records[:, 1, :, :] = 2.0 + 0.5j
+
+    omega_axis = temporal_frequency_axis(records.shape[1], 0.1, 0.5)
+    spectral_map = spectral_marginal_curve(records)
+
+    if omega_axis.shape != (records.shape[1],):
+        raise AssertionError("frequency axis length should match nt")
+    if spectral_map.shape != (records.shape[0], records.shape[1]):
+        raise AssertionError("spectral marginal shape should be [record, nt]")
+    if not np.all(np.isfinite(omega_axis)):
+        raise AssertionError("frequency axis must be finite")
+    if not np.all(np.isfinite(spectral_map)):
+        raise AssertionError("spectral marginal must be finite")
+    if np.any(spectral_map < 0.0):
+        raise AssertionError("spectral marginal must be nonnegative")
+
+
 def main() -> None:
     test_wavelength_frequency_roundtrip()
     test_omega_axis_to_wavelength_axis()
     test_omega_centroid_to_wavelength_nm()
+    test_high_order_grin_spectral_marginal_shape()
     print("test_python_example_spectral: all checks passed.")
 
 

@@ -9,6 +9,7 @@ mathtext.fontset: cm
 axes.labelsize: 10
 axes.titlesize: 10
 legend.fontsize: 10
+lines.markersize: 3.0
 
 # MARK: Figure
 

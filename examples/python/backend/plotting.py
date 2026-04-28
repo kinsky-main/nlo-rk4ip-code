@@ -93,8 +93,16 @@ def _rc_font_family() -> str:
     if isinstance(family, (list, tuple)):
         if not family:
             return "Arial"
-        return str(family[0])
-    return str(family)
+        family_name = str(family[0])
+    else:
+        family_name = str(family)
+    generic = family_name.strip().lower()
+    if generic in {"serif", "sans-serif", "sans serif", "cursive", "fantasy", "monospace"}:
+        stack_key = "font.monospace" if generic == "monospace" else f"font.{generic.replace(' ', '-')}"
+        stack = plt.rcParams.get(stack_key, [])
+        if isinstance(stack, (list, tuple)) and len(stack) > 0:
+            return str(stack[0])
+    return family_name
 
 
 def _pyvista_font_family() -> str:
@@ -116,6 +124,60 @@ def _pyvista_style_from_mpl() -> dict[str, Any]:
         "font_size": base_size,
         "label_font_size": max(1, int(round(_rc_float("axes.labelsize", float(base_size))))),
     }
+
+
+def _mpl_cmap_color(level: float) -> tuple[float, float, float, float]:
+    rgba = _resolve_cmap(plt, None)(float(np.clip(level, 0.0, 1.0)))
+    return tuple(float(value) for value in rgba)
+
+
+def _crop_rendered_image_to_content(image: np.ndarray, *, padding_fraction: float = 0.04) -> np.ndarray:
+    img = np.asarray(image)
+    if img.ndim < 3 or img.shape[0] <= 0 or img.shape[1] <= 0:
+        return img
+    rgb = img[:, :, :3].astype(np.int16, copy=False)
+    background = rgb[0, 0, :]
+    diff = np.max(np.abs(rgb - background), axis=2)
+    mask = diff > 4
+    if not np.any(mask):
+        return img
+
+    rows, cols = np.nonzero(mask)
+    y0 = int(np.min(rows))
+    y1 = int(np.max(rows)) + 1
+    x0 = int(np.min(cols))
+    x1 = int(np.max(cols)) + 1
+    pad_y = max(2, int(round(float(padding_fraction) * float(y1 - y0))))
+    pad_x = max(2, int(round(float(padding_fraction) * float(x1 - x0))))
+    y0 = max(0, y0 - pad_y)
+    y1 = min(img.shape[0], y1 + pad_y)
+    x0 = max(0, x0 - pad_x)
+    x1 = min(img.shape[1], x1 + pad_x)
+    return img[y0:y1, x0:x1, :]
+
+
+def _image_with_mpl_colorbar(image: np.ndarray, *, colorbar_label: str = "Normalized intensity") -> np.ndarray:
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    img = _crop_rendered_image_to_content(np.asarray(image))
+    fig = plt.figure(figsize=(4.0, 2.64), dpi=450, constrained_layout=True)
+    grid = fig.add_gridspec(1, 2, width_ratios=[22.0, 1.0], wspace=0.02)
+    ax_img = fig.add_subplot(grid[0, 0])
+    ax_cbar = fig.add_subplot(grid[0, 1])
+    ax_img.imshow(img)
+    ax_img.set_aspect("equal", adjustable="box", anchor="SW")
+    ax_img.set_axis_off()
+    sm = ScalarMappable(norm=Normalize(vmin=0.0, vmax=1.0), cmap=_resolve_cmap(plt, None))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, cax=ax_cbar)
+    cbar.set_label(colorbar_label, labelpad=4.0)
+    fig.canvas.draw()
+    width, height = fig.canvas.get_width_height()
+    out = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(height, width, 4)
+    out = np.asarray(out[:, :, :3]).copy()
+    plt.close(fig)
+    return out
 
 
 def _normalized_nonnegative_data(values: np.ndarray, *, normalization_peak: float | None) -> tuple[np.ndarray, float]:
@@ -955,7 +1017,7 @@ def _render_3d_intensity_contours_frame(
         intensity = np.asarray(records, dtype=np.float64)
     else:
         intensity = np.abs(records) ** 2
-    # intensity, _ = _normalized_nonnegative_data(intensity, normalization_peak=normalization_peak)
+    intensity, _ = _normalized_nonnegative_data(intensity, normalization_peak=normalization_peak)
     if float(np.max(intensity)) <= 0.0:
         print("intensity is zero everywhere; skipping 3D propagation contour-surface plot.")
         return None
@@ -977,7 +1039,10 @@ def _render_3d_intensity_contours_frame(
         ) from exc
 
     max_intensity = float(np.max(intensity_small))
-    level_upper = max_intensity
+    level_upper = min(0.92, max_intensity)
+    if level_upper <= float(intensity_cutoff):
+        print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
+        return None
     levels = np.linspace(float(intensity_cutoff), level_upper, int(num_levels), dtype=np.float64)
     x_small, y_small, intensity_small = _crop_xy_within_low_contour(
         x_small,
@@ -992,53 +1057,46 @@ def _render_3d_intensity_contours_frame(
     volume_xyz = np.transpose(intensity_small, (2, 1, 0))
     grid = pv.RectilinearGrid(x_small, y_small, z_small)
     grid.point_data["intensity"] = np.ascontiguousarray(volume_xyz).ravel(order="F")
-    cmap = _resolve_cmap(plt, None)
     pv_style = _pyvista_style_from_mpl()
 
-    plotter = pv.Plotter(off_screen=True, window_size=(1320, 960))
+    plotter = pv.Plotter(off_screen=True, window_size=(2400, 1584))
     plotter.set_background(pv_style["background"])
-    plotter.enable_parallel_projection()
-    plotter.set_scale(1.0, 1.0, 1.0)
+    x_span = max(float(np.max(x_small) - np.min(x_small)), 1.0e-9)
+    y_span = max(float(np.max(y_small) - np.min(y_small)), 1.0e-9)
+    z_span = max(float(np.max(z_small) - np.min(z_small)), 1.0e-9)
 
-    scalar_bar_added = False
-    level_span = float(level_upper - float(intensity_cutoff))
+    plotter.show_grid(color='black', bold=True)
+
+    any_surface = False
     for level in levels:
         contour = grid.contour(isosurfaces=[float(level)], scalars="intensity")
         if contour.n_points == 0:
             continue
-        if level_span > 0.0:
-            level_fraction = (float(level) - float(intensity_cutoff)) / level_span
-        else:
-            level_fraction = 1.0
-        level_fraction = float(np.clip(level_fraction, 0.0, 1.0))
-        opacity = alpha_min + (alpha_max - alpha_min) * level_fraction
+        opacity = alpha_min + (alpha_max - alpha_min) * float(level)
         opacity = float(np.clip(opacity, 0.0, 1.0))
         plotter.add_mesh(
             contour,
-            scalars="intensity",
-            clim=(0.0, 1.0),
-            cmap=cmap,
+            color=_mpl_cmap_color(float(level)),
             opacity=opacity,
             smooth_shading=True,
             show_edges=False,
-            specular=0.08,
-            ambient=0.25,
-            diffuse=0.75,
-            show_scalar_bar=not scalar_bar_added,
-            scalar_bar_args={
-                "title": "Normalized intensity",
-                "color": pv_style["foreground"],
-                "vertical": True,
-            },
+            specular=0.0,
+            ambient=1.0,
+            diffuse=0.0,
+            show_scalar_bar=False,
         )
-        scalar_bar_added = True
+        any_surface = True
+    if not any_surface:
+        print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
+        plotter.close()
+        return None
 
     plotter.show_bounds(
-        xtitle=r"$x$",
-        ytitle=r"$y$",
+        xtitle="x",
+        ytitle="y",
         ztitle=z_label,
         color=pv_style["edge"],
-        font_size=max(1, int(pv_style["label_font_size"])),
+        font_size=max(1, int(round(2.2 * float(pv_style["label_font_size"])))),
         font_family=pv_style["font_family"],
         location="outer",
         ticks="outside",
@@ -1047,8 +1105,7 @@ def _render_3d_intensity_contours_frame(
         n_ylabels=5,
         n_zlabels=5,
     )
-    plotter.add_bounding_box(color=pv_style["edge"], line_width=1.0)
-    plotter.view_isometric()
+
     if annotation_text:
         plotter.add_text(
             str(annotation_text),
@@ -1059,7 +1116,7 @@ def _render_3d_intensity_contours_frame(
         )
     image = np.asarray(plotter.screenshot(return_img=True))
     plotter.close()
-    return image
+    return _image_with_mpl_colorbar(image, colorbar_label="Normalized intensity")
 
 
 def _crop_xy_within_low_contour(
@@ -1161,10 +1218,10 @@ def save_3d_intensity_time_sweep_video(
         raise ValueError("t axis length must match field_records_tyx time dimension.")
 
     if np.iscomplexobj(records):
-        global_peak = float(np.max(np.abs(records) ** 2))
+        peak = float(np.max(np.abs(records) ** 2))
     else:
-        global_peak = float(np.max(records))
-    if global_peak <= 0.0:
+        peak = float(np.max(records))
+    if peak <= 0.0:
         print("time-sweep video skipped because intensity is zero everywhere.")
         return None
 
@@ -1198,7 +1255,7 @@ def save_3d_intensity_time_sweep_video(
             alpha_min=float(alpha_min),
             alpha_max=float(alpha_max),
             input_is_intensity=not np.iscomplexobj(records),
-            normalization_peak=global_peak,
+            normalization_peak=None,
             z_label="z",
             annotation_text=f"t = {float(t[int(time_index)]):+.3f}",
         )

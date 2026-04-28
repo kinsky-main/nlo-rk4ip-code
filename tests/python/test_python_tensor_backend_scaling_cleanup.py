@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +18,16 @@ def _load_module(module_name: str, module_path: Path):
     return module
 
 
-def _row(module, solver: str, backend: str, total_points: int, runtime: float | None, *, status: str = "ok"):
+def _row(
+    module,
+    solver: str,
+    backend: str,
+    total_points: int,
+    runtime: float | None,
+    *,
+    runtime_std: float | None = None,
+    status: str = "ok",
+):
     scale = int(round((total_points / 2.0) ** (1.0 / 3.0)))
     return module.BenchmarkRow(
         solver=solver,
@@ -28,7 +38,7 @@ def _row(module, solver: str, backend: str, total_points: int, runtime: float | 
         mode_count=scale * scale,
         total_points=total_points,
         runtime_seconds=runtime,
-        runtime_seconds_std=0.0 if runtime is not None else None,
+        runtime_seconds_std=runtime_std if runtime is not None else None,
         throughput_points_per_second=None,
         status=status,
         message="",
@@ -47,14 +57,14 @@ def test_runtime_plot_helpers() -> None:
     )
 
     rows = [
-        _row(benchmark, "nlolib", "GPU", 512, 0.60),
-        _row(benchmark, "nlolib", "GPU", 128, 0.30),
+        _row(benchmark, "nlolib", "GPU", 512, 0.60, runtime_std=0.06),
+        _row(benchmark, "nlolib", "GPU", 128, 0.30, runtime_std=0.03),
         _row(benchmark, "nlolib", "GPU", 256, None, status="error"),
-        _row(benchmark, "MMTools", "GPU", 128, 0.25),
-        _row(benchmark, "MMTools", "GPU", 512, 0.45),
-        _row(benchmark, "MMTools", "GPU", 256, 0.31),
-        _row(benchmark, "nlolib", "CPU", 128, 0.80),
-        _row(benchmark, "nlolib", "CPU", 256, 1.10),
+        _row(benchmark, "MMTools", "GPU", 128, 0.25, runtime_std=0.02),
+        _row(benchmark, "MMTools", "GPU", 512, 0.45, runtime_std=0.04),
+        _row(benchmark, "MMTools", "GPU", 256, 0.31, runtime_std=0.01),
+        _row(benchmark, "nlolib", "CPU", 128, 0.80, runtime_std=0.08),
+        _row(benchmark, "nlolib", "CPU", 256, 1.10, runtime_std=0.10),
     ]
 
     gpu_rows = benchmark._series_rows(
@@ -63,6 +73,9 @@ def test_runtime_plot_helpers() -> None:
     )
     assert [row.total_points for row in gpu_rows] == [128, 512]
     assert all(row.status == "ok" for row in gpu_rows)
+    assert np.allclose(benchmark._series_yerr(gpu_rows), np.asarray([0.03, 0.06]))
+    assert benchmark._equivalent_total_points(4, 8, 8) == 256
+    assert benchmark._case_key(gpu_rows[0]) == (8, 4, 4)
 
     assert benchmark._fit_runtime_series(gpu_rows[:1]) is None
     fit = benchmark._fit_runtime_series(
@@ -78,8 +91,8 @@ def test_runtime_plot_helpers() -> None:
     assert x_fit.shape == y_fit.shape
     assert x_fit.size == benchmark._FIT_SAMPLE_COUNT
     assert np.all(np.isfinite(y_fit))
-    assert growth_order.startswith("O(N^")
-    assert benchmark._growth_order_label(1.25) == "O(N^1.25)"
+    assert growth_order.startswith("$O(N^{")
+    assert benchmark._growth_order_label(1.25) == "$O(N^{1.25})$"
 
     mixed_labels = [series.label for series in benchmark._MIXED_RUNTIME_PLOT_SPEC.series]
     nlolib_labels = [series.label for series in benchmark._NLOLIB_RUNTIME_PLOT_SPEC.series]
@@ -89,14 +102,16 @@ def test_runtime_plot_helpers() -> None:
     fig, ax = benchmark.plt.subplots()
     assert benchmark._plot_runtime_series(ax, rows, benchmark._MIXED_RUNTIME_PLOT_SPEC.series[0]) is True
     assert benchmark._plot_runtime_series(ax, rows, benchmark._MIXED_RUNTIME_PLOT_SPEC.series[1]) is True
-    legend_labels = [line.get_label() for line in ax.get_lines()]
+    _, legend_labels = ax.get_legend_handles_labels()
     benchmark.plt.close(fig)
-    assert legend_labels == [
-        "nlolib GPU",
-        "nlolib GPU growth O(N^0.50)",
-        "MMTools GPU",
-        "MMTools GPU growth O(N^0.42)",
+    assert "nlolib GPU" in legend_labels
+    assert "MMTools GPU" in legend_labels
+    growth_labels = [
+        label for label in legend_labels if label not in {"nlolib GPU", "MMTools GPU"}
     ]
+    assert len(growth_labels) == 2
+    assert any(label.startswith("nlolib GPU $O(N^{") for label in growth_labels)
+    assert any(label.startswith("MMTools GPU $O(N^{") for label in growth_labels)
 
     temp_dir = repo_root / "build" / "test-artifacts" / "tensor-backend-scaling-cleanup"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -118,6 +133,27 @@ def test_runtime_plot_helpers() -> None:
     assert nlolib_path is not None
     assert nlolib_path.name == "tensor_backend_scaling_runtime_nlolib_only.png"
     assert nlolib_path.is_file()
+
+    with tempfile.TemporaryDirectory() as temp_dir_name:
+        csv_path = Path(temp_dir_name) / "mmtools.csv"
+        csv_path.write_text(
+            "\n".join(
+                [
+                    "solver,backend,nt,nx,ny,mode_count,total_points,runtime_seconds,runtime_seconds_std,throughput_points_per_second,setup_seconds,setup_seconds_std,wall_seconds,wall_seconds_std,status,message",
+                    "MMTools,GPU,4096,8,8,8,32768,0.5,0.1,,1.5,0.2,2.0,0.3,ok,",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        mmtools_rows = benchmark._read_mmtools_rows(csv_path)
+        assert len(mmtools_rows) == 1
+        assert mmtools_rows[0].total_points == benchmark._equivalent_total_points(4096, 8, 8)
+        assert mmtools_rows[0].runtime_seconds == 2.0
+        assert mmtools_rows[0].runtime_seconds_std == 0.3
+        assert np.isclose(
+            float(mmtools_rows[0].throughput_points_per_second),
+            mmtools_rows[0].total_points / float(mmtools_rows[0].runtime_seconds),
+        )
 
 
 def main() -> None:

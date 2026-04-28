@@ -11,12 +11,13 @@ from __future__ import annotations
 import argparse
 import csv
 import time
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
 import numpy as np
-from scipy.optimize import curve_fit
+from scipy.optimize import OptimizeWarning, curve_fit
 from backend.app_base import ExampleAppBase
 from backend.plotting import plt
 from backend.runner import NloExampleRunner, centered_time_grid
@@ -303,6 +304,14 @@ def _require_csv_float(
     return float(value)
 
 
+def _equivalent_total_points(nt: int, nx: int, ny: int) -> int:
+    return int(nt * nx * ny)
+
+
+def _case_key(row: BenchmarkRow) -> tuple[int, int, int]:
+    return int(row.nt), int(row.nx), int(row.ny)
+
+
 def _read_mmtools_rows(summary_csv: Path | None) -> list[BenchmarkRow]:
     if summary_csv is None or not summary_csv.is_file():
         return []
@@ -349,13 +358,21 @@ def _read_mmtools_rows(summary_csv: Path | None) -> list[BenchmarkRow]:
             nx = _require_csv_int(row, "nx", positive=True)
             ny = _require_csv_int(row, "ny", positive=True)
             mode_count = _require_csv_int(row, "mode_count", positive=True)
-            total_points = _require_csv_int(row, "total_points", positive=True)
+            _require_csv_int(row, "total_points", positive=True)
+            total_points = _equivalent_total_points(nt, nx, ny)
 
-            runtime_seconds = _require_csv_float(row, "runtime_seconds", positive=True)
-            runtime_seconds_std = _csv_float(row, "runtime_seconds_std")
-            throughput = _csv_float(row, "throughput_points_per_second")
-            if throughput is None:
-                throughput = _throughput(total_points, runtime_seconds)
+            runtime_seconds = _csv_float(row, "wall_seconds")
+            runtime_seconds_std = _csv_float(row, "wall_seconds_std")
+            if runtime_seconds is None:
+                runtime_seconds = _require_csv_float(
+                    row, "runtime_seconds", positive=True
+                )
+                runtime_seconds_std = _csv_float(row, "runtime_seconds_std")
+            elif runtime_seconds <= 0.0:
+                raise ValueError(
+                    f"MMTools CSV has invalid 'wall_seconds' value: {row.get('wall_seconds')!r}"
+                )
+            throughput = _throughput(total_points, runtime_seconds)
             rows.append(
                 BenchmarkRow(
                     solver="MMTools",
@@ -395,11 +412,7 @@ def _resolve_cases(
 
 def _runtime_plot_rows(rows: Sequence[BenchmarkRow]) -> list[BenchmarkRow]:
     return sorted(
-        [
-            row
-            for row in rows
-            if row.status == "ok" and row.runtime_seconds is not None
-        ],
+        [row for row in rows if row.status == "ok" and row.runtime_seconds is not None],
         key=lambda row: (row.total_points, row.solver.lower(), row.backend.upper()),
     )
 
@@ -423,57 +436,102 @@ def _series_xy(rows: Sequence[BenchmarkRow]) -> tuple[np.ndarray, np.ndarray]:
     )
 
 
+def _series_yerr(rows: Sequence[BenchmarkRow]) -> np.ndarray:
+    return np.asarray(
+        [
+            (
+                0.0
+                if row.runtime_seconds_std is None
+                or not np.isfinite(row.runtime_seconds_std)
+                else max(float(row.runtime_seconds_std), 0.0)
+            )
+            for row in rows
+        ],
+        dtype=np.float64,
+    )
+
+
 def _growth_order_label(order: float) -> str:
-    return r"$O(N^{" + f"{order:.2f}" + r"})$"
+    return r"$O(N^{" + f"{round(order, 1)}" + r"})$"
 
 
 def _fit_runtime_series(
     rows: Sequence[BenchmarkRow],
-) -> tuple[np.ndarray, np.ndarray, str] | None:
+) -> tuple[np.ndarray, np.ndarray, str, float] | None:
     x_values, y_values = _series_xy(rows)
-    if (
-        x_values.size < 2
-        or np.any(x_values <= 0.0)
-        or np.any(y_values <= 0.0)
-    ):
+    if x_values.size < 2 or np.any(x_values <= 0.0) or np.any(y_values <= 0.0):
         return None
 
-    popt, pcov = curve_fit(lambda x, a, b, c: a * np.power(x, b) + c, x_values, y_values)
-    order, intercept = float(popt[1]), float(popt[0])
     x_fit = np.linspace(
         float(np.min(x_values)),
         float(np.max(x_values)),
         _FIT_SAMPLE_COUNT,
         dtype=np.float64,
     )
-    y_fit = intercept * np.power(x_fit, order) + float(popt[2])
-    return x_fit, y_fit, _growth_order_label(float(order))
+    if x_values.size == 2:
+        (order, log_scale), pcov = np.polyfit(
+            np.log(x_values), np.log(y_values), deg=1, full=False, cov=True
+        )
+        y_fit = np.exp(log_scale) * np.power(x_fit, order)
+        error = np.sqrt(np.diag(pcov))[0] if pcov is not None else 0.0
+        return x_fit, y_fit, _growth_order_label(float(order)), error
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", OptimizeWarning)
+            popt, pcov = curve_fit(
+                lambda x, a, b, c: a * np.power(x, b) + c,
+                x_values,
+                y_values,
+            )
+        order = float(popt[1])
+        y_fit = float(popt[0]) * np.power(x_fit, order) + float(popt[2])
+        error = float(np.sqrt(np.diag(pcov))[1]) if pcov is not None else 0.0
+    except Exception:
+        (order, log_scale), pcov = np.polyfit(
+            np.log(x_values), np.log(y_values), deg=1, full=False, cov=True
+        )
+        y_fit = np.exp(log_scale) * np.power(x_fit, order)
+        error = np.sqrt(np.diag(pcov))[0] if pcov is not None else 0.0
+    return x_fit, y_fit, _growth_order_label(float(order)), error
 
 
-def _plot_runtime_series(ax, rows: Sequence[BenchmarkRow], series: RuntimePlotSeries) -> bool:
+def _plot_runtime_series(
+    ax, rows: Sequence[BenchmarkRow], series: RuntimePlotSeries
+) -> tuple[bool, tuple[np.ndarray | None, np.ndarray | None, float | None]] | None:
     solver_rows = _series_rows(rows, series)
     if len(solver_rows) <= 0:
-        return False
+        return False, (None, None, None)
 
     x_values, y_values = _series_xy(solver_rows)
-    (line,) = ax.plot(
-        x_values,
+    y_error = _series_yerr(solver_rows)
+    container = ax.errorbar(
+        x_values / 1e3,
         y_values,
+        yerr=y_error,
         marker=series.marker,
         linestyle="none",
+        capsize=3.0,
+        elinewidth=1.0,
     )
+    line = container.lines[0]
     fit = _fit_runtime_series(solver_rows)
     if fit is not None:
-        x_fit, y_fit, growth_order = fit
+        x_fit, y_fit, growth_order, error = fit
         ax.plot(
-            x_fit,
+            x_fit / 1e3,
             y_fit,
             linestyle=series.fit_linestyle,
             linewidth=1.4,
             color=line.get_color(),
-            label=f"{series.label} {growth_order}",
+            label=f"{series.label} ".split(" ")[0].title()
+            + " "
+            + f"{series.label}".split(" ")[1]
+            + f"{(growth_order)}",
         )
-    return True
+    else:
+        x_fit, y_fit, growth_order, error = None, None, None, None
+    return True, (x_fit, y_fit, error)
 
 
 def _plot_runtime(
@@ -487,21 +545,97 @@ def _plot_runtime(
 
     fig, ax = plt.subplots()
     any_series = False
+    fits = []
     for series in plot_spec.series:
-        any_series = _plot_runtime_series(ax, rows, series) or any_series
+        any_series, fit = _plot_runtime_series(ax, rows, series) or (any_series, None)
+        fits.append(fit)
 
     if not any_series:
         plt.close(fig)
         return None
 
-    ax.set_xlabel("State vector size")
+    ax.set_xlabel(r"State vector size ($10^3$ points)")
     ax.set_ylabel("Runtime (s)")
     ax.legend()
     fig.tight_layout()
     output_path = output_dir / plot_spec.save_path
     fig.savefig(output_path)
     plt.close(fig)
-    return output_path
+    
+    if len(fits) != 0 and all(fit is not None for fit in fits):
+        # Print Intercepts of all pairs of fitted curves
+        for num, fit_a in enumerate(fits):
+            series = plot_spec.series[num]
+            
+            if len(fits) <= num + 1:
+                break
+            
+            for other_idx, fit_b in enumerate(fits[num + 1:], start=num + 1):
+                if fit_a is None or fit_b is None:
+                    continue
+                series_b = plot_spec.series[other_idx]
+                x_fit_a, y_fit_a, error_a = fit_a
+                x_fit_b, y_fit_b, error_b = fit_b
+                if (
+                    x_fit_a is None
+                    or y_fit_a is None
+                    or x_fit_b is None
+                    or y_fit_b is None
+                ):
+                    continue
+
+                overlap_min = max(float(np.min(x_fit_a)), float(np.min(x_fit_b)))
+                overlap_max = min(float(np.max(x_fit_a)), float(np.max(x_fit_b)))
+                if overlap_max <= overlap_min:
+                    print(
+                        f"Could not compute intercept of {series.label} curve and {series_b.label} curve."
+                    )
+                    continue
+
+                sample_count = max(_FIT_SAMPLE_COUNT * 4, 2)
+                x_common = np.linspace(
+                    overlap_min,
+                    overlap_max,
+                    sample_count,
+                    dtype=np.float64,
+                )
+                y_common_a = np.interp(x_common, x_fit_a, y_fit_a)
+                y_common_b = np.interp(x_common, x_fit_b, y_fit_b)
+                delta = y_common_a - y_common_b
+                sign_changes = np.where(np.signbit(delta[:-1]) != np.signbit(delta[1:]))[0]
+
+                x_intercept = None
+                if sign_changes.size > 0:
+                    idx = int(sign_changes[0])
+                    x0 = float(x_common[idx])
+                    x1 = float(x_common[idx + 1])
+                    d0 = float(delta[idx])
+                    d1 = float(delta[idx + 1])
+                    if d1 != d0:
+                        x_intercept = x0 - d0 * (x1 - x0) / (d1 - d0)
+                    else:
+                        x_intercept = x0
+                else:
+                    idx = int(np.argmin(np.abs(delta)))
+                    if np.isclose(delta[idx], 0.0, atol=1.0e-9, rtol=0.0):
+                        x_intercept = float(x_common[idx])
+
+                if x_intercept is not None:
+                    err_a = 0.0 if error_a is None else float(error_a)
+                    err_b = 0.0 if error_b is None else float(error_b)
+                    print(
+                        f"Intercept of {series.label} curve and {series_b.label} curve: {x_intercept:.3f}"
+                        + r" ± "
+                        + f"{np.sqrt(err_a**2 + err_b**2):.3f}"
+                    )
+                else:
+                    print(
+                        f"Could not compute intercept of {series.label} curve and {series_b.label} curve."
+                    )
+        return output_path
+    else:
+        print("Could not compute fitted curves for intercept analysis.")
+        return output_path
 
 
 def _benchmark_nlolib_rows(
@@ -511,6 +645,7 @@ def _benchmark_nlolib_rows(
     cases: Sequence[TensorCase],
     *,
     series: Sequence[RuntimePlotSeries] = _NLOLIB_RUNTIME_PLOT_SPEC.series,
+    run_cpu: bool = True,
 ) -> list[BenchmarkRow]:
     backend_type_by_label = {
         "CPU": runner.nlo.VECTOR_BACKEND_CPU,
@@ -520,6 +655,8 @@ def _benchmark_nlolib_rows(
     for plot_series in series:
         backend_type = backend_type_by_label.get(plot_series.backend.upper())
         if backend_type is None or plot_series.solver.lower() != "nlolib":
+            continue
+        if backend_type == runner.nlo.VECTOR_BACKEND_CPU and not run_cpu:
             continue
         rows.extend(
             _benchmark_nlolib_case(
@@ -540,7 +677,7 @@ def _benchmark_nlolib_rows(
 def _print_summary(rows: list[BenchmarkRow]) -> None:
     runtime_rows = [row for row in rows if row.runtime_seconds is not None]
     keyed_rows = {
-        (row.solver.lower(), row.backend.upper(), row.total_points): row
+        (row.solver.lower(), row.backend.upper(), _case_key(row)): row
         for row in runtime_rows
     }
 
@@ -555,11 +692,21 @@ def _print_summary(rows: list[BenchmarkRow]) -> None:
             f"status={row.status} {row.message}"
         )
 
-    total_points_values = sorted({row.total_points for row in rows})
-    for total_points in total_points_values:
-        cpu_row = keyed_rows.get(("nlolib", "CPU", total_points))
-        gpu_row = keyed_rows.get(("nlolib", "GPU", total_points))
-        mmtools_row = keyed_rows.get(("mmtools", "GPU", total_points))
+    case_keys = sorted(
+        {_case_key(row) for row in rows},
+        key=lambda item: _equivalent_total_points(*item),
+    )
+    for case_key in case_keys:
+        cpu_row = keyed_rows.get(("nlolib", "CPU", case_key))
+        gpu_row = keyed_rows.get(("nlolib", "GPU", case_key))
+        mmtools_row = keyed_rows.get(("mmtools", "GPU", case_key))
+        total_points = None
+        for candidate in (gpu_row, cpu_row, mmtools_row):
+            if candidate is not None:
+                total_points = candidate.total_points
+                break
+        if total_points is None:
+            total_points = _equivalent_total_points(*case_key)
 
         if (
             cpu_row is not None
@@ -604,7 +751,7 @@ def _run(args: argparse.Namespace) -> float:
 
     mmtools_rows = _read_mmtools_rows(mmtools_summary_csv)
     cases = _resolve_cases(args, mmtools_rows, mmtools_summary_csv)
-    nlolib_rows = _benchmark_nlolib_rows(args, runner, api, cases)
+    nlolib_rows = _benchmark_nlolib_rows(args, runner, api, cases, run_cpu=False)
     rows = nlolib_rows + mmtools_rows
 
     csv_path = args.output_dir / "tensor_backend_scaling_results.csv"
