@@ -21,6 +21,7 @@ from scipy.optimize import OptimizeWarning, curve_fit
 from backend.app_base import ExampleAppBase
 from backend.plotting import plt
 from backend.runner import NloExampleRunner, centered_time_grid
+from backend.storage import ExampleRunDB
 
 
 @dataclass(frozen=True)
@@ -312,6 +313,169 @@ def _case_key(row: BenchmarkRow) -> tuple[int, int, int]:
     return int(row.nt), int(row.nx), int(row.ny)
 
 
+def _row_storage_case_key(row: BenchmarkRow) -> str:
+    solver = "".join(ch if ch.isalnum() else "_" for ch in row.solver.lower()).strip("_")
+    backend = "".join(ch if ch.isalnum() else "_" for ch in row.backend.upper()).strip("_")
+    return f"{solver}_{backend}_nt{int(row.nt)}_nx{int(row.nx)}_ny{int(row.ny)}"
+
+
+def _metadata_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return None
+    return resolved if np.isfinite(resolved) else None
+
+
+def _metadata_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"stored benchmark row has invalid integer value: {value!r}") from exc
+
+
+def _row_from_metadata(meta: dict[str, object], *, case_key: str) -> BenchmarkRow:
+    payload = meta.get("row")
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"stored benchmark case '{case_key}' is missing row metadata.")
+
+    required = BenchmarkRow.__dataclass_fields__.keys()
+    missing = [name for name in required if name not in payload]
+    if missing:
+        raise RuntimeError(
+            f"stored benchmark case '{case_key}' is missing fields: {', '.join(missing)}"
+        )
+
+    return BenchmarkRow(
+        solver=str(payload["solver"]),
+        backend=str(payload["backend"]),
+        nt=_metadata_int(payload["nt"]),
+        nx=_metadata_int(payload["nx"]),
+        ny=_metadata_int(payload["ny"]),
+        mode_count=_metadata_int(payload["mode_count"]),
+        total_points=_metadata_int(payload["total_points"]),
+        runtime_seconds=_metadata_float(payload["runtime_seconds"]),
+        runtime_seconds_std=_metadata_float(payload["runtime_seconds_std"]),
+        throughput_points_per_second=_metadata_float(
+            payload["throughput_points_per_second"]
+        ),
+        status=str(payload["status"]),
+        message=str(payload["message"]),
+    )
+
+
+def _save_benchmark_rows(
+    db: ExampleRunDB,
+    *,
+    example_name: str,
+    run_group: str,
+    rows: Sequence[BenchmarkRow],
+) -> None:
+    db.begin_group(example_name, run_group)
+    for row in rows:
+        case_key = _row_storage_case_key(row)
+        db.save_case(
+            example_name=example_name,
+            run_group=run_group,
+            case_key=case_key,
+            run_id=db.make_run_id(example_name, run_group, case_key),
+            meta={
+                "kind": "tensor_backend_scaling_benchmark_row",
+                "schema": 1,
+                "row": asdict(row),
+            },
+        )
+
+
+def _load_benchmark_rows(
+    db: ExampleRunDB,
+    *,
+    example_name: str,
+    run_group: str,
+) -> list[BenchmarkRow]:
+    rows: list[BenchmarkRow] = []
+    for case in db.list_cases(example_name=example_name, run_group=run_group):
+        if case.meta.get("kind") != "tensor_backend_scaling_benchmark_row":
+            continue
+        rows.append(_row_from_metadata(case.meta, case_key=case.case_key))
+
+    if not rows:
+        raise RuntimeError(
+            f"run_group '{run_group}' has no stored tensor backend scaling rows."
+        )
+
+    return sorted(
+        rows,
+        key=lambda row: (row.total_points, row.solver.lower(), row.backend.upper()),
+    )
+
+
+def _read_benchmark_rows_csv(csv_path: Path) -> list[BenchmarkRow]:
+    if not csv_path.is_file():
+        return []
+
+    with csv_path.open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = set(reader.fieldnames or [])
+        required = set(BenchmarkRow.__dataclass_fields__.keys())
+        missing = sorted(required - fieldnames)
+        if missing:
+            raise ValueError(
+                f"benchmark CSV is missing required columns ({', '.join(missing)})."
+            )
+
+        rows = [
+            BenchmarkRow(
+                solver=str(row["solver"]),
+                backend=str(row["backend"]),
+                nt=_metadata_int(row["nt"]),
+                nx=_metadata_int(row["nx"]),
+                ny=_metadata_int(row["ny"]),
+                mode_count=_metadata_int(row["mode_count"]),
+                total_points=_metadata_int(row["total_points"]),
+                runtime_seconds=_metadata_float(row["runtime_seconds"]),
+                runtime_seconds_std=_metadata_float(row["runtime_seconds_std"]),
+                throughput_points_per_second=_metadata_float(
+                    row["throughput_points_per_second"]
+                ),
+                status=str(row["status"]),
+                message=str(row["message"]),
+            )
+            for row in reader
+        ]
+
+    return sorted(
+        rows,
+        key=lambda row: (row.total_points, row.solver.lower(), row.backend.upper()),
+    )
+
+
+def _load_replot_benchmark_rows(
+    db: ExampleRunDB,
+    *,
+    example_name: str,
+    run_group: str | None,
+    fallback_csv: Path | None,
+) -> list[BenchmarkRow]:
+    try:
+        resolved_run_group = db.resolve_replot_group(example_name, run_group)
+    except RuntimeError:
+        if run_group is not None or fallback_csv is None:
+            raise
+        rows = _read_benchmark_rows_csv(fallback_csv)
+        if rows:
+            return rows
+        raise
+
+    return _load_benchmark_rows(
+        db,
+        example_name=example_name,
+        run_group=resolved_run_group,
+    )
+
+
 def _read_mmtools_rows(summary_csv: Path | None) -> list[BenchmarkRow]:
     if summary_csv is None or not summary_csv.is_file():
         return []
@@ -556,7 +720,6 @@ def _plot_runtime(
 
     ax.set_xlabel(r"State vector size ($10^3$ points)")
     ax.set_ylabel("Runtime (s)")
-    ax.set_xscale("log")
     ax.set_yscale("log")
     ax.legend()
     fig.tight_layout()
@@ -743,20 +906,38 @@ def _print_summary(rows: list[BenchmarkRow]) -> None:
 
 
 def _run(args: argparse.Namespace) -> float:
-    runner = NloExampleRunner()
-    api = runner.nlo.NLolib()
+    db = ExampleRunDB(args.db_path)
+    example_name = "tensor_backend_scaling"
     args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    mmtools_summary_csv = args.mmtools_summary_csv
-    if mmtools_summary_csv is None and _DEFAULT_MMTOOLS_SUMMARY_CSV.is_file():
-        mmtools_summary_csv = _DEFAULT_MMTOOLS_SUMMARY_CSV
-
-    mmtools_rows = _read_mmtools_rows(mmtools_summary_csv)
-    cases = _resolve_cases(args, mmtools_rows, mmtools_summary_csv)
-    nlolib_rows = _benchmark_nlolib_rows(args, runner, api, cases, run_cpu=False)
-    rows = nlolib_rows + mmtools_rows
-
     csv_path = args.output_dir / "tensor_backend_scaling_results.csv"
+
+    if args.replot:
+        rows = _load_replot_benchmark_rows(
+            db,
+            example_name=example_name,
+            run_group=args.run_group,
+            fallback_csv=csv_path,
+        )
+    else:
+        run_group = db.begin_group(example_name, args.run_group)
+        runner = NloExampleRunner()
+        api = runner.nlo.NLolib()
+
+        mmtools_summary_csv = args.mmtools_summary_csv
+        if mmtools_summary_csv is None and _DEFAULT_MMTOOLS_SUMMARY_CSV.is_file():
+            mmtools_summary_csv = _DEFAULT_MMTOOLS_SUMMARY_CSV
+
+        mmtools_rows = _read_mmtools_rows(mmtools_summary_csv)
+        cases = _resolve_cases(args, mmtools_rows, mmtools_summary_csv)
+        nlolib_rows = _benchmark_nlolib_rows(args, runner, api, cases, run_cpu=False)
+        rows = nlolib_rows + mmtools_rows
+        _save_benchmark_rows(
+            db,
+            example_name=example_name,
+            run_group=run_group,
+            rows=rows,
+        )
+
     _write_csv(rows, csv_path)
     plot_path = _plot_runtime(rows, args.output_dir, plot_spec=_MIXED_RUNTIME_PLOT_SPEC)
     plot_path_2 = _plot_runtime(

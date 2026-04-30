@@ -10,30 +10,51 @@ from __future__ import annotations
 import argparse
 
 from backend.app_base import ExampleAppBase
+from backend.storage import ExampleRunDB
 from tensor_backend_scaling_rk4ip import (
     BenchmarkRow,
     _NLOLIB_RUNTIME_PLOT_SPEC,
     _benchmark_nlolib_rows,
     _case_from_scale,
+    _load_replot_benchmark_rows,
     _parse_int_csv,
     _plot_runtime,
     _print_summary,
+    _save_benchmark_rows,
     _write_csv,
     RuntimePlotSpec,
 )
 
 
 def _run(args: argparse.Namespace) -> float:
-    from backend.runner import NloExampleRunner
-
-    runner = NloExampleRunner()
-    api = runner.nlo.NLolib()
+    db = ExampleRunDB(args.db_path)
+    example_name = "tensor_backend_scaling_nlolib"
     args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    cases = [_case_from_scale(scale) for scale in args.scales]
-    rows: list[BenchmarkRow] = _benchmark_nlolib_rows(args, runner, api, cases)
-
     csv_path = args.output_dir / "tensor_backend_scaling_nlolib_results.csv"
+
+    if args.replot:
+        rows: list[BenchmarkRow] = _load_replot_benchmark_rows(
+            db,
+            example_name=example_name,
+            run_group=args.run_group,
+            fallback_csv=csv_path,
+        )
+    else:
+        from backend.runner import NloExampleRunner
+
+        run_group = db.begin_group(example_name, args.run_group)
+        runner = NloExampleRunner()
+        api = runner.nlo.NLolib()
+
+        cases = [_case_from_scale(scale) for scale in args.scales]
+        rows = _benchmark_nlolib_rows(args, runner, api, cases)
+        _save_benchmark_rows(
+            db,
+            example_name=example_name,
+            run_group=run_group,
+            rows=rows,
+        )
+
     _write_csv(rows, csv_path)
     plot_path = _plot_runtime(
         rows,
