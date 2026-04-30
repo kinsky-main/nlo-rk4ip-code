@@ -98,11 +98,29 @@ def test_runtime_plot_helpers() -> None:
     assert np.all(np.isfinite(y_fit))
     assert growth_order.startswith("$O(N^{")
     assert benchmark._growth_order_label(1.25) == "$O(N^{1.2})$"
+    skipped_fit = benchmark._fit_runtime_series(
+        [
+            _row(benchmark, "MMTools", "GPU", 64, 9.99),
+            _row(benchmark, "MMTools", "GPU", 128, 0.16),
+            _row(benchmark, "MMTools", "GPU", 256, 0.32),
+            _row(benchmark, "MMTools", "GPU", 512, 0.64),
+        ],
+        skip_initial_points=1,
+    )
+    assert skipped_fit is not None
+    skipped_x_fit, skipped_y_fit, skipped_order, _ = skipped_fit
+    assert np.isclose(float(skipped_x_fit[0]), 128.0)
+    assert np.isclose(float(skipped_x_fit[-1]), 512.0)
+    assert skipped_order == "$O(N^{1.0})$"
+    assert np.isclose(float(skipped_y_fit[0]), 0.16)
+    assert np.isclose(float(skipped_y_fit[-1]), 0.64)
 
     mixed_labels = [series.label for series in benchmark._MIXED_RUNTIME_PLOT_SPEC.series]
     nlolib_labels = [series.label for series in benchmark._NLOLIB_RUNTIME_PLOT_SPEC.series]
     assert mixed_labels == ["nlolib GPU", "MMTools GPU"]
     assert nlolib_labels == ["nlolib CPU", "nlolib GPU"]
+    assert benchmark._MIXED_RUNTIME_PLOT_SPEC.fit_skip_initial_points == 1
+    assert benchmark._NLOLIB_RUNTIME_PLOT_SPEC.fit_skip_initial_points == 1
 
     fig, ax = benchmark.plt.subplots()
     assert benchmark._plot_runtime_series(ax, rows, benchmark._MIXED_RUNTIME_PLOT_SPEC.series[0])[0] is True

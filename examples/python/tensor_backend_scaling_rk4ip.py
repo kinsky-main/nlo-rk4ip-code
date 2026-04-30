@@ -11,13 +11,11 @@ from __future__ import annotations
 import argparse
 import csv
 import time
-import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
 import numpy as np
-from scipy.optimize import OptimizeWarning, curve_fit
 from backend.app_base import ExampleAppBase
 from backend.plotting import plt
 from backend.runner import NloExampleRunner, centered_time_grid
@@ -72,6 +70,7 @@ class RuntimePlotSeries:
 class RuntimePlotSpec:
     series: tuple[RuntimePlotSeries, ...]
     save_path: str
+    fit_skip_initial_points: int = 0
 
 
 _TIME_WINDOW = 2.56
@@ -97,6 +96,7 @@ _MIXED_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
         RuntimePlotSeries("MMTools", "GPU"),
     ),
     save_path="tensor_backend_scaling_runtime.png",
+    fit_skip_initial_points=1,
 )
 _NLOLIB_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
     series=(
@@ -104,6 +104,7 @@ _NLOLIB_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
         RuntimePlotSeries("nlolib", "GPU"),
     ),
     save_path="tensor_backend_scaling_runtime_nlolib_only.png",
+    fit_skip_initial_points=1,
 )
 _FIT_SAMPLE_COUNT = 256
 
@@ -619,49 +620,60 @@ def _growth_order_label(order: float) -> str:
     return r"$O(N^{" + f"{round(order, 1)}" + r"})$"
 
 
-def _fit_runtime_series(
-    rows: Sequence[BenchmarkRow],
-) -> tuple[np.ndarray, np.ndarray, str, float] | None:
-    x_values, y_values = _series_xy(rows)
-    if x_values.size < 2 or np.any(x_values <= 0.0) or np.any(y_values <= 0.0):
+def _fit_loglog_slope(
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    fit_mask: np.ndarray,
+) -> tuple[float, float, np.ndarray] | None:
+    valid_mask = (
+        np.asarray(fit_mask, dtype=bool)
+        & np.isfinite(x_values)
+        & np.isfinite(y_values)
+        & (x_values > 0.0)
+        & (y_values > 0.0)
+    )
+    if int(np.count_nonzero(valid_mask)) < 2:
         return None
 
+    log_x = np.asarray(np.log(x_values[valid_mask]), dtype=np.float64)
+    log_y = np.asarray(np.log(y_values[valid_mask]), dtype=np.float64)
+    order, log_scale = np.polyfit(log_x, log_y, deg=1)
+    return float(order), float(log_scale), valid_mask
+
+
+def _fit_runtime_series(
+    rows: Sequence[BenchmarkRow],
+    *,
+    skip_initial_points: int = 0,
+) -> tuple[np.ndarray, np.ndarray, str, float] | None:
+    x_values, y_values = _series_xy(rows)
+    if x_values.size <= int(skip_initial_points):
+        return None
+
+    fit_mask = np.ones(x_values.shape, dtype=bool)
+    fit_mask[: max(0, int(skip_initial_points))] = False
+    fitted = _fit_loglog_slope(x_values, y_values, fit_mask)
+    if fitted is None:
+        return None
+    order, log_scale, valid_mask = fitted
+
+    fit_x_values = x_values[valid_mask]
     x_fit = np.linspace(
-        float(np.min(x_values)),
-        float(np.max(x_values)),
+        float(np.min(fit_x_values)),
+        float(np.max(fit_x_values)),
         _FIT_SAMPLE_COUNT,
         dtype=np.float64,
     )
-    if x_values.size == 2:
-        (order, log_scale), pcov = np.polyfit(
-            np.log(x_values), np.log(y_values), deg=1, full=False, cov=True
-        )
-        y_fit = np.exp(log_scale) * np.power(x_fit, order)
-        error = np.sqrt(np.diag(pcov))[0] if pcov is not None else 0.0
-        return x_fit, y_fit, _growth_order_label(float(order)), error
-
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", OptimizeWarning)
-            popt, pcov = curve_fit(
-                lambda x, a, b, c: a * np.power(x, b) + c,
-                x_values,
-                y_values,
-            )
-        order = float(popt[1])
-        y_fit = float(popt[0]) * np.power(x_fit, order) + float(popt[2])
-        error = float(np.sqrt(np.diag(pcov))[1]) if pcov is not None else 0.0
-    except Exception:
-        (order, log_scale), pcov = np.polyfit(
-            np.log(x_values), np.log(y_values), deg=1, full=False, cov=True
-        )
-        y_fit = np.exp(log_scale) * np.power(x_fit, order)
-        error = np.sqrt(np.diag(pcov))[0] if pcov is not None else 0.0
-    return x_fit, y_fit, _growth_order_label(float(order)), error
+    y_fit = np.exp(log_scale) * np.power(x_fit, order)
+    return x_fit, y_fit, _growth_order_label(float(order)), 0.0
 
 
 def _plot_runtime_series(
-    ax, rows: Sequence[BenchmarkRow], series: RuntimePlotSeries
+    ax,
+    rows: Sequence[BenchmarkRow],
+    series: RuntimePlotSeries,
+    *,
+    fit_skip_initial_points: int = 0,
 ) -> tuple[bool, tuple[np.ndarray | None, np.ndarray | None, float | None]] | None:
     solver_rows = _series_rows(rows, series)
     if len(solver_rows) <= 0:
@@ -679,7 +691,10 @@ def _plot_runtime_series(
         elinewidth=1.0,
     )
     line = container.lines[0]
-    fit = _fit_runtime_series(solver_rows)
+    fit = _fit_runtime_series(
+        solver_rows,
+        skip_initial_points=fit_skip_initial_points,
+    )
     if fit is not None:
         x_fit, y_fit, growth_order, error = fit
         ax.plot(
@@ -688,10 +703,7 @@ def _plot_runtime_series(
             linestyle=series.fit_linestyle,
             linewidth=1.4,
             color=line.get_color(),
-            label=f"{series.label} ".split(" ")[0].title()
-            + " "
-            + f"{series.label}".split(" ")[1]
-            + f" {(growth_order)}",
+            label=f"{series.label} {growth_order}",
         )
     else:
         x_fit, y_fit, growth_order, error = None, None, None, None
@@ -711,7 +723,13 @@ def _plot_runtime(
     any_series = False
     fits = []
     for series in plot_spec.series:
-        any_series, fit = _plot_runtime_series(ax, rows, series) or (any_series, None)
+        series_plotted, fit = _plot_runtime_series(
+            ax,
+            rows,
+            series,
+            fit_skip_initial_points=plot_spec.fit_skip_initial_points,
+        ) or (False, None)
+        any_series = any_series or series_plotted
         fits.append(fit)
 
     if not any_series:
@@ -721,6 +739,7 @@ def _plot_runtime(
     ax.set_xlabel(r"State vector size ($10^3$ points)")
     ax.set_ylabel("Runtime (s)")
     ax.set_yscale("log")
+    ax.set_xscale("log")
     ax.legend()
     fig.tight_layout()
     output_path = output_dir / plot_spec.save_path

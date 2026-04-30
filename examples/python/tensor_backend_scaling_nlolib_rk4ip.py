@@ -8,6 +8,7 @@ same tensor problem construction as the mixed MMTools comparison example.
 from __future__ import annotations
 
 import argparse
+import numpy as np
 
 from backend.app_base import ExampleAppBase
 from backend.storage import ExampleRunDB
@@ -62,6 +63,7 @@ def _run(args: argparse.Namespace) -> float:
         plot_spec=RuntimePlotSpec(
             series=_NLOLIB_RUNTIME_PLOT_SPEC.series,
             save_path="tensor_backend_scaling_nlolib_runtime.png",
+            fit_skip_initial_points=_NLOLIB_RUNTIME_PLOT_SPEC.fit_skip_initial_points,
         ),
     )
 
@@ -81,7 +83,7 @@ class TensorBackendScalingNlolibApp(ExampleAppBase):
         parser.add_argument(
             "--scales",
             type=_parse_int_csv,
-            default=[16, 32, 48, 64, 80, 96, 112, 128],
+            default=np.geomspace(8, 256, num=16, dtype=int).tolist(),
             help="Comma-separated default tensor scales with nt=2*scale and nx=ny=scale.",
         )
         parser.add_argument(
@@ -90,8 +92,8 @@ class TensorBackendScalingNlolibApp(ExampleAppBase):
             default=1,
             help="Recorded snapshots per run. Use 1 to benchmark final-only output.",
         )
-        parser.add_argument("--warmup", type=int, default=7, help="Warmup runs per benchmark point.")
-        parser.add_argument("--runs", type=int, default=5, help="Measured runs per benchmark point.")
+        parser.add_argument("--warmup", type=int, default=0, help="Warmup runs per benchmark point.")
+        parser.add_argument("--runs", type=int, default=1, help="Measured runs per benchmark point.")
 
     def run(self) -> float:
         return _run(self.args)
