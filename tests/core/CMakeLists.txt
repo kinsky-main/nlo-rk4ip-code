@@ -1,5 +1,6 @@
 add_executable(test_core_state_alloc
   ${CMAKE_CURRENT_LIST_DIR}/test_state_alloc.c
+  ${CMAKE_SOURCE_DIR}/src/nlolib.c
   ${CMAKE_SOURCE_DIR}/src/core/init.c
   ${CMAKE_SOURCE_DIR}/src/core/init_defaults.c
   ${CMAKE_SOURCE_DIR}/src/core/init_limits.c
@@ -14,6 +15,7 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/physics/operator_program_execute.c
   ${CMAKE_SOURCE_DIR}/src/numerics/rk4_kernel.c
   ${CMAKE_SOURCE_DIR}/src/io/log_format.c
+  ${CMAKE_SOURCE_DIR}/src/io/propagate_log.c
   ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
   ${CMAKE_SOURCE_DIR}/src/io/snapshot_store.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c

@@ -33,9 +33,9 @@ if str(PYTHON_API_DIR) not in sys.path:
 import nlolib as nlo
 
 
-DEFAULT_SOLITON_ORDER = 1.0
+DEFAULT_SOLITON_ORDER = 2.0
 DEFAULT_SATURATION_INTENSITY = 2.0
-DEFAULT_PROPAGATION_PERIODS = 8.0
+DEFAULT_PROPAGATION_PERIODS = 6.0
 
 
 def centered_spatial_grid(num_samples: int, delta: float) -> np.ndarray:
@@ -280,6 +280,8 @@ def _run_case(
         ),
     )
     kwargs = dict(storage_kwargs or {})
+    if storage_kwargs is not None:
+        kwargs.setdefault("return_records", False)
     result = api.propagate(
         cfg,
         flatten_tfast(field0_tyx).tolist(),
@@ -289,18 +291,20 @@ def _run_case(
         **kwargs,
     )
     z_axis = np.asarray(result.z_axis, dtype=np.float64)
-    records_tyx = unflatten_tfast_records(
-        np.asarray(result.records, dtype=np.complex128),
-        num_records=len(z_axis),
-        nt=nt,
-        ny=ny,
-        nx=nx,
-    )
+    if result.records:
+        records_tyx = unflatten_tfast_records(
+            np.asarray(result.records, dtype=np.complex128),
+            num_records=len(z_axis),
+            nt=nt,
+            ny=ny,
+            nx=nx,
+        )
+    else:
+        records_tyx = np.empty((0, int(nt), int(ny), int(nx)), dtype=np.complex128)
     return z_axis, records_tyx, dict(result.meta)
 
 
 def _run(args: argparse.Namespace) -> float:
-    nlo.set_progress_options(enabled=False)
     try:
         nlo.set_log_level(nlo.NLOLIB_LOG_LEVEL_ERROR)
     except RuntimeError:
@@ -308,6 +312,7 @@ def _run(args: argparse.Namespace) -> float:
 
     db = ExampleRunDB(args.db_path)
     api = nlo.NLolib()
+    api.set_progress_options(enabled=True, milestone_percent=2, emit_on_step_adjust=True)
     example_name = "high_order_grin_soliton_rk4ip"
     nonlinear_case_key = "nonlinear"
 
@@ -353,8 +358,8 @@ def _run(args: argparse.Namespace) -> float:
     ).astype(np.complex128)
 
     exec_options = nlo.default_execution_options(
-        backend_type=nlo.VECTOR_BACKEND_CPU,
-        fft_backend=nlo.FFT_BACKEND_FFTW,
+        backend_type=nlo.VECTOR_BACKEND_AUTO,
+        fft_backend=nlo.FFT_BACKEND_AUTO,
     )
 
     if args.replot:
@@ -454,6 +459,15 @@ def _run(args: argparse.Namespace) -> float:
             case_key=nonlinear_case_key,
             solver_meta=nonlinear_meta,
             meta=meta,
+        )
+        loaded_nonlinear = db.load_case(example_name=example_name, run_group=run_group, case_key=nonlinear_case_key)
+        z_axis = np.asarray(loaded_nonlinear.z_axis, dtype=np.float64)
+        nonlinear_records = unflatten_tfast_records(
+            loaded_nonlinear.records,
+            num_records=len(z_axis),
+            nt=nt,
+            ny=ny,
+            nx=nx,
         )
 
     launch_centerline = np.sum(np.abs(field0_tyx[:, ny // 2, :]) ** 2, axis=0)
@@ -587,14 +601,14 @@ def _run(args: argparse.Namespace) -> float:
         input_is_intensity=True,
         z_label=r"$z / L_D$",
     )
-    save_3d_intensity_time_sweep_video(
-        t_scaled,
-        x_scaled,
-        y_scaled,
-        z_scaled,
-        nonlinear_records,
-        output_dir / "high_order_grin_soliton_nonlinear_time_sweep.mp4",
-    )
+    # save_3d_intensity_time_sweep_video(
+    #     t_scaled,
+    #     x_scaled,
+    #     y_scaled,
+    #     z_scaled,
+    #     nonlinear_records,
+    #     output_dir / "high_order_grin_soliton_nonlinear_time_sweep.mp4",
+    # )
 
     nonlinear_power_drift = float(nonlinear_power_drift_curve[-1])
 

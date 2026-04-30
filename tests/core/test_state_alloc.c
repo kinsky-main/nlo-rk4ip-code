@@ -7,10 +7,12 @@
 #include "core/init.h"
 #include "core/state.h"
 #include "io/snapshot_store.h"
+#include "nlolib.h"
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifndef TEST_TWO_PI
 #define TEST_TWO_PI 6.283185307179586476925286766559
@@ -566,6 +568,105 @@ static void test_snapshot_store_dense_readback(void)
     printf("test_snapshot_store_dense_readback: validates dense record reconstruction from chunks.\n");
 }
 
+static void test_dense_output_safety_cap_rejects_before_init(void)
+{
+    simulation_config config;
+    memset(&config, 0, sizeof(config));
+    config.propagation.propagation_distance = 0.1;
+
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
+    propagate_options options = nlolib_propagate_options_default();
+    options.num_recorded_samples = 1u;
+    options.output_mode = PROPAGATE_OUTPUT_FINAL_ONLY;
+    options.return_records = 1;
+    options.exec_options = &exec_options;
+
+    nlo_complex input = make(1.0, 0.0);
+    nlo_complex output = make(0.0, 0.0);
+    size_t records_written = 99u;
+    propagate_output out = nlolib_propagate_output_default();
+    out.output_records = &output;
+    out.output_record_capacity = 1u;
+    out.records_written = &records_written;
+
+    const size_t oversized_samples =
+        (((size_t)2u * 1024u * 1024u * 1024u) / sizeof(nlo_complex)) + 1u;
+    const nlolib_status status = nlolib_propagate(
+        &config,
+        NULL,
+        oversized_samples,
+        &input,
+        &options,
+        &out);
+
+    assert(status == NLOLIB_STATUS_INVALID_ARGUMENT);
+    assert(records_written == 0u);
+
+    printf("test_dense_output_safety_cap_rejects_before_init: rejects oversized dense output.\n");
+}
+
+static void test_storage_only_propagate_without_dense_output(void)
+{
+    if (!snapshot_store_is_available()) {
+        printf("test_storage_only_propagate_without_dense_output: skipped (storage unavailable).\n");
+        return;
+    }
+
+    const size_t num_time_samples = 16u;
+    sim_config* config = create_sim_config(num_time_samples);
+    assert(config != NULL);
+    config->propagation.propagation_distance = 0.02;
+    config->propagation.starting_step_size = 0.01;
+    config->propagation.max_step_size = 0.01;
+    config->propagation.min_step_size = 0.001;
+    config->propagation.error_tolerance = 1e-6;
+
+    nlo_complex input[16];
+    for (size_t i = 0u; i < num_time_samples; ++i) {
+        input[i] = make(0.1 * (double)i, 0.0);
+    }
+
+    char db_path[256];
+    (void)snprintf(db_path, sizeof(db_path), "test_storage_only_%u.sqlite3", (unsigned)rand());
+
+    storage_options storage_options = storage_options_default();
+    storage_options.sqlite_path = db_path;
+    storage_options.run_id = "test-storage-only-propagate";
+    storage_options.chunk_records = 2u;
+
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
+    propagate_options options = nlolib_propagate_options_default();
+    options.num_recorded_samples = 3u;
+    options.return_records = 0;
+    options.exec_options = &exec_options;
+    options.storage_options = &storage_options;
+
+    size_t records_written = 99u;
+    storage_result storage_result;
+    propagate_output out = nlolib_propagate_output_default();
+    out.records_written = &records_written;
+    out.storage_result = &storage_result;
+
+    simulation_config sim_section;
+    sim_section.propagation = config->propagation;
+    sim_section.tensor = config->tensor;
+    sim_section.time = config->time;
+    sim_section.frequency = config->frequency;
+    sim_section.spatial = config->spatial;
+    physics_config physics_section = config->runtime;
+
+    const nlolib_status status =
+        nlolib_propagate(&sim_section, &physics_section, num_time_samples, input, &options, &out);
+    assert(status == NLOLIB_STATUS_OK);
+    assert(records_written == 0u);
+    assert(storage_result.records_written == 3u);
+
+    free_sim_config(config);
+    (void)remove(db_path);
+
+    printf("test_storage_only_propagate_without_dense_output: accepts storage-only propagation.\n");
+}
+
 int main(void)
 {
     test_init_state_success();
@@ -578,6 +679,8 @@ int main(void)
     test_tensor_mode_frequency_mesh_generation();
     test_tensor_mode_linear_factor_literal_power_vulkan();
     test_snapshot_store_dense_readback();
+    test_dense_output_safety_cap_rejects_before_init();
+    test_storage_only_propagate_without_dense_output();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;
 }

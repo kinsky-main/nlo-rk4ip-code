@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 configure_build_configurations()
 
-project(nlolib VERSION 1.10.29 LANGUAGES C)
+project(nlolib VERSION 1.10.30 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)

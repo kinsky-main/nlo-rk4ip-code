@@ -527,7 +527,7 @@ def _plot_runtime_series(
             label=f"{series.label} ".split(" ")[0].title()
             + " "
             + f"{series.label}".split(" ")[1]
-            + f"{(growth_order)}",
+            + f" {(growth_order)}",
         )
     else:
         x_fit, y_fit, growth_order, error = None, None, None, None
@@ -556,6 +556,8 @@ def _plot_runtime(
 
     ax.set_xlabel(r"State vector size ($10^3$ points)")
     ax.set_ylabel("Runtime (s)")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
     ax.legend()
     fig.tight_layout()
     output_path = output_dir / plot_spec.save_path

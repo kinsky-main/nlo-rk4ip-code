@@ -15,7 +15,7 @@
 
 typedef struct {
     int enabled;
-    perf_profile_snapshot snapshot;
+    nlo_perf_profile_snapshot snapshot;
 } perf_profile_state;
 
 static perf_profile_state g_nlo_perf_profile_state = {
@@ -38,7 +38,7 @@ void perf_profile_reset(void)
     memset(&g_nlo_perf_profile_state.snapshot, 0, sizeof(g_nlo_perf_profile_state.snapshot));
 }
 
-void perf_profile_snapshot_read(perf_profile_snapshot* out_snapshot)
+void perf_profile_snapshot_read(nlo_perf_profile_snapshot* out_snapshot)
 {
     if (out_snapshot == NULL) {
         return;

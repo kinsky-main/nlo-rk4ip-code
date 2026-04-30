@@ -63,7 +63,7 @@ void perf_profile_reset(void);
  *
  * @param out_snapshot Destination snapshot.
  */
-void perf_profile_snapshot_read(perf_profile_snapshot* out_snapshot);
+void perf_profile_snapshot_read(nlo_perf_profile_snapshot* out_snapshot);
 
 /**
  * @brief Record elapsed dispersion-operator time.
