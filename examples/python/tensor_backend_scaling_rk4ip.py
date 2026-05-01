@@ -4,6 +4,9 @@ Equal-point nlolib CPU/GPU vs MMTools GPU runtime benchmark.
 nlolib tensor cases use nt * nx * ny points. MMTools rows are treated as the
 equal-point counterpart when they satisfy nt * mode_count with
 mode_count = nx * ny.
+
+The mode-count runtime plot uses a GRIN-effective scalar modal count for
+nlolib grid cases and the actual modal count for MMTools rows.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ class TensorCase:
 
     @property
     def mode_count(self) -> int:
-        return int(self.nx * self.ny)
+        return _rectangular_mode_count(self.nx, self.ny)
 
     @property
     def total_points(self) -> int:
@@ -71,6 +74,9 @@ class RuntimePlotSpec:
     series: tuple[RuntimePlotSeries, ...]
     save_path: str
     fit_skip_initial_points: int = 0
+    x_axis: str = "state_points"
+    x_scale: float = 1.0e3
+    x_label: str = r"State vector size ($10^3$ points)"
 
 
 _TIME_WINDOW = 2.56
@@ -98,6 +104,17 @@ _MIXED_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
     save_path="tensor_backend_scaling_runtime.png",
     fit_skip_initial_points=1,
 )
+_MIXED_MODE_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
+    series=(
+        RuntimePlotSeries("nlolib", "GPU"),
+        RuntimePlotSeries("MMTools", "GPU"),
+    ),
+    save_path="tensor_backend_scaling_runtime_by_mode.png",
+    fit_skip_initial_points=1,
+    x_axis="effective_modes",
+    x_scale=1.0,
+    x_label="Effective scalar mode count",
+)
 _NLOLIB_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
     series=(
         RuntimePlotSeries("nlolib", "CPU"),
@@ -107,6 +124,21 @@ _NLOLIB_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
     fit_skip_initial_points=1,
 )
 _FIT_SAMPLE_COUNT = 256
+
+
+def _rectangular_mode_count(nx: int, ny: int) -> int:
+    return int(nx) * int(ny)
+
+
+def _grin_effective_mode_count(nx: int, ny: int) -> int:
+    q_max = max(0, min(int(nx), int(ny)) - 1)
+    return int((q_max + 1) * (q_max + 2) // 2)
+
+
+def _effective_runtime_mode_count(row: BenchmarkRow) -> int:
+    if row.solver.strip().lower() == "mmtools":
+        return int(row.mode_count)
+    return _grin_effective_mode_count(row.nx, row.ny)
 
 
 def _parse_int_csv(raw: str) -> list[int]:
@@ -594,9 +626,21 @@ def _series_rows(
     ]
 
 
-def _series_xy(rows: Sequence[BenchmarkRow]) -> tuple[np.ndarray, np.ndarray]:
+def _runtime_x_value(row: BenchmarkRow, x_axis: str) -> int:
+    if x_axis == "state_points":
+        return int(row.total_points)
+    if x_axis == "effective_modes":
+        return _effective_runtime_mode_count(row)
+    raise ValueError(f"unknown runtime plot x-axis: {x_axis!r}")
+
+
+def _series_xy(
+    rows: Sequence[BenchmarkRow],
+    *,
+    x_axis: str = "state_points",
+) -> tuple[np.ndarray, np.ndarray]:
     return (
-        np.asarray([row.total_points for row in rows], dtype=np.float64),
+        np.asarray([_runtime_x_value(row, x_axis) for row in rows], dtype=np.float64),
         np.asarray([float(row.runtime_seconds) for row in rows], dtype=np.float64),
     )
 
@@ -645,8 +689,9 @@ def _fit_runtime_series(
     rows: Sequence[BenchmarkRow],
     *,
     skip_initial_points: int = 0,
+    x_axis: str = "state_points",
 ) -> tuple[np.ndarray, np.ndarray, str, float] | None:
-    x_values, y_values = _series_xy(rows)
+    x_values, y_values = _series_xy(rows, x_axis=x_axis)
     if x_values.size <= int(skip_initial_points):
         return None
 
@@ -674,31 +719,35 @@ def _plot_runtime_series(
     series: RuntimePlotSeries,
     *,
     fit_skip_initial_points: int = 0,
+    x_axis: str = "state_points",
+    x_scale: float = 1.0e3,
 ) -> tuple[bool, tuple[np.ndarray | None, np.ndarray | None, float | None]] | None:
     solver_rows = _series_rows(rows, series)
     if len(solver_rows) <= 0:
         return False, (None, None, None)
 
-    x_values, y_values = _series_xy(solver_rows)
+    x_values, y_values = _series_xy(solver_rows, x_axis=x_axis)
     y_error = _series_yerr(solver_rows)
     container = ax.errorbar(
-        x_values / 1e3,
+        x_values / float(x_scale),
         y_values,
         yerr=y_error,
         marker=series.marker,
         linestyle="none",
         capsize=3.0,
         elinewidth=1.0,
+        label=series.label,
     )
     line = container.lines[0]
     fit = _fit_runtime_series(
         solver_rows,
         skip_initial_points=fit_skip_initial_points,
+        x_axis=x_axis,
     )
     if fit is not None:
         x_fit, y_fit, growth_order, error = fit
         ax.plot(
-            x_fit / 1e3,
+            x_fit / float(x_scale),
             y_fit,
             linestyle=series.fit_linestyle,
             linewidth=1.4,
@@ -728,6 +777,8 @@ def _plot_runtime(
             rows,
             series,
             fit_skip_initial_points=plot_spec.fit_skip_initial_points,
+            x_axis=plot_spec.x_axis,
+            x_scale=plot_spec.x_scale,
         ) or (False, None)
         any_series = any_series or series_plotted
         fits.append(fit)
@@ -736,7 +787,7 @@ def _plot_runtime(
         plt.close(fig)
         return None
 
-    ax.set_xlabel(r"State vector size ($10^3$ points)")
+    ax.set_xlabel(plot_spec.x_label)
     ax.set_ylabel("Runtime (s)")
     ax.set_yscale("log")
     ax.set_xscale("log")
@@ -959,6 +1010,11 @@ def _run(args: argparse.Namespace) -> float:
 
     _write_csv(rows, csv_path)
     plot_path = _plot_runtime(rows, args.output_dir, plot_spec=_MIXED_RUNTIME_PLOT_SPEC)
+    plot_path_mode = _plot_runtime(
+        rows,
+        args.output_dir,
+        plot_spec=_MIXED_MODE_RUNTIME_PLOT_SPEC,
+    )
     plot_path_2 = _plot_runtime(
         rows,
         args.output_dir,
@@ -969,6 +1025,8 @@ def _run(args: argparse.Namespace) -> float:
     _print_summary(rows)
     if plot_path is not None:
         print(f"saved plot: {plot_path}")
+    if plot_path_mode is not None:
+        print(f"saved plot: {plot_path_mode}")
     if plot_path_2 is not None:
         print(f"saved plot: {plot_path_2}")
     return 0.0

@@ -91,3 +91,6 @@ The mixed nlolib/MMTools runtime comparison remains:
 ```powershell
 python examples/python/tensor_backend_scaling_rk4ip.py
 ```
+
+It writes both a state-vector-size runtime plot and a GRIN-effective
+mode-count runtime plot for the MMTools/nlolib comparison.

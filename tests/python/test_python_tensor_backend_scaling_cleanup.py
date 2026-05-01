@@ -81,6 +81,45 @@ def test_runtime_plot_helpers() -> None:
     assert np.allclose(benchmark._series_yerr(gpu_rows), np.asarray([0.03, 0.06]))
     assert benchmark._equivalent_total_points(4, 8, 8) == 256
     assert benchmark._case_key(gpu_rows[0]) == (8, 4, 4)
+    assert benchmark._rectangular_mode_count(3, 4) == 12
+    assert benchmark._grin_effective_mode_count(3, 3) == 6
+    assert benchmark._grin_effective_mode_count(4, 4) == 10
+    assert benchmark._grin_effective_mode_count(4, 6) == 10
+
+    nlo_mode_row = benchmark.BenchmarkRow(
+        solver="nlolib",
+        backend="GPU",
+        nt=128,
+        nx=4,
+        ny=4,
+        mode_count=16,
+        total_points=2048,
+        runtime_seconds=0.5,
+        runtime_seconds_std=0.05,
+        throughput_points_per_second=None,
+        status="ok",
+        message="",
+    )
+    mmtools_mode_row = benchmark.BenchmarkRow(
+        solver="MMTools",
+        backend="GPU",
+        nt=128,
+        nx=4,
+        ny=4,
+        mode_count=16,
+        total_points=2048,
+        runtime_seconds=0.4,
+        runtime_seconds_std=0.04,
+        throughput_points_per_second=None,
+        status="ok",
+        message="",
+    )
+    x_modes, y_modes = benchmark._series_xy(
+        [nlo_mode_row, mmtools_mode_row],
+        x_axis="effective_modes",
+    )
+    assert np.allclose(x_modes, np.asarray([10.0, 16.0]))
+    assert np.allclose(y_modes, np.asarray([0.5, 0.4]))
 
     assert benchmark._fit_runtime_series(gpu_rows[:1]) is None
     fit = benchmark._fit_runtime_series(
@@ -149,6 +188,11 @@ def test_runtime_plot_helpers() -> None:
         temp_dir,
         plot_spec=benchmark._NLOLIB_RUNTIME_PLOT_SPEC,
     )
+    mode_path = benchmark._plot_runtime(
+        rows,
+        temp_dir,
+        plot_spec=benchmark._MIXED_MODE_RUNTIME_PLOT_SPEC,
+    )
     gpu_only_path = benchmark._plot_runtime(
         [_row(benchmark, "nlolib", "GPU", 128, 0.30)],
         temp_dir,
@@ -161,6 +205,9 @@ def test_runtime_plot_helpers() -> None:
     assert nlolib_path is not None
     assert nlolib_path.name == "tensor_backend_scaling_runtime_nlolib_only.png"
     assert nlolib_path.is_file()
+    assert mode_path is not None
+    assert mode_path.name == "tensor_backend_scaling_runtime_by_mode.png"
+    assert mode_path.is_file()
     assert gpu_only_path is not None
     assert gpu_only_path.name == "tensor_backend_scaling_runtime.png"
 
@@ -237,6 +284,7 @@ def test_runtime_plot_helpers() -> None:
         )
         assert (output_dir / "tensor_backend_scaling_results.csv").is_file()
         assert (output_dir / "tensor_backend_scaling_runtime.png").is_file()
+        assert (output_dir / "tensor_backend_scaling_runtime_by_mode.png").is_file()
 
     with tempfile.TemporaryDirectory() as temp_dir_name:
         temp_dir = Path(temp_dir_name)
@@ -265,6 +313,7 @@ def test_runtime_plot_helpers() -> None:
             )
         )
         assert (output_dir / "tensor_backend_scaling_runtime.png").is_file()
+        assert (output_dir / "tensor_backend_scaling_runtime_by_mode.png").is_file()
 
     with tempfile.TemporaryDirectory() as temp_dir_name:
         temp_dir = Path(temp_dir_name)
