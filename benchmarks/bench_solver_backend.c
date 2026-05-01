@@ -855,7 +855,7 @@ static int bench_execute_single_run(
         out_metrics->samples_per_sec = 0.0;
     }
 
-    perf_profile_snapshot snapshot;
+    nlo_perf_profile_snapshot snapshot;
     perf_profile_snapshot_read(&snapshot);
     out_metrics->dispersion_ms = snapshot.dispersion_ms;
     out_metrics->nonlinear_ms = snapshot.nonlinear_ms;

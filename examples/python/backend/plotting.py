@@ -167,17 +167,38 @@ def _crop_rendered_image_to_content_with_bounds(
     return img[y0:y1, x0:x1, :], (x0, y0, x1, y1)
 
 
+def _crop_rendered_image_to_bounds(
+    image: np.ndarray,
+    crop_bounds: tuple[int, int, int, int],
+) -> np.ndarray:
+    img = np.asarray(image)
+    if img.ndim < 2:
+        return img
+    x0, y0, x1, y1 = crop_bounds
+    x0 = max(0, min(int(x0), int(img.shape[1])))
+    x1 = max(x0, min(int(x1), int(img.shape[1])))
+    y0 = max(0, min(int(y0), int(img.shape[0])))
+    y1 = max(y0, min(int(y1), int(img.shape[0])))
+    return img[y0:y1, x0:x1, ...]
+
+
 def _image_with_mpl_colorbar(
     image: np.ndarray,
     *,
     colorbar_label: str = "Normalized intensity",
+    image_crop_bounds: tuple[int, int, int, int] | None = None,
+    axis_line_specs: list[tuple[float, float, float, float, float, float, str]] | None = None,
     axis_label_specs: list[tuple[str, float, float, float, str, str]] | None = None,
     axis_tick_specs: list[tuple[str, float, float, float, str, str]] | None = None,
 ) -> np.ndarray:
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
 
-    img = _crop_rendered_image_to_content(np.asarray(image))
+    img = (
+        _crop_rendered_image_to_bounds(np.asarray(image), image_crop_bounds)
+        if image_crop_bounds is not None
+        else _crop_rendered_image_to_content(np.asarray(image))
+    )
     fig = plt.figure(figsize=(4.0, 2.64), dpi=450, constrained_layout=True)
     grid = fig.add_gridspec(1, 2, width_ratios=[22.0, 1.0], wspace=0.02)
     ax_img = fig.add_subplot(grid[0, 0])
@@ -185,6 +206,21 @@ def _image_with_mpl_colorbar(
     ax_img.imshow(img)
     ax_img.set_aspect("equal", adjustable="box", anchor="SW")
     ax_img.set_axis_off()
+    grid_color = _rc_color("grid.color", "#6b7280")
+    axis_color = _rc_color("axes.edgecolor", "#111827")
+    if axis_line_specs is not None:
+        for x0, y0, x1, y1, alpha, linewidth, kind in axis_line_specs:
+            ax_img.plot(
+                [x0, x1],
+                [y0, y1],
+                transform=ax_img.transAxes,
+                color=axis_color if kind == "axis" else grid_color,
+                alpha=float(alpha),
+                linewidth=float(linewidth),
+                solid_capstyle="round",
+                clip_on=True,
+                zorder=3,
+            )
     label_color = _rc_color("axes.labelcolor", _rc_color("text.color", "#000000"))
     tick_color = _rc_color("xtick.color", label_color)
     label_size = _rc_float("axes.labelsize", _rc_float("font.size", 10.0))
@@ -281,23 +317,87 @@ def _axis_text_rotation(start_axes: np.ndarray, end_axes: np.ndarray) -> float:
     return angle
 
 
-def _axis_label_offset(axis_name: str, direction: np.ndarray) -> np.ndarray:
-    direction = np.asarray(direction, dtype=np.float64)
+def _transform_3d_point(
+    point: tuple[float, float, float],
+    transform_matrix: np.ndarray | None,
+) -> tuple[float, float, float]:
+    if transform_matrix is None:
+        return (float(point[0]), float(point[1]), float(point[2]))
+    transformed = np.asarray(transform_matrix, dtype=np.float64) @ np.asarray(
+        [float(point[0]), float(point[1]), float(point[2]), 1.0],
+        dtype=np.float64,
+    )
+    return (float(transformed[0]), float(transformed[1]), float(transformed[2]))
+
+
+def _expanded_crop_bounds_for_world_points(
+    plotter: Any,
+    *,
+    image_shape: tuple[int, ...],
+    crop_bounds: tuple[int, int, int, int],
+    world_points: list[tuple[float, float, float]],
+    padding_fraction: float = 0.08,
+) -> tuple[int, int, int, int]:
+    if not world_points:
+        return crop_bounds
+
+    renderer = plotter.renderer
+    image_height = float(image_shape[0])
+    image_width = float(image_shape[1])
+    projected: list[tuple[float, float]] = []
+    for point in world_points:
+        display_xy = _project_world_to_display(renderer, point)
+        projected.append((float(display_xy[0]), image_height - float(display_xy[1])))
+    if not projected:
+        return crop_bounds
+
+    x0, y0, x1, y1 = crop_bounds
+    xs = [value[0] for value in projected]
+    ys = [value[1] for value in projected]
+    x0 = min(float(x0), min(xs))
+    x1 = max(float(x1), max(xs))
+    y0 = min(float(y0), min(ys))
+    y1 = max(float(y1), max(ys))
+    pad_x = max(8.0, float(padding_fraction) * max(x1 - x0, 1.0))
+    pad_y = max(8.0, float(padding_fraction) * max(y1 - y0, 1.0))
+    return (
+        max(0, int(np.floor(x0 - pad_x))),
+        max(0, int(np.floor(y0 - pad_y))),
+        min(int(image_width), int(np.ceil(x1 + pad_x))),
+        min(int(image_height), int(np.ceil(y1 + pad_y))),
+    )
+
+
+def _axis_text_outward_offset(
+    start_axes: np.ndarray,
+    end_axes: np.ndarray,
+    projected_center: np.ndarray,
+) -> np.ndarray:
+    direction = np.asarray(end_axes, dtype=np.float64) - np.asarray(start_axes, dtype=np.float64)
     length = float(np.linalg.norm(direction))
     if length <= 1.0e-12:
         return np.asarray([0.0, 0.0], dtype=np.float64)
     direction = direction / length
     normal = np.asarray([-direction[1], direction[0]], dtype=np.float64)
-    if axis_name == "x" and normal[1] > 0.0:
-        normal = -normal
-    if axis_name == "y" and normal[0] > 0.0:
-        normal = -normal
-    if axis_name == "z" and normal[0] < 0.0:
+    midpoint = 0.5 * (np.asarray(start_axes, dtype=np.float64) + np.asarray(end_axes, dtype=np.float64))
+    if float(np.linalg.norm((midpoint - normal) - projected_center)) > float(
+        np.linalg.norm((midpoint + normal) - projected_center)
+    ):
         normal = -normal
     return normal
 
 
-def _project_3d_axis_text_specs(
+def _clamp_axes_text_position(position: np.ndarray, *, margin: float = 0.035) -> np.ndarray:
+    return np.asarray(
+        [
+            float(np.clip(float(position[0]), margin, 1.0 - margin)),
+            float(np.clip(float(position[1]), margin, 1.0 - margin)),
+        ],
+        dtype=np.float64,
+    )
+
+
+def _select_principal_axis_origin(
     plotter: Any,
     *,
     image_shape: tuple[int, ...],
@@ -305,12 +405,8 @@ def _project_3d_axis_text_specs(
     x_axis: np.ndarray,
     y_axis: np.ndarray,
     z_axis: np.ndarray,
-    axis_labels: tuple[str, str, str],
-    tick_count: int = 3,
-) -> tuple[
-    list[tuple[str, float, float, float, str, str]],
-    list[tuple[str, float, float, float, str, str]],
-]:
+    transform_matrix: np.ndarray | None,
+) -> tuple[float, float, float]:
     renderer = plotter.renderer
     x_min, x_max = float(np.min(x_axis)), float(np.max(x_axis))
     y_min, y_max = float(np.min(y_axis)), float(np.max(y_axis))
@@ -323,91 +419,241 @@ def _project_3d_axis_text_specs(
             crop_bounds=crop_bounds,
         )
 
-    edge_specs = {
-        "x": [
-            ((x_min, fixed_y, fixed_z), (x_max, fixed_y, fixed_z))
-            for fixed_y in (y_min, y_max)
-            for fixed_z in (z_min, z_max)
-        ],
-        "y": [
-            ((fixed_x, y_min, fixed_z), (fixed_x, y_max, fixed_z))
-            for fixed_x in (x_min, x_max)
-            for fixed_z in (z_min, z_max)
-        ],
-        "z": [
-            ((fixed_x, fixed_y, z_min), (fixed_x, fixed_y, z_max))
-            for fixed_x in (x_min, x_max)
-            for fixed_y in (y_min, y_max)
-        ],
-    }
+    def full_image_point(point: tuple[float, float, float]) -> np.ndarray:
+        return _display_to_cropped_axes(
+            _project_world_to_display(renderer, point),
+            image_shape=image_shape,
+            crop_bounds=(0, 0, int(image_shape[1]), int(image_shape[0])),
+        )
 
-    label_specs: list[tuple[str, float, float, float, str, str]] = []
-    tick_specs: list[tuple[str, float, float, float, str, str]] = []
-    label_by_axis = {"x": axis_labels[0], "y": axis_labels[1], "z": axis_labels[2]}
-    ranges_by_axis = {"x": (x_min, x_max), "y": (y_min, y_max), "z": (z_min, z_max)}
+    def outside_unit_square_penalty(points: list[np.ndarray]) -> float:
+        penalty = 0.0
+        for point in points:
+            x_pos = float(point[0])
+            y_pos = float(point[1])
+            penalty += max(0.0, -x_pos) + max(0.0, x_pos - 1.0)
+            penalty += max(0.0, -y_pos) + max(0.0, y_pos - 1.0)
+        return penalty
 
-    for axis_name, edges in edge_specs.items():
-        projected_edges = [(axes_point(start), axes_point(end), start, end) for start, end in edges]
-        if axis_name == "x":
-            start_axes, end_axes, start_world, end_world = min(
-                projected_edges,
-                key=lambda edge: 0.5 * (float(edge[0][1]) + float(edge[1][1])),
+    candidates = [
+        (x_value, y_value, z_value)
+        for x_value in (x_min, x_max)
+        for y_value in (y_min, y_max)
+        for z_value in (z_min, z_max)
+    ]
+
+    def adjacent_axis_points(corner: tuple[float, float, float]) -> list[tuple[float, float, float]]:
+        points = [_transform_3d_point(corner, transform_matrix)]
+        for axis_index in range(3):
+            endpoint = [float(corner[0]), float(corner[1]), float(corner[2])]
+            endpoint[axis_index] = (
+                (x_min, y_min, z_min)[axis_index]
+                if float(corner[axis_index]) == (x_max, y_max, z_max)[axis_index]
+                else (x_max, y_max, z_max)[axis_index]
             )
-        elif axis_name == "y":
-            start_axes, end_axes, start_world, end_world = min(
-                projected_edges,
-                key=lambda edge: 0.5 * (float(edge[0][0]) + float(edge[1][0])),
-            )
-        else:
-            start_axes, end_axes, start_world, end_world = max(
-                projected_edges,
-                key=lambda edge: 0.5 * (float(edge[0][0]) + float(edge[1][0])),
-            )
+            points.append(_transform_3d_point((endpoint[0], endpoint[1], endpoint[2]), transform_matrix))
+        return points
 
-        direction = end_axes - start_axes
-        outward = _axis_label_offset(axis_name, direction)
-        tick_offset = 0.055 * outward
-        label_offset_scale = 0.16 if axis_name == "z" else 0.105
-        label_offset = label_offset_scale * outward
-        rotation = _axis_text_rotation(start_axes, end_axes)
-        tick_rotation = 0.0
-        label_rotation = 90.0 if axis_name == "z" else rotation
+    projected_candidates = []
+    for corner in candidates:
+        origin_axes = axes_point(_transform_3d_point(corner, transform_matrix))
+        frame_points = [full_image_point(point) for point in adjacent_axis_points(corner)]
+        projected_candidates.append((corner, origin_axes, outside_unit_square_penalty(frame_points)))
 
-        lo, hi = ranges_by_axis[axis_name]
-        tick_values = np.linspace(lo, hi, max(2, int(tick_count)), dtype=np.float64)
-        tick_labels = _format_mpl_tick_labels(tick_values)
-        for value, tick_label in zip(tick_values, tick_labels):
-            if axis_name == "x":
-                point = (float(value), float(start_world[1]), float(start_world[2]))
-            elif axis_name == "y":
-                point = (float(start_world[0]), float(value), float(start_world[2]))
-            else:
-                point = (float(start_world[0]), float(start_world[1]), float(value))
-            tick_pos = axes_point(point) + tick_offset
-            tick_specs.append(
+    origin, _, _ = min(
+        projected_candidates,
+        key=lambda item: (
+            (-0.75 * float(item[2])) +
+            abs(float(item[1][0]) - 0.5) +
+            (-0.65 * float(item[1][1]))
+        ),
+    )
+    return origin
+
+
+def _principal_axis_world_lines(
+    *,
+    origin: tuple[float, float, float],
+    x_axis: np.ndarray,
+    y_axis: np.ndarray,
+    z_axis: np.ndarray,
+    transform_matrix: np.ndarray | None,
+    tick_count: int,
+) -> tuple[
+    list[tuple[tuple[float, float, float], tuple[float, float, float], float, float, str]],
+    list[tuple[int, tuple[float, float, float], tuple[float, float, float], np.ndarray]],
+]:
+    axis_ranges = [
+        (float(np.min(x_axis)), float(np.max(x_axis))),
+        (float(np.min(y_axis)), float(np.max(y_axis))),
+        (float(np.min(z_axis)), float(np.max(z_axis))),
+    ]
+    axis_lines: list[tuple[tuple[float, float, float], tuple[float, float, float], float, float, str]] = []
+    axis_defs: list[tuple[int, tuple[float, float, float], tuple[float, float, float], np.ndarray]] = []
+    for axis_index, (axis_min, axis_max) in enumerate(axis_ranges):
+        endpoint = [float(origin[0]), float(origin[1]), float(origin[2])]
+        endpoint[axis_index] = axis_min if float(origin[axis_index]) == axis_max else axis_max
+        endpoint_tuple = (float(endpoint[0]), float(endpoint[1]), float(endpoint[2]))
+        axis_lines.append(
+            (
+                _transform_3d_point(origin, transform_matrix),
+                _transform_3d_point(endpoint_tuple, transform_matrix),
+                0.74,
+                0.82,
+                "axis",
+            )
+        )
+        axis_defs.append(
+            (
+                axis_index,
+                _transform_3d_point(origin, transform_matrix),
+                _transform_3d_point(endpoint_tuple, transform_matrix),
+                np.linspace(float(origin[axis_index]), float(endpoint_tuple[axis_index]), max(2, int(tick_count))),
+            )
+        )
+
+    for first_axis, second_axis in ((0, 1), (0, 2), (1, 2)):
+        first_values = axis_defs[first_axis][3][1:-1]
+        second_values = axis_defs[second_axis][3][1:-1]
+        first_end_value = float(axis_defs[first_axis][3][-1])
+        second_end_value = float(axis_defs[second_axis][3][-1])
+
+        for value in first_values:
+            start = [float(origin[0]), float(origin[1]), float(origin[2])]
+            end = [float(origin[0]), float(origin[1]), float(origin[2])]
+            start[first_axis] = float(value)
+            end[first_axis] = float(value)
+            end[second_axis] = second_end_value
+            axis_lines.append(
                 (
-                    tick_label,
-                    float(tick_pos[0]),
-                    float(tick_pos[1]),
-                    tick_rotation,
-                    "center",
-                    "center",
+                    _transform_3d_point((start[0], start[1], start[2]), transform_matrix),
+                    _transform_3d_point((end[0], end[1], end[2]), transform_matrix),
+                    0.26,
+                    0.44,
+                    "grid",
+                )
+            )
+        for value in second_values:
+            start = [float(origin[0]), float(origin[1]), float(origin[2])]
+            end = [float(origin[0]), float(origin[1]), float(origin[2])]
+            start[second_axis] = float(value)
+            end[second_axis] = float(value)
+            end[first_axis] = first_end_value
+            axis_lines.append(
+                (
+                    _transform_3d_point((start[0], start[1], start[2]), transform_matrix),
+                    _transform_3d_point((end[0], end[1], end[2]), transform_matrix),
+                    0.26,
+                    0.44,
+                    "grid",
                 )
             )
 
-        label_pos = 0.5 * (start_axes + end_axes) + label_offset
+    return axis_lines, axis_defs
+
+
+def _project_3d_principal_axis_specs(
+    plotter: Any,
+    *,
+    image_shape: tuple[int, ...],
+    crop_bounds: tuple[int, int, int, int],
+    x_axis: np.ndarray,
+    y_axis: np.ndarray,
+    z_axis: np.ndarray,
+    axis_labels: tuple[str, str, str],
+    transform_matrix: np.ndarray | None = None,
+    tick_count: int = 3,
+    grid_tick_count: int = 5,
+) -> tuple[
+    list[tuple[float, float, float, float, float, float, str]],
+    list[tuple[str, float, float, float, str, str]],
+    list[tuple[str, float, float, float, str, str]],
+    tuple[int, int, int, int],
+]:
+    origin = _select_principal_axis_origin(
+        plotter,
+        image_shape=image_shape,
+        crop_bounds=crop_bounds,
+        x_axis=x_axis,
+        y_axis=y_axis,
+        z_axis=z_axis,
+        transform_matrix=transform_matrix,
+    )
+    axis_lines, axis_defs = _principal_axis_world_lines(
+        origin=origin,
+        x_axis=x_axis,
+        y_axis=y_axis,
+        z_axis=z_axis,
+        transform_matrix=transform_matrix,
+        tick_count=max(int(tick_count), int(grid_tick_count)),
+    )
+    expanded_crop_bounds = _expanded_crop_bounds_for_world_points(
+        plotter,
+        image_shape=image_shape,
+        crop_bounds=crop_bounds,
+        world_points=[point for start, end, *_ in axis_lines for point in (start, end)],
+    )
+
+    renderer = plotter.renderer
+
+    def axes_point(point: tuple[float, float, float]) -> np.ndarray:
+        return _display_to_cropped_axes(
+            _project_world_to_display(renderer, point),
+            image_shape=image_shape,
+            crop_bounds=expanded_crop_bounds,
+        )
+
+    line_specs = [
+        (
+            float(axes_point(start)[0]),
+            float(axes_point(start)[1]),
+            float(axes_point(end)[0]),
+            float(axes_point(end)[1]),
+            float(alpha),
+            float(linewidth),
+            kind,
+        )
+        for start, end, alpha, linewidth, kind in axis_lines
+    ]
+
+    axis_endpoints = [axes_point(start) for _, start, _, _ in axis_defs]
+    axis_endpoints.extend(axes_point(end) for _, _, end, _ in axis_defs)
+    projected_center = np.mean(np.asarray(axis_endpoints, dtype=np.float64), axis=0)
+
+    label_specs: list[tuple[str, float, float, float, str, str]] = []
+    tick_specs: list[tuple[str, float, float, float, str, str]] = []
+    for axis_index, start_world, end_world, dense_tick_values in axis_defs:
+        start_axes = axes_point(start_world)
+        end_axes = axes_point(end_world)
+        outward = _axis_text_outward_offset(start_axes, end_axes, projected_center)
+        rotation = _axis_text_rotation(start_axes, end_axes)
+
+        visible_tick_values = np.linspace(
+            float(dense_tick_values[0]),
+            float(dense_tick_values[-1]),
+            max(2, int(tick_count)),
+            dtype=np.float64,
+        )
+        for tick_value, tick_label in zip(visible_tick_values, _format_mpl_tick_labels(visible_tick_values)):
+            point = list(origin)
+            point[axis_index] = float(tick_value)
+            tick_pos = axes_point(_transform_3d_point((point[0], point[1], point[2]), transform_matrix))
+            tick_pos = _clamp_axes_text_position(tick_pos + 0.035 * outward)
+            tick_specs.append((tick_label, float(tick_pos[0]), float(tick_pos[1]), 0.0, "center", "center"))
+
+        label_pos = _clamp_axes_text_position(0.5 * (start_axes + end_axes) + 0.090 * outward)
         label_specs.append(
             (
-                label_by_axis[axis_name],
+                axis_labels[axis_index],
                 float(label_pos[0]),
                 float(label_pos[1]),
-                label_rotation,
+                rotation,
                 "center",
                 "center",
             )
         )
 
-    return label_specs, tick_specs
+    return line_specs, label_specs, tick_specs, expanded_crop_bounds
 
 
 def _normalized_nonnegative_data(values: np.ndarray, *, normalization_peak: float | None) -> tuple[np.ndarray, float]:
@@ -1356,10 +1602,11 @@ def _render_3d_intensity_contours_frame(
             color=pv_style["foreground"],
             font=pv_style["font_family"],
         )
+    plotter.camera.zoom(0.86)
     image = np.asarray(plotter.screenshot(return_img=True))
     _, crop_bounds = _crop_rendered_image_to_content_with_bounds(image)
     try:
-        axis_label_specs, axis_tick_specs = _project_3d_axis_text_specs(
+        axis_line_specs, axis_label_specs, axis_tick_specs, crop_bounds = _project_3d_principal_axis_specs(
             plotter,
             image_shape=image.shape,
             crop_bounds=crop_bounds,
@@ -1367,14 +1614,18 @@ def _render_3d_intensity_contours_frame(
             y_axis=y_normalized,
             z_axis=z_normalized,
             axis_labels=(x_label, y_label, z_label),
+            transform_matrix=rotation_matrix,
         )
     except Exception:
         axis_label_specs = _default_3d_axis_label_specs((x_label, y_label, z_label))
         axis_tick_specs = None
+        axis_line_specs = None
     plotter.close()
     return _image_with_mpl_colorbar(
         image,
         colorbar_label="Normalized intensity",
+        image_crop_bounds=crop_bounds,
+        axis_line_specs=axis_line_specs,
         axis_label_specs=axis_label_specs,
         axis_tick_specs=axis_tick_specs,
     )

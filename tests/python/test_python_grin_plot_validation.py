@@ -14,6 +14,7 @@ if str(EXAMPLES_PYTHON) not in sys.path:
 
 from grin.models import PlotArtifact, ValidationReport
 from grin.validation import PlotImageValidator, WavelengthWindowSelector
+from backend.plotting import _image_with_mpl_colorbar
 
 
 def _check_condition(cond: bool, message: str) -> None:
@@ -79,9 +80,33 @@ def test_plot_image_validator_flags_blank_plot() -> None:
         )
 
 
+def test_3d_contour_compositor_draws_projected_grid_lines() -> None:
+    image = np.full((120, 180, 3), 255, dtype=np.uint8)
+    axis_line_specs = [
+        (0.10, 0.15, 0.88, 0.18, 1.0, 1.8, "axis"),
+        (0.12, 0.16, 0.25, 0.82, 1.0, 1.8, "axis"),
+        (0.25, 0.82, 0.88, 0.78, 0.55, 1.1, "grid"),
+    ]
+
+    rendered = _image_with_mpl_colorbar(
+        image,
+        axis_line_specs=axis_line_specs,
+        colorbar_label="Normalized intensity",
+    )
+    rgb = np.asarray(rendered[:, :, :3], dtype=np.int16)
+    dark_pixels = np.any(rgb < 245, axis=2)
+
+    _check_condition(rendered.ndim == 3 and rendered.shape[2] == 3, "composited image must be RGB")
+    _check_condition(
+        int(np.count_nonzero(dark_pixels)) > 100,
+        "projected grid lines should alter the blank render",
+    )
+
+
 def main() -> None:
     test_wavelength_window_selector_focuses_signal()
     test_plot_image_validator_flags_blank_plot()
+    test_3d_contour_compositor_draws_projected_grid_lines()
     print("test_python_grin_plot_validation: all checks passed.")
 
 

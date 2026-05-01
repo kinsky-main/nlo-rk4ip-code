@@ -817,7 +817,7 @@ static int bench_execute_single_run(
     }
 
     {
-        perf_profile_snapshot snapshot;
+        nlo_perf_profile_snapshot snapshot;
         memset(&snapshot, 0, sizeof(snapshot));
         perf_profile_snapshot_read(&snapshot);
         out_metrics->dispersion_ms = snapshot.dispersion_ms;
