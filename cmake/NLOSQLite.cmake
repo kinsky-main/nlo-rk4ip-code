@@ -37,6 +37,7 @@ function(configure_sqlite target_name)
     get_filename_component(sqlite_inc_dir "${sqlite_inc}" DIRECTORY)
 
     add_library(sqlite3 STATIC "${sqlite_src}")
+    set_target_properties(sqlite3 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(sqlite3 PUBLIC "${sqlite_inc_dir}")
   endif()
 
