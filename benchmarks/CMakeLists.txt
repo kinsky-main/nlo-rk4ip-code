@@ -32,6 +32,9 @@ add_executable(bench_solver_backend
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_transfer.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vk_backend_ops.c
 )
+if(ENABLE_VKFFT)
+  set_target_properties(bench_solver_backend PROPERTIES LINKER_LANGUAGE CXX)
+endif()
 
 include(ResolveVulkan)
 resolve_vulkan(vk_headers_available vk_loader_available)
@@ -56,7 +59,10 @@ endif()
 
 set(VKFFT_INCLUDE_DIR "${CMAKE_BINARY_DIR}/_deps/vkfft-src")
 if(EXISTS "${VKFFT_INCLUDE_DIR}/vkFFT/vkFFT.h")
-  target_include_directories(bench_solver_backend PRIVATE "${VKFFT_INCLUDE_DIR}")
+  target_include_directories(bench_solver_backend PRIVATE
+    "${VKFFT_INCLUDE_DIR}"
+    "${VKFFT_INCLUDE_DIR}/vkFFT"
+  )
   target_compile_definitions(bench_solver_backend PRIVATE VKFFT_BACKEND=0)
 else()
   message(FATAL_ERROR
@@ -75,22 +81,16 @@ if(GLSLANG_C_INCLUDE_DIR)
   target_include_directories(bench_solver_backend PRIVATE ${GLSLANG_C_INCLUDE_DIR})
 endif()
 
-find_package(Vulkan QUIET COMPONENTS glslang)
-if(TARGET Vulkan::glslang)
-  target_link_libraries(bench_solver_backend PRIVATE Vulkan::glslang)
-endif()
+include(ResolveGlslang)
+resolve_glslang_for_vkfft(glslang_target glslang_found)
+target_link_libraries(bench_solver_backend PRIVATE ${glslang_target})
 
-if(WIN32 AND DEFINED ENV{VULKAN_SDK})
-  target_link_directories(bench_solver_backend PRIVATE "$ENV{VULKAN_SDK}/Lib")
-  target_link_libraries(bench_solver_backend PRIVATE
-    $<$<CONFIG:Debug>:MachineIndependentd;OSDependentd;GenericCodeGend;SPIRVd;SPIRV-Toolsd;SPIRV-Tools-optd;glslang-default-resource-limitsd>
-    $<$<NOT:$<CONFIG:Debug>>:MachineIndependent;OSDependent;GenericCodeGen;SPIRV;SPIRV-Tools;SPIRV-Tools-opt;glslang-default-resource-limits>
-  )
+if(WIN32 AND MSVC)
+  target_link_options(bench_solver_backend PRIVATE /IGNORE:4099)
 endif()
 
 if(WIN32)
   target_compile_definitions(bench_solver_backend PRIVATE NLOLIB_EXPORTS)
-  target_link_options(bench_solver_backend PRIVATE /IGNORE:4099)
   set(runtime_hints "${SQLITE_RUNTIME_HINTS}")
   if(CBLAS_RUNTIME_HINTS)
     list(APPEND runtime_hints "${CBLAS_RUNTIME_HINTS}")

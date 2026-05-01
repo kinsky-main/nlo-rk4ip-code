@@ -159,3 +159,6 @@ __pypackages__/
 *.pyd
 *.dll
 *.dylib
+
+# Pyenv
+*.python-version

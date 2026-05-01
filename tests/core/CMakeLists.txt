@@ -21,6 +21,9 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/utility/state_debug.c
   ${CMAKE_SOURCE_DIR}/src/fft/fft.c
 )
+if(ENABLE_VKFFT)
+  set_target_properties(test_core_state_alloc PROPERTIES LINKER_LANGUAGE CXX)
+endif()
 if(ENABLE_VULKAN_BACKEND)
   target_sources(test_core_state_alloc PRIVATE
     ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
