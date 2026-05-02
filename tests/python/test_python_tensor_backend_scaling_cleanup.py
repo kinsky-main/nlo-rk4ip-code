@@ -84,7 +84,9 @@ def test_runtime_plot_helpers() -> None:
     assert benchmark._rectangular_mode_count(3, 4) == 12
     assert benchmark._grin_effective_mode_count(3, 3) == 6
     assert benchmark._grin_effective_mode_count(4, 4) == 10
-    assert benchmark._grin_effective_mode_count(4, 6) == 10
+    assert benchmark._square_grid_size_for_grin_mode_count(8) == 4
+    assert benchmark._square_grid_size_for_grin_mode_count(10) == 4
+    assert benchmark._square_grid_size_for_grin_mode_count(11) == 5
 
     nlo_mode_row = benchmark.BenchmarkRow(
         solver="nlolib",
@@ -116,9 +118,9 @@ def test_runtime_plot_helpers() -> None:
     )
     x_modes, y_modes = benchmark._series_xy(
         [nlo_mode_row, mmtools_mode_row],
-        x_axis="effective_modes",
+        x_axis="mode_count",
     )
-    assert np.allclose(x_modes, np.asarray([10.0, 16.0]))
+    assert np.allclose(x_modes, np.asarray([16.0, 16.0]))
     assert np.allclose(y_modes, np.asarray([0.5, 0.4]))
 
     assert benchmark._fit_runtime_series(gpu_rows[:1]) is None
@@ -154,6 +156,28 @@ def test_runtime_plot_helpers() -> None:
     assert np.isclose(float(skipped_y_fit[0]), 0.16)
     assert np.isclose(float(skipped_y_fit[-1]), 0.64)
 
+    segmented_gpu_rows = [
+        _row(benchmark, "nlolib", "GPU", 64, 0.08),
+        _row(benchmark, "nlolib", "GPU", 128, 0.12),
+        _row(benchmark, "nlolib", "GPU", 256, 0.20),
+        _row(benchmark, "nlolib", "GPU", 512, 0.55),
+        _row(benchmark, "nlolib", "GPU", 1024, 1.70),
+    ]
+    segmented_fits = benchmark._fit_runtime_series_segments(
+        segmented_gpu_rows,
+        skip_initial_points=1,
+        segment_count=2,
+    )
+    assert len(segmented_fits) == 2
+    first_x, _, first_order, _ = segmented_fits[0]
+    second_x, _, second_order, _ = segmented_fits[1]
+    assert np.isclose(float(first_x[0]), 128.0)
+    assert np.isclose(float(first_x[-1]), 256.0)
+    assert np.isclose(float(second_x[0]), 512.0)
+    assert np.isclose(float(second_x[-1]), 1024.0)
+    assert first_order.startswith("$O(N^{")
+    assert second_order.startswith("$O(N^{")
+
     mixed_labels = [series.label for series in benchmark._MIXED_RUNTIME_PLOT_SPEC.series]
     nlolib_labels = [series.label for series in benchmark._NLOLIB_RUNTIME_PLOT_SPEC.series]
     assert mixed_labels == ["nlolib GPU", "MMTools GPU"]
@@ -174,6 +198,25 @@ def test_runtime_plot_helpers() -> None:
     assert len(growth_labels) == 2
     assert any(label.startswith("nlolib GPU $O(N^{") for label in growth_labels)
     assert any(label.startswith("MMTools GPU $O(N^{") for label in growth_labels)
+
+    fig, ax = benchmark.plt.subplots()
+    assert benchmark._plot_runtime_series(
+        ax,
+        segmented_gpu_rows,
+        benchmark._NLOLIB_RUNTIME_PLOT_SPEC.series[1],
+        fit_skip_initial_points=benchmark._NLOLIB_RUNTIME_PLOT_SPEC.fit_skip_initial_points,
+    )[0] is True
+    _, segmented_labels = ax.get_legend_handles_labels()
+    benchmark.plt.close(fig)
+    assert "nlolib GPU" in segmented_labels
+    assert any(
+        label.startswith("nlolib GPU ringbuffer $O(N^{")
+        for label in segmented_labels
+    )
+    assert any(
+        label.startswith("nlolib GPU transfer-limited $O(N^{")
+        for label in segmented_labels
+    )
 
     temp_dir = repo_root / "build" / "test-artifacts" / "tensor-backend-scaling-cleanup"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -224,13 +267,24 @@ def test_runtime_plot_helpers() -> None:
         )
         mmtools_rows = benchmark._read_mmtools_rows(csv_path)
         assert len(mmtools_rows) == 1
-        assert mmtools_rows[0].total_points == benchmark._equivalent_total_points(4096, 8, 8)
+        assert mmtools_rows[0].total_points == 4096 * 8
         assert mmtools_rows[0].runtime_seconds == 2.0
         assert mmtools_rows[0].runtime_seconds_std == 0.3
         assert np.isclose(
             float(mmtools_rows[0].throughput_points_per_second),
             mmtools_rows[0].total_points / float(mmtools_rows[0].runtime_seconds),
         )
+        resolved_cases = benchmark._resolve_cases(
+            argparse.Namespace(scales=[3]),
+            mmtools_rows,
+            csv_path,
+        )
+        assert len(resolved_cases) == 1
+        assert resolved_cases[0].nt == 4096
+        assert resolved_cases[0].nx == 4
+        assert resolved_cases[0].ny == 4
+        assert resolved_cases[0].mode_count == 8
+        assert resolved_cases[0].total_points == 4096 * 4 * 4
 
     with tempfile.TemporaryDirectory() as temp_dir_name:
         temp_dir = Path(temp_dir_name)

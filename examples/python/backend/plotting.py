@@ -204,6 +204,7 @@ def _image_with_mpl_colorbar(
     ax_img = fig.add_subplot(grid[0, 0])
     ax_cbar = fig.add_subplot(grid[0, 1])
     ax_img.imshow(img)
+    ax_img.set_zorder(-1)
     ax_img.set_aspect("equal", adjustable="box", anchor="SW")
     ax_img.set_axis_off()
     grid_color = _rc_color("grid.color", "#6b7280")
@@ -219,7 +220,7 @@ def _image_with_mpl_colorbar(
                 linewidth=float(linewidth),
                 solid_capstyle="round",
                 clip_on=True,
-                zorder=3,
+                zorder=1,
             )
     label_color = _rc_color("axes.labelcolor", _rc_color("text.color", "#000000"))
     tick_color = _rc_color("xtick.color", label_color)
@@ -276,7 +277,19 @@ def _format_mpl_tick_labels(values: np.ndarray) -> list[str]:
         formatter.set_locs(values)
         return [str(formatter(value)) for value in values]
     except Exception:
-        return [f"{float(value):.3g}" for value in values]
+        return [f"{round(v, 1):g}" for v in values]
+
+
+def _apply_nice_ticks(ax: Any) -> None:
+    try:
+        from matplotlib.ticker import MaxNLocator
+        locator_x = MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10])
+        locator_y = MaxNLocator(nbins=5, steps=[1, 2, 2.5, 5, 10])
+        ax.xaxis.set_major_locator(locator_x)
+        ax.yaxis.set_major_locator(locator_y)
+        ax.set_axisbelow(True)
+    except Exception:
+        pass
 
 
 def _project_world_to_display(renderer: Any, point: tuple[float, float, float]) -> np.ndarray:
@@ -407,68 +420,10 @@ def _select_principal_axis_origin(
     z_axis: np.ndarray,
     transform_matrix: np.ndarray | None,
 ) -> tuple[float, float, float]:
-    renderer = plotter.renderer
-    x_min, x_max = float(np.min(x_axis)), float(np.max(x_axis))
-    y_min, y_max = float(np.min(y_axis)), float(np.max(y_axis))
-    z_min, z_max = float(np.min(z_axis)), float(np.max(z_axis))
-
-    def axes_point(point: tuple[float, float, float]) -> np.ndarray:
-        return _display_to_cropped_axes(
-            _project_world_to_display(renderer, point),
-            image_shape=image_shape,
-            crop_bounds=crop_bounds,
-        )
-
-    def full_image_point(point: tuple[float, float, float]) -> np.ndarray:
-        return _display_to_cropped_axes(
-            _project_world_to_display(renderer, point),
-            image_shape=image_shape,
-            crop_bounds=(0, 0, int(image_shape[1]), int(image_shape[0])),
-        )
-
-    def outside_unit_square_penalty(points: list[np.ndarray]) -> float:
-        penalty = 0.0
-        for point in points:
-            x_pos = float(point[0])
-            y_pos = float(point[1])
-            penalty += max(0.0, -x_pos) + max(0.0, x_pos - 1.0)
-            penalty += max(0.0, -y_pos) + max(0.0, y_pos - 1.0)
-        return penalty
-
-    candidates = [
-        (x_value, y_value, z_value)
-        for x_value in (x_min, x_max)
-        for y_value in (y_min, y_max)
-        for z_value in (z_min, z_max)
-    ]
-
-    def adjacent_axis_points(corner: tuple[float, float, float]) -> list[tuple[float, float, float]]:
-        points = [_transform_3d_point(corner, transform_matrix)]
-        for axis_index in range(3):
-            endpoint = [float(corner[0]), float(corner[1]), float(corner[2])]
-            endpoint[axis_index] = (
-                (x_min, y_min, z_min)[axis_index]
-                if float(corner[axis_index]) == (x_max, y_max, z_max)[axis_index]
-                else (x_max, y_max, z_max)[axis_index]
-            )
-            points.append(_transform_3d_point((endpoint[0], endpoint[1], endpoint[2]), transform_matrix))
-        return points
-
-    projected_candidates = []
-    for corner in candidates:
-        origin_axes = axes_point(_transform_3d_point(corner, transform_matrix))
-        frame_points = [full_image_point(point) for point in adjacent_axis_points(corner)]
-        projected_candidates.append((corner, origin_axes, outside_unit_square_penalty(frame_points)))
-
-    origin, _, _ = min(
-        projected_candidates,
-        key=lambda item: (
-            (-0.75 * float(item[2])) +
-            abs(float(item[1][0]) - 0.5) +
-            (-0.65 * float(item[1][1]))
-        ),
-    )
-    return origin
+    x_min = float(np.min(x_axis))
+    y_max = float(np.max(y_axis))
+    z_min = float(np.min(z_axis))
+    return (x_min, y_max, z_min)
 
 
 def _principal_axis_world_lines(
@@ -631,12 +586,12 @@ def _project_3d_principal_axis_specs(
         visible_tick_values = np.linspace(
             float(dense_tick_values[0]),
             float(dense_tick_values[-1]),
-            max(2, int(tick_count)),
+            max(5, int(tick_count)),
             dtype=np.float64,
         )
         for tick_value, tick_label in zip(visible_tick_values, _format_mpl_tick_labels(visible_tick_values)):
             point = list(origin)
-            point[axis_index] = float(tick_value)
+            point[axis_index] = tick_value
             tick_pos = axes_point(_transform_3d_point((point[0], point[1], point[2]), transform_matrix))
             tick_pos = _clamp_axes_text_position(tick_pos + 0.035 * outward)
             tick_specs.append((tick_label, float(tick_pos[0]), float(tick_pos[1]), 0.0, "center", "center"))
@@ -909,6 +864,7 @@ def plot_final_re_im_comparison(
     ax.plot(x_axis, np.imag(out), lw=1.5, color="C1", ls="--", label=f"{final_label} Im")
     ax.set_xlabel(x_label)
     ax.set_ylabel("Field amplitude")
+    _apply_nice_ticks(ax)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path)
@@ -934,6 +890,7 @@ def plot_two_curve_comparison(
     ax.plot(x_axis, curve_b, lw=1.5, ls="--", label=label_b)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+    _apply_nice_ticks(ax)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path)
@@ -962,6 +919,7 @@ def plot_three_curve_drift(
     ax.plot(x_axis, curve_c, lw=1.8, label=label_c)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+    _apply_nice_ticks(ax)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path)
@@ -986,6 +944,7 @@ def plot_mode_power_exchange(
     ax.plot(z_axis, mode2_num, "--", lw=1.5, color="C1", label="|A2|^2 numerical")
     ax.set_xlabel("Propagation distance z")
     ax.set_ylabel("Mode power")
+    _apply_nice_ticks(ax)
     ax.grid(True, alpha=0.3)
     ax.legend(ncol=2)
     saved = _save_figure(fig, output_path)
@@ -1010,6 +969,7 @@ def plot_phase_shift_comparison(
     ax.plot(t_axis, phase_num_plot, "--", lw=1.5, label="Numerical phase shift")
     ax.set_xlabel("Time t")
     ax.set_ylabel("Phase shift (rad)")
+    _apply_nice_ticks(ax)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path)
@@ -1054,6 +1014,7 @@ def plot_convergence_loglog(
     ax.loglog(step_sizes_plot, errors_plot, "o", color="C1", lw=1.8, ms=3.0)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+    _apply_nice_ticks(ax)
     ax.grid(True, which="both", alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path, bbox_inches="tight")
@@ -1075,6 +1036,7 @@ def plot_summary_curve(
     ax.plot(x_values, y_values, marker="o", lw=1.8)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+    _apply_nice_ticks(ax)
     ax.grid(True, alpha=0.3)
     saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -1126,10 +1088,12 @@ def plot_wavelength_step_history(
     ax_map.set_xlabel(map_x_label)
     ax_map.set_ylabel(map_y_label)
     ax_map.set_box_aspect(1.0)
+    ax_map.tick_params(labelbottom=False, bottom=False)
     cbar = fig.colorbar(mesh, ax=ax_map, pad=0.05, shrink=0.79)
     cbar.set_label("Normalized spectral intensity")
 
     ax_step = fig.add_subplot(grid[1, 0])
+    ax_step.tick_params(labeltop=False, top=False)
     has_series = False
     if accepted_z is not None and accepted_step_sizes is not None:
         z_plot = np.asarray(accepted_z, dtype=np.float64).reshape(-1)
@@ -1151,6 +1115,7 @@ def plot_wavelength_step_history(
         ax_step.set_xlabel(step_x_label)
         ax_step.set_ylabel(step_y_label)
         ax_step.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3), useOffset=False)
+        _apply_nice_ticks(ax_step)
         ax_step.grid(True, alpha=0.3)
     else:
         ax_step.text(
@@ -1193,6 +1158,7 @@ def plot_final_intensity_comparison(
     ax.plot(x_axis, out_intensity, lw=1.5, ls="--", color="C1", label=f"{final_label} $|A|^2$")
     ax.set_xlabel(x_label)
     ax.set_ylabel(r"Intensity $|A|^2$")
+    _apply_nice_ticks(ax)
     ax.grid(True, alpha=0.3)
     ax.legend()
     saved = _save_figure(fig, output_path, dpi=200, bbox_inches="tight")
@@ -1229,6 +1195,7 @@ def plot_total_error_over_propagation(
     ax.plot(z_values, errors, lw=1.8, color="C3")
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+    _apply_nice_ticks(ax)
     ax.grid(True, alpha=0.3)
     saved = _save_figure(fig, output_path, bbox_inches="tight")
     plt.close(fig)
@@ -1312,7 +1279,7 @@ def plot_frequency_time_propagation_grid(
             time_values,
             normalized_maps[3],
             f"",
-            r"Time $t$",
+            r"Time $t$ (s)",
             "",
         ),
     )

@@ -86,11 +86,15 @@ Run the nlolib-only tensor CPU vs GPU benchmark with:
 python examples/python/tensor_backend_scaling_nlolib_rk4ip.py
 ```
 
+The nlolib-only runtime plot fits the GPU curve in two regions: a smaller
+ringbuffer-friendly region and a larger transfer-limited region.
+
 The mixed nlolib/MMTools runtime comparison remains:
 
 ```powershell
 python examples/python/tensor_backend_scaling_rk4ip.py
 ```
 
-It writes both a state-vector-size runtime plot and a GRIN-effective
-mode-count runtime plot for the MMTools/nlolib comparison.
+It translates MMTools scalar mode counts into GRIN-effective nlolib grid
+sizes, then writes both state-vector-size and scalar-mode-count runtime
+plots for the comparison.

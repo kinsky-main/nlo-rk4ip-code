@@ -1,12 +1,13 @@
 """
-Equal-point nlolib CPU/GPU vs MMTools GPU runtime benchmark.
+Modal-count calibrated nlolib CPU/GPU vs MMTools GPU runtime benchmark.
 
-nlolib tensor cases use nt * nx * ny points. MMTools rows are treated as the
-equal-point counterpart when they satisfy nt * mode_count with
-mode_count = nx * ny.
+nlolib tensor cases use nt * nx * ny sampled field points. MMTools rows use
+nt * mode_count modal state entries. When MMTools rows are provided, nlolib
+grid dimensions are chosen so the GRIN-effective modal count covers the
+MMTools scalar mode count.
 
-The mode-count runtime plot uses a GRIN-effective scalar modal count for
-nlolib grid cases and the actual modal count for MMTools rows.
+The mode-count runtime plot uses the scalar mode count shared by paired
+nlolib grid cases and MMTools modal rows.
 """
 
 from __future__ import annotations
@@ -30,9 +31,12 @@ class TensorCase:
     nt: int
     nx: int
     ny: int
+    scalar_mode_count: int | None = None
 
     @property
     def mode_count(self) -> int:
+        if self.scalar_mode_count is not None:
+            return int(self.scalar_mode_count)
         return _rectangular_mode_count(self.nx, self.ny)
 
     @property
@@ -57,12 +61,19 @@ class BenchmarkRow:
 
 
 @dataclass(frozen=True)
+class RuntimeFitSegment:
+    label_suffix: str
+    linestyle: str
+
+
+@dataclass(frozen=True)
 class RuntimePlotSeries:
     solver: str
     backend: str
     marker: str = "o"
     linestyle: str = "-"
     fit_linestyle: str = "--"
+    fit_segments: tuple[RuntimeFitSegment, ...] = ()
 
     @property
     def label(self) -> str:
@@ -111,14 +122,21 @@ _MIXED_MODE_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
     ),
     save_path="tensor_backend_scaling_runtime_by_mode.png",
     fit_skip_initial_points=1,
-    x_axis="effective_modes",
+    x_axis="mode_count",
     x_scale=1.0,
-    x_label="Effective scalar mode count",
+    x_label="Scalar mode count",
 )
 _NLOLIB_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
     series=(
         RuntimePlotSeries("nlolib", "CPU"),
-        RuntimePlotSeries("nlolib", "GPU"),
+        RuntimePlotSeries(
+            "nlolib",
+            "GPU",
+            fit_segments=(
+                RuntimeFitSegment("ringbuffer", "--"),
+                RuntimeFitSegment("transfer-limited", ":"),
+            ),
+        ),
     ),
     save_path="tensor_backend_scaling_runtime_nlolib_only.png",
     fit_skip_initial_points=1,
@@ -135,10 +153,15 @@ def _grin_effective_mode_count(nx: int, ny: int) -> int:
     return int((q_max + 1) * (q_max + 2) // 2)
 
 
-def _effective_runtime_mode_count(row: BenchmarkRow) -> int:
-    if row.solver.strip().lower() == "mmtools":
-        return int(row.mode_count)
-    return _grin_effective_mode_count(row.nx, row.ny)
+def _square_grid_size_for_grin_mode_count(mode_count: int) -> int:
+    target = int(mode_count)
+    if target <= 0:
+        raise ValueError("mode_count must be positive.")
+
+    grid_n = int(np.ceil((np.sqrt(8.0 * float(target) + 1.0) - 1.0) / 2.0))
+    while _grin_effective_mode_count(grid_n, grid_n) < target:
+        grid_n += 1
+    return max(1, grid_n)
 
 
 def _parse_int_csv(raw: str) -> list[int]:
@@ -344,6 +367,10 @@ def _equivalent_total_points(nt: int, nx: int, ny: int) -> int:
 
 def _case_key(row: BenchmarkRow) -> tuple[int, int, int]:
     return int(row.nt), int(row.nx), int(row.ny)
+
+
+def _mode_pair_key(row: BenchmarkRow) -> tuple[int, int]:
+    return int(row.nt), int(row.mode_count)
 
 
 def _row_storage_case_key(row: BenchmarkRow) -> str:
@@ -556,7 +583,7 @@ def _read_mmtools_rows(summary_csv: Path | None) -> list[BenchmarkRow]:
             ny = _require_csv_int(row, "ny", positive=True)
             mode_count = _require_csv_int(row, "mode_count", positive=True)
             _require_csv_int(row, "total_points", positive=True)
-            total_points = _equivalent_total_points(nt, nx, ny)
+            total_points = int(nt * mode_count)
 
             runtime_seconds = _csv_float(row, "wall_seconds")
             runtime_seconds_std = _csv_float(row, "wall_seconds_std")
@@ -597,13 +624,22 @@ def _resolve_cases(
 ) -> list[TensorCase]:
     if len(mmtools_rows) > 0:
         print(
-            f"using {len(mmtools_rows)} equal-point MMTools rows from: {mmtools_summary_csv}"
+            f"using {len(mmtools_rows)} modal-count MMTools rows from: {mmtools_summary_csv}"
         )
-        return [
-            TensorCase(nt=row.nt, nx=row.nx, ny=row.ny)
-            for row in mmtools_rows
-            if row.status == "ok"
-        ]
+        cases: list[TensorCase] = []
+        for row in mmtools_rows:
+            if row.status != "ok":
+                continue
+            grid_n = _square_grid_size_for_grin_mode_count(row.mode_count)
+            cases.append(
+                TensorCase(
+                    nt=row.nt,
+                    nx=grid_n,
+                    ny=grid_n,
+                    scalar_mode_count=row.mode_count,
+                )
+            )
+        return cases
     return [_case_from_scale(scale) for scale in args.scales]
 
 
@@ -629,8 +665,8 @@ def _series_rows(
 def _runtime_x_value(row: BenchmarkRow, x_axis: str) -> int:
     if x_axis == "state_points":
         return int(row.total_points)
-    if x_axis == "effective_modes":
-        return _effective_runtime_mode_count(row)
+    if x_axis == "mode_count":
+        return int(row.mode_count)
     raise ValueError(f"unknown runtime plot x-axis: {x_axis!r}")
 
 
@@ -685,18 +721,11 @@ def _fit_loglog_slope(
     return float(order), float(log_scale), valid_mask
 
 
-def _fit_runtime_series(
-    rows: Sequence[BenchmarkRow],
-    *,
-    skip_initial_points: int = 0,
-    x_axis: str = "state_points",
+def _fit_runtime_curve(
+    x_values: np.ndarray,
+    y_values: np.ndarray,
+    fit_mask: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, str, float] | None:
-    x_values, y_values = _series_xy(rows, x_axis=x_axis)
-    if x_values.size <= int(skip_initial_points):
-        return None
-
-    fit_mask = np.ones(x_values.shape, dtype=bool)
-    fit_mask[: max(0, int(skip_initial_points))] = False
     fitted = _fit_loglog_slope(x_values, y_values, fit_mask)
     if fitted is None:
         return None
@@ -711,6 +740,61 @@ def _fit_runtime_series(
     )
     y_fit = np.exp(log_scale) * np.power(x_fit, order)
     return x_fit, y_fit, _growth_order_label(float(order)), 0.0
+
+
+def _fit_runtime_series(
+    rows: Sequence[BenchmarkRow],
+    *,
+    skip_initial_points: int = 0,
+    x_axis: str = "state_points",
+) -> tuple[np.ndarray, np.ndarray, str, float] | None:
+    x_values, y_values = _series_xy(rows, x_axis=x_axis)
+    if x_values.size <= int(skip_initial_points):
+        return None
+
+    fit_mask = np.ones(x_values.shape, dtype=bool)
+    fit_mask[: max(0, int(skip_initial_points))] = False
+    return _fit_runtime_curve(x_values, y_values, fit_mask)
+
+
+def _fit_runtime_series_segments(
+    rows: Sequence[BenchmarkRow],
+    *,
+    skip_initial_points: int = 0,
+    x_axis: str = "state_points",
+    segment_count: int = 2,
+) -> list[tuple[np.ndarray, np.ndarray, str, float]]:
+    x_values, y_values = _series_xy(rows, x_axis=x_axis)
+    if segment_count <= 1:
+        fit = _fit_runtime_series(
+            rows,
+            skip_initial_points=skip_initial_points,
+            x_axis=x_axis,
+        )
+        return [] if fit is None else [fit]
+
+    base_mask = (
+        np.isfinite(x_values)
+        & np.isfinite(y_values)
+        & (x_values > 0.0)
+        & (y_values > 0.0)
+    )
+    base_mask[: max(0, int(skip_initial_points))] = False
+    valid_indices = np.flatnonzero(base_mask)
+    if valid_indices.size < int(segment_count) * 2:
+        return []
+
+    fits: list[tuple[np.ndarray, np.ndarray, str, float]] = []
+    for segment_indices in np.array_split(valid_indices, int(segment_count)):
+        if segment_indices.size < 2:
+            return []
+        fit_mask = np.zeros(x_values.shape, dtype=bool)
+        fit_mask[segment_indices] = True
+        fit = _fit_runtime_curve(x_values, y_values, fit_mask)
+        if fit is None:
+            return []
+        fits.append(fit)
+    return fits
 
 
 def _plot_runtime_series(
@@ -739,6 +823,26 @@ def _plot_runtime_series(
         label=series.label,
     )
     line = container.lines[0]
+    if len(series.fit_segments) > 0:
+        segment_fits = _fit_runtime_series_segments(
+            solver_rows,
+            skip_initial_points=fit_skip_initial_points,
+            x_axis=x_axis,
+            segment_count=len(series.fit_segments),
+        )
+        if len(segment_fits) == len(series.fit_segments):
+            for segment, segment_fit in zip(series.fit_segments, segment_fits):
+                x_fit, y_fit, growth_order, _ = segment_fit
+                ax.plot(
+                    x_fit / float(x_scale),
+                    y_fit,
+                    linestyle=segment.linestyle,
+                    linewidth=1.4,
+                    color=line.get_color(),
+                    label=f"{series.label} {segment.label_suffix} {growth_order}",
+                )
+            return True, (None, None, None)
+
     fit = _fit_runtime_series(
         solver_rows,
         skip_initial_points=fit_skip_initial_points,
@@ -791,6 +895,7 @@ def _plot_runtime(
     ax.set_ylabel("Runtime (s)")
     ax.set_yscale("log")
     ax.set_xscale("log")
+    ax.grid(True, which="both", alpha=0.3)
     ax.legend()
     fig.tight_layout()
     output_path = output_dir / plot_spec.save_path
@@ -912,7 +1017,7 @@ def _benchmark_nlolib_rows(
 def _print_summary(rows: list[BenchmarkRow]) -> None:
     runtime_rows = [row for row in rows if row.runtime_seconds is not None]
     keyed_rows = {
-        (row.solver.lower(), row.backend.upper(), _case_key(row)): row
+        (row.solver.lower(), row.backend.upper(), _mode_pair_key(row)): row
         for row in runtime_rows
     }
 
@@ -927,21 +1032,15 @@ def _print_summary(rows: list[BenchmarkRow]) -> None:
             f"status={row.status} {row.message}"
         )
 
-    case_keys = sorted(
-        {_case_key(row) for row in rows},
-        key=lambda item: _equivalent_total_points(*item),
+    pair_keys = sorted(
+        {_mode_pair_key(row) for row in rows},
+        key=lambda item: (item[1], item[0]),
     )
-    for case_key in case_keys:
-        cpu_row = keyed_rows.get(("nlolib", "CPU", case_key))
-        gpu_row = keyed_rows.get(("nlolib", "GPU", case_key))
-        mmtools_row = keyed_rows.get(("mmtools", "GPU", case_key))
-        total_points = None
-        for candidate in (gpu_row, cpu_row, mmtools_row):
-            if candidate is not None:
-                total_points = candidate.total_points
-                break
-        if total_points is None:
-            total_points = _equivalent_total_points(*case_key)
+    for pair_key in pair_keys:
+        cpu_row = keyed_rows.get(("nlolib", "CPU", pair_key))
+        gpu_row = keyed_rows.get(("nlolib", "GPU", pair_key))
+        mmtools_row = keyed_rows.get(("mmtools", "GPU", pair_key))
+        nt, mode_count = pair_key
 
         if (
             cpu_row is not None
@@ -952,7 +1051,7 @@ def _print_summary(rows: list[BenchmarkRow]) -> None:
         ):
             cpu_vs_gpu = cpu_row.runtime_seconds / gpu_row.runtime_seconds
             print(
-                f"compare total_points={total_points:<8d} "
+                f"compare nt={nt:<4d} mode_count={mode_count:<6d} "
                 f"nlolib_cpu_runtime_s={cpu_row.runtime_seconds:.6f} "
                 f"nlolib_gpu_runtime_s={gpu_row.runtime_seconds:.6f} "
                 f"cpu_vs_gpu_runtime={cpu_vs_gpu:.3f}x"
@@ -968,7 +1067,9 @@ def _print_summary(rows: list[BenchmarkRow]) -> None:
             continue
         runtime_ratio = gpu_row.runtime_seconds / mmtools_row.runtime_seconds
         print(
-            f"compare total_points={total_points:<8d} "
+            f"compare nt={nt:<4d} mode_count={mode_count:<6d} "
+            f"nlolib_grid_points={gpu_row.total_points:<8d} "
+            f"mmtools_state_points={mmtools_row.total_points:<8d} "
             f"nlolib_gpu_runtime_s={gpu_row.runtime_seconds:.6f} "
             f"mmtools_runtime_s={mmtools_row.runtime_seconds:.6f} "
             f"nlolib_gpu_vs_mmtools_runtime={runtime_ratio:.3f}x"
@@ -1051,10 +1152,10 @@ class TensorBackendScalingApp(ExampleAppBase):
             help="Recorded snapshots per run. Use 1 to benchmark final-only output.",
         )
         parser.add_argument(
-            "--warmup", type=int, default=0, help="Warmup runs per benchmark point."
+            "--warmup", type=int, default=6, help="Warmup runs per benchmark point."
         )
         parser.add_argument(
-            "--runs", type=int, default=1, help="Measured runs per benchmark point."
+            "--runs", type=int, default=4, help="Measured runs per benchmark point."
         )
         parser.add_argument(
             "--mmtools-summary-csv",
