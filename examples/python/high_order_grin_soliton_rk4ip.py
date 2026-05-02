@@ -36,6 +36,10 @@ import nlolib as nlo
 DEFAULT_SOLITON_ORDER = 2.0
 DEFAULT_SATURATION_INTENSITY = 2.0
 DEFAULT_PROPAGATION_PERIODS = 6.0
+DEFAULT_AZIMUTHAL_AMPLITUDE = 0.02
+DEFAULT_AZIMUTHAL_ORDER = 4
+DEFAULT_NOISE_AMPLITUDE = 5.0e-3
+DEFAULT_NOISE_SEED = 12345
 
 
 def centered_spatial_grid(num_samples: int, delta: float) -> np.ndarray:
@@ -46,13 +50,24 @@ def guided_spatial_mode(
     x_axis: np.ndarray,
     y_axis: np.ndarray,
     *,
-    mode_width: float,
+    mode_width_x: float,
+    mode_width_y: float,
     chirp: float,
+    azimuthal_amplitude: float,
+    azimuthal_order: int,
+    noise_amplitude: float,
+    noise_seed: int,
 ) -> np.ndarray:
     xx, yy = np.meshgrid(np.asarray(x_axis, dtype=np.float64), np.asarray(y_axis, dtype=np.float64))
     r2 = (xx * xx) + (yy * yy)
-    envelope = np.exp(-r2 / (2.0 * float(mode_width) * float(mode_width)))
-    return envelope * np.exp(1.0j * float(chirp) * r2)
+    wx = float(mode_width_x)
+    wy = float(mode_width_y)
+    envelope = np.exp(-(xx * xx) / (2.0 * wx * wx) - (yy * yy) / (2.0 * wy * wy))
+    theta = np.arctan2(yy, xx)
+    rng = np.random.default_rng(int(noise_seed))
+    xi = rng.standard_normal(envelope.shape).astype(np.float64)
+    perturbation = 1.0 + float(azimuthal_amplitude) * np.cos(int(azimuthal_order) * theta) + float(noise_amplitude) * xi
+    return envelope * perturbation * np.exp(1.0j * float(chirp) * r2)
 
 
 def sech(x: np.ndarray) -> np.ndarray:
@@ -97,8 +112,13 @@ def grin_launch_field(
     beta2: float,
     gamma: float,
     soliton_order: float,
-    mode_width: float,
+    mode_width_x: float,
+    mode_width_y: float,
     spatial_chirp: float,
+    azimuthal_amplitude: float,
+    azimuthal_order: int,
+    noise_amplitude: float,
+    noise_seed: int,
 ) -> np.ndarray:
     temporal = temporal_envelope(
         t_axis,
@@ -110,8 +130,13 @@ def grin_launch_field(
     transverse = guided_spatial_mode(
         x_axis,
         y_axis,
-        mode_width=mode_width,
+        mode_width_x=mode_width_x,
+        mode_width_y=mode_width_y,
         chirp=spatial_chirp,
+        azimuthal_amplitude=azimuthal_amplitude,
+        azimuthal_order=azimuthal_order,
+        noise_amplitude=noise_amplitude,
+        noise_seed=noise_seed,
     ).astype(np.complex128)
     return temporal[:, None, None] * transverse[None, :, :]
 
@@ -324,8 +349,13 @@ def _run(args: argparse.Namespace) -> float:
     dy = 0.04
     temporal_width = 0.30
     soliton_order = float(args.soliton_order)
-    mode_width = 2.4
-    spatial_chirp = 0.0
+    mode_width_x = 2.4
+    mode_width_y = 2.4
+    spatial_chirp = 4.0e-3
+    azimuthal_amplitude = float(args.azimuthal_amplitude)
+    azimuthal_order = int(args.azimuthal_order)
+    noise_amplitude = float(args.noise_amplitude)
+    noise_seed = int(args.noise_seed)
     beta2 = -0.08
     beta_t = -0.08
     grin_strength = 1.5e-3
@@ -353,8 +383,13 @@ def _run(args: argparse.Namespace) -> float:
         beta2=beta2,
         gamma=gamma_nonlinear,
         soliton_order=soliton_order,
-        mode_width=mode_width,
+        mode_width_x=mode_width_x,
+        mode_width_y=mode_width_y,
         spatial_chirp=spatial_chirp,
+        azimuthal_amplitude=azimuthal_amplitude,
+        azimuthal_order=azimuthal_order,
+        noise_amplitude=noise_amplitude,
+        noise_seed=noise_seed,
     ).astype(np.complex128)
 
     exec_options = nlo.default_execution_options(
@@ -378,8 +413,13 @@ def _run(args: argparse.Namespace) -> float:
         dy = float(meta["dy"])
         temporal_width = float(meta["temporal_width"])
         soliton_order = float(meta["soliton_order"])
-        mode_width = float(meta["mode_width"])
+        mode_width_x = float(meta["mode_width_x"])
+        mode_width_y = float(meta["mode_width_y"])
         spatial_chirp = float(meta["spatial_chirp"])
+        azimuthal_amplitude = float(meta.get("azimuthal_amplitude", 0.0))
+        azimuthal_order = int(meta.get("azimuthal_order", 4))
+        noise_amplitude = float(meta.get("noise_amplitude", 0.0))
+        noise_seed = int(meta.get("noise_seed", 0))
         beta2 = float(meta["beta2"])
         beta_t = float(meta["beta_t"])
         grin_strength = float(meta["grin_strength"])
@@ -397,8 +437,13 @@ def _run(args: argparse.Namespace) -> float:
             beta2=beta2,
             gamma=gamma_nonlinear,
             soliton_order=soliton_order,
-            mode_width=mode_width,
+            mode_width_x=mode_width_x,
+            mode_width_y=mode_width_y,
             spatial_chirp=spatial_chirp,
+            azimuthal_amplitude=azimuthal_amplitude,
+            azimuthal_order=azimuthal_order,
+            noise_amplitude=noise_amplitude,
+            noise_seed=noise_seed,
         ).astype(np.complex128)
         z_axis = np.asarray(loaded_nonlinear.z_axis, dtype=np.float64)
         nonlinear_records = unflatten_tfast_records(
@@ -444,8 +489,13 @@ def _run(args: argparse.Namespace) -> float:
             "dy": float(dy),
             "temporal_width": float(temporal_width),
             "soliton_order": float(soliton_order),
-            "mode_width": float(mode_width),
+            "mode_width_x": float(mode_width_x),
+            "mode_width_y": float(mode_width_y),
             "spatial_chirp": float(spatial_chirp),
+            "azimuthal_amplitude": float(azimuthal_amplitude),
+            "azimuthal_order": int(azimuthal_order),
+            "noise_amplitude": float(noise_amplitude),
+            "noise_seed": int(noise_seed),
             "beta2": float(beta2),
             "beta_t": float(beta_t),
             "grin_strength": float(grin_strength),
@@ -487,11 +537,11 @@ def _run(args: argparse.Namespace) -> float:
     nonlinear_temporal_peaks = temporal_peak_count_curve(nonlinear_temporal)
     ld = dispersion_length(beta2, temporal_width)
     lnl = 1.0 / (gamma_nonlinear * fundamental_soliton_power(beta2, gamma_nonlinear, temporal_width))
-    ldiff = diffraction_length(beta_t, mode_width)
+    ldiff = diffraction_length(beta_t, 0.5 * (mode_width_x + mode_width_y))
     t_scaled = t_axis / float(temporal_width)
     omega_scaled = temporal_frequency_axis(nt, dt, temporal_width)
-    x_scaled = x_axis / float(mode_width)
-    y_scaled = y_axis / float(mode_width)
+    x_scaled = x_axis / float(mode_width_x)
+    y_scaled = y_axis / float(mode_width_y)
     z_period = soliton_period(beta2, temporal_width)
     z_final = float(z_axis[-1]) if z_axis.size > 0 else float(z_final)
     if propagation_periods <= 0.0:
@@ -655,6 +705,30 @@ class HighOrderGrinSolitonApp(ExampleAppBase):
             type=float,
             default=DEFAULT_PROPAGATION_PERIODS,
             help="Propagation distance in units of the high-order soliton period.",
+        )
+        parser.add_argument(
+            "--azimuthal-amplitude",
+            type=float,
+            default=DEFAULT_AZIMUTHAL_AMPLITUDE,
+            help="Amplitude epsilon of the cos(m*theta) azimuthal modulation seeding filamentation.",
+        )
+        parser.add_argument(
+            "--azimuthal-order",
+            type=int,
+            default=DEFAULT_AZIMUTHAL_ORDER,
+            help="Azimuthal mode number m for the cos(m*theta) seed.",
+        )
+        parser.add_argument(
+            "--noise-amplitude",
+            type=float,
+            default=DEFAULT_NOISE_AMPLITUDE,
+            help="Amplitude eta of the random transverse perturbation xi(x,y).",
+        )
+        parser.add_argument(
+            "--noise-seed",
+            type=int,
+            default=DEFAULT_NOISE_SEED,
+            help="RNG seed used to draw the noise field xi(x,y).",
         )
 
     def run(self) -> float:
