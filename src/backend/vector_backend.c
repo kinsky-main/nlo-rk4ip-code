@@ -20,6 +20,46 @@
 #define TWO_PI 6.283185307179586476925286766559
 #endif
 
+static vk_auto_context g_auto_context;
+static int g_auto_context_ready = 0;
+static int g_auto_context_cleanup_registered = 0;
+static int g_auto_context_logged = 0;
+
+static void vector_backend_destroy_auto_context(void)
+{
+    if (g_auto_context_ready != 0) {
+        vk_auto_context_destroy(&g_auto_context);
+        g_auto_context_ready = 0;
+    }
+}
+
+static int vector_backend_auto_context(
+    vk_auto_context** out_context,
+    char* reason,
+    size_t reason_capacity
+)
+{
+    if (out_context == NULL) {
+        return -1;
+    }
+
+    if (g_auto_context_ready == 0) {
+        vk_auto_context auto_ctx;
+        if (vk_auto_context_init(&auto_ctx, reason, reason_capacity) != 0) {
+            return -1;
+        }
+        g_auto_context = auto_ctx;
+        g_auto_context_ready = 1;
+        if (g_auto_context_cleanup_registered == 0) {
+            (void)atexit(vector_backend_destroy_auto_context);
+            g_auto_context_cleanup_registered = 1;
+        }
+    }
+
+    *out_context = &g_auto_context;
+    return 0;
+}
+
 size_t vec_element_size(vec_kind kind)
 {
     switch (kind) {
@@ -367,8 +407,9 @@ vector_backend* vector_backend_create_vulkan(const vk_backend_config* config)
 static vector_backend* vector_backend_create_auto(const vk_backend_config* config_template)
 {
     char reason[256];
-    vk_auto_context auto_ctx;
-    if (vk_auto_context_init(&auto_ctx, reason, sizeof(reason)) != 0) {
+    vk_auto_context* auto_ctx = NULL;
+    if (vector_backend_auto_context(&auto_ctx, reason, sizeof(reason)) != 0 ||
+        auto_ctx == NULL) {
         fprintf(stderr,
                 "[nlolib] auto backend selection failed: %s\n",
                 (reason[0] != '\0') ? reason : "unknown Vulkan setup error");
@@ -380,15 +421,14 @@ static vector_backend* vector_backend_create_auto(const vk_backend_config* confi
         config = *config_template;
     }
 
-    config.physical_device = auto_ctx.physical_device;
-    config.device = auto_ctx.device;
-    config.queue = auto_ctx.queue;
-    config.queue_family_index = auto_ctx.queue_family_index;
+    config.physical_device = auto_ctx->physical_device;
+    config.device = auto_ctx->device;
+    config.queue = auto_ctx->queue;
+    config.queue_family_index = auto_ctx->queue_family_index;
     config.command_pool = VK_NULL_HANDLE;
 
     vector_backend* backend = (vector_backend*)calloc(1, sizeof(*backend));
     if (backend == NULL) {
-        vk_auto_context_destroy(&auto_ctx);
         return NULL;
     }
 
@@ -396,32 +436,34 @@ static vector_backend* vector_backend_create_auto(const vk_backend_config* confi
     backend->in_simulation = false;
     if (vk_backend_init(backend, &config) != VEC_STATUS_OK) {
         free(backend);
-        vk_auto_context_destroy(&auto_ctx);
         return NULL;
     }
 
-    backend->vk.instance = auto_ctx.instance;
-    backend->vk.owns_instance = true;
-    backend->vk.owns_device = true;
-    backend->vk.device_type = auto_ctx.device_type;
-    backend->vk.device_local_bytes = auto_ctx.device_local_bytes;
+    backend->vk.instance = auto_ctx->instance;
+    backend->vk.owns_instance = false;
+    backend->vk.owns_device = false;
+    backend->vk.device_type = auto_ctx->device_type;
+    backend->vk.device_local_bytes = auto_ctx->device_local_bytes;
 #if defined(_MSC_VER)
     strncpy_s(backend->vk.device_name,
               sizeof(backend->vk.device_name),
-              auto_ctx.device_name,
+              auto_ctx->device_name,
               _TRUNCATE);
 #else
     snprintf(backend->vk.device_name,
              sizeof(backend->vk.device_name),
              "%s",
-             auto_ctx.device_name);
+             auto_ctx->device_name);
 #endif
 
-    fprintf(stderr,
-            "[nlolib] auto backend selected Vulkan device='%s' type=%s device_local_bytes=%llu\n",
-            (backend->vk.device_name[0] != '\0') ? backend->vk.device_name : "unknown",
-            vk_device_type_to_string(backend->vk.device_type),
-            (unsigned long long)backend->vk.device_local_bytes);
+    if (g_auto_context_logged == 0) {
+        fprintf(stderr,
+                "[nlolib] auto backend selected Vulkan device='%s' type=%s device_local_bytes=%llu\n",
+                (backend->vk.device_name[0] != '\0') ? backend->vk.device_name : "unknown",
+                vk_device_type_to_string(backend->vk.device_type),
+                (unsigned long long)backend->vk.device_local_bytes);
+        g_auto_context_logged = 1;
+    }
     return backend;
 }
 
@@ -1309,4 +1351,3 @@ vec_status vec_complex_weighted_rms_error(
 
     return VEC_STATUS_UNSUPPORTED;
 }
-

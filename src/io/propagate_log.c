@@ -153,6 +153,7 @@ void log_propagate_request(
     char records_bytes_text[48];
     char field_size_text[48];
     char records_size_text[48];
+    char frequency_bytes_text[48];
     char frequency_size_text[48];
     char runtime_constants_text[48];
     char nt_text[48];
@@ -167,6 +168,9 @@ void log_propagate_request(
                                      (uint64_t)num_recorded_samples);
     (void)log_format_u64_grouped(field_bytes_text, sizeof(field_bytes_text), (uint64_t)field_bytes);
     (void)log_format_u64_grouped(records_bytes_text, sizeof(records_bytes_text), (uint64_t)records_bytes);
+    (void)log_format_u64_grouped(frequency_bytes_text,
+                                     sizeof(frequency_bytes_text),
+                                     (uint64_t)frequency_grid_bytes);
     (void)log_format_u64_grouped(runtime_constants_text,
                                      sizeof(runtime_constants_text),
                                      (uint64_t)((config != NULL) ? config->runtime.num_constants : 0u));
@@ -294,7 +298,7 @@ void log_propagate_request(
         constants_lines,
         (config != NULL) ? (const void*)config->frequency.frequency_grid : NULL,
         frequency_size_text,
-        field_bytes_text,
+        frequency_bytes_text,
         nt_text,
         nx_text,
         ny_text,

@@ -5,6 +5,7 @@
 
 #include "fft/fft.h"
 #include "backend/vector_backend_internal.h"
+#include "numerics/vk_backend_internal.h"
 #include "numerics/vk_vector_ops.h"
 #include <limits.h>
 #include <stddef.h>
@@ -44,6 +45,11 @@ struct fft_plan {
     vec_buffer* vk_placeholder_vec;
     VkBuffer vk_buffer_binding;
     uint64_t vk_buffer_size;
+    vec_buffer** vk_split_vecs;
+    VkBuffer* vk_split_buffer_bindings;
+    uint64_t* vk_split_buffer_sizes;
+    uint64_t* vk_split_payload_sizes;
+    size_t vk_split_count;
     VkCommandPool vk_command_pool;
     VkCommandBuffer vk_command_buffer;
     VkFence vkfft_internal_fence;
@@ -189,9 +195,221 @@ static void fft_vk_cmd_compute_barrier(VkCommandBuffer cmd, VkBuffer buffer, VkD
                          0u,
                          NULL);
 }
+
+static void fft_vk_cmd_transfer_to_compute_barrier(
+    VkCommandBuffer cmd,
+    VkBuffer buffer,
+    VkDeviceSize offset,
+    VkDeviceSize size
+)
+{
+    VkBufferMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = buffer,
+        .offset = offset,
+        .size = size
+    };
+
+    vkCmdPipelineBarrier(cmd,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         0u,
+                         0u,
+                         NULL,
+                         1u,
+                         &barrier,
+                         0u,
+                         NULL);
+}
 #endif
 
 #if ENABLE_VKFFT
+static size_t fft_vk_max_split_elements(const vector_backend* backend)
+{
+    if (backend == NULL || backend->vk.limits.maxStorageBufferRange == 0u) {
+        return 0u;
+    }
+    const uint64_t max_bytes = backend->vk.limits.maxStorageBufferRange;
+    const uint64_t max_elements = max_bytes / (uint64_t)sizeof(nlo_complex);
+    return (max_elements > (uint64_t)SIZE_MAX) ? SIZE_MAX : (size_t)max_elements;
+}
+
+static void fft_vk_destroy_split_buffers(fft_plan* plan)
+{
+    if (plan == NULL || plan->backend == NULL) {
+        return;
+    }
+    for (size_t i = 0u; i < plan->vk_split_count; ++i) {
+        if (plan->vk_split_vecs != NULL && plan->vk_split_vecs[i] != NULL) {
+            vec_destroy(plan->backend, plan->vk_split_vecs[i]);
+            plan->vk_split_vecs[i] = NULL;
+        }
+    }
+    free(plan->vk_split_vecs);
+    free(plan->vk_split_buffer_bindings);
+    free(plan->vk_split_buffer_sizes);
+    free(plan->vk_split_payload_sizes);
+    plan->vk_split_vecs = NULL;
+    plan->vk_split_buffer_bindings = NULL;
+    plan->vk_split_buffer_sizes = NULL;
+    plan->vk_split_payload_sizes = NULL;
+    plan->vk_split_count = 0u;
+}
+
+static vec_status fft_vk_create_split_buffers(fft_plan* plan)
+{
+    if (plan == NULL || plan->backend == NULL) {
+        return VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    const size_t max_segment_elements = fft_vk_max_split_elements(plan->backend);
+    if (max_segment_elements == 0u) {
+        return VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    const size_t split_count =
+        1u + ((plan->total_size - 1u) / max_segment_elements);
+    if (split_count <= 1u || split_count > (size_t)UINT32_MAX) {
+        return VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    plan->vk_split_vecs = (vec_buffer**)calloc(split_count, sizeof(*plan->vk_split_vecs));
+    plan->vk_split_buffer_bindings =
+        (VkBuffer*)calloc(split_count, sizeof(*plan->vk_split_buffer_bindings));
+    plan->vk_split_buffer_sizes =
+        (uint64_t*)calloc(split_count, sizeof(*plan->vk_split_buffer_sizes));
+    plan->vk_split_payload_sizes =
+        (uint64_t*)calloc(split_count, sizeof(*plan->vk_split_payload_sizes));
+    if (plan->vk_split_vecs == NULL ||
+        plan->vk_split_buffer_bindings == NULL ||
+        plan->vk_split_buffer_sizes == NULL ||
+        plan->vk_split_payload_sizes == NULL) {
+        fft_vk_destroy_split_buffers(plan);
+        return VEC_STATUS_ALLOCATION_FAILED;
+    }
+
+    plan->vk_split_count = split_count;
+    size_t remaining = plan->total_size;
+    for (size_t i = 0u; i < split_count; ++i) {
+        const size_t segment_elements =
+            (remaining > max_segment_elements) ? max_segment_elements : remaining;
+        if (vec_create(plan->backend,
+                       VEC_KIND_COMPLEX64,
+                       max_segment_elements,
+                       &plan->vk_split_vecs[i]) != VEC_STATUS_OK) {
+            fft_vk_destroy_split_buffers(plan);
+            return VEC_STATUS_ALLOCATION_FAILED;
+        }
+        plan->vk_split_buffer_bindings[i] = plan->vk_split_vecs[i]->vk_buffer;
+        plan->vk_split_buffer_sizes[i] = (uint64_t)plan->vk_split_vecs[i]->bytes;
+        plan->vk_split_payload_sizes[i] =
+            (uint64_t)(segment_elements * sizeof(nlo_complex));
+        remaining -= segment_elements;
+    }
+
+    return VEC_STATUS_OK;
+}
+
+static void fft_vk_cmd_split_copy(
+    fft_plan* plan,
+    VkCommandBuffer cmd,
+    VkBuffer whole_buffer,
+    int split_to_whole
+)
+{
+    VkDeviceSize whole_offset = 0u;
+    for (size_t i = 0u; i < plan->vk_split_count; ++i) {
+        const VkDeviceSize segment_bytes = (VkDeviceSize)plan->vk_split_payload_sizes[i];
+        VkBuffer split_buffer = plan->vk_split_buffer_bindings[i];
+        VkBufferCopy copy = {
+            .srcOffset = split_to_whole ? 0u : whole_offset,
+            .dstOffset = split_to_whole ? whole_offset : 0u,
+            .size = segment_bytes
+        };
+
+        vk_cmd_compute_to_transfer(cmd,
+                                   split_to_whole ? split_buffer : whole_buffer,
+                                   split_to_whole ? 0u : whole_offset,
+                                   segment_bytes);
+        vk_cmd_compute_to_transfer(cmd,
+                                   split_to_whole ? whole_buffer : split_buffer,
+                                   split_to_whole ? whole_offset : 0u,
+                                   segment_bytes);
+        vkCmdCopyBuffer(cmd,
+                        split_to_whole ? split_buffer : whole_buffer,
+                        split_to_whole ? whole_buffer : split_buffer,
+                        1u,
+                        &copy);
+        fft_vk_cmd_transfer_to_compute_barrier(cmd,
+                                               whole_buffer,
+                                               whole_offset,
+                                               segment_bytes);
+        fft_vk_cmd_transfer_to_compute_barrier(cmd,
+                                               split_buffer,
+                                               0u,
+                                               segment_bytes);
+        whole_offset += segment_bytes;
+    }
+}
+
+static vec_status fft_vk_execute_split(
+    fft_plan* plan,
+    vec_buffer* target,
+    int inverse
+)
+{
+    if (plan == NULL || target == NULL || plan->vk_split_count == 0u) {
+        return VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    vector_backend* backend = plan->backend;
+    VkCommandBuffer cmd = plan->vk_command_buffer;
+    vec_status status = VEC_STATUS_OK;
+    if (backend != NULL && backend->in_simulation) {
+        status = vk_simulation_phase_command_buffer(backend, &cmd);
+    } else {
+        status = fft_vk_begin_commands(plan);
+    }
+    if (status != VEC_STATUS_OK) {
+        return status;
+    }
+
+    fft_vk_cmd_split_copy(plan, cmd, target->vk_buffer, 0);
+    for (size_t i = 0u; i < plan->vk_split_count; ++i) {
+        fft_vk_cmd_compute_barrier(cmd,
+                                   plan->vk_split_buffer_bindings[i],
+                                   (VkDeviceSize)plan->vk_split_buffer_sizes[i]);
+    }
+
+    VkFFTLaunchParams launch_params = {0};
+    launch_params.commandBuffer = &cmd;
+
+    VkFFTResult result = VkFFTAppend(&plan->vk_app, inverse ? 1 : -1, &launch_params);
+    if (result != VKFFT_SUCCESS) {
+        if (backend == NULL || !backend->in_simulation) {
+            (void)vkEndCommandBuffer(cmd);
+        }
+        return VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    for (size_t i = 0u; i < plan->vk_split_count; ++i) {
+        fft_vk_cmd_compute_barrier(cmd,
+                                   plan->vk_split_buffer_bindings[i],
+                                   (VkDeviceSize)plan->vk_split_buffer_sizes[i]);
+    }
+    fft_vk_cmd_split_copy(plan, cmd, target->vk_buffer, 1);
+
+    if (backend != NULL && backend->in_simulation) {
+        vk_simulation_phase_mark_commands(backend);
+        return VEC_STATUS_OK;
+    }
+    return fft_vk_submit_commands(plan);
+}
+
 static vec_status fft_vk_execute_inplace(
     fft_plan* plan,
     vec_buffer* target,
@@ -200,6 +418,9 @@ static vec_status fft_vk_execute_inplace(
 {
     if (plan == NULL || target == NULL) {
         return VEC_STATUS_INVALID_ARGUMENT;
+    }
+    if (plan->vk_split_count > 0u) {
+        return fft_vk_execute_split(plan, target, inverse);
     }
 
     vector_backend* backend = plan->backend;
@@ -394,17 +615,38 @@ vec_status fft_plan_create_shaped_with_backend(
             return VEC_STATUS_INVALID_ARGUMENT;
         }
 
-        vec_status status = vec_create(backend,
-                                               VEC_KIND_COMPLEX64,
-                                               plan->total_size,
-                                               &plan->vk_placeholder_vec);
-        if (status != VEC_STATUS_OK) {
+        size_t total_bytes = 0u;
+        if (fft_checked_mul_size(plan->total_size, sizeof(nlo_complex), &total_bytes) != 0) {
             fft_plan_destroy(plan);
-            return status;
+            return VEC_STATUS_INVALID_ARGUMENT;
         }
+        const size_t max_storage_range =
+            (size_t)backend->vk.limits.maxStorageBufferRange;
+        if (max_storage_range > 0u && total_bytes > max_storage_range) {
+            /*
+             * Long-term: make Vulkan vec_buffer itself segmented so vector ops,
+             * runtime operators, and VkFFT share one logical multi-buffer storage
+             * model. This local split keeps VkFFT unified for large fields without
+             * broadening the vector backend contract yet.
+             */
+            vec_status status = fft_vk_create_split_buffers(plan);
+            if (status != VEC_STATUS_OK) {
+                fft_plan_destroy(plan);
+                return status;
+            }
+        } else {
+            vec_status status = vec_create(backend,
+                                                   VEC_KIND_COMPLEX64,
+                                                   plan->total_size,
+                                                   &plan->vk_placeholder_vec);
+            if (status != VEC_STATUS_OK) {
+                fft_plan_destroy(plan);
+                return status;
+            }
 
-        plan->vk_buffer_binding = plan->vk_placeholder_vec->vk_buffer;
-        plan->vk_buffer_size = (uint64_t)plan->vk_placeholder_vec->bytes;
+            plan->vk_buffer_binding = plan->vk_placeholder_vec->vk_buffer;
+            plan->vk_buffer_size = (uint64_t)plan->vk_placeholder_vec->bytes;
+        }
 
         VkCommandPoolCreateInfo pool_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -461,8 +703,14 @@ vec_status fft_plan_create_shaped_with_backend(
         configuration.queue = &backend->vk.queue;
         configuration.commandPool = &plan->vk_command_pool;
         configuration.fence = &plan->vkfft_internal_fence;
-        configuration.buffer = &plan->vk_buffer_binding;
-        configuration.bufferSize = &plan->vk_buffer_size;
+        if (plan->vk_split_count > 0u) {
+            configuration.bufferNum = (uint64_t)plan->vk_split_count;
+            configuration.buffer = plan->vk_split_buffer_bindings;
+            configuration.bufferSize = plan->vk_split_buffer_sizes;
+        } else {
+            configuration.buffer = &plan->vk_buffer_binding;
+            configuration.bufferSize = &plan->vk_buffer_size;
+        }
 
         VkFFTResult result = initializeVkFFT(&plan->vk_app, configuration);
         if (result != VKFFT_SUCCESS) {
@@ -510,6 +758,7 @@ void fft_plan_destroy(fft_plan* plan)
     if (plan->fft_backend == FFT_BACKEND_VKFFT) {
 #if ENABLE_VKFFT
         deleteVkFFT(&plan->vk_app);
+        fft_vk_destroy_split_buffers(plan);
 #endif
     }
 #if ENABLE_VKFFT

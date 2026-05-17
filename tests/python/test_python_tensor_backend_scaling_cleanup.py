@@ -161,6 +161,40 @@ def test_runtime_plot_helpers() -> None:
     assert benchmark._MIXED_RUNTIME_PLOT_SPEC.fit_skip_initial_points == 1
     assert benchmark._NLOLIB_RUNTIME_PLOT_SPEC.fit_skip_initial_points == 1
 
+    original_benchmark_nlolib_rows = nlolib_benchmark._benchmark_nlolib_rows
+    calls = []
+
+    def fake_benchmark_nlolib_rows(args, runner, api, cases, *, series, run_cpu=True):
+        assert run_cpu is True
+        assert len(series) == 1
+        backend = series[0].backend.upper()
+        calls.append((backend, [case.nx for case in cases]))
+        return [
+            _row(benchmark, "nlolib", backend, case.total_points, 0.10)
+            for case in cases
+        ]
+
+    try:
+        nlolib_benchmark._benchmark_nlolib_rows = fake_benchmark_nlolib_rows
+        rows_with_gpu_scales = nlolib_benchmark._benchmark_nlolib_rows_with_backend_scales(
+            argparse.Namespace(scales=[3], gpu_scales=[3, 4]),
+            runner=None,
+            api=None,
+        )
+        assert calls == [("CPU", [3]), ("GPU", [3, 4])]
+        assert [row.backend for row in rows_with_gpu_scales] == ["CPU", "GPU", "GPU"]
+
+        calls.clear()
+        rows_without_gpu_scales = nlolib_benchmark._benchmark_nlolib_rows_with_backend_scales(
+            argparse.Namespace(scales=[5], gpu_scales=None),
+            runner=None,
+            api=None,
+        )
+        assert calls == [("CPU", [5]), ("GPU", [5])]
+        assert [row.backend for row in rows_without_gpu_scales] == ["CPU", "GPU"]
+    finally:
+        nlolib_benchmark._benchmark_nlolib_rows = original_benchmark_nlolib_rows
+
     fig, ax = benchmark.plt.subplots()
     assert benchmark._plot_runtime_series(ax, rows, benchmark._MIXED_RUNTIME_PLOT_SPEC.series[0])[0] is True
     assert benchmark._plot_runtime_series(ax, rows, benchmark._MIXED_RUNTIME_PLOT_SPEC.series[1])[0] is True

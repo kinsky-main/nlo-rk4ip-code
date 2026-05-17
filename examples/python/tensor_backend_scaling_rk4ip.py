@@ -76,7 +76,7 @@ class RuntimePlotSpec:
     fit_skip_initial_points: int = 0
     x_axis: str = "state_points"
     x_scale: float = 1.0e3
-    x_label: str = r"State vector size ($10^3$ points)"
+    x_label: str = r"State vector size $N$"
 
 
 _TIME_WINDOW = 2.56
@@ -720,7 +720,7 @@ def _plot_runtime_series(
     *,
     fit_skip_initial_points: int = 0,
     x_axis: str = "state_points",
-    x_scale: float = 1.0e3,
+    x_scale: float = 1.0,
 ) -> tuple[bool, tuple[np.ndarray | None, np.ndarray | None, float | None]] | None:
     solver_rows = _series_rows(rows, series)
     if len(solver_rows) <= 0:

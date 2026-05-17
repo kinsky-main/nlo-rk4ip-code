@@ -1289,7 +1289,7 @@ def plot_frequency_time_propagation_grid(
             normalized_maps[0],
             f"",
             r"",
-            r"Propagation $z$",
+            r"Propagation $z / L_D$",
         ),
         (
             axes[0, 1],
@@ -1305,7 +1305,7 @@ def plot_frequency_time_propagation_grid(
             normalized_maps[2],
             f"",
             r"Frequency detuning $1/t$",
-            r"Propagation $z$",
+            r"Propagation $z / L_D$",
         ),
         (
             axes[1, 1],

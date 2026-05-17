@@ -31,6 +31,93 @@ static void vk_auto_copy_reason(
 #endif
 }
 
+static const char* vk_auto_result_name(VkResult result)
+{
+    switch (result) {
+        case VK_SUCCESS:
+            return "VK_SUCCESS";
+        case VK_NOT_READY:
+            return "VK_NOT_READY";
+        case VK_TIMEOUT:
+            return "VK_TIMEOUT";
+        case VK_EVENT_SET:
+            return "VK_EVENT_SET";
+        case VK_EVENT_RESET:
+            return "VK_EVENT_RESET";
+        case VK_INCOMPLETE:
+            return "VK_INCOMPLETE";
+        case VK_ERROR_OUT_OF_HOST_MEMORY:
+            return "VK_ERROR_OUT_OF_HOST_MEMORY";
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+            return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+        case VK_ERROR_INITIALIZATION_FAILED:
+            return "VK_ERROR_INITIALIZATION_FAILED";
+        case VK_ERROR_DEVICE_LOST:
+            return "VK_ERROR_DEVICE_LOST";
+        case VK_ERROR_MEMORY_MAP_FAILED:
+            return "VK_ERROR_MEMORY_MAP_FAILED";
+        case VK_ERROR_LAYER_NOT_PRESENT:
+            return "VK_ERROR_LAYER_NOT_PRESENT";
+        case VK_ERROR_EXTENSION_NOT_PRESENT:
+            return "VK_ERROR_EXTENSION_NOT_PRESENT";
+        case VK_ERROR_FEATURE_NOT_PRESENT:
+            return "VK_ERROR_FEATURE_NOT_PRESENT";
+        case VK_ERROR_INCOMPATIBLE_DRIVER:
+            return "VK_ERROR_INCOMPATIBLE_DRIVER";
+        case VK_ERROR_TOO_MANY_OBJECTS:
+            return "VK_ERROR_TOO_MANY_OBJECTS";
+        case VK_ERROR_FORMAT_NOT_SUPPORTED:
+            return "VK_ERROR_FORMAT_NOT_SUPPORTED";
+        case VK_ERROR_FRAGMENTED_POOL:
+            return "VK_ERROR_FRAGMENTED_POOL";
+        default:
+            return "VK_ERROR_UNKNOWN";
+    }
+}
+
+static void vk_auto_copy_result_reason(
+    char* reason,
+    size_t reason_capacity,
+    const char* message,
+    VkResult result
+)
+{
+    if (reason == NULL || reason_capacity == 0u) {
+        return;
+    }
+    snprintf(reason,
+             reason_capacity,
+             "%s (%s=%d)",
+             (message != NULL) ? message : "Vulkan call failed",
+             vk_auto_result_name(result),
+             (int)result);
+}
+
+static uint32_t vk_auto_select_instance_api_version(void)
+{
+    uint32_t version = VK_API_VERSION_1_0;
+#if defined(VK_VERSION_1_1)
+    PFN_vkEnumerateInstanceVersion enumerate_instance_version =
+        (PFN_vkEnumerateInstanceVersion)vkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion");
+    if (enumerate_instance_version != NULL &&
+        enumerate_instance_version(&version) != VK_SUCCESS) {
+        version = VK_API_VERSION_1_0;
+    }
+#endif
+
+#if defined(VK_VERSION_1_2)
+    if (version >= VK_API_VERSION_1_2) {
+        return VK_API_VERSION_1_2;
+    }
+#endif
+#if defined(VK_VERSION_1_1)
+    if (version >= VK_API_VERSION_1_1) {
+        return VK_API_VERSION_1_1;
+    }
+#endif
+    return VK_API_VERSION_1_0;
+}
+
 static void vk_auto_reset_context(vk_auto_context* context)
 {
     if (context == NULL) {
@@ -225,15 +312,26 @@ int vk_auto_context_init(
         .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
         .pEngineName = "nlolib",
         .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-        .apiVersion = VK_API_VERSION_1_2
+        .apiVersion = vk_auto_select_instance_api_version()
     };
 
     VkInstanceCreateInfo instance_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info
     };
-    if (vkCreateInstance(&instance_info, NULL, &context->instance) != VK_SUCCESS) {
-        vk_auto_copy_reason(reason, reason_capacity, "Failed to create Vulkan instance.");
+    VkResult instance_result = vkCreateInstance(&instance_info, NULL, &context->instance);
+#if defined(VK_VERSION_1_1)
+    if (instance_result == VK_ERROR_INCOMPATIBLE_DRIVER &&
+        app_info.apiVersion > VK_API_VERSION_1_0) {
+        app_info.apiVersion = VK_API_VERSION_1_0;
+        instance_result = vkCreateInstance(&instance_info, NULL, &context->instance);
+    }
+#endif
+    if (instance_result != VK_SUCCESS) {
+        vk_auto_copy_result_reason(reason,
+                                   reason_capacity,
+                                   "Failed to create Vulkan instance.",
+                                   instance_result);
         return -1;
     }
 

@@ -24,7 +24,51 @@ from tensor_backend_scaling_rk4ip import (
     _save_benchmark_rows,
     _write_csv,
     RuntimePlotSpec,
+    RuntimePlotSeries,
 )
+
+
+def _series_for_backend(backend: str) -> tuple[RuntimePlotSeries, ...]:
+    backend_key = backend.upper()
+    return tuple(
+        series
+        for series in _NLOLIB_RUNTIME_PLOT_SPEC.series
+        if series.backend.upper() == backend_key
+    )
+
+
+def _benchmark_nlolib_rows_with_backend_scales(
+    args: argparse.Namespace,
+    runner,
+    api,
+) -> list[BenchmarkRow]:
+    cpu_cases = [_case_from_scale(scale) for scale in args.scales]
+    gpu_scales = getattr(args, "gpu_scales", None)
+    gpu_cases = [
+        _case_from_scale(scale)
+        for scale in (args.scales if gpu_scales is None else gpu_scales)
+    ]
+
+    rows: list[BenchmarkRow] = []
+    rows.extend(
+        _benchmark_nlolib_rows(
+            args,
+            runner,
+            api,
+            cpu_cases,
+            series=_series_for_backend("CPU"),
+        )
+    )
+    rows.extend(
+        _benchmark_nlolib_rows(
+            args,
+            runner,
+            api,
+            gpu_cases,
+            series=_series_for_backend("GPU"),
+        )
+    )
+    return rows
 
 
 def _run(args: argparse.Namespace) -> float:
@@ -47,8 +91,7 @@ def _run(args: argparse.Namespace) -> float:
         runner = NloExampleRunner()
         api = runner.nlo.NLolib()
 
-        cases = [_case_from_scale(scale) for scale in args.scales]
-        rows = _benchmark_nlolib_rows(args, runner, api, cases)
+        rows = _benchmark_nlolib_rows_with_backend_scales(args, runner, api)
         _save_benchmark_rows(
             db,
             example_name=example_name,
@@ -83,8 +126,17 @@ class TensorBackendScalingNlolibApp(ExampleAppBase):
         parser.add_argument(
             "--scales",
             type=_parse_int_csv,
-            default=np.geomspace(8, 256, num=16, dtype=int).tolist(),
-            help="Comma-separated default tensor scales with nt=2*scale and nx=ny=scale.",
+            default=np.geomspace(8, 32, num=4, dtype=int).tolist(),
+            help=(
+                "Comma-separated CPU tensor scales with nt=2*scale and nx=ny=scale. "
+                "Also used for GPU unless --gpu-scales is set."
+            ),
+        )
+        parser.add_argument(
+            "--gpu-scales",
+            type=_parse_int_csv,
+            default=np.geomspace(8, 480, num=20, dtype=int).tolist(),
+            help="Comma-separated GPU tensor scales. Defaults to --scales when omitted.",
         )
         parser.add_argument(
             "--num-records",
@@ -92,8 +144,8 @@ class TensorBackendScalingNlolibApp(ExampleAppBase):
             default=1,
             help="Recorded snapshots per run. Use 1 to benchmark final-only output.",
         )
-        parser.add_argument("--warmup", type=int, default=0, help="Warmup runs per benchmark point.")
-        parser.add_argument("--runs", type=int, default=1, help="Measured runs per benchmark point.")
+        parser.add_argument("--warmup", type=int, default=4, help="Warmup runs per benchmark point.")
+        parser.add_argument("--runs", type=int, default=4, help="Measured runs per benchmark point.")
 
     def run(self) -> float:
         return _run(self.args)

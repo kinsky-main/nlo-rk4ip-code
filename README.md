@@ -86,6 +86,9 @@ Run the nlolib-only tensor CPU vs GPU benchmark with:
 python examples/python/tensor_backend_scaling_nlolib_rk4ip.py
 ```
 
+Use `--gpu-scales` to benchmark additional GPU tensor sizes without also
+running them on CPU, for example `--scales=8,16,32 --gpu-scales=8,16,32,64,128`.
+
 The mixed nlolib/MMTools runtime comparison remains:
 
 ```powershell
