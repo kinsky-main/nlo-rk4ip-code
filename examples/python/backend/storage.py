@@ -35,7 +35,7 @@ class LoadedCase:
 
 class ExampleRunDB:
     def __init__(self, db_path: Path | str):
-        self.db_path = Path(db_path)
+        self.db_path = Path(db_path).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.ensure_schema()
 
@@ -77,8 +77,55 @@ class ExampleRunDB:
             "  error_blob BLOB NOT NULL"
             ");"
         )
+        try:
+            self._ensure_schema_once(schema)
+            return
+        except sqlite3.OperationalError as first_error:
+            if not self._is_recoverable_sqlite_io_error(first_error):
+                raise
+
+        backup_path = self._recover_db_from_io_error()
+        try:
+            self._ensure_schema_once(schema)
+        except sqlite3.OperationalError as second_error:
+            backup_note = f"; backup at '{backup_path}'" if backup_path is not None else ""
+            raise RuntimeError(
+                "failed to initialize example SQLite schema at "
+                f"'{self.db_path}' after I/O-error recovery{backup_note}: {second_error}"
+            ) from second_error
+
+    def _ensure_schema_once(self, schema: str) -> None:
         with self._connect() as con:
             con.executescript(schema)
+
+    @staticmethod
+    def _is_recoverable_sqlite_io_error(err: sqlite3.OperationalError) -> bool:
+        message = str(err).lower()
+        return (
+            "disk i/o error" in message
+            or "database disk image is malformed" in message
+            or "unable to open database file" in message
+        )
+
+    def _recover_db_from_io_error(self) -> Path | None:
+        backup_path: Path | None = None
+        for suffix in ("-wal", "-shm"):
+            sidecar = self.db_path.parent / f"{self.db_path.name}{suffix}"
+            if sidecar.exists():
+                try:
+                    sidecar.unlink()
+                except OSError:
+                    pass
+
+        if self.db_path.exists() and self.db_path.is_file():
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            backup_path = self.db_path.with_suffix(f"{self.db_path.suffix}.ioerror-{stamp}.bak")
+            try:
+                self.db_path.replace(backup_path)
+            except OSError:
+                backup_path = None
+
+        return backup_path
 
     @staticmethod
     def new_run_group_id() -> str:

@@ -13,10 +13,15 @@
 #include "io/propagate_log.h"
 #include "io/snapshot_store.h"
 #include "numerics/rk4_kernel.h"
+#include "utility/perf_profile.h"
 #include <float.h>
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
+
+#ifndef NLOLIB_DENSE_OUTPUT_MAX_BYTES
+#define NLOLIB_DENSE_OUTPUT_MAX_BYTES ((size_t)2u * 1024u * 1024u * 1024u)
+#endif
 
 static nlolib_status propagate_fail(const char* stage, nlolib_status status)
 {
@@ -217,6 +222,32 @@ static sim_config merge_simulation_and_physics(
     return merged;
 }
 
+NLOLIB_API nlolib_status nlolib_perf_profile_set_enabled(int enabled)
+{
+    perf_profile_set_enabled(enabled);
+    return NLOLIB_STATUS_OK;
+}
+
+NLOLIB_API int nlolib_perf_profile_is_enabled(void)
+{
+    return perf_profile_is_enabled();
+}
+
+NLOLIB_API nlolib_status nlolib_perf_profile_reset(void)
+{
+    perf_profile_reset();
+    return NLOLIB_STATUS_OK;
+}
+
+NLOLIB_API nlolib_status nlolib_perf_profile_read(nlo_perf_profile_snapshot* out_snapshot)
+{
+    if (out_snapshot == NULL) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    perf_profile_snapshot_read(out_snapshot);
+    return NLOLIB_STATUS_OK;
+}
+
 NLOLIB_API nlolib_status nlolib_query_runtime_limits(
     const simulation_config* simulation_config,
     const physics_config* physics_config,
@@ -357,9 +388,20 @@ NLOLIB_API nlolib_status nlolib_propagate(
             local_output.output_record_capacity < num_recorded_samples) {
             return propagate_fail("validate.output_record_capacity", NLOLIB_STATUS_INVALID_ARGUMENT);
         }
-        if (local_output.output_records != NULL &&
-            compute_record_bytes(num_recorded_samples, num_time_samples) == 0u) {
-            return propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
+        if (local_output.output_records != NULL) {
+            const size_t record_bytes = compute_record_bytes(num_recorded_samples, num_time_samples);
+            if (record_bytes == 0u) {
+                return propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
+            }
+            if (record_bytes > (size_t)NLOLIB_DENSE_OUTPUT_MAX_BYTES) {
+                log_emit(
+                    LOG_LEVEL_ERROR,
+                    "[nlolib] dense output request requires %zu bytes, above the %zu byte safety cap. "
+                    "Use storage_options with return_records=0 for large recorded outputs.",
+                    record_bytes,
+                    (size_t)NLOLIB_DENSE_OUTPUT_MAX_BYTES);
+                return propagate_fail("validate.dense_output_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
+            }
         }
     }
     if (storage_enabled(local_options.storage_options) && !snapshot_store_is_available()) {

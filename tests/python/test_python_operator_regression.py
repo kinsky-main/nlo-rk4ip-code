@@ -300,6 +300,50 @@ def test_nonlinear_callable_matches_string(api, opts):
     assert err <= 2e-8, f"nonlinear callable mismatch: err={err}"
 
 
+def test_saturable_nonlinear_literal_one_matches_constant(api, opts):
+    n = 64
+    dt = 0.02
+    gamma = 0.7
+    saturation_intensity = 0.4
+    input_field = _random_input_field(n, seed=27)
+
+    common = dict(
+        propagation_distance=0.04,
+        starting_step_size=1e-3,
+        max_step_size=2e-3,
+        min_step_size=1e-5,
+        error_tolerance=1e-7,
+        pulse_period=float(n) * dt,
+        delta_time=dt,
+        frequency_grid=[0j] * n,
+    )
+
+    literal_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*A*(c0*(I/(1.0 + I/c1)))",
+            constants=[gamma, saturation_intensity],
+        ),
+        **common,
+    )
+
+    constant_cfg = prepare_sim_config(
+        n,
+        runtime=RuntimeOperators(
+            dispersion_factor_expr="0",
+            nonlinear_expr="i*A*(c0*(I/(c2 + I/c1)))",
+            constants=[gamma, saturation_intensity, 1.0],
+        ),
+        **common,
+    )
+
+    literal_final = api.propagate(literal_cfg, input_field, 2, opts).records[1]
+    constant_final = api.propagate(constant_cfg, input_field, 2, opts).records[1]
+    err = _max_abs_diff(literal_final, constant_final)
+    assert err <= 2e-8, f"saturable nonlinear literal-one mismatch: err={err}"
+
+
 def test_nonlinear_legacy_multiplier_warns(api, opts):
     n = 96
     dt = 0.01
@@ -1502,6 +1546,7 @@ def main():
     opts = default_execution_options(VECTOR_BACKEND_CPU)
     test_dispersion_factor_callable_matches_string(api, opts)
     test_nonlinear_callable_matches_string(api, opts)
+    test_saturable_nonlinear_literal_one_matches_constant(api, opts)
     test_nonlinear_legacy_multiplier_warns(api, opts)
     test_field_first_callable_signature_enforced()
     test_linear_dispersion_aliases_are_mutually_exclusive()

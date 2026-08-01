@@ -14,6 +14,9 @@ add_executable(test_fft
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
 )
+if(ENABLE_VKFFT)
+  set_target_properties(test_fft PROPERTIES LINKER_LANGUAGE CXX)
+endif()
 if(ENABLE_VULKAN_BACKEND)
   target_sources(test_fft PRIVATE
     ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c

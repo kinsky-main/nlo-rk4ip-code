@@ -8,10 +8,11 @@
 - [x] Remove working buffers by keeping one k_tmp and k_tot buffer then summing k values as each stage is computed.
 - [x] Step size appears to cap at 1e-4 for some reason, investigate and fix.
 - [x] Numerical error is exceptionally high even when cropping to 1e-6 floating max amplitude, investigate and fix.
-- [ ] Cut first and final step from soliton variable step plot in example.
+- [x] Cut first and final step from soliton variable step plot in example.
 - [x] Bring MATLAB and Julia interfaces up to date with Python API, currently using very old interfaces (complete rewrite required).
 - [ ] Benchmark GPU against CPU backend for 3D problems, show scaling of performance with regions for < GPU memory, > GPU memory, and > system memory.
 - [ ] Model Spectral Vortices in (3+1)D with 3D frequency domain plots showing the vortex structure in the frequency domain.
+- [ ] Have default window sizes be set by dispersion/diffraction length scales for better performance and accuracy. Go through paper by Yi-Hao Chen on window optimisation.
 
 ## Potentially Required Tasks
 

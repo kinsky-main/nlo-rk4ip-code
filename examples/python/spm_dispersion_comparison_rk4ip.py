@@ -1,11 +1,11 @@
 """
-Four-panel propagation comparison for pure nonlinearity (SPM) and pure dispersion.
+Four-panel propagation comparison for pure nonlinearity (SPM) and drifted dispersion.
 
 The generated figure is arranged as a 2x2 grid:
   - left column: frequency-domain intensity propagation
   - right column: time-domain intensity propagation
   - top row: pure Kerr nonlinearity / SPM
-  - bottom row: pure dispersion
+  - bottom row: pure dispersion with linear drift
 """
 
 from __future__ import annotations
@@ -28,9 +28,9 @@ from backend.storage import ExampleRunDB
 @dataclass(frozen=True)
 class CaseConfig:
     case_key: str
-    row_label: str
     gamma: float
     beta2: float
+    chirp: float = 0.0
 
 
 def _configure_runtime_logging(runner: NloExampleRunner) -> None:
@@ -44,8 +44,27 @@ def _configure_runtime_logging(runner: NloExampleRunner) -> None:
         pass
 
 
-def _initial_field(time_axis: np.ndarray, pulse_width: float) -> np.ndarray:
-    return np.exp(-((time_axis / pulse_width) ** 2)).astype(np.complex128)
+def _row_label(case: CaseConfig, *, chirp: float) -> str:
+    if case.case_key == "dispersion" and abs(chirp) > 0.0:
+        return "Pure dispersion with linear drift"
+    if case.case_key == "spm":
+        return "Pure nonlinearity (SPM)"
+    return "Pure dispersion"
+
+
+def _initial_field(time_axis: np.ndarray, pulse_width: float, *, chirp: float = 0.0) -> np.ndarray:
+    envelope = np.exp(-((time_axis / pulse_width) ** 2))
+    if chirp == 0.0:
+        return envelope.astype(np.complex128)
+    return (envelope * np.exp((-1.0j) * chirp * time_axis)).astype(np.complex128)
+
+
+def _row_annotation(case: CaseConfig, *, chirp: float) -> str:
+    if case.case_key == "dispersion" and abs(chirp) > 0.0:
+        return "Dispersion"
+    if case.case_key == "spm":
+        return "SPM"
+    return "Dispersion"
 
 
 def _frequency_intensity_map(records: np.ndarray) -> np.ndarray:
@@ -67,18 +86,24 @@ def _run_case(
     z_final: float,
     num_records: int,
     exec_options: SimulationOptions,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     if args.replot:
         loaded = db.load_case(example_name=example_name, run_group=run_group, case_key=case.case_key)
         meta = loaded.meta
         num_samples = int(meta["num_samples"])
         dt = float(meta["dt"])
         pulse_width = float(meta["pulse_width"])
+        chirp = float(meta.get("chirp", case.chirp))
         time_axis = centered_time_grid(num_samples, dt)
-        return time_axis, np.asarray(loaded.z_axis, dtype=np.float64), np.asarray(loaded.records, dtype=np.complex128)
+        return (
+            time_axis,
+            np.asarray(loaded.z_axis, dtype=np.float64),
+            np.asarray(loaded.records, dtype=np.complex128),
+            chirp,
+        )
 
     time_axis = centered_time_grid(num_samples, dt)
-    field0 = _initial_field(time_axis, pulse_width)
+    field0 = _initial_field(time_axis, pulse_width, chirp=case.chirp)
     sim_cfg = TemporalSimulationConfig(
         gamma=case.gamma,
         beta2=case.beta2,
@@ -119,10 +144,11 @@ def _run_case(
             "z_final": float(z_final),
             "gamma": float(case.gamma),
             "beta2": float(case.beta2),
+            "chirp": float(case.chirp),
             "num_records": int(num_records),
         },
     )
-    return time_axis, np.asarray(z_axis, dtype=np.float64), np.asarray(records, dtype=np.complex128)
+    return time_axis, np.asarray(z_axis, dtype=np.float64), np.asarray(records, dtype=np.complex128), float(case.chirp)
 
 
 def _run(args: argparse.Namespace) -> float:
@@ -131,15 +157,14 @@ def _run(args: argparse.Namespace) -> float:
     cases = (
         CaseConfig(
             case_key="spm",
-            row_label="Pure nonlinearity (SPM)",
             gamma=80.0,
             beta2=0.0,
         ),
         CaseConfig(
             case_key="dispersion",
-            row_label="Pure dispersion",
             gamma=0.0,
             beta2=0.20,
+            chirp=12.0,
         ),
     )
 
@@ -164,7 +189,7 @@ def _run(args: argparse.Namespace) -> float:
 
     case_outputs: dict[str, dict[str, np.ndarray | str]] = {}
     for case in cases:
-        time_axis, z_axis, records = _run_case(
+        time_axis, z_axis, records, chirp = _run_case(
             db=db,
             runner=runner,
             args=args,
@@ -179,7 +204,8 @@ def _run(args: argparse.Namespace) -> float:
             exec_options=exec_options,
         )
         case_outputs[case.case_key] = {
-            "row_label": case.row_label,
+            "row_label": _row_label(case, chirp=chirp),
+            "annotation": _row_annotation(case, chirp=chirp),
             "time_axis": time_axis,
             "z_axis": z_axis,
             "time_map": np.abs(records) ** 2,
@@ -209,7 +235,7 @@ def _run(args: argparse.Namespace) -> float:
         upper_row_label=str(spm_output["row_label"]),
         lower_row_label=str(dispersion_output["row_label"]),
         upper_left_annotation="SPM",
-        lower_left_annotation="Dispersion",
+        lower_left_annotation=str(dispersion_output["annotation"]),
     )
 
     print(f"SPM/dispersion comparison example completed (run_group={run_group}).")
@@ -225,7 +251,7 @@ def _run(args: argparse.Namespace) -> float:
 
 class SpmDispersionComparisonApp(ExampleAppBase):
     example_slug = "spm_dispersion_comparison"
-    description = "Four-panel SPM vs pure-dispersion propagation comparison."
+    description = "Four-panel SPM vs drifted-dispersion propagation comparison."
 
     def run(self) -> float:
         return _run(self.args)

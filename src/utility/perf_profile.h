@@ -14,6 +14,8 @@ extern "C" {
 /**
  * @brief Snapshot of accumulated performance counters.
  */
+#ifndef NLO_PERF_PROFILE_SNAPSHOT_DEFINED
+#define NLO_PERF_PROFILE_SNAPSHOT_DEFINED 1
 typedef struct {
     double dispersion_ms;
     double nonlinear_ms;
@@ -34,7 +36,8 @@ typedef struct {
     uint64_t gpu_download_count;
     uint64_t gpu_upload_bytes;
     uint64_t gpu_download_bytes;
-} perf_profile_snapshot;
+} nlo_perf_profile_snapshot;
+#endif
 
 /**
  * @brief Enable or disable profiling counter accumulation globally.
@@ -60,7 +63,7 @@ void perf_profile_reset(void);
  *
  * @param out_snapshot Destination snapshot.
  */
-void perf_profile_snapshot_read(perf_profile_snapshot* out_snapshot);
+void perf_profile_snapshot_read(nlo_perf_profile_snapshot* out_snapshot);
 
 /**
  * @brief Record elapsed dispersion-operator time.

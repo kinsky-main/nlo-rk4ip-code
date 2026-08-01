@@ -35,6 +35,7 @@ function(configure_fftw out_target out_include_dirs)
     endif()
 
     # FFTW upstream only exports install-time include paths. Add a build-time path.
+    set_target_properties(fftw3 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_include_directories(fftw3 INTERFACE
       "$<BUILD_INTERFACE:${fftw_SOURCE_DIR}/api>"
     )

@@ -77,3 +77,27 @@ Generated output:
 - Julia package guide: `julia/README.md`
 
 The PyPI/package readme remains `python/README_PYPI.md`.
+<<<<<<< HEAD
+=======
+
+## Python Benchmarks
+
+Run the nlolib-only tensor CPU vs GPU benchmark with:
+
+```powershell
+python examples/python/tensor_backend_scaling_nlolib_rk4ip.py
+```
+
+The nlolib-only runtime plot fits the GPU curve in two regions: a smaller
+ringbuffer-friendly region and a larger transfer-limited region.
+
+The mixed nlolib/MMTools runtime comparison remains:
+
+```powershell
+python examples/python/tensor_backend_scaling_rk4ip.py
+```
+
+It translates MMTools scalar mode counts into GRIN-effective nlolib grid
+sizes, then writes both state-vector-size and scalar-mode-count runtime
+plots for the comparison.
+>>>>>>> feat/benchmarking-junk

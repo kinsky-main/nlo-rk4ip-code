@@ -13,6 +13,7 @@ from ._binding import (
     NLOLIB_PROGRESS_STREAM_STDERR,
     NLOLIB_STATUS_OK,
     NloExecutionOptions,
+    NloPerfProfileSnapshot,
     NloPhysicsConfig,
     NloRuntimeLimits,
     NloSimulationConfig,
@@ -41,6 +42,46 @@ class NLolib:
         if not bool(getattr(self.lib, "_has_storage_is_available", False)):
             return False
         return bool(int(self.lib.nlolib_storage_is_available()))
+
+    def perf_profile_set_enabled(self, enabled: bool = True) -> None:
+        """
+        Enable or disable runtime performance counter accumulation.
+        """
+        if not bool(getattr(self.lib, "_has_perf_profile", False)):
+            raise RuntimeError("perf-profile APIs are unavailable in the loaded nlolib build")
+        status = int(self.lib.nlolib_perf_profile_set_enabled(int(bool(enabled))))
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_perf_profile_set_enabled failed with status={status}")
+
+    def perf_profile_is_enabled(self) -> bool:
+        """
+        Return whether runtime performance counters are currently enabled.
+        """
+        if not bool(getattr(self.lib, "_has_perf_profile", False)):
+            raise RuntimeError("perf-profile APIs are unavailable in the loaded nlolib build")
+        return bool(int(self.lib.nlolib_perf_profile_is_enabled()))
+
+    def perf_profile_reset(self) -> None:
+        """
+        Reset all runtime performance counters.
+        """
+        if not bool(getattr(self.lib, "_has_perf_profile", False)):
+            raise RuntimeError("perf-profile APIs are unavailable in the loaded nlolib build")
+        status = int(self.lib.nlolib_perf_profile_reset())
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_perf_profile_reset failed with status={status}")
+
+    def perf_profile_read(self) -> NloPerfProfileSnapshot:
+        """
+        Read the current runtime performance counter snapshot.
+        """
+        if not bool(getattr(self.lib, "_has_perf_profile", False)):
+            raise RuntimeError("perf-profile APIs are unavailable in the loaded nlolib build")
+        snapshot = NloPerfProfileSnapshot()
+        status = int(self.lib.nlolib_perf_profile_read(ctypes.pointer(snapshot)))
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_perf_profile_read failed with status={status}")
+        return snapshot
 
     def set_log_file(self, path: str | None, append: bool = False) -> None:
         """

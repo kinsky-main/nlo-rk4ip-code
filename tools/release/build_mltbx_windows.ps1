@@ -1,5 +1,5 @@
 param(
-    [string]$BuildDir = "build-wheel-win",
+    [string]$BuildDir = "build-mltbx-win",
     [string]$Config = "Release"
 )
 

@@ -6,6 +6,7 @@
 #include "tensor_scaling_plan.h"
 
 #include <limits.h>
+#include <stdint.h>
 
 static int bench_mul_size_t(size_t lhs, size_t rhs, size_t* out_value)
 {

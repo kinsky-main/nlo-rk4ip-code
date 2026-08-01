@@ -53,7 +53,7 @@ function(configure_vulkan_backend target target_source_dir target_binary_dir)
 
   set(vk_spv_outputs "")
   foreach(vk_kernel IN LISTS vk_kernel_names)
-    set(vk_kernel_src "${VK_KERNEL_SOURCE_DIR}/${vk_kernel}.comp")
+    set(vk_kernel_src "${VK_KERNEL_SOURCE_DIR}/nlo_${vk_kernel}.comp")
     set(vk_kernel_spv "${VK_KERNEL_BINARY_DIR}/${vk_kernel}.spv")
     add_custom_command(
       OUTPUT "${vk_kernel_spv}"
@@ -96,7 +96,7 @@ function(configure_vulkan_backend target target_source_dir target_binary_dir)
   set(VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_X_PATH "${VK_KERNEL_BINARY_DIR}/complex_mesh_from_axis_tfast_x.spv")
 
   configure_file(
-    "${target_source_dir}/backend/vulkan/vk_shader_paths.h.in"
+    "${target_source_dir}/backend/vulkan/nlo_vk_shader_paths.h.in"
     "${target_binary_dir}/generated/vk_shader_paths.h"
     @ONLY
   )

@@ -259,7 +259,7 @@ classdef NLolib < handle
 
             if returnRecords
                 outLen = uint64(numTimeSamples) * numRecordedSamples;
-                outBuffer = repmat(struct('re', 0.0, 'im', 0.0), 1, double(outLen));
+                outBuffer = libpointer('doublePtr', zeros(1, 2 * double(outLen)));
                 totalComplex = double(outLen);
             else
                 outBuffer = struct('re', {}, 'im', {});
@@ -692,6 +692,83 @@ classdef NLolib < handle
                           statusCode, statusName);
                 end
             end
+        end
+
+        function perf_profile_set_enabled(obj, enabled)
+            %PERF_PROFILE_SET_ENABLED Enable or disable runtime perf counters.
+            if nargin < 2 || isempty(enabled)
+                enabled = true;
+            end
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_perf_profile_set_enabled')
+                error('nlolib:perfProfileUnavailable', ...
+                      'nlolib_perf_profile_set_enabled is not available in this library build.');
+            end
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_perf_profile_set_enabled', int32(logical(enabled)));
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:perfProfileFailed', ...
+                          'nlolib_perf_profile_set_enabled failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:perfProfileFailed', ...
+                          'nlolib_perf_profile_set_enabled failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+        end
+
+        function tf = perf_profile_is_enabled(obj)
+            %PERF_PROFILE_IS_ENABLED Return true when runtime perf counters are enabled.
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_perf_profile_is_enabled')
+                error('nlolib:perfProfileUnavailable', ...
+                      'nlolib_perf_profile_is_enabled is not available in this library build.');
+            end
+            tf = logical(calllib(obj.LIBNAME, 'nlolib_perf_profile_is_enabled'));
+        end
+
+        function perf_profile_reset(obj)
+            %PERF_PROFILE_RESET Reset all runtime perf counters.
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_perf_profile_reset')
+                error('nlolib:perfProfileUnavailable', ...
+                      'nlolib_perf_profile_reset is not available in this library build.');
+            end
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_perf_profile_reset');
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:perfProfileFailed', ...
+                          'nlolib_perf_profile_reset failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:perfProfileFailed', ...
+                          'nlolib_perf_profile_reset failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+        end
+
+        function snapshot = perf_profile_read(obj)
+            %PERF_PROFILE_READ Read current runtime perf counters into a MATLAB struct.
+            if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_perf_profile_read')
+                error('nlolib:perfProfileUnavailable', ...
+                      'nlolib_perf_profile_read is not available in this library build.');
+            end
+            snapshotRaw = libstruct('nlo_perf_profile_snapshot');
+            statusRaw = calllib(obj.LIBNAME, 'nlolib_perf_profile_read', snapshotRaw);
+            [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode ~= 0
+                if strlength(statusDetail) > 0
+                    error('nlolib:perfProfileFailed', ...
+                          'nlolib_perf_profile_read failed with status=%d (%s). %s', ...
+                          statusCode, statusName, statusDetail);
+                else
+                    error('nlolib:perfProfileFailed', ...
+                          'nlolib_perf_profile_read failed with status=%d (%s)', ...
+                          statusCode, statusName);
+                end
+            end
+            snapshot = struct(snapshotRaw);
         end
 
         function limits = query_runtime_limits(obj, config, execOptions)

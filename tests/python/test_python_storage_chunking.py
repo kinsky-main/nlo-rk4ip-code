@@ -1,5 +1,6 @@
 import math
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 
@@ -11,6 +12,17 @@ from nlolib import (
     default_execution_options,
     prepare_sim_config,
 )
+from nlolib._binding import NloPhysicsConfig, NloSimulationConfig
+from nlolib._executor import _DENSE_OUTPUT_MAX_BYTES, _COMPLEX_BYTES, PropagationExecutor
+from nlolib._requests import _NormalizedPropagateRequest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EXAMPLE_PYTHON_DIR = REPO_ROOT / "examples" / "python"
+if str(EXAMPLE_PYTHON_DIR) not in sys.path:
+    sys.path.insert(0, str(EXAMPLE_PYTHON_DIR))
+
+from backend.storage import ExampleRunDB
 
 
 def _table_exists(cur: sqlite3.Cursor, table_name: str) -> bool:
@@ -194,7 +206,104 @@ def _simulate_storage_facade_case(api: NLolib, db_path: Path) -> None:
         assert cur.execute("SELECT COUNT(*) FROM io_runs").fetchone()[0] == 1
 
 
-def _internal_spill_dense_return_case(api: NLolib) -> None:
+class _HugeInput:
+    def __len__(self) -> int:
+        return (_DENSE_OUTPUT_MAX_BYTES // _COMPLEX_BYTES) + 1
+
+    def __iter__(self):
+        raise AssertionError("dense output validation should run before input conversion")
+
+
+def _dense_output_guard_case() -> None:
+    executor = PropagationExecutor(object(), lambda: True)
+    request = _NormalizedPropagateRequest(
+        sim_cfg=NloSimulationConfig(),
+        phys_cfg=NloPhysicsConfig(),
+        input_seq=_HugeInput(),  # type: ignore[arg-type]
+        num_records=1,
+        exec_options=None,
+        sqlite_path="guard.db",
+        run_id=None,
+        sqlite_max_bytes=0,
+        chunk_records=0,
+        cap_policy=0,
+        log_final_output_field_to_db=False,
+        return_records=True,
+        capture_step_history=False,
+        step_history_capacity=0,
+        output_label="final",
+        explicit_record_z=None,
+        progress_callback=None,
+        meta_overrides={},
+    )
+
+    try:
+        executor.execute(request)
+        raise AssertionError("expected dense output guard to reject oversized request")
+    except ValueError as exc:
+        message = str(exc)
+        assert "return_records=False" in message
+        assert "SQLite storage" in message
+
+
+def _example_db_tensor_reload_case(api: NLolib, db_path: Path) -> None:
+    db = ExampleRunDB(db_path)
+    example_name = "test_python_storage_chunking"
+    run_group = db.begin_group(example_name, "tensor-reload")
+    case_key = "tensor"
+    storage_kwargs = db.storage_kwargs(
+        example_name=example_name,
+        run_group=run_group,
+        case_key=case_key,
+        chunk_records=2,
+    )
+
+    nt = 4
+    nx = 3
+    ny = 2
+    n = nt * nx * ny
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.05,
+        starting_step_size=0.01,
+        max_step_size=0.02,
+        min_step_size=1e-4,
+        error_tolerance=1e-6,
+        pulse_period=1.0,
+        delta_time=1.0 / nt,
+        tensor_nt=nt,
+        tensor_nx=nx,
+        tensor_ny=ny,
+        frequency_grid=[complex(i, 0.0) for i in range(nt)],
+        potential_grid=[0j] * (nx * ny),
+    )
+    field0 = [complex(math.exp(-(((i % nt) - (nt / 2.0)) ** 2)), 0.0) for i in range(n)]
+    result = api.propagate(
+        cfg,
+        field0,
+        3,
+        default_execution_options(VECTOR_BACKEND_CPU),
+        return_records=False,
+        **storage_kwargs,
+    )
+    assert result.meta.get("records_returned") is False
+    db.save_case_from_solver_meta(
+        example_name=example_name,
+        run_group=run_group,
+        case_key=case_key,
+        solver_meta=result.meta,
+        meta={"nt": nt, "nx": nx, "ny": ny},
+    )
+
+    loaded = db.load_case(example_name=example_name, run_group=run_group, case_key=case_key)
+    assert loaded.records.shape == (3, n)
+    assert loaded.z_axis.shape == (3,)
+    assert loaded.num_time_samples == n
+    assert loaded.requested_records == 3
+    assert loaded.records[-1].shape == (n,)
+
+
+def _small_dense_return_case(api: NLolib) -> None:
     n = 40
     cfg = prepare_sim_config(
         n,
@@ -216,8 +325,7 @@ def _internal_spill_dense_return_case(api: NLolib) -> None:
         return_records=True,
     )
 
-    assert result.meta.get("storage_enabled") is True
-    assert result.meta.get("storage_internal_spill") is True
+    assert result.meta.get("storage_enabled") is False
     assert result.meta.get("records_returned") is True
     assert int(result.meta.get("records_written", 0)) == 6
     assert len(result.records) == 6
@@ -241,7 +349,9 @@ def main() -> None:
     _legacy_ntmax_exceed_case(api, ntmax_db)
     _final_output_logging_case(api, final_output_db)
     _simulate_storage_facade_case(api, facade_db)
-    _internal_spill_dense_return_case(api)
+    _dense_output_guard_case()
+    _example_db_tensor_reload_case(api, tmp / "example_tensor.db")
+    _small_dense_return_case(api)
     print("test_python_storage_chunking: passed")
 
 

@@ -207,6 +207,22 @@ def storage_is_available() -> bool:
     return _api().storage_is_available()
 
 
+def perf_profile_set_enabled(enabled: bool = True) -> None:
+    _api().perf_profile_set_enabled(enabled=enabled)
+
+
+def perf_profile_is_enabled() -> bool:
+    return _api().perf_profile_is_enabled()
+
+
+def perf_profile_reset() -> None:
+    _api().perf_profile_reset()
+
+
+def perf_profile_read():
+    return _api().perf_profile_read()
+
+
 def set_log_level(level: int = NLOLIB_LOG_LEVEL_INFO) -> None:
     _api().set_log_level(level)
 

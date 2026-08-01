@@ -42,6 +42,9 @@ endif()
 
 add_library(nlolib SHARED ${NLOLIB_SOURCES})
 set_target_properties(nlolib PROPERTIES OUTPUT_NAME nlolib)
+if(ENABLE_VKFFT)
+  set_target_properties(nlolib PROPERTIES LINKER_LANGUAGE CXX)
+endif()
 
 target_include_directories(nlolib PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 
@@ -93,5 +96,4 @@ target_compile_definitions(nlolib PUBLIC
   ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
   ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
 )
-
 

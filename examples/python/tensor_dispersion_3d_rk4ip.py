@@ -340,7 +340,7 @@ def _run(args: argparse.Namespace) -> float:
         x_marginal_map,
         output_dir / "tensor_dispersion_3d_x_marginal_map.png",
         x_label="x",
-        colorbar_label="Normalized x-marginal intensity",
+        colorbar_label="Normalised x-marginal intensity",
     )
     if saved is not None:
         saved_paths.append(saved)
@@ -351,7 +351,7 @@ def _run(args: argparse.Namespace) -> float:
         t_marginal_map,
         output_dir / "tensor_dispersion_3d_temporal_marginal_map.png",
         x_label="Time t",
-        colorbar_label="Normalized temporal-marginal intensity",
+        colorbar_label="Normalised intensity",
     )
     if saved is not None:
         saved_paths.append(saved)

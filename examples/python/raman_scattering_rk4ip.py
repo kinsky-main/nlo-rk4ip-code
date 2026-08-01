@@ -10,7 +10,6 @@ from pathlib import Path
 import numpy as np
 from backend.app_base import ExampleAppBase
 from backend.metrics import (
-    relative_l2_intensity_error_curve,
     relative_l2_intensity_error,
 )
 from backend.plotting import (
@@ -228,13 +227,13 @@ def _run(args: argparse.Namespace) -> float:
     kerr_case_key = "kerr_only"
     raman_case_key = "kerr_raman_shock"
 
-    n = 2**11
-    dt = 0.002
+    n = 2**12
+    dt = 0.02
     beta2 = -0.01
     gamma = 1.40
-    z_final = 0.40
+    z_final = 0.70
     pulse_width = 0.08
-    num_records = 120
+    num_records = 80
 
     f_r = 0.18 # TODO: Switch in fraction sign results in allocation failure in the solver.
     tau1 = 0.0522
@@ -420,13 +419,13 @@ def _run(args: argparse.Namespace) -> float:
         centered_num,
         centered_pred
     )
-    centroid_curve_rel_error = relative_l2_intensity_error_curve(
+    centroid_curve_rel_error = relative_l2_intensity_error(
         centered_num,
-        centered_pred
+        centered_pred,
     )
-    centroid_derivative_rel_error = relative_l2_intensity_error_curve(
+    centroid_derivative_rel_error = relative_l2_intensity_error(
         centroid_derivative_num_norm,
-        centroid_rhs_norm
+        centroid_rhs_norm,
     )
 
     final_kerr = _normalized_rows(kerr_spec_map)[-1]
@@ -458,7 +457,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "raman_time_intensity_propagation.png",
         x_label="Time (ps)",
         y_label=r"Propagation distance $z / L_D$",
-        colorbar_label="Normalized temporal intensity",
+        colorbar_label="Normalised intensity",
     )
     if p0 is not None:
         saved_paths.append(p0)
@@ -470,7 +469,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "raman_spectral_intensity_propagation.png",
         x_label="Angular-frequency detuning (rad/time)",
         y_label=r"Propagation distance $z / L_D$",
-        colorbar_label="Normalized spectral intensity",
+        colorbar_label="Normalised spectral intensity",
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -494,8 +493,8 @@ def _run(args: argparse.Namespace) -> float:
         wavelength_map,
         output_dir / "raman_wavelength_intensity_propagation.png",
         x_label="Wavelength (nm)",
-        y_label=r"Propagation distance $z / L_D$",
-        colorbar_label="Normalized spectral intensity",
+        y_label=r"$z / L_D$",
+        colorbar_label="Normalised intensity",
     )
     if p3 is not None:
         saved_paths.append(p3)
@@ -523,7 +522,7 @@ def _run(args: argparse.Namespace) -> float:
         label_a="Kerr-only final",
         label_b="Kerr+Raman final",
         x_label="Angular-frequency detuning (rad/time)",
-        y_label="Normalized spectral intensity",
+        y_label="Normalisedspectral intensity",
         
     )
     if p5 is not None:

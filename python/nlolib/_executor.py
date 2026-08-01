@@ -32,6 +32,10 @@ from ._models import PropagationAbortedError, PropagationResult
 from ._requests import _NormalizedPropagateRequest
 
 
+_DENSE_OUTPUT_MAX_BYTES = 2 * 1024 * 1024 * 1024
+_COMPLEX_BYTES = ctypes.sizeof(NloComplex)
+
+
 class PropagationExecutor:
     def __init__(self, lib: ctypes.CDLL, storage_is_available) -> None:
         self.lib = lib
@@ -43,8 +47,22 @@ class PropagationExecutor:
 
         sim_ptr = ctypes.pointer(request.sim_cfg)
         phys_ptr = ctypes.pointer(request.phys_cfg)
-        in_arr = make_complex_array(request.input_seq)
         n = len(request.input_seq)
+        if request.return_records:
+            dense_output_bytes = n * request.num_records * _COMPLEX_BYTES
+            if dense_output_bytes > _DENSE_OUTPUT_MAX_BYTES:
+                if request.sqlite_path is not None:
+                    raise ValueError(
+                        "dense output request requires "
+                        f"{dense_output_bytes} bytes, above the {_DENSE_OUTPUT_MAX_BYTES} byte safety cap; "
+                        "use return_records=False with SQLite storage for large recorded outputs"
+                    )
+                raise ValueError(
+                    "dense output request requires "
+                    f"{dense_output_bytes} bytes, above the {_DENSE_OUTPUT_MAX_BYTES} byte safety cap; "
+                    "enable SQLite storage or request fewer records/samples"
+                )
+        in_arr = make_complex_array(request.input_seq)
         out_arr = make_complex_array(n * request.num_records) if request.return_records else None
         explicit_record_z_arr = None
         progress_callback_ref = None
