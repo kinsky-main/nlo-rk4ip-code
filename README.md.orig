@@ -157,6 +157,7 @@ $env:PYTHONPATH="$PWD/python"
 $env:NLOLIB_LIBRARY="$PWD/python/nlolib.dll"
 python examples/python/runtime_temporal_demo.py
 python examples/python/high_order_grin_soliton_rk4ip.py
+python examples/python/spm_dispersion_comparison_rk4ip.py
 ```
 
 On Linux:
@@ -167,12 +168,13 @@ export PYTHONPATH="$PWD/python"
 export NLOLIB_LIBRARY="$PWD/python/libnlolib.so"
 python3 examples/python/runtime_temporal_demo.py
 python3 examples/python/high_order_grin_soliton_rk4ip.py
+python3 examples/python/spm_dispersion_comparison_rk4ip.py
 ```
 
 Tensor-grid backend timing example:
 
 ```powershell
-python examples/python/tensor_backend_scaling_rk4ip.py --field-scales 8,16,32,48 --record-scale 32 --record-counts 1,8,16,32,64
+python examples/python/tensor_backend_scaling_rk4ip.py --gpu-fit-scales 8,16,32 --host-fit-scales 48,64 --spill-scale 32 --spill-records 128,256,512
 ```
 
 Build wheel artifacts manually:
@@ -318,4 +320,4 @@ cmake --preset local-custom-path-debug
 cmake --build --preset local-custom-path-debug-build
 ctest --preset local-custom-path-debug-test
 ```
->>>>>>> ed0f671e0b522abbe7f53b88f4c59f593986e4d0
+>>>>>>> feature/transverse-diffusion-support

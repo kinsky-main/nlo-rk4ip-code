@@ -2,21 +2,22 @@
 
 ## Main Tasks
 
-- [ ] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
+- [x] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
 - [ ] Fix MATLAB output for installed packages where progress is not printed.
 - [x] Improve printout for progress of solver, showing estimated time of completion.
 - [x] Remove working buffers by keeping one k_tmp and k_tot buffer then summing k values as each stage is computed.
 - [x] Step size appears to cap at 1e-4 for some reason, investigate and fix.
 - [x] Numerical error is exceptionally high even when cropping to 1e-6 floating max amplitude, investigate and fix.
 - [ ] Cut first and final step from soliton variable step plot in example.
-- [ ] Bring MATLAB and Julia interfaces up to date with Python API, currently using very old interfaces (complete rewrite required).
+- [x] Bring MATLAB and Julia interfaces up to date with Python API, currently using very old interfaces (complete rewrite required).
 - [ ] Benchmark GPU against CPU backend for 3D problems, show scaling of performance with regions for < GPU memory, > GPU memory, and > system memory.
+- [ ] Model Spectral Vortices in (3+1)D with 3D frequency domain plots showing the vortex structure in the frequency domain.
 
 ## Potentially Required Tasks
 
 - [ ] Implement more efficient GPU memory management and data transfer strategies, e.g. pinned memory, async transfers, etc.
-- [ ] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
-- [ ] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
+- [x] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
+- [x] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
 - [x] Loading bar with estimated time remaining for long-running simulations.
 - [x] Refactor state.c into respective init files.
 - [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.

@@ -650,6 +650,155 @@ def plot_total_error_over_propagation(
     return saved
 
 
+def plot_frequency_time_propagation_grid(
+    frequency_axis: np.ndarray,
+    time_axis: np.ndarray,
+    z_axis: np.ndarray,
+    upper_frequency_map: np.ndarray,
+    upper_time_map: np.ndarray,
+    lower_frequency_map: np.ndarray,
+    lower_time_map: np.ndarray,
+    output_path: Path,
+    *,
+    upper_row_label: str,
+    lower_row_label: str,
+    left_title: str = "Frequency-domain intensity",
+    right_title: str = "Time-domain intensity",
+    colorbar_label: str = "Normalized intensity",
+    upper_left_annotation: str | None = None,
+    lower_left_annotation: str | None = None,
+    cmap="nlolib_hdr",
+) -> Path | None:
+    frequency_values = np.asarray(frequency_axis, dtype=np.float64).reshape(-1)
+    time_values = np.asarray(time_axis, dtype=np.float64).reshape(-1)
+    z_values = np.asarray(z_axis, dtype=np.float64).reshape(-1)
+    maps = [
+        np.asarray(upper_frequency_map, dtype=np.float64),
+        np.asarray(upper_time_map, dtype=np.float64),
+        np.asarray(lower_frequency_map, dtype=np.float64),
+        np.asarray(lower_time_map, dtype=np.float64),
+    ]
+    expected_frequency_shape = (z_values.size, frequency_values.size)
+    expected_time_shape = (z_values.size, time_values.size)
+    if maps[0].shape != expected_frequency_shape or maps[2].shape != expected_frequency_shape:
+        raise ValueError("frequency intensity maps must have shape [record, frequency].")
+    if maps[1].shape != expected_time_shape or maps[3].shape != expected_time_shape:
+        raise ValueError("time intensity maps must have shape [record, time].")
+
+    normalized_maps = []
+    for data in maps:
+        normalized, _ = _normalized_nonnegative_data(data, normalization_peak=None)
+        normalized_maps.append(normalized)
+
+    fig, axes = plt.subplots(
+        2,
+        2,
+        figsize=(5.3, 4.1),
+        sharey=True,
+        constrained_layout=True,
+    )
+    plot_specs = (
+        (
+            axes[0, 0],
+            frequency_values,
+            normalized_maps[0],
+            f"",
+            "Frequency detuning (1/time)",
+            "Propagation distance z",
+        ),
+        (
+            axes[0, 1],
+            time_values,
+            normalized_maps[1],
+            f"",
+            "Time t",
+            "",
+        ),
+        (
+            axes[1, 0],
+            frequency_values,
+            normalized_maps[2],
+            f"",
+            "Frequency detuning (1/time)",
+            "Propagation distance z",
+        ),
+        (
+            axes[1, 1],
+            time_values,
+            normalized_maps[3],
+            f"",
+            "Time t",
+            "",
+        ),
+    )
+
+    last_mesh = None
+    resolved_cmap = _resolve_cmap(plt, cmap)
+    for num, (ax, x_values, data, title, x_label, y_label) in enumerate(plot_specs):
+        last_mesh = ax.pcolormesh(
+            x_values,
+            z_values,
+            data,
+            shading="auto",
+            cmap=resolved_cmap,
+            vmin=0.0,
+            vmax=1.0,
+        )
+        ax.set_title(title)
+        ax.set_xlabel(x_label)
+
+        
+        if x_label == "Frequency detuning (1/time)":
+            ax.set_xlim(-25, 25)
+        else:
+            ax.set_xlim(-10, 10)
+        if y_label:
+            ax.set_ylabel(y_label)
+
+    if last_mesh is not None:
+        cbar = fig.colorbar(last_mesh, ax=axes, shrink=0.96, pad=0.02)
+        cbar.set_label(colorbar_label)
+
+    if upper_left_annotation:
+        axes[0, 0].text(
+            0.04,
+            0.94,
+            upper_left_annotation,
+            transform=axes[0, 0].transAxes,
+            ha="left",
+            va="top",
+            fontsize=12,
+            fontweight="bold",
+            color="black",
+            bbox={
+                "boxstyle": "round,pad=0.22",
+                "facecolor": (1.0, 1.0, 1.0, 0.72),
+                "edgecolor": "none",
+            },
+        )
+    if lower_left_annotation:
+        axes[1, 0].text(
+            0.04,
+            0.94,
+            lower_left_annotation,
+            transform=axes[1, 0].transAxes,
+            ha="left",
+            va="top",
+            fontsize=12,
+            fontweight="bold",
+            color="black",
+            bbox={
+                "boxstyle": "round,pad=0.22",
+                "facecolor": (1.0, 1.0, 1.0, 0.72),
+                "edgecolor": "none",
+            },
+        )
+
+    saved = _save_figure(fig, output_path, dpi=220, bbox_inches="tight")
+    plt.close(fig)
+    return saved
+
+
 def plot_3d_intensity_contours_propagation(
     x_axis: np.ndarray,
     y_axis: np.ndarray,
