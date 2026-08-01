@@ -163,7 +163,7 @@ def _run(args: argparse.Namespace) -> tuple[float, float, float]:
         label_a="Energy drift",
         label_b="Momentum drift",
         label_c="Hamiltonian drift",
-        x_label="Normalized propagation z / L_D",
+        x_label="Normalisedpropagation z / L_D",
     )
 
     print(f"conservation-check summary (run_group={run_group}):")

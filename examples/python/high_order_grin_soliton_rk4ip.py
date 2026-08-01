@@ -33,12 +33,12 @@ if str(PYTHON_API_DIR) not in sys.path:
 import nlolib as nlo
 
 
-DEFAULT_SOLITON_ORDER = 2.0
+DEFAULT_SOLITON_ORDER = 4.5
 DEFAULT_SATURATION_INTENSITY = 2.0
-DEFAULT_PROPAGATION_PERIODS = 6.0
-DEFAULT_AZIMUTHAL_AMPLITUDE = 0.02
+DEFAULT_PROPAGATION_PERIODS = 8.0
+DEFAULT_AZIMUTHAL_AMPLITUDE = 0.25
 DEFAULT_AZIMUTHAL_ORDER = 4
-DEFAULT_NOISE_AMPLITUDE = 5.0e-3
+DEFAULT_NOISE_AMPLITUDE = 0.01
 DEFAULT_NOISE_SEED = 12345
 
 
@@ -285,8 +285,8 @@ def _run_case(
         propagation_distance=float(z_final),
         starting_step_size=5.0e-3,
         max_step_size=2.0e-1,
-        min_step_size=1.0e-5,
-        error_tolerance=1.0e-6,
+        min_step_size=1.0e-8,
+        error_tolerance=1.0e-5,
         pulse_period=float(nt) * float(dt),
         delta_time=float(dt),
         tensor_nt=int(nt),
@@ -341,17 +341,17 @@ def _run(args: argparse.Namespace) -> float:
     example_name = "high_order_grin_soliton_rk4ip"
     nonlinear_case_key = "nonlinear"
 
-    nt = 1024
-    nx = 64
-    ny = 64
+    nt = 512
+    nx = 128
+    ny = 128
     dt = 0.02
-    dx = 0.04
-    dy = 0.04
+    dx = 0.03
+    dy = 0.03
     temporal_width = 0.30
     soliton_order = float(args.soliton_order)
-    mode_width_x = 2.4
-    mode_width_y = 2.4
-    spatial_chirp = 4.0e-3
+    mode_width_x = 0.55
+    mode_width_y = 0.75
+    spatial_chirp = 1.5
     azimuthal_amplitude = float(args.azimuthal_amplitude)
     azimuthal_order = int(args.azimuthal_order)
     noise_amplitude = float(args.noise_amplitude)
@@ -359,7 +359,7 @@ def _run(args: argparse.Namespace) -> float:
     beta2 = -0.08
     beta_t = -0.08
     grin_strength = 1.5e-3
-    gamma_nonlinear = 1.0
+    gamma_nonlinear = 1.5
     saturation_intensity = float(args.saturation_intensity)
     propagation_periods = float(args.propagation_periods)
     if not np.isfinite(soliton_order) or soliton_order <= 0.0:
@@ -558,7 +558,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "high_order_grin_soliton_nonlinear_centerline_map.png",
         x_label=r"$x / w0$",
         y_label=r"$z / L_D$",
-        colorbar_label="Normalized center-line intensity",
+        colorbar_label="Normalisedcenter-line intensity",
     )
     plot_summary_curve(
         z_scaled,
@@ -612,7 +612,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "high_order_grin_soliton_final_temporal_comparison.png",
         label_a="Launch",
         label_b="Saturable nonlinear final",
-        x_label=r"t / T_0",
+        x_label=r"$t / T_0$",
         y_label="Temporal marginal intensity",
     )
     plot_intensity_colormap_vs_propagation(
@@ -620,27 +620,29 @@ def _run(args: argparse.Namespace) -> float:
         z_scaled,
         nonlinear_temporal,
         output_dir / "high_order_grin_soliton_nonlinear_temporal_map.png",
-        x_label=r"t / T_0",
+        x_label=r"$t / T_0$",
         y_label=r"$z / L_D$",
-        colorbar_label="Normalized temporal marginal intensity",
+        colorbar_label="Normalised intensity",
+        xlimit=(-5, 5)
     )
     plot_intensity_colormap_vs_propagation(
         omega_scaled,
         z_scaled,
         nonlinear_spectral,
         output_dir / "high_order_grin_soliton_nonlinear_frequency_map.png",
-        x_label="omega T0",
+        x_label=r"$\omega / \omega_0$",
         y_label=r"$z / L_D$",
-        colorbar_label="Normalized spectral intensity",
+        colorbar_label="Normalisedspectral intensity",
+        xlimit=(-5, 5)
     )
     plot_intensity_colormap_vs_propagation(
         x_scaled,
         y_scaled,
         nonlinear_xy[-1],
         output_dir / "high_order_grin_soliton_nonlinear_final_xy_map.png",
-        x_label=r"$x / w0$",
-        y_label="y / w0",
-        colorbar_label="Normalized final intensity",
+        x_label=r"$x / \omega_0$",
+        y_label=r"$y / \omega_0$",
+        colorbar_label="Normalisedfinal intensity",
     )
     plot_3d_intensity_contours_propagation(
         x_scaled,

@@ -124,7 +124,7 @@ _MIXED_MODE_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
     fit_skip_initial_points=1,
     x_axis="mode_count",
     x_scale=1.0,
-    x_label="Scalar mode count",
+    x_label=r"Mode count $P_{eff}$",
 )
 _NLOLIB_RUNTIME_PLOT_SPEC = RuntimePlotSpec(
     series=(

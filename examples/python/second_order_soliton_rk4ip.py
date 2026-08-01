@@ -304,10 +304,10 @@ def save_plots(
         output_dir / "soliton_wavelength_intensity_colormap.png",
         accepted_z=telemetry_plot.accepted_z,
         accepted_step_sizes=telemetry_plot.accepted_step_sizes[3:-1],
-        map_x_label=r"Soliton Period $z$ / $Z_0$",
+        map_x_label=r"Soliton period $z$ / $Z_0$",
         map_y_label=r"Linearized wavelength $\lambda_{lin}$ (nm)",
-        step_x_label=r"Soliton Period $z$ / $Z_0$",
-        step_y_label=r"Step Size $z$ / $Z_0 (10^{-3})$",
+        step_x_label=r"Soliton period $z$ / $Z_0$",
+        step_y_label=r"Step size $z$ / $Z_0 (\times 10^{-3})$",
         normalization_peak=map_peak,
     )
     if p1 is not None:
@@ -319,8 +319,8 @@ def save_plots(
         spectral_map_true,
         output_dir / "soliton_wavelength_intensity_colormap_analytical.png",
         x_label=r"Linearized wavelength $\lambda_{lin}$ (nm)",
-        y_label=r"Soliton Period $z$ / $Z_0$",
-        colorbar_label="Normalized spectral intensity",
+        y_label=r"Soliton period $z$ / $Z_0$",
+        colorbar_label="Normalisedspectral intensity",
         normalization_peak=map_peak,
     )
     if p1b is not None:
@@ -642,7 +642,7 @@ def _run(args: argparse.Namespace) -> float:
 
     print(f"second-order soliton summary (run_group={run_group})")
     print(
-        "normalized NLSE coefficients: "
+        "NormalisedNLSE coefficients: "
         f"sgn(beta2)={int(sgn_beta2):+d}, "
         f"1/(2*LD)={0.5 / ld:.6e} 1/m, "
         f"exp(-alpha*z_final)/LNL={math.exp(-alpha * z_final) / lnl:.6e} 1/m."

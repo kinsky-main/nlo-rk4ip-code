@@ -145,7 +145,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "linear_drift_intensity_propagation_map.png",
         x_label=r"Time $t$",
         y_label=r"Propagation Distance $z / L_D$",
-        colorbar_label="Normalized intensity",
+        colorbar_label="Normalised intensity",
     )
     if saved is not None:
         saved_paths.append(saved)

@@ -147,7 +147,7 @@ cfg.total_points = cfg.nt * cfg.mode_count;
 cfg.lambda0_m = 1030e-9;
 cfg.propagation_length_m = 0.20;
 cfg.time_window_ps = 2.56;
-cfg.tfwhm_ps = 0.045;
+cfg.tfwhm_ps = 0.057;
 cfg.total_energy_nj = 5.0;
 cfg.chirp = 1.5;
 cfg.starting_step_size_m = 1.0e-4;
@@ -157,7 +157,7 @@ cfg.mpa_tolerance = 1.0e-9;
 cfg.beta0_base = 8.8268e6;
 cfg.beta0_spacing = 25.0;
 cfg.beta1 = 0.0;
-cfg.beta2 = 0.0209;
+cfg.beta2 = 0.01;
 
 coeffs = randn(1, cfg.mode_count) + 1i * randn(1, cfg.mode_count);
 coeffs = coeffs .* linspace(1.0, 0.35, cfg.mode_count);

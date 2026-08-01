@@ -80,33 +80,31 @@ def test_plot_image_validator_flags_blank_plot() -> None:
         )
 
 
-def test_3d_contour_compositor_draws_projected_grid_lines() -> None:
-    image = np.full((120, 180, 3), 255, dtype=np.uint8)
-    axis_line_specs = [
-        (0.10, 0.15, 0.88, 0.18, 1.0, 1.8, "axis"),
-        (0.12, 0.16, 0.25, 0.82, 1.0, 1.8, "axis"),
-        (0.25, 0.82, 0.88, 0.78, 0.55, 1.1, "grid"),
-    ]
+def test_image_with_mpl_colorbar_composes_image_and_colorbar() -> None:
+    # Render a non-trivial scene image (gradient) and verify the compositor
+    # preserves the rendered content and adds a colorbar strip on the right.
+    height, width = 120, 180
+    gradient = np.linspace(0.0, 1.0, width, dtype=np.float64)
+    scene = np.tile(gradient[None, :, None], (height, 1, 3))
+    scene = (scene * 255.0).astype(np.uint8)
 
-    rendered = _image_with_mpl_colorbar(
-        image,
-        axis_line_specs=axis_line_specs,
-        colorbar_label="Normalized intensity",
-    )
-    rgb = np.asarray(rendered[:, :, :3], dtype=np.int16)
-    dark_pixels = np.any(rgb < 245, axis=2)
+    rendered = _image_with_mpl_colorbar(scene, colorbar_label="Normalized intensity")
 
     _check_condition(rendered.ndim == 3 and rendered.shape[2] == 3, "composited image must be RGB")
-    _check_condition(
-        int(np.count_nonzero(dark_pixels)) > 100,
-        "projected grid lines should alter the blank render",
-    )
+    _check_condition(rendered.shape[0] > 0 and rendered.shape[1] > 0, "composited image must be non-empty")
+
+    # A colorbar adds a strip of saturated colors on the right side of the
+    # figure that does not appear in the input gradient (which is greyscale).
+    rgb = np.asarray(rendered, dtype=np.int16)
+    right_half = rgb[:, rendered.shape[1] // 2:, :]
+    chroma = np.max(right_half, axis=2) - np.min(right_half, axis=2)
+    _check_condition(int(np.max(chroma)) > 30, "colorbar should introduce non-grey pixels on the right")
 
 
 def main() -> None:
     test_wavelength_window_selector_focuses_signal()
     test_plot_image_validator_flags_blank_plot()
-    test_3d_contour_compositor_draws_projected_grid_lines()
+    test_image_with_mpl_colorbar_composes_image_and_colorbar()
     print("test_python_grin_plot_validation: all checks passed.")
 
 

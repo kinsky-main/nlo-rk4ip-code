@@ -171,7 +171,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "spm_time_intensity_propagation.png",
         x_label="Time t",
         
-        colorbar_label="Normalized intensity",
+        colorbar_label="Normalised intensity",
     )
     if p2 is not None:
         saved.append(p2)
@@ -182,7 +182,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "spm_frequency_intensity_propagation.png",
         x_label="Frequency detuning (1/time)",
         
-        colorbar_label="Normalized spectral intensity",
+        colorbar_label="Normalisedspectral intensity",
     )
     if p3 is not None:
         saved.append(p3)

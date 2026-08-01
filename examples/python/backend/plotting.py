@@ -88,49 +88,6 @@ def _rc_float(name: str, fallback: float) -> float:
         return float(fallback)
 
 
-def _rc_font_family() -> str:
-    family = plt.rcParams.get("font.family", "Arial")
-    if isinstance(family, (list, tuple)):
-        if not family:
-            return "Arial"
-        family_name = str(family[0])
-    else:
-        family_name = str(family)
-    generic = family_name.strip().lower()
-    if generic in {"serif", "sans-serif", "sans serif", "cursive", "fantasy", "monospace"}:
-        stack_key = "font.monospace" if generic == "monospace" else f"font.{generic.replace(' ', '-')}"
-        stack = plt.rcParams.get(stack_key, [])
-        if isinstance(stack, (list, tuple)) and len(stack) > 0:
-            return str(stack[0])
-    return family_name
-
-
-def _pyvista_font_family() -> str:
-    family = _rc_font_family().lower()
-    if "times" in family or "roman" in family:
-        return "times"
-    if "courier" in family or "mono" in family:
-        return "courier"
-    return "arial"
-
-
-def _pyvista_style_from_mpl() -> dict[str, Any]:
-    base_size = max(1, int(round(_rc_float("font.size", 12.0))))
-    return {
-        "background": _rc_color("figure.facecolor", "#ffffff"),
-        "foreground": _rc_color("text.color", _rc_color("axes.labelcolor", "#000000")),
-        "edge": _rc_color("axes.edgecolor", "#000000"),
-        "font_family": _pyvista_font_family(),
-        "font_size": base_size,
-        "label_font_size": max(1, int(round(_rc_float("axes.labelsize", float(base_size))))),
-    }
-
-
-def _mpl_cmap_color(level: float) -> tuple[float, float, float, float]:
-    rgba = _resolve_cmap(plt, None)(float(np.clip(level, 0.0, 1.0)))
-    return tuple(float(value) for value in rgba)
-
-
 def _crop_rendered_image_to_content(image: np.ndarray, *, padding_fraction: float = 0.04) -> np.ndarray:
     cropped, _ = _crop_rendered_image_to_content_with_bounds(image, padding_fraction=padding_fraction)
     return cropped
@@ -167,85 +124,52 @@ def _crop_rendered_image_to_content_with_bounds(
     return img[y0:y1, x0:x1, :], (x0, y0, x1, y1)
 
 
-def _crop_rendered_image_to_bounds(
-    image: np.ndarray,
-    crop_bounds: tuple[int, int, int, int],
-) -> np.ndarray:
-    img = np.asarray(image)
-    if img.ndim < 2:
-        return img
-    x0, y0, x1, y1 = crop_bounds
-    x0 = max(0, min(int(x0), int(img.shape[1])))
-    x1 = max(x0, min(int(x1), int(img.shape[1])))
-    y0 = max(0, min(int(y0), int(img.shape[0])))
-    y1 = max(y0, min(int(y1), int(img.shape[0])))
-    return img[y0:y1, x0:x1, ...]
-
-
 def _image_with_mpl_colorbar(
     image: np.ndarray,
     *,
-    colorbar_label: str = "Normalized intensity",
-    image_crop_bounds: tuple[int, int, int, int] | None = None,
-    axis_line_specs: list[tuple[float, float, float, float, float, float, str]] | None = None,
-    axis_label_specs: list[tuple[str, float, float, float, str, str]] | None = None,
-    axis_tick_specs: list[tuple[str, float, float, float, str, str]] | None = None,
+    colorbar_label: str = "Normalised intensity",
+    axis_label_specs: list[tuple[str, float, float, float]] | None = None,
 ) -> np.ndarray:
+    """Compose a rendered scene image with a matplotlib colorbar on the right.
+
+    `axis_label_specs` is an optional list of ``(label, x_axes, y_axes, rot_deg)``
+    tuples drawn over the image via matplotlib so that LaTeX (``$z / L_D$``)
+    renders correctly. Coordinates are in the *displayed* image's axes frame.
+    When specs are provided the image is assumed to already be cropped to
+    content (so the projected coords match the display); when specs are
+    ``None`` the function crops internally for backwards compatibility.
+    """
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
 
-    img = (
-        _crop_rendered_image_to_bounds(np.asarray(image), image_crop_bounds)
-        if image_crop_bounds is not None
-        else _crop_rendered_image_to_content(np.asarray(image))
-    )
+    img = np.asarray(image)
+    if axis_label_specs is None:
+        img = _crop_rendered_image_to_content(img)
     fig = plt.figure(figsize=(4.0, 2.64), dpi=450, constrained_layout=True)
-    grid = fig.add_gridspec(1, 2, width_ratios=[22.0, 1.0], wspace=0.02)
+    grid = fig.add_gridspec(1, 2, width_ratios=[22.0, 1.0])
     ax_img = fig.add_subplot(grid[0, 0])
     ax_cbar = fig.add_subplot(grid[0, 1])
     ax_img.imshow(img)
-    ax_img.set_zorder(-1)
-    ax_img.set_aspect("equal", adjustable="box", anchor="SW")
+    ax_img.set_aspect("equal", adjustable="box", anchor="C")
     ax_img.set_axis_off()
-    grid_color = _rc_color("grid.color", "#6b7280")
-    axis_color = _rc_color("axes.edgecolor", "#111827")
-    if axis_line_specs is not None:
-        for x0, y0, x1, y1, alpha, linewidth, kind in axis_line_specs:
-            ax_img.plot(
-                [x0, x1],
-                [y0, y1],
+    if axis_label_specs:
+        label_color = _rc_color("axes.labelcolor", _rc_color("text.color", "#000000"))
+        label_size = _rc_float("axes.labelsize", _rc_float("font.size", 10.0))
+        for label, x_pos, y_pos, rotation in axis_label_specs:
+            if not label:
+                continue
+            ax_img.text(
+                float(x_pos),
+                float(y_pos),
+                str(label),
                 transform=ax_img.transAxes,
-                color=axis_color if kind == "axis" else grid_color,
-                alpha=float(alpha),
-                linewidth=float(linewidth),
-                solid_capstyle="round",
-                clip_on=True,
-                zorder=1,
+                ha="center",
+                va="center",
+                rotation=float(rotation),
+                color=label_color,
+                fontsize=label_size,
+                clip_on=False,
             )
-    label_color = _rc_color("axes.labelcolor", _rc_color("text.color", "#000000"))
-    tick_color = _rc_color("xtick.color", label_color)
-    label_size = _rc_float("axes.labelsize", _rc_float("font.size", 10.0))
-    tick_size = 0.72 * _rc_float("font.size", 10.0)
-    for specs, color, size in (
-        (axis_tick_specs, tick_color, tick_size),
-        (axis_label_specs, label_color, label_size),
-    ):
-        if specs is None:
-            continue
-        for text, x_pos, y_pos, rotation, ha, va in specs:
-            if text:
-                ax_img.text(
-                    x_pos,
-                    y_pos,
-                    text,
-                    transform=ax_img.transAxes,
-                    ha=ha,
-                    va=va,
-                    rotation=rotation,
-                    color=color,
-                    fontsize=size,
-                    clip_on=False,
-                )
     sm = ScalarMappable(norm=Normalize(vmin=0.0, vmax=1.0), cmap=_resolve_cmap(plt, None))
     sm.set_array([])
     cbar = fig.colorbar(sm, cax=ax_cbar)
@@ -258,26 +182,11 @@ def _image_with_mpl_colorbar(
     return out
 
 
-def _default_3d_axis_label_specs(
-    axis_labels: tuple[str, str, str],
-) -> list[tuple[str, float, float, float, str, str]]:
-    return [
-        (axis_labels[0], 0.50, 0.06, 0.0, "center", "center"),
-        (axis_labels[1], 0.12, 0.24, 34.0, "center", "center"),
-        (axis_labels[2], 0.91, 0.54, 90.0, "center", "center"),
-    ]
-
-
-def _format_mpl_tick_labels(values: np.ndarray) -> list[str]:
-    try:
-        from matplotlib.ticker import ScalarFormatter
-
-        formatter = ScalarFormatter(useOffset=False, useMathText=True)
-        formatter.create_dummy_axis()
-        formatter.set_locs(values)
-        return [str(formatter(value)) for value in values]
-    except Exception:
-        return [f"{round(v, 1):g}" for v in values]
+def _figure_to_rgb_array(fig: Any) -> np.ndarray:
+    fig.canvas.draw()
+    width, height = fig.canvas.get_width_height()
+    out = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(height, width, 4)
+    return np.asarray(out[:, :, :3]).copy()
 
 
 def _apply_nice_ticks(ax: Any) -> None:
@@ -290,325 +199,6 @@ def _apply_nice_ticks(ax: Any) -> None:
         ax.set_axisbelow(True)
     except Exception:
         pass
-
-
-def _project_world_to_display(renderer: Any, point: tuple[float, float, float]) -> np.ndarray:
-    renderer.SetWorldPoint(float(point[0]), float(point[1]), float(point[2]), 1.0)
-    renderer.WorldToDisplay()
-    return np.asarray(renderer.GetDisplayPoint()[:2], dtype=np.float64)
-
-
-def _display_to_cropped_axes(
-    display_xy: np.ndarray,
-    *,
-    image_shape: tuple[int, ...],
-    crop_bounds: tuple[int, int, int, int],
-) -> np.ndarray:
-    image_height = float(image_shape[0])
-    x0, y0, x1, y1 = crop_bounds
-    crop_width = max(float(x1 - x0), 1.0)
-    crop_height = max(float(y1 - y0), 1.0)
-    crop_bottom_display = image_height - float(y1)
-    return np.asarray(
-        [
-            (float(display_xy[0]) - float(x0)) / crop_width,
-            (float(display_xy[1]) - crop_bottom_display) / crop_height,
-        ],
-        dtype=np.float64,
-    )
-
-
-def _axis_text_rotation(start_axes: np.ndarray, end_axes: np.ndarray) -> float:
-    delta = np.asarray(end_axes, dtype=np.float64) - np.asarray(start_axes, dtype=np.float64)
-    if float(np.linalg.norm(delta)) <= 1.0e-12:
-        return 0.0
-    angle = float(np.degrees(np.arctan2(float(delta[1]), float(delta[0]))))
-    if angle > 90.0:
-        angle -= 180.0
-    if angle < -90.0:
-        angle += 180.0
-    return angle
-
-
-def _transform_3d_point(
-    point: tuple[float, float, float],
-    transform_matrix: np.ndarray | None,
-) -> tuple[float, float, float]:
-    if transform_matrix is None:
-        return (float(point[0]), float(point[1]), float(point[2]))
-    transformed = np.asarray(transform_matrix, dtype=np.float64) @ np.asarray(
-        [float(point[0]), float(point[1]), float(point[2]), 1.0],
-        dtype=np.float64,
-    )
-    return (float(transformed[0]), float(transformed[1]), float(transformed[2]))
-
-
-def _expanded_crop_bounds_for_world_points(
-    plotter: Any,
-    *,
-    image_shape: tuple[int, ...],
-    crop_bounds: tuple[int, int, int, int],
-    world_points: list[tuple[float, float, float]],
-    padding_fraction: float = 0.08,
-) -> tuple[int, int, int, int]:
-    if not world_points:
-        return crop_bounds
-
-    renderer = plotter.renderer
-    image_height = float(image_shape[0])
-    image_width = float(image_shape[1])
-    projected: list[tuple[float, float]] = []
-    for point in world_points:
-        display_xy = _project_world_to_display(renderer, point)
-        projected.append((float(display_xy[0]), image_height - float(display_xy[1])))
-    if not projected:
-        return crop_bounds
-
-    x0, y0, x1, y1 = crop_bounds
-    xs = [value[0] for value in projected]
-    ys = [value[1] for value in projected]
-    x0 = min(float(x0), min(xs))
-    x1 = max(float(x1), max(xs))
-    y0 = min(float(y0), min(ys))
-    y1 = max(float(y1), max(ys))
-    pad_x = max(8.0, float(padding_fraction) * max(x1 - x0, 1.0))
-    pad_y = max(8.0, float(padding_fraction) * max(y1 - y0, 1.0))
-    return (
-        max(0, int(np.floor(x0 - pad_x))),
-        max(0, int(np.floor(y0 - pad_y))),
-        min(int(image_width), int(np.ceil(x1 + pad_x))),
-        min(int(image_height), int(np.ceil(y1 + pad_y))),
-    )
-
-
-def _axis_text_outward_offset(
-    start_axes: np.ndarray,
-    end_axes: np.ndarray,
-    projected_center: np.ndarray,
-) -> np.ndarray:
-    direction = np.asarray(end_axes, dtype=np.float64) - np.asarray(start_axes, dtype=np.float64)
-    length = float(np.linalg.norm(direction))
-    if length <= 1.0e-12:
-        return np.asarray([0.0, 0.0], dtype=np.float64)
-    direction = direction / length
-    normal = np.asarray([-direction[1], direction[0]], dtype=np.float64)
-    midpoint = 0.5 * (np.asarray(start_axes, dtype=np.float64) + np.asarray(end_axes, dtype=np.float64))
-    if float(np.linalg.norm((midpoint - normal) - projected_center)) > float(
-        np.linalg.norm((midpoint + normal) - projected_center)
-    ):
-        normal = -normal
-    return normal
-
-
-def _clamp_axes_text_position(position: np.ndarray, *, margin: float = 0.035) -> np.ndarray:
-    return np.asarray(
-        [
-            float(np.clip(float(position[0]), margin, 1.0 - margin)),
-            float(np.clip(float(position[1]), margin, 1.0 - margin)),
-        ],
-        dtype=np.float64,
-    )
-
-
-def _select_principal_axis_origin(
-    plotter: Any,
-    *,
-    image_shape: tuple[int, ...],
-    crop_bounds: tuple[int, int, int, int],
-    x_axis: np.ndarray,
-    y_axis: np.ndarray,
-    z_axis: np.ndarray,
-    transform_matrix: np.ndarray | None,
-) -> tuple[float, float, float]:
-    x_min = float(np.min(x_axis))
-    y_max = float(np.max(y_axis))
-    z_min = float(np.min(z_axis))
-    return (x_min, y_max, z_min)
-
-
-def _principal_axis_world_lines(
-    *,
-    origin: tuple[float, float, float],
-    x_axis: np.ndarray,
-    y_axis: np.ndarray,
-    z_axis: np.ndarray,
-    transform_matrix: np.ndarray | None,
-    tick_count: int,
-) -> tuple[
-    list[tuple[tuple[float, float, float], tuple[float, float, float], float, float, str]],
-    list[tuple[int, tuple[float, float, float], tuple[float, float, float], np.ndarray]],
-]:
-    axis_ranges = [
-        (float(np.min(x_axis)), float(np.max(x_axis))),
-        (float(np.min(y_axis)), float(np.max(y_axis))),
-        (float(np.min(z_axis)), float(np.max(z_axis))),
-    ]
-    axis_lines: list[tuple[tuple[float, float, float], tuple[float, float, float], float, float, str]] = []
-    axis_defs: list[tuple[int, tuple[float, float, float], tuple[float, float, float], np.ndarray]] = []
-    for axis_index, (axis_min, axis_max) in enumerate(axis_ranges):
-        endpoint = [float(origin[0]), float(origin[1]), float(origin[2])]
-        endpoint[axis_index] = axis_min if float(origin[axis_index]) == axis_max else axis_max
-        endpoint_tuple = (float(endpoint[0]), float(endpoint[1]), float(endpoint[2]))
-        axis_lines.append(
-            (
-                _transform_3d_point(origin, transform_matrix),
-                _transform_3d_point(endpoint_tuple, transform_matrix),
-                0.74,
-                0.82,
-                "axis",
-            )
-        )
-        axis_defs.append(
-            (
-                axis_index,
-                _transform_3d_point(origin, transform_matrix),
-                _transform_3d_point(endpoint_tuple, transform_matrix),
-                np.linspace(float(origin[axis_index]), float(endpoint_tuple[axis_index]), max(2, int(tick_count))),
-            )
-        )
-
-    for first_axis, second_axis in ((0, 1), (0, 2), (1, 2)):
-        first_values = axis_defs[first_axis][3][1:-1]
-        second_values = axis_defs[second_axis][3][1:-1]
-        first_end_value = float(axis_defs[first_axis][3][-1])
-        second_end_value = float(axis_defs[second_axis][3][-1])
-
-        for value in first_values:
-            start = [float(origin[0]), float(origin[1]), float(origin[2])]
-            end = [float(origin[0]), float(origin[1]), float(origin[2])]
-            start[first_axis] = float(value)
-            end[first_axis] = float(value)
-            end[second_axis] = second_end_value
-            axis_lines.append(
-                (
-                    _transform_3d_point((start[0], start[1], start[2]), transform_matrix),
-                    _transform_3d_point((end[0], end[1], end[2]), transform_matrix),
-                    0.26,
-                    0.44,
-                    "grid",
-                )
-            )
-        for value in second_values:
-            start = [float(origin[0]), float(origin[1]), float(origin[2])]
-            end = [float(origin[0]), float(origin[1]), float(origin[2])]
-            start[second_axis] = float(value)
-            end[second_axis] = float(value)
-            end[first_axis] = first_end_value
-            axis_lines.append(
-                (
-                    _transform_3d_point((start[0], start[1], start[2]), transform_matrix),
-                    _transform_3d_point((end[0], end[1], end[2]), transform_matrix),
-                    0.26,
-                    0.44,
-                    "grid",
-                )
-            )
-
-    return axis_lines, axis_defs
-
-
-def _project_3d_principal_axis_specs(
-    plotter: Any,
-    *,
-    image_shape: tuple[int, ...],
-    crop_bounds: tuple[int, int, int, int],
-    x_axis: np.ndarray,
-    y_axis: np.ndarray,
-    z_axis: np.ndarray,
-    axis_labels: tuple[str, str, str],
-    transform_matrix: np.ndarray | None = None,
-    tick_count: int = 3,
-    grid_tick_count: int = 5,
-) -> tuple[
-    list[tuple[float, float, float, float, float, float, str]],
-    list[tuple[str, float, float, float, str, str]],
-    list[tuple[str, float, float, float, str, str]],
-    tuple[int, int, int, int],
-]:
-    origin = _select_principal_axis_origin(
-        plotter,
-        image_shape=image_shape,
-        crop_bounds=crop_bounds,
-        x_axis=x_axis,
-        y_axis=y_axis,
-        z_axis=z_axis,
-        transform_matrix=transform_matrix,
-    )
-    axis_lines, axis_defs = _principal_axis_world_lines(
-        origin=origin,
-        x_axis=x_axis,
-        y_axis=y_axis,
-        z_axis=z_axis,
-        transform_matrix=transform_matrix,
-        tick_count=max(int(tick_count), int(grid_tick_count)),
-    )
-    expanded_crop_bounds = _expanded_crop_bounds_for_world_points(
-        plotter,
-        image_shape=image_shape,
-        crop_bounds=crop_bounds,
-        world_points=[point for start, end, *_ in axis_lines for point in (start, end)],
-    )
-
-    renderer = plotter.renderer
-
-    def axes_point(point: tuple[float, float, float]) -> np.ndarray:
-        return _display_to_cropped_axes(
-            _project_world_to_display(renderer, point),
-            image_shape=image_shape,
-            crop_bounds=expanded_crop_bounds,
-        )
-
-    line_specs = [
-        (
-            float(axes_point(start)[0]),
-            float(axes_point(start)[1]),
-            float(axes_point(end)[0]),
-            float(axes_point(end)[1]),
-            float(alpha),
-            float(linewidth),
-            kind,
-        )
-        for start, end, alpha, linewidth, kind in axis_lines
-    ]
-
-    axis_endpoints = [axes_point(start) for _, start, _, _ in axis_defs]
-    axis_endpoints.extend(axes_point(end) for _, _, end, _ in axis_defs)
-    projected_center = np.mean(np.asarray(axis_endpoints, dtype=np.float64), axis=0)
-
-    label_specs: list[tuple[str, float, float, float, str, str]] = []
-    tick_specs: list[tuple[str, float, float, float, str, str]] = []
-    for axis_index, start_world, end_world, dense_tick_values in axis_defs:
-        start_axes = axes_point(start_world)
-        end_axes = axes_point(end_world)
-        outward = _axis_text_outward_offset(start_axes, end_axes, projected_center)
-        rotation = _axis_text_rotation(start_axes, end_axes)
-
-        visible_tick_values = np.linspace(
-            float(dense_tick_values[0]),
-            float(dense_tick_values[-1]),
-            max(5, int(tick_count)),
-            dtype=np.float64,
-        )
-        for tick_value, tick_label in zip(visible_tick_values, _format_mpl_tick_labels(visible_tick_values)):
-            point = list(origin)
-            point[axis_index] = tick_value
-            tick_pos = axes_point(_transform_3d_point((point[0], point[1], point[2]), transform_matrix))
-            tick_pos = _clamp_axes_text_position(tick_pos + 0.035 * outward)
-            tick_specs.append((tick_label, float(tick_pos[0]), float(tick_pos[1]), 0.0, "center", "center"))
-
-        label_pos = _clamp_axes_text_position(0.5 * (start_axes + end_axes) + 0.090 * outward)
-        label_specs.append(
-            (
-                axis_labels[axis_index],
-                float(label_pos[0]),
-                float(label_pos[1]),
-                rotation,
-                "center",
-                "center",
-            )
-        )
-
-    return line_specs, label_specs, tick_specs, expanded_crop_bounds
 
 
 def _normalized_nonnegative_data(values: np.ndarray, *, normalization_peak: float | None) -> tuple[np.ndarray, float]:
@@ -632,6 +222,60 @@ def _evenly_spaced_indices(count: int, *, max_count: int) -> np.ndarray:
     if count <= max_count:
         return np.arange(count, dtype=np.int64)
     return np.unique(np.rint(np.linspace(0.0, float(count - 1), int(max_count))).astype(np.int64))
+
+
+def _evenly_spaced_indices_with_required(
+    count: int,
+    *,
+    max_count: int,
+    required_indices: np.ndarray,
+) -> np.ndarray:
+    if count <= 0:
+        return np.zeros(0, dtype=np.int64)
+    if count <= max_count:
+        return np.arange(count, dtype=np.int64)
+
+    required = np.asarray(required_indices, dtype=np.int64).reshape(-1)
+    required = np.unique(required[(required >= 0) & (required < int(count))])
+    if required.size == 0:
+        return _evenly_spaced_indices(count, max_count=max_count)
+
+    base_count = max(int(max_count) - int(required.size), 1)
+    indices = np.unique(
+        np.concatenate(
+            [
+                _evenly_spaced_indices(count, max_count=base_count),
+                required,
+            ]
+        )
+    )
+    if indices.size > max_count:
+        required_set = {int(value) for value in required}
+        keep = np.ones(indices.size, dtype=bool)
+        while int(np.count_nonzero(keep)) > int(max_count):
+            candidates = np.flatnonzero(keep & np.asarray([int(value) not in required_set for value in indices]))
+            if candidates.size == 0:
+                break
+            distances = np.min(np.abs(indices[candidates, None] - required[None, :]), axis=1)
+            remove_at = int(candidates[int(np.argmin(distances))])
+            keep[remove_at] = False
+        indices = indices[keep]
+    return np.asarray(indices, dtype=np.int64)
+
+
+def _axis_feature_indices(profile: np.ndarray, *, threshold_fraction: float = 0.35, max_count: int = 9) -> np.ndarray:
+    values = np.asarray(profile, dtype=np.float64).reshape(-1)
+    if values.size == 0:
+        return np.zeros(0, dtype=np.int64)
+    peak = float(np.max(values))
+    if peak <= 0.0:
+        return np.asarray([int(np.argmax(values))], dtype=np.int64)
+    support = np.flatnonzero(values >= float(threshold_fraction) * peak)
+    if support.size == 0:
+        support = np.asarray([int(np.argmax(values))], dtype=np.int64)
+    if support.size > int(max_count):
+        support = support[_evenly_spaced_indices(support.size, max_count=int(max_count))]
+    return np.unique(np.concatenate([support, np.asarray([int(np.argmax(values))], dtype=np.int64)]))
 
 
 def _pulse_supported_time_indices(
@@ -807,8 +451,10 @@ def plot_intensity_colormap_vs_propagation(
     *,
     x_label: str,
     y_label: str = "Propagation distance z",
-    colorbar_label: str = "Normalized intensity",
+    colorbar_label: str = "Normalised intensity",
     normalization_peak: float | None = None,
+    xlimit: tuple[float, float] | None = None,
+    ylimit: tuple[float, float] | None = None,
     cmap="nlolib_hdr",
 ) -> Path | None:
 
@@ -835,6 +481,10 @@ def plot_intensity_colormap_vs_propagation(
     )
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
+    if xlimit is not None:
+        ax.set_xlim(xlimit)
+    if ylimit is not None:
+        ax.set_ylim(ylimit)
     cbar = fig.colorbar(mesh, ax=ax)
     cbar.set_label(colorbar_label)
     saved = _save_figure(fig, output_path)
@@ -1014,8 +664,8 @@ def plot_convergence_loglog(
     ax.loglog(step_sizes_plot, errors_plot, "o", color="C1", lw=1.8, ms=3.0)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    _apply_nice_ticks(ax)
-    ax.grid(True, which="both", alpha=0.3)
+    # _apply_nice_ticks(ax)
+    ax.grid(True, which="both", alpha=0.35)
     ax.legend()
     saved = _save_figure(fig, output_path, bbox_inches="tight")
     plt.close(fig)
@@ -1090,7 +740,7 @@ def plot_wavelength_step_history(
     ax_map.set_box_aspect(1.0)
     ax_map.tick_params(labelbottom=False, bottom=False)
     cbar = fig.colorbar(mesh, ax=ax_map, pad=0.05, shrink=0.79)
-    cbar.set_label("Normalized spectral intensity")
+    cbar.set_label("Normalised intensity")
 
     ax_step = fig.add_subplot(grid[1, 0])
     ax_step.tick_params(labeltop=False, top=False)
@@ -1131,7 +781,7 @@ def plot_wavelength_step_history(
 
     map_pos = ax_map.get_position()
     step_pos = ax_step.get_position()
-    ax_step.set_position([map_pos.x0, step_pos.y0, map_pos.width, step_pos.height])
+    ax_step.set_position([map_pos.x0, step_pos.y0 + 0.07, map_pos.width, step_pos.height])
 
     saved = _save_figure(fig, output_path, dpi=260, bbox_inches="tight")
     plt.close(fig)
@@ -1216,7 +866,7 @@ def plot_frequency_time_propagation_grid(
     lower_row_label: str,
     left_title: str = "Frequency-domain intensity",
     right_title: str = "Time-domain intensity",
-    colorbar_label: str = "Normalized intensity",
+    colorbar_label: str = "Normalised intensity",
     upper_left_annotation: str | None = None,
     lower_left_annotation: str | None = None,
     cmap="nlolib_hdr",
@@ -1256,7 +906,7 @@ def plot_frequency_time_propagation_grid(
             normalized_maps[0],
             f"",
             r"",
-            r"Propagation $z$",
+            r"$z / L_D$",
         ),
         (
             axes[0, 1],
@@ -1271,15 +921,15 @@ def plot_frequency_time_propagation_grid(
             frequency_values,
             normalized_maps[2],
             f"",
-            r"Frequency detuning $1/t$",
-            r"Propagation $z$",
+            r"Frequency detuning $\omega - \omega_0$",
+            r"$z / L_D$",
         ),
         (
             axes[1, 1],
             time_values,
             normalized_maps[3],
             f"",
-            r"Time $t$ (s)",
+            r"Time $t$ (ps)",
             "",
         ),
     )
@@ -1361,20 +1011,21 @@ def plot_3d_intensity_contours_propagation(
     output_path: Path,
     *,
     intensity_cutoff: float = 0.01,
-    num_levels: int = 30,
+    num_levels: int = 100,
     max_x_samples: int = 128,
     max_y_samples: int = 128,
     max_z_samples: int = 128,
-    alpha_min: float = 0.12,
-    alpha_max: float = 0.72,
+    alpha_min: float = 0.05,
+    alpha_max: float = 0.3,
     input_is_intensity: bool = False,
     normalization_peak: float | None = None,
     x_label: str = r"$x$",
     y_label: str = r"$y$",
     z_label: str = r"$z$",
     annotation_text: str | None = None,
-    xy_crop_inset: float = 0.12,
+    xy_crop_inset: float = 0.0,
     xy_crop_padding: float = 0.16,
+    z_axis_ratio: float = 2,
 ) -> Path | None:
 
     image = _render_3d_intensity_contours_frame(
@@ -1397,21 +1048,17 @@ def plot_3d_intensity_contours_propagation(
         annotation_text=annotation_text,
         xy_crop_inset=xy_crop_inset,
         xy_crop_padding=xy_crop_padding,
+        z_axis_ratio=z_axis_ratio,
     )
     if image is None:
         return None
-    try:
-        import imageio.v3 as iio
-    except ImportError as exc:
-        raise RuntimeError(
-            "plot_3d_intensity_contours_propagation requires imageio. "
-            "Install the Python example dependencies first."
-        ) from exc
-    temp_output_path = Path(output_path).with_suffix(".tmp.png")
-    temp_output_path.parent.mkdir(parents=True, exist_ok=True)
-    iio.imwrite(temp_output_path, image)
-    saved = _save_rendered_image(temp_output_path, output_path)
-    temp_output_path.unlink(missing_ok=True)
+    height, width = image.shape[:2]
+    fig = plt.figure(figsize=(width / 220.0, height / 220.0), dpi=220)
+    ax = fig.add_axes((0.0, 0.0, 1.0, 1.0))
+    ax.imshow(image)
+    ax.set_axis_off()
+    saved = _save_figure(fig, output_path, dpi=220)
+    plt.close(fig)
     return saved
 
 
@@ -1434,8 +1081,9 @@ def _render_3d_intensity_contours_frame(
     y_label: str,
     z_label: str,
     annotation_text: str | None,
-    xy_crop_inset: float = 0.12,
+    xy_crop_inset: float = 0.0,
     xy_crop_padding: float = 0.16,
+    z_axis_ratio: float = 2.0,
 ) -> np.ndarray | None:
     if input_is_intensity:
         records = np.asarray(field_records, dtype=np.float64)
@@ -1462,6 +1110,8 @@ def _render_3d_intensity_contours_frame(
         raise ValueError("xy_crop_inset must be in [0, 1).")
     if xy_crop_padding < 0.0 or xy_crop_padding >= 1.0:
         raise ValueError("xy_crop_padding must be in [0, 1).")
+    if not np.isfinite(z_axis_ratio) or z_axis_ratio <= 0.0:
+        raise ValueError("z_axis_ratio must be a positive finite value.")
     if input_is_intensity:
         intensity = np.asarray(records, dtype=np.float64)
     else:
@@ -1471,23 +1121,32 @@ def _render_3d_intensity_contours_frame(
         print("intensity is zero everywhere; skipping 3D propagation contour-surface plot.")
         return None
 
-    x_indices = _evenly_spaced_indices(x.size, max_count=int(max_x_samples))
-    y_indices = _evenly_spaced_indices(y.size, max_count=int(max_y_samples))
-    z_indices = _evenly_spaced_indices(z.size, max_count=int(max_z_samples))
+    x_indices = _evenly_spaced_indices_with_required(
+        x.size,
+        max_count=int(max_x_samples),
+        required_indices=_axis_feature_indices(np.max(intensity, axis=(0, 1))),
+    )
+    y_indices = _evenly_spaced_indices_with_required(
+        y.size,
+        max_count=int(max_y_samples),
+        required_indices=_axis_feature_indices(np.max(intensity, axis=(0, 2))),
+    )
+    z_indices = _evenly_spaced_indices_with_required(
+        z.size,
+        max_count=int(max_z_samples),
+        required_indices=_axis_feature_indices(np.max(intensity, axis=(1, 2))),
+    )
     intensity_small = intensity[np.ix_(z_indices, y_indices, x_indices)]
     x_small = x[x_indices]
     y_small = y[y_indices]
     z_small = z[z_indices]
 
-    try:
-        import pyvista as pv
-    except ImportError as exc:
-        raise RuntimeError(
-            "plot_3d_intensity_contours_propagation requires pyvista. "
-            "Install the Python example dependencies first."
-        ) from exc
-
     max_intensity = float(np.max(intensity_small))
+    _plot_debug(
+        "3d contour sampled intensity "
+        f"full_max={float(np.max(intensity)):.4g} sampled_max={max_intensity:.4g} "
+        f"samples=({x_small.size}, {y_small.size}, {z_small.size})"
+    )
     level_upper = min(0.92, max_intensity)
     if level_upper <= float(intensity_cutoff):
         print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
@@ -1503,99 +1162,132 @@ def _render_3d_intensity_contours_frame(
         xy_crop_padding=float(xy_crop_padding),
     )
 
-    # Normalize axes to cube-like dimensions while preserving data proportions
-    x_span = max(float(np.max(x_small) - np.min(x_small)), 1.0e-9)
-    y_span = max(float(np.max(y_small) - np.min(y_small)), 1.0e-9)
-    z_span = max(float(np.max(z_small) - np.min(z_small)), 1.0e-9)
-    max_span = max(x_span, y_span, z_span)
-    x_center = 0.5 * (float(np.min(x_small)) + float(np.max(x_small)))
-    y_center = 0.5 * (float(np.min(y_small)) + float(np.max(y_small)))
-    z_center = 0.5 * (float(np.min(z_small)) + float(np.max(z_small)))
-    x_normalized = np.linspace(x_center - 0.5 * max_span, x_center + 0.5 * max_span, x_small.size)
-    y_normalized = np.linspace(y_center - 0.5 * max_span, y_center + 0.5 * max_span, y_small.size)
-    z_normalized = np.linspace(z_center - 0.5 * max_span, z_center + 0.5 * max_span, z_small.size)
+    # Reorder axes so the isometric view projects:
+    #   data x -> screen lower-left (world X)
+    #   data z -> screen lower-right, propagation goes right (world Y)
+    #   data y -> screen up (world Z)
+    #
+    # Normalize world coordinates so the bounding box has a controlled aspect
+    # ratio: the transverse axes (data x, data y) share the same world span,
+    # and the propagation axis (data z) is `z_axis_ratio` times that span. The
+    # default makes the propagation direction visibly longer than the
+    # transverse axes so the direction of propagation reads at a glance.
+    x_min, x_max = float(np.min(x_small)), float(np.max(x_small))
+    y_min, y_max = float(np.min(y_small)), float(np.max(y_small))
+    z_min, z_max = float(np.min(z_small)), float(np.max(z_small))
+    xy_span = max(max(x_max - x_min, y_max - y_min), 1.0e-9)
+    z_span = float(z_axis_ratio) * xy_span
+    half_xy = 0.5 * xy_span
+    half_z = 0.5 * z_span
+    x_world = np.linspace(-half_xy, half_xy, x_small.size)
+    z_world = np.linspace(-half_z, half_z, z_small.size)
+    y_world = np.linspace(-half_xy, half_xy, y_small.size)
 
-    volume_xyz = np.transpose(intensity_small, (2, 1, 0))
-    grid = pv.RectilinearGrid(x_normalized, y_normalized, z_normalized)
-    grid.point_data["intensity"] = np.ascontiguousarray(volume_xyz).ravel(order="F")
-    
-    # Convert to StructuredGrid to support full rotations
-    grid = grid.cast_to_structured_grid()
-    
-    # Apply 90° clockwise rotation around x-axis
-    # Rotation matrix: [1, 0, 0; 0, 0, 1; 0, -1, 0]
-    rotation_matrix = np.array([
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, -1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0]
-    ])
-    grid = grid.transform(rotation_matrix, inplace=False)
-    
-    pv_style = _pyvista_style_from_mpl()
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    from matplotlib.ticker import FixedLocator, FixedFormatter
 
-    plotter = pv.Plotter(off_screen=True, window_size=(2400, 1584))
-    plotter.set_background(pv_style["background"])
+    facecolor = _rc_color("figure.facecolor", "#ffffff")
+    foreground = _rc_color("text.color", _rc_color("axes.labelcolor", "#000000"))
+    edgecolor = _rc_color("axes.edgecolor", "#000000")
+    gridcolor = _rc_color("grid.color", "#cccccc")
+    fig = plt.figure(figsize=(5.2, 3.6), dpi=360, constrained_layout=True)
+    ax = fig.add_subplot(1, 1, 1, projection="3d", computed_zorder=False)
+    fig.patch.set_facecolor(facecolor)
+    ax.set_facecolor(facecolor)
+    ax.view_init(elev=24.0, azim=45.0)
+    ax.set_box_aspect((xy_span, z_span, xy_span))
 
+    cmap = _resolve_cmap(plt, None)
+    render_indices = _evenly_spaced_indices(levels.size, max_count=min(levels.size, 18))
+    render_levels = levels[render_indices]
+    level_span = max(float(level_upper) - float(intensity_cutoff), 1.0e-12)
     any_surface = False
-    for level in levels:
-        contour = grid.contour(isosurfaces=[float(level)], scalars="intensity")
-        if contour.n_points == 0:
-            continue
-        opacity = alpha_min + (alpha_max - alpha_min) * float(level)
-        opacity = float(np.clip(opacity, 0.0, 1.0))
-        plotter.add_mesh(
-            contour,
-            color=_mpl_cmap_color(float(level)),
+    for level in render_levels:
+        level_fraction = float(np.clip((float(level) - float(intensity_cutoff)) / level_span, 0.0, 1.0))
+        opacity = float(np.clip(alpha_min + (alpha_max - alpha_min) * level_fraction, 0.0, 1.0))
+        # opacity *= level_fraction ** 0.2
+        any_surface = _plot_intensity_level_envelope_shells(
+            ax,
+            intensity_small,
+            x_world=x_world,
+            y_world=y_world,
+            z_world=z_world,
+            level=float(level),
+            color=tuple(float(value) for value in cmap(float(level))[:3]),
             opacity=opacity,
-            smooth_shading=True,
-            show_edges=False,
-            specular=0.0,
-            ambient=1.0,
-            diffuse=0.0,
-            show_scalar_bar=False,
-        )
-        any_surface = True
+            zorder=10.0 + 100.0 * level_fraction,
+        ) or any_surface
     if not any_surface:
         print("no contours passed intensity cutoff; skipping 3D propagation contour-surface plot.")
-        plotter.close()
+        plt.close(fig)
         return None
 
-    if annotation_text:
-        plotter.add_text(
-            str(annotation_text),
-            position="upper_left",
-            font_size=max(1, int(round(1.6 * float(pv_style["font_size"])))),
-            color=pv_style["foreground"],
-            font=pv_style["font_family"],
-        )
-    plotter.camera.zoom(0.86)
-    image = np.asarray(plotter.screenshot(return_img=True))
-    _, crop_bounds = _crop_rendered_image_to_content_with_bounds(image)
+    ax.set_xlim(float(x_world[0]), float(x_world[-1]))
+    ax.set_ylim(float(z_world[0]), float(z_world[-1]))
+    ax.set_zlim(float(y_world[0]), float(y_world[-1]))
+
+    def apply_physical_ticks(axis: Any, world_axis: np.ndarray, physical_axis: np.ndarray, *, count: int) -> None:
+        tick_count = max(int(count), 2)
+        world_values = np.asarray(world_axis, dtype=np.float64)
+        physical_values = np.asarray(physical_axis, dtype=np.float64)
+        values = np.linspace(float(physical_values[0]), float(physical_values[-1]), tick_count)
+        if abs(float(physical_values[-1] - physical_values[0])) <= 1.0e-12:
+            ticks = np.full(tick_count, float(world_values[0]), dtype=np.float64)
+        else:
+            fraction = (values - float(physical_values[0])) / float(physical_values[-1] - physical_values[0])
+            ticks = float(world_values[0]) + fraction * float(world_values[-1] - world_values[0])
+        labels = [f"{float(value):.2g}" for value in values]
+        axis.set_major_locator(FixedLocator(ticks))
+        axis.set_major_formatter(FixedFormatter(labels))
+
+    apply_physical_ticks(ax.xaxis, x_world, x_small, count=3)
+    apply_physical_ticks(ax.yaxis, z_world, z_small, count=4)
+    apply_physical_ticks(ax.zaxis, y_world, y_small, count=3)
+    ax.set_xlabel(x_label, labelpad=4.0)
+    ax.set_ylabel(z_label, labelpad=4.0)
+    ax.set_zlabel(y_label, labelpad=4.0)
+    ax.tick_params(colors=foreground, labelsize=0.72 * _rc_float("font.size", 10.0), pad=1.0)
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axis.label.set_color(foreground)
+        try:
+            axis.line.set_color(edgecolor)
+            axis._axinfo["grid"]["color"] = gridcolor
+            axis._axinfo["tick"]["color"] = edgecolor
+            axis._axinfo["axisline"]["color"] = edgecolor
+        except Exception:
+            pass
     try:
-        axis_line_specs, axis_label_specs, axis_tick_specs, crop_bounds = _project_3d_principal_axis_specs(
-            plotter,
-            image_shape=image.shape,
-            crop_bounds=crop_bounds,
-            x_axis=x_normalized,
-            y_axis=y_normalized,
-            z_axis=z_normalized,
-            axis_labels=(x_label, y_label, z_label),
-            transform_matrix=rotation_matrix,
-        )
+        ax.xaxis.pane.set_facecolor(facecolor)
+        ax.yaxis.pane.set_facecolor(facecolor)
+        ax.zaxis.pane.set_facecolor(facecolor)
+        ax.xaxis.pane.set_edgecolor(edgecolor)
+        ax.yaxis.pane.set_edgecolor(edgecolor)
+        ax.zaxis.pane.set_edgecolor(edgecolor)
     except Exception:
-        axis_label_specs = _default_3d_axis_label_specs((x_label, y_label, z_label))
-        axis_tick_specs = None
-        axis_line_specs = None
-    plotter.close()
-    return _image_with_mpl_colorbar(
-        image,
-        colorbar_label="Normalized intensity",
-        image_crop_bounds=crop_bounds,
-        axis_line_specs=axis_line_specs,
-        axis_label_specs=axis_label_specs,
-        axis_tick_specs=axis_tick_specs,
-    )
+        pass
+    ax.grid(True)
+
+    if annotation_text:
+        ax.text2D(
+            0.02,
+            0.96,
+            str(annotation_text),
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            color=foreground,
+            fontsize=1.15 * _rc_float("font.size", 10.0),
+        )
+
+    sm = ScalarMappable(norm=Normalize(vmin=0.0, vmax=1.0), cmap=cmap)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.74, pad=0.04)
+    cbar.set_label("Normalised intensity", labelpad=6.0, fontsize=11.0)
+
+    image = _figure_to_rgb_array(fig)
+    plt.close(fig)
+    return image
 
 
 def _crop_xy_within_low_contour(
@@ -1661,6 +1353,112 @@ def _expand_crop_window_by_value(axis: np.ndarray, start: int, stop: int, *, pad
     start_idx = max(0, min(start_idx, values.size - 1))
     stop_idx = max(start_idx, min(stop_idx, values.size - 1))
     return start_idx, stop_idx
+
+
+def _threshold_envelope_coordinates(
+    axis: np.ndarray,
+    values: np.ndarray,
+    *,
+    level: float,
+    axis_index: int,
+    upper: bool,
+) -> np.ndarray:
+    axis_values = np.asarray(axis, dtype=np.float64).reshape(-1)
+    data = np.moveaxis(np.asarray(values, dtype=np.float64), int(axis_index), 0)
+    if data.shape[0] != axis_values.size:
+        raise ValueError("axis length must match the selected values dimension.")
+
+    passed = data >= float(level)
+    has_passed = np.any(passed, axis=0)
+    if not np.any(has_passed):
+        return np.full(data.shape[1:], np.nan, dtype=np.float64)
+
+    if upper:
+        inside_idx = data.shape[0] - 1 - np.argmax(passed[::-1, ...], axis=0)
+        outside_idx = np.minimum(inside_idx + 1, data.shape[0] - 1)
+    else:
+        inside_idx = np.argmax(passed, axis=0)
+        outside_idx = np.maximum(inside_idx - 1, 0)
+
+    inside = np.take_along_axis(data, np.expand_dims(inside_idx, axis=0), axis=0)[0]
+    outside = np.take_along_axis(data, np.expand_dims(outside_idx, axis=0), axis=0)[0]
+    inside_coord = axis_values[inside_idx]
+    outside_coord = axis_values[outside_idx]
+
+    denom = inside - outside
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fraction = (float(level) - outside) / denom
+    fraction = np.clip(fraction, 0.0, 1.0)
+    coords = outside_coord + fraction * (inside_coord - outside_coord)
+    coords = np.where((inside_idx == outside_idx) | ~np.isfinite(coords), inside_coord, coords)
+    return np.where(has_passed, coords, np.nan)
+
+
+def _plot_intensity_level_envelope_shells(
+    ax: Any,
+    intensity_zyx: np.ndarray,
+    *,
+    x_world: np.ndarray,
+    y_world: np.ndarray,
+    z_world: np.ndarray,
+    level: float,
+    color: tuple[float, float, float, float],
+    opacity: float,
+    zorder: float,
+) -> bool:
+    surface_kwargs = {
+        "color": color,
+        "alpha": float(opacity),
+        "linewidth": 0.0,
+        "antialiased": True,
+        "shade": False,
+        "rstride": 1,
+        "cstride": 1,
+        "zsort": "min",
+        "zorder": float(zorder),
+    }
+    any_surface = False
+
+    x_grid_zx, z_grid_zx = np.meshgrid(x_world, z_world)
+    for upper in (False, True):
+        y_coords = _threshold_envelope_coordinates(
+            y_world,
+            intensity_zyx,
+            level=float(level),
+            axis_index=1,
+            upper=upper,
+        )
+        if np.any(np.isfinite(y_coords)):
+            ax.plot_surface(x_grid_zx, z_grid_zx, y_coords, **surface_kwargs)
+            any_surface = True
+
+    z_grid_zy, y_grid_zy = np.meshgrid(z_world, y_world, indexing="ij")
+    for upper in (False, True):
+        x_coords = _threshold_envelope_coordinates(
+            x_world,
+            intensity_zyx,
+            level=float(level),
+            axis_index=2,
+            upper=upper,
+        )
+        if np.any(np.isfinite(x_coords)):
+            ax.plot_surface(x_coords, z_grid_zy, y_grid_zy, **surface_kwargs)
+            any_surface = True
+
+    x_grid_yx, y_grid_yx = np.meshgrid(x_world, y_world)
+    for upper in (False, True):
+        z_coords = _threshold_envelope_coordinates(
+            z_world,
+            intensity_zyx,
+            level=float(level),
+            axis_index=0,
+            upper=upper,
+        )
+        if np.any(np.isfinite(z_coords)):
+            ax.plot_surface(x_grid_yx, z_coords, y_grid_yx, **surface_kwargs)
+            any_surface = True
+
+    return any_surface
 
 
 def save_3d_intensity_time_sweep_video(
@@ -1735,6 +1533,8 @@ def save_3d_intensity_time_sweep_video(
             alpha_max=float(alpha_max),
             input_is_intensity=not np.iscomplexobj(records),
             normalization_peak=None,
+            x_label=r"$x$",
+            y_label=r"$y$",
             z_label="z",
             annotation_text=f"t = {float(t[int(time_index)]):+.3f}",
         )

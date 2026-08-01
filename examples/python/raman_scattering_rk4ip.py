@@ -457,7 +457,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "raman_time_intensity_propagation.png",
         x_label="Time (ps)",
         y_label=r"Propagation distance $z / L_D$",
-        colorbar_label="Normalized temporal intensity",
+        colorbar_label="Normalised intensity",
     )
     if p0 is not None:
         saved_paths.append(p0)
@@ -469,7 +469,7 @@ def _run(args: argparse.Namespace) -> float:
         output_dir / "raman_spectral_intensity_propagation.png",
         x_label="Angular-frequency detuning (rad/time)",
         y_label=r"Propagation distance $z / L_D$",
-        colorbar_label="Normalized spectral intensity",
+        colorbar_label="Normalised spectral intensity",
     )
     if p1 is not None:
         saved_paths.append(p1)
@@ -493,8 +493,8 @@ def _run(args: argparse.Namespace) -> float:
         wavelength_map,
         output_dir / "raman_wavelength_intensity_propagation.png",
         x_label="Wavelength (nm)",
-        y_label=r"Propagation distance $z / L_D$",
-        colorbar_label="Normalized spectral intensity",
+        y_label=r"$z / L_D$",
+        colorbar_label="Normalised intensity",
     )
     if p3 is not None:
         saved_paths.append(p3)
@@ -522,7 +522,7 @@ def _run(args: argparse.Namespace) -> float:
         label_a="Kerr-only final",
         label_b="Kerr+Raman final",
         x_label="Angular-frequency detuning (rad/time)",
-        y_label="Normalized spectral intensity",
+        y_label="Normalisedspectral intensity",
         
     )
     if p5 is not None:
