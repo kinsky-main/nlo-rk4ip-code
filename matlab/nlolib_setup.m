@@ -73,6 +73,14 @@ end
 end
 
 function prepend_dirs_to_path(dirs)
+% Only Windows resolves DLL dependencies through PATH.  On Linux/macOS the
+% loader uses LD_LIBRARY_PATH/DYLD_LIBRARY_PATH, which cannot be changed
+% after MATLAB has started, and PATH there is ':'-separated -- rewriting it
+% with ';' would corrupt PATH for the rest of the session.
+if ~ispc
+    return;
+end
+
 currentPath = string(getenv("PATH"));
 parts = split(currentPath, ";");
 normParts = lower(strtrim(parts));

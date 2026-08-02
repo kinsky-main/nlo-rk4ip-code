@@ -4,8 +4,15 @@ function records = unpack_records(outPtr, numRecords, numTimeSamples, debugConte
 %
 %   records = nlolib.unpack_records(outPtr, numRecords, numTimeSamples)
 %
-%   outPtr is a libpointer('complexPtr', ...) pointing to output
+%   outPtr is a libpointer('nlo_complexPtr', ...) pointing to output
 %   records in record-major order.
+%
+%   numRecords is the number of records the library actually wrote
+%   (records_written), which may be fewer than the capacity the buffer was
+%   allocated with: nlolib_propagate() reduces the record count for
+%   fixed-step runs, explicit-z schedules, and callback-aborted runs.
+%   Trailing unwritten capacity is therefore ignored rather than treated
+%   as a length mismatch.
 if nargin < 4
     debugContext = struct();
 end
@@ -32,42 +39,41 @@ end
 if isnumeric(raw)
     flat = double(raw(:).');
     expectedDoubles = 2 * totalComplex;
-    if numel(flat) ~= expectedDoubles
+    if numel(flat) < expectedDoubles
         detail = format_probe_report(nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
                                                                     "unpack-numeric-length", false), ...
                                      debugContext);
         error('nlolib:invalidComplexBufferLength', ...
-              ['Output buffer length mismatch: expected %d doubles (%d complex), ' ...
+              ['Output buffer too short: need %d doubles (%d complex), ' ...
                'got %d doubles. %s'], ...
               expectedDoubles, totalComplex, numel(flat), detail);
     end
+    flat = flat(1:expectedDoubles);
     re = flat(1:2:end);
     im = flat(2:2:end);
 elseif isstruct(raw) && all(isfield(raw, {'re', 'im'}))
     re = [raw.re];
     im = [raw.im];
-    if (numel(re) ~= totalComplex || numel(im) ~= totalComplex)
-        % Some loadlibrary call paths collapse pointer shape metadata to scalar.
-        % Rebind expected element count and retry before failing.
-        try
-            setdatatype(outPtr, 'complexPtr', 1, totalComplex);
-            raw = outPtr.Value;
-            if isstruct(raw) && all(isfield(raw, {'re', 'im'}))
-                re = [raw.re];
-                im = [raw.im];
-            end
-        catch
+    if numel(re) < totalComplex || numel(im) < totalComplex
+        % Reading .Value on an nlo_complex* yields only the first element:
+        % MATLAB keeps no element count for struct pointers, and setdatatype()
+        % rejects them outright ("Array must be numeric or logical or a
+        % pointer to one"). Walk the buffer with pointer arithmetic instead.
+        if isa(outPtr, 'lib.pointer')
+            [re, im] = walk_complex_pointer(outPtr, totalComplex);
         end
     end
-    if numel(re) ~= totalComplex || numel(im) ~= totalComplex
+    if numel(re) < totalComplex || numel(im) < totalComplex
         detail = format_probe_report(nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
                                                                     "unpack-struct-length", false), ...
                                      debugContext);
         error('nlolib:invalidComplexBufferLength', ...
-              ['Output record length mismatch: expected %d complex values, ' ...
+              ['Output record buffer too short: need %d complex values, ' ...
                'got re=%d and im=%d. %s'], ...
               totalComplex, numel(re), numel(im), detail);
     end
+    re = re(1:totalComplex);
+    im = im(1:totalComplex);
 else
     detail = format_probe_report(nlolib.debug_probe_complex_ptr(outPtr, totalComplex, ...
                                                                 "unpack-unsupported", false), ...
@@ -78,6 +84,19 @@ end
 
 cplx = complex(re, im);
 records = reshape(cplx, [numTimeSamples, numRecords]).';
+end
+
+function [re, im] = walk_complex_pointer(ptr, count)
+%WALK_COMPLEX_POINTER Read `count` nlo_complex values via pointer arithmetic.
+re = zeros(1, count);
+im = zeros(1, count);
+cursor = ptr;
+for idx = 1:count
+    value = cursor.Value;
+    re(idx) = double(value(1).re);
+    im(idx) = double(value(1).im);
+    cursor = cursor + 1;
+end
 end
 
 function out = format_probe_report(report, debugContext)

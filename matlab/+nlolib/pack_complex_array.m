@@ -4,19 +4,16 @@ function ptr = pack_complex_array(values)
 %
 %   ptr = nlolib.pack_complex_array(values)
 %
-%   Returns a typed libpointer('complexPtr', ...) whose payload is a
+%   Returns a typed libpointer('nlo_complexPtr', ...) whose payload is a
 %   struct array with fields .re and .im.
 vals = values(:).';
 re = num2cell(real(vals));
 im = num2cell(imag(vals));
 arr = struct('re', re, 'im', im);
-ptr = libpointer('complexPtr', arr);
-if ~isempty(vals)
-    try
-        setdatatype(ptr, 'complexPtr', 1, numel(vals));
-    catch
-        % Some MATLAB parser modes may not support explicit size binding.
-        % Keep best-effort pointer construction as fallback.
-    end
-end
+ptr = libpointer('nlo_complexPtr', arr);
+% NOTE: setdatatype() cannot be used to bind an element count here --
+% MATLAB rejects struct pointers with "Array must be numeric or logical or a
+% pointer to one". The full array is still passed to the library correctly;
+% only read-back through .Value is limited to the first element, which
+% nlolib.unpack_records() works around with pointer arithmetic.
 end

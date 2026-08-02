@@ -62,7 +62,6 @@ classdef NLolib < handle
                         nlolib.NLolib.validate_load_result(notfound, loadWarnings, ...
                                                            dllPath, headerPath);
                         loaded = true;
-                        sprintf("Loaded nlolib library from %s with header %s\n", dllPath, headerPath);
                         break;
                     catch ME
                         loadErrors(end + 1, 1) = string(dllPath) + " -> " + string(ME.message); %#ok<AGROW>
@@ -251,6 +250,21 @@ classdef NLolib < handle
             stepHistory = nlolib.NLolib.empty_step_history();
 
             numTimeSamples = numel(inputField);
+            if numTimeSamples == 0
+                error('nlolib:invalidInputField', ...
+                      'inputField must be non-empty');
+            end
+            % prepare_sim_config sizes the grids from cfg.num_time_samples
+            % while nlolib_propagate is called with numel(inputField); a
+            % mismatch is rejected deep inside the C dimension resolver as a
+            % bare INVALID_ARGUMENT, so catch it here with a usable message.
+            if isstruct(config) && isfield(config, 'num_time_samples') && ...
+                    double(config.num_time_samples) ~= double(numTimeSamples)
+                error('nlolib:inputFieldLengthMismatch', ...
+                      ['numel(inputField)=%d does not match ' ...
+                       'config.num_time_samples=%d.'], ...
+                      numTimeSamples, double(config.num_time_samples));
+            end
             numRecordedSamples = uint64(numRecordedSamples);
 
             % Pack split configs and collect keepalive handles.
@@ -260,10 +274,10 @@ classdef NLolib < handle
             if returnRecords
                 outLen = uint64(numTimeSamples) * numRecordedSamples;
                 outBuffer = libpointer('doublePtr', zeros(1, 2 * double(outLen)));
-                totalComplex = double(outLen);
             else
-                outBuffer = struct('re', {}, 'im', {});
-                totalComplex = 0.0;
+                % Typed NULL: output_records is declared double* in
+                % nlolib_matlab.h, so an empty struct array is not assignable.
+                outBuffer = libpointer('doublePtr');
             end
 
             matlabDebug = false;
@@ -271,8 +285,6 @@ classdef NLolib < handle
                 rawDebug = logical(execOptions.matlab_debug);
                 matlabDebug = any(rawDebug(:));
             end
-            preProbe = struct();
-            postProbe = struct();
 
             if isempty(fieldnames(execOptions))
                 execOptsStruct = nlolib.NLolib.make_exec_options(struct());
@@ -357,27 +369,26 @@ classdef NLolib < handle
 
             recordsWrittenPtr = libpointer('uint64Ptr', uint64(0));
             propagateOutput = libstruct('propagate_output');
+            propagateOutput.output_records = outBuffer;
             if returnRecords
-                propagateOutput.output_records = outBuffer;
                 propagateOutput.output_record_capacity = numRecordedSamples;
             else
-                propagateOutput.output_records = outBuffer;
                 propagateOutput.output_record_capacity = uint64(0);
             end
             propagateOutput.records_written = recordsWrittenPtr;
             propagateOutput.storage_result = storageResultPtr;
             if captureStepHistory
-                stepEventsLen = double(stepHistoryCapacity);
-                stepEventsBuffer = repmat(libstruct('step_event'), 1, stepEventsLen);
-                propagateOutput.output_step_events = stepEventsBuffer;
+                % A plain struct array marshals as a contiguous step_event[].
+                % repmat(libstruct(...)) must not be used here: libstruct
+                % returns a handle object, so every element would alias one
+                % underlying struct instead of a distinct array slot.
+                stepEventsBuffer = nlolib.NLolib.make_step_event_buffer(stepHistoryCapacity);
+                stepEventsPtr = libpointer('step_eventPtr', stepEventsBuffer);
+                propagateOutput.output_step_events = stepEventsPtr;
                 propagateOutput.output_step_event_capacity = stepHistoryCapacity;
             else
-                stepEventsBuffer = struct('step_index', {}, ...
-                                          'z_current', {}, ...
-                                          'step_size', {}, ...
-                                          'next_step_size', {}, ...
-                                          'error', {});
-                propagateOutput.output_step_events = stepEventsBuffer;
+                stepEventsPtr = libpointer('step_eventPtr');
+                propagateOutput.output_step_events = stepEventsPtr;
                 propagateOutput.output_step_event_capacity = uint64(0);
             end
             stepEventsWrittenPtr = libpointer('uint64Ptr', uint64(0));
@@ -404,21 +415,21 @@ classdef NLolib < handle
                     statusDetail = statusDetail + newline + "runtime logs:" + newline + streamedLogs;
                 end
                 if matlabDebug && returnRecords
-                    if isstruct(postProbe) && isfield(postProbe, 'value_size')
-                        sizeText = join(string(double(postProbe.value_size(:).')), "x");
-                    else
-                        sizeText = "";
-                    end
+                    postProbe = nlolib.debug_probe_complex_ptr( ...
+                        outBuffer, ...
+                        double(numTimeSamples) * double(numRecordedSamples), ...
+                        "propagate-post-call", ...
+                        false);
                     probeDetail = sprintf(['MATLAB probe post-call: ptr.class=%s ptr.datatype=%s ' ...
                                            'value.class=%s value.size=%s raw=%d re=%d im=%d expected=%g'], ...
-                                          char(string(getfield_safe(postProbe, 'pointer_class', ""))), ...
-                                          char(string(getfield_safe(postProbe, 'pointer_datatype', ""))), ...
-                                          char(string(getfield_safe(postProbe, 'value_class', ""))), ...
-                                          char(string(sizeText)), ...
-                                          int64(getfield_safe(postProbe, 'raw_count', 0)), ...
-                                          int64(getfield_safe(postProbe, 're_count', 0)), ...
-                                          int64(getfield_safe(postProbe, 'im_count', 0)), ...
-                                          double(getfield_safe(postProbe, 'expected_count', 0)));
+                                          char(string(postProbe.pointer_class)), ...
+                                          char(string(postProbe.pointer_datatype)), ...
+                                          char(string(postProbe.value_class)), ...
+                                          char(join(string(double(postProbe.value_size(:).')), "x")), ...
+                                          int64(postProbe.raw_count), ...
+                                          int64(postProbe.re_count), ...
+                                          int64(postProbe.im_count), ...
+                                          double(postProbe.expected_count));
                     if strlength(statusDetail) > 0
                         statusDetail = statusDetail + " | " + string(probeDetail);
                     else
@@ -439,9 +450,7 @@ classdef NLolib < handle
             recordsWritten = double(recordsWrittenPtr.Value);
             if returnRecords
                 debugContext = struct('enabled', matlabDebug, ...
-                                      'expected_count', totalComplex, ...
-                                      'pre_probe', preProbe, ...
-                                      'post_probe', postProbe);
+                                      'expected_count', recordsWritten * double(numTimeSamples));
                 records = nlolib.unpack_records(outBuffer, ...
                                                 recordsWritten, ...
                                                 numTimeSamples, ...
@@ -451,7 +460,7 @@ classdef NLolib < handle
             end
             if captureStepHistory
                 stepHistory = nlolib.NLolib.unpack_step_history( ...
-                    stepEventsBuffer, ...
+                    stepEventsPtr, ...
                     double(stepEventsWrittenPtr.Value), ...
                     double(stepEventsDroppedPtr.Value), ...
                     double(stepHistoryCapacity));
@@ -569,10 +578,15 @@ classdef NLolib < handle
                       'nlolib_read_log_buffer is not available in this library build.');
             end
 
-            outPtr = libpointer('uint8Ptr', zeros(1, double(maxBytes), 'uint8'));
+            % nlolib_read_log_buffer takes `char* dst`, which loadlibrary
+            % marshals as a cstring: pass a preallocated char buffer and take
+            % the modified text back as calllib's second output. The library
+            % always NUL-terminates and writes at most dst_bytes-1 bytes.
+            buffer = blanks(double(maxBytes));
             writtenPtr = libpointer('uint64Ptr', uint64(0));
-            statusRaw = calllib(obj.LIBNAME, 'nlolib_read_log_buffer', ...
-                                outPtr, uint64(maxBytes), writtenPtr, int32(logical(consume)));
+            [statusRaw, bufferOut] = calllib(obj.LIBNAME, 'nlolib_read_log_buffer', ...
+                                             buffer, uint64(maxBytes), writtenPtr, ...
+                                             int32(logical(consume)));
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
             if statusCode ~= 0
                 if strlength(statusDetail) > 0
@@ -591,8 +605,11 @@ classdef NLolib < handle
                 text = "";
                 return;
             end
-            bytes = outPtr.Value(1:byteCount);
-            text = string(native2unicode(bytes, 'UTF-8'));
+            % calllib already decoded the C string into MATLAB characters, so
+            % byteCount is an upper bound on the character count (it is exact
+            % for ASCII log output).
+            raw = char(bufferOut);
+            text = string(raw(1:min(byteCount, numel(raw))));
         end
 
         function text = tail_logs(obj, consume, maxBytes)
@@ -754,7 +771,15 @@ classdef NLolib < handle
                 error('nlolib:perfProfileUnavailable', ...
                       'nlolib_perf_profile_read is not available in this library build.');
             end
-            snapshotRaw = libstruct('nlo_perf_profile_snapshot');
+            snapshotRaw = nlolib.NLolib.zeroed_libstruct('nlo_perf_profile_snapshot', ...
+                {'dispersion_ms', 'nonlinear_ms', ...
+                 'dispersion_calls', 'nonlinear_calls', ...
+                 'gpu_dispatch_count', 'gpu_copy_count', ...
+                 'gpu_device_copy_count', 'gpu_device_copy_bytes', ...
+                 'gpu_host_transfer_copy_count', 'gpu_host_transfer_copy_bytes', ...
+                 'gpu_memory_pass_count', 'gpu_memory_pass_bytes', ...
+                 'gpu_upload_count', 'gpu_download_count', ...
+                 'gpu_upload_bytes', 'gpu_download_bytes'});
             statusRaw = calllib(obj.LIBNAME, 'nlolib_perf_profile_read', snapshotRaw);
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
             if statusCode ~= 0
@@ -795,7 +820,13 @@ classdef NLolib < handle
 
             [simCfgPtr, physicsCfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>
             execOptsPtr = nlolib.NLolib.make_exec_options(execOptions);
-            out = libstruct('runtime_limits');
+            out = nlolib.NLolib.zeroed_libstruct('runtime_limits', ...
+                {'max_num_time_samples_runtime', ...
+                 'max_num_recorded_samples_in_memory', ...
+                 'max_num_recorded_samples_with_storage', ...
+                 'estimated_required_working_set_bytes', ...
+                 'estimated_device_budget_bytes', ...
+                 'storage_available'});
             statusRaw = calllib(obj.LIBNAME, 'nlolib_query_runtime_limits', ...
                                 simCfgPtr, physicsCfgPtr, execOptsPtr, out);
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
@@ -1016,12 +1047,6 @@ classdef NLolib < handle
                   strjoin(candidates, '\n  '));
         end
 
-        function dllPath = resolve_library(userPath)
-            %RESOLVE_LIBRARY Locate the nlolib shared library.
-            candidates = nlolib.NLolib.resolve_library_candidates(userPath);
-            dllPath = candidates{1};
-        end
-
         function candidates = resolve_library_candidates(userPath)
             %RESOLVE_LIBRARY_CANDIDATES Locate candidate nlolib shared libraries.
             if strlength(string(userPath)) > 0 && isfile(userPath)
@@ -1237,6 +1262,33 @@ classdef NLolib < handle
             out.truncated = logical(storageResultRaw.truncated);
         end
 
+        function s = zeroed_libstruct(typeName, fieldNames)
+            %ZEROED_LIBSTRUCT Build a materialised, zero-filled libstruct.
+            %   libstruct(TYPE) with no initial value creates an *empty*
+            %   structure object, which calllib marshals as a NULL pointer --
+            %   output-parameter calls such as nlolib_query_runtime_limits()
+            %   then fail with INVALID_ARGUMENT. Supplying an initialiser
+            %   forces MATLAB to allocate real backing storage.
+            init = struct();
+            for idx = 1:numel(fieldNames)
+                init.(fieldNames{idx}) = 0;
+            end
+            s = libstruct(typeName, init);
+        end
+
+        function buffer = make_step_event_buffer(capacity)
+            %MAKE_STEP_EVENT_BUFFER Preallocate a step_event[] as a struct array.
+            %   Every element is fully populated so libpointer() can marshal
+            %   the array without hitting empty ([]) field values.
+            n = double(capacity);
+            zeroCells = num2cell(zeros(1, n));
+            buffer = struct('step_index', zeroCells, ...
+                            'z_current', zeroCells, ...
+                            'step_size', zeroCells, ...
+                            'next_step_size', zeroCells, ...
+                            'error', zeroCells);
+        end
+
         function out = empty_step_history()
             out = struct();
             out.step_index = zeros(0, 1);
@@ -1248,7 +1300,12 @@ classdef NLolib < handle
             out.capacity = 0.0;
         end
 
-        function out = unpack_step_history(stepEventsRaw, eventsWritten, eventsDropped, capacity)
+        function out = unpack_step_history(stepEventsPtr, eventsWritten, eventsDropped, capacity)
+            %UNPACK_STEP_HISTORY Read step_event[] written by the library.
+            %   stepEventsPtr is a libpointer('step_eventPtr', ...). Reading
+            %   .Value returns only the first element -- MATLAB keeps no
+            %   element count for struct pointers -- so the array is walked
+            %   with pointer arithmetic.
             out = nlolib.NLolib.empty_step_history();
             count = max(0, floor(double(eventsWritten)));
             if count > 0
@@ -1257,13 +1314,16 @@ classdef NLolib < handle
                 out.step_size = zeros(count, 1);
                 out.next_step_size = zeros(count, 1);
                 out.error = zeros(count, 1);
+                cursor = stepEventsPtr;
                 for idx = 1:count
-                    event = stepEventsRaw(idx);
+                    raw = cursor.Value;
+                    event = raw(1);
                     out.step_index(idx, 1) = double(event.step_index);
                     out.z(idx, 1) = double(event.z_current);
                     out.step_size(idx, 1) = double(event.step_size);
                     out.next_step_size(idx, 1) = double(event.next_step_size);
                     out.error(idx, 1) = double(event.error);
+                    cursor = cursor + 1;
                 end
             end
             out.dropped = double(eventsDropped);
@@ -1815,6 +1875,8 @@ classdef NLolib < handle
                     code = int32(2);
                 case 'NLOLIB_STATUS_NOT_IMPLEMENTED'
                     code = int32(3);
+                case 'NLOLIB_STATUS_ABORTED'
+                    code = int32(4);
                 otherwise
                     code = int32(-1);
                     if strlength(detail) == 0
@@ -1861,6 +1923,8 @@ classdef NLolib < handle
                     name = "NLOLIB_STATUS_ALLOCATION_FAILED";
                 case 3
                     name = "NLOLIB_STATUS_NOT_IMPLEMENTED";
+                case 4
+                    name = "NLOLIB_STATUS_ABORTED";
                 otherwise
                     name = "NLOLIB_STATUS_UNKNOWN";
             end

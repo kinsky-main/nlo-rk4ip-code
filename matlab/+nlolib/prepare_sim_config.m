@@ -189,11 +189,13 @@ simMl.tensor = struct( ...
     'nx', uint64(get_optional(cfg, "tensor_nx", 0)), ...
     'ny', uint64(get_optional(cfg, "tensor_ny", 0)), ...
     'layout', int32(get_optional(cfg, "tensor_layout", 0)));
+% wt_axis is left unset unless the caller supplies one: assigning [] here
+% would hand the library a non-NULL pointer to an empty buffer, which it
+% would then read nt values from instead of generating the axis itself.
 simMl.time = struct( ...
     'nt', uint64(0), ...
     'pulse_period', double(cfg.pulse_period), ...
-    'delta_time', double(cfg.delta_time), ...
-    'wt_axis', []);
+    'delta_time', double(cfg.delta_time));
 if isfield(cfg, "wt_axis") && ~isempty(cfg.wt_axis)
     wtAxisPtr = nlolib.pack_complex_array(cfg.wt_axis);
     simMl.time.wt_axis = wtAxisPtr;
@@ -216,13 +218,6 @@ if isfield(cfg, name)
 else
     val = default;
 end
-end
-
-function out = complex_to_nlo_complex_struct(values)
-vals = values(:).';
-re = num2cell(real(vals));
-im = num2cell(imag(vals));
-out = struct('re', re, 'im', im);
 end
 
 function ptr = cstring_ptr(text)

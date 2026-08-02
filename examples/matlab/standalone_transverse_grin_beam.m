@@ -59,8 +59,10 @@ field0    = exp(-(((xx - xOffset).^2 + yy.^2) / wMatched^2));
 field0    = complex(field0, zeros(size(field0)));
 potential = grinDepth * (xx.^2 + yy.^2);
 
-% nlolib expects a flat, row-major (x fastest, then y, then t) sample vector.
-flatten = @(m) reshape(m.', 1, []);
+% nlolib's tensor layout (TENSOR_LAYOUT_XYT_T_FAST) is t fastest, then y, then
+% x; with tensor_nt = 1 that is y fastest, which is exactly MATLAB's own
+% ordering for an (ny, nx) array, so the sheet flattens with a plain reshape.
+flatten = @(m) reshape(m, 1, []);
 
 % ------------------------------------------------------------- solver inputs
 pulse = struct();
@@ -101,7 +103,7 @@ nRec        = size(recordsFlat, 1);
 
 records = zeros(nRec, ny, nx);
 for idx = 1:nRec
-    records(idx, :, :) = reshape(recordsFlat(idx, :), [nx, ny]).';
+    records(idx, :, :) = reshape(recordsFlat(idx, :), [ny, nx]);
 end
 intensity = abs(records).^2;
 
@@ -128,8 +130,7 @@ fprintf("power drift = %.3e, max centroid deviation from x0*cos(g*z) = %.3f um\n
 centerY = floor(ny / 2) + 1;
 xzMap   = squeeze(intensity(:, centerY, :));     % nRec-by-nx
 
-figure("Name", "nlolib transverse GRIN beam", "Color", "w", ...
-       "Position", [100, 100, 1100, 800]);
+figure("Name", "nlolib transverse GRIN beam", "Position", [100, 100, 1100, 800]);
 tiledlayout(2, 2, "TileSpacing", "compact", "Padding", "compact");
 
 nexttile;

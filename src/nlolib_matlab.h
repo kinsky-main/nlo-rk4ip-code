@@ -432,10 +432,19 @@ typedef struct
     double eta_seconds;
 } progress_info;
 
-/**
- * @brief Progress callback invoked during propagation.
+/*
+ * NOTE: the canonical header declares
+ *
+ *   typedef int (*progress_callback)(const progress_info *info, void *user_data);
+ *
+ * and uses it for propagate_options::progress_callback.  MATLAB's
+ * loadlibrary() cannot represent function-pointer members: it warns
+ * "The data type 'FcnPtr' ... does not exist.  The structure may not be
+ * usable." and degrades the whole enclosing structure.  The field is
+ * therefore mirrored as void* below, which is layout-compatible on every
+ * platform nlolib supports and keeps propagate_options usable from MATLAB.
+ * Callbacks are not invocable through this FFI; pass NULL (the default).
  */
-typedef int (*progress_callback)(const progress_info *info, void *user_data);
 
 /**
  * @brief Database size-limit behavior when snapshot storage reaches its cap.
@@ -505,7 +514,7 @@ typedef struct
     const storage_options *storage_options;
     const double *explicit_record_z;
     size_t explicit_record_z_count;
-    progress_callback progress_callback;
+    void *progress_callback; /* progress_callback fn-ptr; see note above. */
     void *progress_user_data;
 } propagate_options;
 

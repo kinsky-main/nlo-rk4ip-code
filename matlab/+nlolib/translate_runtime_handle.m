@@ -51,9 +51,10 @@ end
 body = strrep(body, ".^", "^");
 body = strrep(body, ".*", "*");
 body = strrep(body, "./", "/");
-body = regexprep(body, "(?<![A-Za-z0-9_\\.])1(?:\\.0+)?[iIjJ]\\>", "i");
-body = regexprep(body, "\<1[iIjJ]\>", "i");
-body = regexprep(body, "\<1[jJ]\>", "i");
+% Imaginary literals: 1i / 1j / 1.0i / 1.00j -> i.  Note MATLAB double-quoted
+% strings do not process escapes, so "\\>" would reach the regex engine as a
+% literal backslash and never match; use single backslashes here.
+body = regexprep(body, "(?<![A-Za-z0-9_.])1(\.0+)?[iIjJ]\>", "i");
 
 mapFields = fieldnames(symbolMap);
 for idx = 1:numel(mapFields)
@@ -91,7 +92,14 @@ end
 identifiers = regexp(body, "[A-Za-z_]\w*", "match");
 for idx = 1:numel(identifiers)
     name = identifiers{idx};
-    if ismember(name, {'w', 'A', 'I', 'D', 'V', 'h', 'i', 'exp', 'log', 'sqrt', 'sin', 'cos'})
+    % Reserved symbols and intrinsics understood by the runtime expression
+    % compiler (see parse_primary in src/physics/operator_program_compile.c).
+    % The tensor symbols wt/kx/ky/t/x/y must be listed here: without them a
+    % handle referencing e.g. `t` or `x` would silently capture a same-named
+    % workspace variable as a constant instead of binding the grid symbol.
+    if ismember(name, {'w', 'wt', 'kx', 'ky', 't', 'x', 'y', ...
+                       'A', 'I', 'D', 'V', 'h', 'i', ...
+                       'exp', 'log', 'sqrt', 'sin', 'cos'})
         continue;
     end
     if ~isempty(regexp(name, "^c\d+$", "once"))
