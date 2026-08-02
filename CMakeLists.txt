@@ -19,7 +19,7 @@ option(ENABLE_VULKAN_BACKEND "Enable Vulkan vector backend and shader compilatio
 option(ENABLE_VKFFT "Enable VkFFT backend integration for Vulkan FFT execution" ON)
 option(BUMP_PATCH_ON_BUILD "Bump patch version in CMakeLists.txt after successful builds" OFF)
 option(SQLITE_USE_FETCHCONTENT "Deprecated: SQLite amalgamation is always used" ON)
-set(NLOLIB_GLSLANG_PROVIDER "AUTO" CACHE STRING
+set(NLOLIB_GLSLANG_PROVIDER "FETCH" CACHE STRING
   "glslang provider for VkFFT: AUTO, SYSTEM, or FETCH")
 set_property(CACHE NLOLIB_GLSLANG_PROVIDER PROPERTY STRINGS AUTO SYSTEM FETCH)
 
