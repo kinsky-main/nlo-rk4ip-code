@@ -1,28 +1,20 @@
 # Final Year Project TODO List for NLOLib
 
-## Main Tasks
+## High Priority
 
-- [x] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
 - [ ] Fix MATLAB output for installed packages where progress is not printed.
-- [x] Improve printout for progress of solver, showing estimated time of completion.
-- [x] Remove working buffers by keeping one k_tmp and k_tot buffer then summing k values as each stage is computed.
-- [x] Step size appears to cap at 1e-4 for some reason, investigate and fix.
-- [x] Numerical error is exceptionally high even when cropping to 1e-6 floating max amplitude, investigate and fix.
-- [x] Cut first and final step from soliton variable step plot in example.
-- [x] Bring MATLAB and Julia interfaces up to date with Python API, currently using very old interfaces (complete rewrite required).
 - [ ] Benchmark GPU against CPU backend for 3D problems, show scaling of performance with regions for < GPU memory, > GPU memory, and > system memory.
 - [ ] Model Spectral Vortices in (3+1)D with 3D frequency domain plots showing the vortex structure in the frequency domain.
 - [ ] Have default window sizes be set by dispersion/diffraction length scales for better performance and accuracy. Go through paper by Yi-Hao Chen on window optimisation.
+- [ ] Better define memory limitations, currently grids much smaller than the anticipated memory capacity result in allocation failures. Or I have just forgotten how the grids/ring-buffers scale related to GPU, need to audit buffers and look for a way to better stream propogation steps to GPU.
 
-## Potentially Required Tasks
+## Low Priority
 
 - [ ] Implement more efficient GPU memory management and data transfer strategies, e.g. pinned memory, async transfers, etc.
-- [x] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
-- [x] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
-- [x] Loading bar with estimated time remaining for long-running simulations.
-- [x] Refactor state.c into respective init files.
 - [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.
 - [ ] Utilise OS level shared memory for GPU backend to allow for larger problem sizes.
+- [ ] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
+- [ ] Remove low-level high-level API split completely. C API should be sufficiently concise to use directly and then move to an approach where C binding generation is not partly manual eg `clibgen`, `sip`, `pybind11`, and many more.
 
 ## Extensions
 
@@ -32,6 +24,7 @@
 - [ ] Review directory and module sturcture for better organisation. Currently there are some looped dependencies between modules which are not ideal, e.g. core -> physics -> core.
 - [ ] Add finite difference kernel for solving course/sharp problems with high accuracy and ability to parallelise much more efficiently on GPU following the approach used in [NLSEMagic](https://github.com/sumseq/NLSEMagic).
 - [ ] Replicate all examples from [MMTools](https://github.com/AaHaHaa/MMTools?tab=readme-ov-file) and compare results to ensure consistency modal solver.
+- [ ] Add mode coupling to model different polarisations and field interactions. Requires skeleton for applying kernel steps to different slices of input pulse vector.
 
 ## Complete
 
@@ -58,3 +51,13 @@
 - [x] Remap (3+1)D problems to use full size tensors rather than flattening to 1D arrays, this will also require implementation of dedicated GPU kernels for (3+1)D problems.
 - [x] Redefine nonlinear operator inputs to not separate the field, it should allow for non-seperable nonlinear operators.
 - [x] Move transverse operator into main nonlinear and dispersion operators, may be required for certain potentials.
+- [x] `query_runtime_limits` should return accurate grid size limits for GPU and CPU backend.
+- [x] Loading bar with estimated time remaining for long-running simulations.
+- [x] Refactor state.c into respective init files.
+- [x] Improve printout for progress of solver, showing estimated time of completion.
+- [x] Remove working buffers by keeping one k_tmp and k_tot buffer then summing k values as each stage is computed.
+- [x] Step size appears to cap at 1e-4 for some reason, investigate and fix.
+- [x] Numerical error is exceptionally high even when cropping to 1e-6 floating max amplitude, investigate and fix.
+- [x] Cut first and final step from soliton variable step plot in example.
+- [x] Bring MATLAB and Julia interfaces up to date with Python API, currently using very old interfaces (complete rewrite required).
+- [x] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
