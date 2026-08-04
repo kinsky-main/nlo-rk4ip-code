@@ -22,6 +22,10 @@ documentation.
 ## MATLAB Binding
 
 - @ref matlab_binding
+- [MATLAB User Guide](matlab_user_guide.md) — install, pulse and operator
+  specs, options, telemetry, storage, troubleshooting
+- [MATLAB Binding Guide](../matlab/README.md) — build-tree usage, tests,
+  design notes
 
 ## Julia Binding
 

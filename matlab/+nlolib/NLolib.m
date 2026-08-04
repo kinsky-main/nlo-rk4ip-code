@@ -29,11 +29,45 @@ classdef NLolib < handle
     %       NVIDIA / AMD / Intel desktop drivers).
     %
     %   QUICK START
-    %     api = nlolib.NLolib();
-    %     cfg = struct(...);
-    %     result = api.propagate(cfg, field0, numRecords);
+    %     n  = 512;
+    %     dt = 0.02;
+    %     t  = ((0:(n - 1)) - 0.5 * (n - 1)) * dt;
     %
-    %   See also: examples/matlab/runtime_temporal_demo.m
+    %     pulse = struct( ...
+    %         'samples',    exp(-(t / 0.25) .^ 2) .* exp(-1i * 8.0 * t), ...
+    %         'delta_time', dt);
+    %
+    %     linearOperator = struct( ...
+    %         'expr',   "i*beta2*w*w - loss", ...
+    %         'params', struct('beta2', -0.005, 'loss', 0.0));
+    %     nonlinearOperator = struct( ...
+    %         'expr',   "i*gamma*A*I", ...
+    %         'params', struct('gamma', 0.01));
+    %
+    %     options = struct( ...
+    %         'propagation_distance', 1.0, ...
+    %         'records',              128, ...
+    %         'preset',               "balanced");
+    %
+    %     api    = nlolib.NLolib();
+    %     result = api.propagate(pulse, linearOperator, nonlinearOperator, options);
+    %     imagesc(t, result.z_axis, abs(result.records) .^ 2);
+    %
+    %   RESULT STRUCT
+    %     result.records      - numRecords x numSamples complex matrix
+    %     result.final        - last row of records ([] when none returned)
+    %     result.z_axis       - recorded z positions
+    %     result.step_history - solver telemetry (see propagate)
+    %     result.meta         - run metadata; records_written may be smaller
+    %                           than records_requested
+    %
+    %   USER GUIDE
+    %     docs/matlab_user_guide.md covers pulse and operator specs, presets,
+    %     execution options, coupled 2D/3D runs, logging, perf counters,
+    %     SQLite storage, and a troubleshooting table.
+    %
+    %   See also NLOLIB.NLOLIB/PROPAGATE, NLOLIB.NLOLIB/QUERY_RUNTIME_LIMITS,
+    %   NLOLIB.TRANSLATE_RUNTIME_HANDLE, NLOLIB.PREPARE_SIM_CONFIG.
 
     properties (Constant, Access = private)
         LIBNAME = 'nlolib';
@@ -93,6 +127,65 @@ classdef NLolib < handle
             %     result = obj.propagate(cfg, field, numRecords, execOpts, storageOpts)
             %   High-level:
             %     result = obj.propagate(pulse, linearOp, nonlinearOp, options)
+            %
+            %   The high-level form is selected when the first argument is a
+            %   struct with 'samples' and 'delta_time' and no
+            %   'num_time_samples'.  In the low-level form the fourth argument
+            %   is treated as storage options when it has an 'sqlite_path'
+            %   field, otherwise as execution options.
+            %
+            %   PULSE SPEC (high-level)
+            %     samples                - complex launch field (flattened)
+            %     delta_time             - temporal sample spacing, > 0
+            %     pulse_period           - optional; default nt * delta_time
+            %     frequency_grid         - optional; default FFT-order grid
+            %     tensor_nt/nx/ny        - optional coupled-run shape
+            %     tensor_layout          - 0 = t fastest, then y, then x
+            %     delta_x/delta_y        - transverse spacing; default 1.0
+            %     spatial_frequency_grid - optional explicit transverse grid
+            %     potential_grid         - optional complex potential V
+            %
+            %   OPERATORS (high-level)
+            %     A preset string ("gvd", "kerr", "none"), a struct with
+            %     'expr' and optional 'params', or a struct with a function
+            %     handle 'fn'.  Named params are substituted for c0, c1, ...
+            %     in expression order, linear constants first.
+            %
+            %       linearOp    = struct('expr', "i*beta2*w*w - loss", ...
+            %                            'params', struct('beta2', -0.005, 'loss', 0.0));
+            %       nonlinearOp = struct('fn', @(A, I, V) 1i * A * (0.01 * I + V));
+            %
+            %   OPTIONS (high-level)
+            %     propagation_distance - required, > 0
+            %     preset               - "fast" | "balanced" | "accuracy"
+            %     records              - z samples to record; preset default
+            %     output               - "dense" | "final" (forces records = 1)
+            %     exec_options         - execution options struct, below
+            %     storage              - SQLite storage options struct
+            %
+            %   EXECUTION OPTIONS
+            %     backend_type          - 0 CPU, 1 Vulkan, 2 auto (default)
+            %     fft_backend           - 0 auto, 1 FFTW, 2 VkFFT
+            %     device_heap_fraction  - default 0.70
+            %     record_ring_target, forced_device_budget_bytes
+            %     capture_step_history  - fill result.step_history
+            %     step_history_capacity - default 200000 events
+            %     matlab_stream_logs    - drain the log buffer after the call
+            %                             and attach it to failure messages
+            %     matlab_log_buffer_bytes, matlab_progress_stream, matlab_debug
+            %
+            %   Example with telemetry:
+            %     options.exec_options = struct( ...
+            %         'backend_type',          1, ...
+            %         'capture_step_history',  true, ...
+            %         'step_history_capacity', uint64(200000));
+            %     result = obj.propagate(pulse, linearOp, nonlinearOp, options);
+            %     semilogy(result.step_history.z, result.step_history.error);
+            %
+            %   A non-zero result.step_history.dropped means the history was
+            %   truncated; raise step_history_capacity.
+            %
+            %   See also NLOLIB.NLOLIB, NLOLIB.NLOLIB/QUERY_RUNTIME_LIMITS.
             if nargin < 2
                 error('nlolib:invalidPropagateCall', ...
                       'propagate requires at least a primary argument');
@@ -798,6 +891,23 @@ classdef NLolib < handle
 
         function limits = query_runtime_limits(obj, config, execOptions)
             %QUERY_RUNTIME_LIMITS Query runtime-derived solver limits.
+            %   limits = obj.query_runtime_limits()
+            %   limits = obj.query_runtime_limits(cfg)
+            %   limits = obj.query_runtime_limits(cfg, execOptions)
+            %
+            %   Runs no simulation, so it is cheap enough to call before
+            %   committing to a large grid:
+            %
+            %     limits  = obj.query_runtime_limits(cfg, execOptions);
+            %     records = min(wanted, limits.max_num_recorded_samples_in_memory);
+            %
+            %   Fields:
+            %     max_num_time_samples_runtime
+            %     max_num_recorded_samples_in_memory
+            %     max_num_recorded_samples_with_storage
+            %     estimated_required_working_set_bytes
+            %     estimated_device_budget_bytes
+            %     storage_available
             if nargin < 2
                 config = struct( ...
                     'num_time_samples', 1, ...

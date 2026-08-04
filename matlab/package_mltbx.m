@@ -51,7 +51,8 @@ opts.ToolboxVersion = char(version);
 opts.Summary = "GPU-first nonlinear optics propagation library";
 opts.Description = sprintf(['nlolib MATLAB bindings and staged runtime libraries.\n' ...
                             'Includes +nlolib wrapper files, nlolib_setup.m, examples,\n' ...
-                            'and platform-specific shared libraries under lib/.']);
+                            'the user guide under docs/, and platform-specific shared\n' ...
+                            'libraries under lib/.']);
 opts.AuthorName = "nlolib";
 opts.MinimumMatlabRelease = "R2019b";
 opts.OutputFile = artifactPath;

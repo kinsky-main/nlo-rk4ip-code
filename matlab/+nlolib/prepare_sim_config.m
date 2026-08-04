@@ -5,6 +5,43 @@ function [simCfgPtr, physicsCfgPtr, keepalive] = prepare_sim_config(cfg)
 %   cfg is a flat MATLAB struct with fields matching the nlolib C API.
 %   Returns a libstruct('sim_config', ...) and a keepalive cell array for
 %   pointer-backed fields (complex arrays and c-strings).
+%
+%   Required fields:
+%     num_time_samples, propagation_distance, starting_step_size,
+%     max_step_size, min_step_size, error_tolerance, pulse_period,
+%     delta_time, frequency_grid
+%
+%   Optional fields:
+%     tensor_nt, tensor_nx, tensor_ny, tensor_layout, delta_x, delta_y,
+%     spatial_frequency_grid, kx_axis, ky_axis, potential_grid, wt_axis,
+%     runtime
+%
+%   num_time_samples is the total element count of the flattened field, so
+%   for a tensor run it is tensor_nt * tensor_nx * tensor_ny.  wt_axis,
+%   kx_axis, and ky_axis are left unset unless supplied, which is what tells
+%   the library to generate those axes itself.
+%
+%   Example:
+%     cfg = struct( ...
+%         'num_time_samples',     n, ...
+%         'propagation_distance', 1.0, ...
+%         'starting_step_size',   5e-3, ...
+%         'max_step_size',        4e-2, ...
+%         'min_step_size',        5e-5, ...
+%         'error_tolerance',      1e-6, ...
+%         'delta_time',           dt, ...
+%         'pulse_period',         n * dt, ...
+%         'frequency_grid',       complex(omega, zeros(1, n)));
+%     cfg.runtime = struct( ...
+%         'dispersion_factor_expr', "i*c0*w*w-c1", ...
+%         'nonlinear_expr',         "i*c2*A*I", ...
+%         'constants',              [0.5 * beta2, 0.5 * alpha, gamma]);
+%     [simCfgPtr, physicsCfgPtr, keepalive] = nlolib.prepare_sim_config(cfg);
+%
+%   keepalive must stay in scope for as long as the returned pointers are
+%   used, or MATLAB frees the buffers underneath the library.
+%
+%   See also NLOLIB.NLOLIB/PROPAGATE, NLOLIB.TRANSLATE_RUNTIME_HANDLE.
 if ~isstruct(cfg)
     error("cfg must be a struct");
 end

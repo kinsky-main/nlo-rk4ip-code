@@ -183,7 +183,7 @@ end
 omega = backend.angular_frequency_grid(nt, dt);
 potential = grinStrength * (xx .* xx + yy .* yy);
 
-field0Flat = flatten_tyx_row_major(field0);
+field0Flat = flatten_tyx(field0);
 pulse = struct();
 pulse.samples = field0Flat;
 pulse.delta_time = dt;
@@ -195,7 +195,7 @@ pulse.tensor_layout = 0;
 pulse.frequency_grid = complex(omega, zeros(1, nt));
 pulse.delta_x = dx;
 pulse.delta_y = dy;
-pulse.potential_grid = repmat(flatten_xy_row_major(complex(potential, zeros(size(potential)))), 1, nt);
+pulse.potential_grid = flatten_potential_tyx(complex(potential, zeros(size(potential))), nt);
 
 linearOperator = struct();
 linearOperator.expr = "i*(beta2*wt*wt + beta_t*(kx*kx + ky*ky))";
@@ -218,19 +218,26 @@ records = unflatten_tyx_records(recordsFlat, numRecords, nt, ny, nx);
 zRecords = result.z_axis;
 end
 
-function flat = flatten_xy_row_major(matrixYX)
-flat = reshape(matrixYX.', 1, []);
+function flat = flatten_tyx(volumeTYX)
+%FLATTEN_TYX Flatten an (nt, ny, nx) volume into nlolib's tensor layout.
+%   TENSOR_LAYOUT_XYT_T_FAST is t fastest, then y, then x, which is exactly
+%   MATLAB's own column-major ordering for an (nt, ny, nx) array, so the
+%   volume flattens with a plain reshape.
+flat = reshape(volumeTYX, 1, []);
 end
 
-function flat = flatten_tyx_row_major(volumeTYX)
-flat = reshape(permute(volumeTYX, [3, 2, 1]), 1, []);
+function flat = flatten_potential_tyx(matrixYX, nt)
+%FLATTEN_POTENTIAL_TYX Broadcast a static (ny, nx) potential over the time axis.
+%   The potential grid is uploaded as a full nt*ny*nx volume in the same
+%   layout as the field, so the sheet is repeated along t before flattening.
+volume = repmat(reshape(matrixYX, [1, size(matrixYX, 1), size(matrixYX, 2)]), [nt, 1, 1]);
+flat = flatten_tyx(volume);
 end
 
 function records = unflatten_tyx_records(recordsFlat, numRecords, nt, ny, nx)
-records = zeros(numRecords, nt, ny, nx);
+records = complex(zeros(numRecords, nt, ny, nx));
 for ridx = 1:numRecords
-    row = recordsFlat(ridx, :);
-    records(ridx, :, :, :) = permute(reshape(row, [nx, ny, nt]), [3, 2, 1]);
+    records(ridx, :, :, :) = reshape(recordsFlat(ridx, :), [nt, ny, nx]);
 end
 end
 

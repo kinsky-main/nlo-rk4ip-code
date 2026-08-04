@@ -1,4 +1,32 @@
 function [expression, constants] = translate_runtime_handle(fn, context, runtime)
+%TRANSLATE_RUNTIME_HANDLE Compile a function handle into a runtime expression.
+%   [expression, constants] = nlolib.translate_runtime_handle(fn, context)
+%   [expression, constants] = nlolib.translate_runtime_handle(fn, context, runtime)
+%
+%   Argument positions bind runtime symbols according to context; each
+%   context accepts a prefix of its argument list:
+%
+%     "dispersion_factor"  @(A, w)
+%     "dispersion"         @(A, D, h, w)
+%     "nonlinear"          @(A, I, V)
+%
+%   The body must be a single expression.  Element-wise operators are
+%   normalised (.* -> *, .^ -> ^, ./ -> /) and 1i / 1j literals become i.
+%   Identifiers other than the reserved symbols (w, wt, kx, ky, t, x, y, A,
+%   I, D, V, h, i), the intrinsics (exp, log, sqrt, sin, cos), and cN tokens
+%   are captured from the handle's closure as real scalar constants.
+%
+%   Example:
+%     beta2 = 0.05;
+%     [expr, constants] = nlolib.translate_runtime_handle( ...
+%         @(A, w) 1i * (beta2 / 2.0) * (w .* w), "dispersion_factor");
+%     % expr references c0; constants(1) is beta2.
+%
+%   Pass runtime.constant_bindings (struct or containers.Map) to pin values
+%   explicitly, or runtime.auto_capture_constants = false to reject closure
+%   capture and require every identifier to be bound.
+%
+%   See also NLOLIB.NLOLIB/PROPAGATE, NLOLIB.PREPARE_SIM_CONFIG.
 if ~isa(fn, "function_handle")
     error("runtime handle must be a function_handle");
 end

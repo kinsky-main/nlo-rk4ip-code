@@ -11,6 +11,7 @@ entrypoints:
 - [API Reference Guide](api_reference.md)
 - [Python Binding Guide](../python/README.md)
 - [MATLAB Binding Guide](../matlab/README.md)
+- [MATLAB User Guide](matlab_user_guide.md)
 - [Julia Binding Guide](../julia/README.md)
 
 ## Default Operator Forms
@@ -90,11 +91,15 @@ D=i\left(\beta_{2,s}\omega_t^2+\beta_t(k_x^2+k_y^2)\right)
   tests, and docs generation.
 - [API Reference Guide](api_reference.md) links into the generated reference for
   the C API and each binding.
+- [MATLAB User Guide](matlab_user_guide.md) is a task-oriented walkthrough of
+  the MATLAB binding, with worked examples for temporal, transverse, and
+  coupled 3+1D runs.
 
 ## Binding Guides
 
 - [Python Binding Guide](../python/README.md)
-- [MATLAB Binding Guide](../matlab/README.md)
+- [MATLAB Binding Guide](../matlab/README.md) and
+  [MATLAB User Guide](matlab_user_guide.md)
 - [Julia Binding Guide](../julia/README.md)
 
 ## API Entry Points
