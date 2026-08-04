@@ -11,7 +11,7 @@ set(CMAKE_C_STANDARD 99)
 
 option(ENABLE_RK4_DEBUG_DIAGNOSTICS "Enable debug-only RK4/dispersion diagnostics in Debug builds" ON)
 option(INSTALL_GIT_HOOKS "Install repository git hooks during CMake configure" OFF)
-option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" OFF)
+option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
 option(NLOLIB_BUILD_MATLAB_TESTS "Enable MATLAB runtime-handle parser tests when MATLAB is available" OFF)

@@ -57,7 +57,7 @@ y = ((0:(ny - 1)) - 0.5 * (ny - 1)) * scenario.dy;
 phaseUnit = (scenario.grin_gx * (xx .* xx)) + (scenario.grin_gy * (yy .* yy));
 field0 = exp(-(((xx - scenario.x_offset) .^ 2 + (yy - scenario.y_offset) .^ 2) / (scenario.w0 ^ 2)));
 field0 = complex(field0, zeros(size(field0)));
-field0Flat = flatten_xy_row_major(field0);
+field0Flat = flatten_xy(field0);
 
 pulse = struct();
 pulse.samples = field0Flat;
@@ -70,7 +70,7 @@ pulse.tensor_ny = ny;
 pulse.tensor_layout = 0;
 pulse.delta_x = scenario.dx;
 pulse.delta_y = scenario.dy;
-pulse.potential_grid = flatten_xy_row_major(complex(phaseUnit, zeros(size(phaseUnit))));
+pulse.potential_grid = flatten_xy(complex(phaseUnit, zeros(size(phaseUnit))));
 
 linearOperator = struct();
 linearOperator.expr = "i*beta2*w*w-loss";
@@ -89,7 +89,7 @@ propagateOptions.exec_options = execOptions;
 result = api.propagate(pulse, linearOperator, nonlinearOperator, propagateOptions);
 recordsFlat = result.records;
 zRecords = result.z_axis;
-records = unflatten_records_row_major(recordsFlat, numRecords, ny, nx);
+records = unflatten_xy_records(recordsFlat, numRecords, ny, nx);
 
 analyticalRecords = zeros(size(records));
 for ridx = 1:numRecords
@@ -194,7 +194,7 @@ y = ((0:(ny - 1)) - 0.5 * (ny - 1)) * dy;
 [xx, yy] = meshgrid(x, y);
 field0 = exp(-((xx .* xx + yy .* yy) / (w0 ^ 2)));
 field0 = complex(field0, zeros(size(field0)));
-field0Flat = flatten_xy_row_major(field0);
+field0Flat = flatten_xy(field0);
 nxy = nx * ny;
 
 kx = backend.angular_frequency_grid(nx, dx);
@@ -227,7 +227,7 @@ cfgTensor.runtime = struct( ...
     'constants', diffractionCoeff);
 
 tensorResult = api.propagate(cfgTensor, field0Flat, numRecords, execOptions);
-tensorRecords = unflatten_records_row_major(tensorResult.records, numRecords, ny, nx);
+tensorRecords = unflatten_xy_records(tensorResult.records, numRecords, ny, nx);
 zRecords = tensorResult.z_axis;
 
 fft0 = fft2(field0);
@@ -258,14 +258,18 @@ savedPath = backend.plot_total_error_over_propagation( ...
     "y_label", "Relative L2 error (tensor vs FFT2 reference)");
 end
 
-function flat = flatten_xy_row_major(field)
-flat = reshape(field.', 1, []);
+function flat = flatten_xy(field)
+%FLATTEN_XY Flatten an (ny, nx) sheet into nlolib's tensor layout.
+%   TENSOR_LAYOUT_XYT_T_FAST is t fastest, then y, then x; with tensor_nt = 1
+%   that is y fastest, which is exactly MATLAB's own ordering for an (ny, nx)
+%   array, so the sheet flattens with a plain reshape.
+flat = reshape(field, 1, []);
 end
 
-function records = unflatten_records_row_major(recordsFlat, numRecords, ny, nx)
-records = zeros(numRecords, ny, nx);
+function records = unflatten_xy_records(recordsFlat, numRecords, ny, nx)
+records = complex(zeros(numRecords, ny, nx));
 for ridx = 1:numRecords
-    records(ridx, :, :) = reshape(recordsFlat(ridx, :), [nx, ny]).';
+    records(ridx, :, :) = reshape(recordsFlat(ridx, :), [ny, nx]);
 end
 end
 
