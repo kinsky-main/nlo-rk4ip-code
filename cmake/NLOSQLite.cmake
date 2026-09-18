@@ -3,15 +3,14 @@ function(configure_sqlite target_name)
       "Candidate sqlite runtime library paths for packaging helpers" FORCE)
 
   include(FetchContent)
-  if(NOT DEFINED SQLITE_AMALGAMATION_URL OR SQLITE_AMALGAMATION_URL STREQUAL "")
-    set(SQLITE_AMALGAMATION_URL
-      "https://www.sqlite.org/2025/sqlite-amalgamation-3490200.zip")
-  endif()
+  include(NLODependencies)
 
   if(NOT TARGET sqlite3)
     FetchContent_Declare(
       sqlite_amalgamation
-      URL ${SQLITE_AMALGAMATION_URL}
+      URL "${SQLITE_AMALGAMATION_URL}"
+      URL_HASH "SHA256=${SQLITE_AMALGAMATION_SHA256}"
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(sqlite_amalgamation)
 

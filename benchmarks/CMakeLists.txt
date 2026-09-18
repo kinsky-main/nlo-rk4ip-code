@@ -54,7 +54,14 @@ if(fftw_include_dirs)
   target_include_directories(bench_solver_backend PRIVATE ${fftw_include_dirs})
 endif()
 
-set(VKFFT_INCLUDE_DIR "${CMAKE_BINARY_DIR}/_deps/vkfft-src")
+# src/fft/CMakeLists.txt populated VkFFT; ask FetchContent where it landed so
+# FETCHCONTENT_SOURCE_DIR_VKFFT overrides (offline/vendored builds) keep working.
+include(FetchContent)
+FetchContent_GetProperties(vkfft)
+if(NOT vkfft_SOURCE_DIR)
+  set(vkfft_SOURCE_DIR "${CMAKE_BINARY_DIR}/_deps/vkfft-src")
+endif()
+set(VKFFT_INCLUDE_DIR "${vkfft_SOURCE_DIR}")
 if(EXISTS "${VKFFT_INCLUDE_DIR}/vkFFT/vkFFT.h")
   target_include_directories(bench_solver_backend PRIVATE
     "${VKFFT_INCLUDE_DIR}"

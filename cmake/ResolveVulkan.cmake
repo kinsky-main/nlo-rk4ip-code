@@ -88,6 +88,8 @@ function(resolve_vulkan out_headers_available out_loader_available)
       FetchContent_Declare(
         vulkan_headers
         URL "${VULKAN_HEADERS_URL}"
+        URL_HASH "SHA256=${VULKAN_HEADERS_SHA256}"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
       )
       FetchContent_MakeAvailable(vulkan_headers)
 

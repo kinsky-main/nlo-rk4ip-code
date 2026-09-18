@@ -122,10 +122,13 @@ function(nlolib_define_fetched_glslang target_name out_found)
   set(ENABLE_OPT OFF CACHE BOOL "Build SPIR-V optimizer support in glslang" FORCE)
   set(GLSLANG_TESTS OFF CACHE BOOL "Build glslang tests" FORCE)
 
+  # Release tarball with a pinned hash rather than a git tag: no git needed at
+  # configure time, and a moved tag cannot silently change what is built.
   FetchContent_Declare(
     glslang_main
-    GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
-    GIT_TAG "${GLSLANG_GIT_TAG}"
+    URL "${GLSLANG_URL}"
+    URL_HASH "SHA256=${GLSLANG_SHA256}"
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
   FetchContent_MakeAvailable(glslang_main)
 

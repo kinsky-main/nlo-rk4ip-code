@@ -1,0 +1,43 @@
+# Conan 2 manifest for nlolib -- the build-environment half of the dependency list.
+#
+# nlolib is self-contained: FFTW, SQLite, VkFFT and glslang are compiled in from
+# the archives pinned in cmake/NLODependencies.cmake (see sbom.cdx.json for the
+# full, versioned record). A package manager therefore only has to provide what
+# the compiler and linker need to see on the host and cannot be fetched:
+#
+#   vulkan-headers   -> find_package(Vulkan) headers  (cmake/ResolveVulkan.cmake)
+#   vulkan-loader    -> libvulkan / vulkan-1 import lib for linking
+#   glslang (tool)   -> glslangValidator, compiles the .comp kernels at build time
+#
+# Versions are the ConanCenter recipe versions (they follow the Vulkan SDK
+# numbering, not glslang's own). 1.4.313.0 is what was verified end to end on
+# Ubuntu 24.04 without root; ConanCenter also carries 1.4.350.0.
+#
+#   conan install . --output-folder=build/conan --build=missing -s build_type=Release
+#   source build/conan/conanbuild.sh            # puts glslangValidator on PATH
+#   cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=build/conan/conan_toolchain.cmake
+#
+# Not needed when a LunarG Vulkan SDK (VULKAN_SDK set) or the distro packages
+# libvulkan-dev + glslang-tools are installed; the CMake modules find those first.
+
+[requires]
+vulkan-headers/1.4.313.0
+vulkan-loader/1.4.313.0
+
+[tool_requires]
+glslang/1.4.313.0
+
+[options]
+# Compute only: no window-system integration, so no xorg/wayland system packages.
+vulkan-loader/*:with_wsi_xcb=False
+vulkan-loader/*:with_wsi_xlib=False
+vulkan-loader/*:with_wsi_wayland=False
+# build_executables provides glslangValidator; the libraries are not used
+# because NLOLIB_GLSLANG_PROVIDER=FETCH compiles the pinned glslang in-tree.
+glslang/*:build_executables=True
+glslang/*:hlsl=False
+glslang/*:enable_optimizer=False
+
+[generators]
+CMakeToolchain
+VirtualBuildEnv

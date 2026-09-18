@@ -26,7 +26,9 @@ function(configure_fftw out_target out_include_dirs)
 
     FetchContent_Declare(
       fftw
-      URL "https://www.fftw.org/${FFTW_GIT_TAG}.tar.gz"
+      URL "${FFTW_URL}"
+      URL_HASH "SHA256=${FFTW_SHA256}"
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(fftw)
 

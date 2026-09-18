@@ -14,7 +14,9 @@ if(ENABLE_VKFFT)
 
   FetchContent_Declare(
     vkfft
-    URL https://github.com/DTolm/VkFFT/archive/refs/heads/master.zip
+    URL "${VKFFT_URL}"
+    URL_HASH "SHA256=${VKFFT_SHA256}"
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
   # VkFFT is used as headers-only; avoid adding its CMake sub-build because it
   # can inject fragile transitive glslang library paths on Windows generators.

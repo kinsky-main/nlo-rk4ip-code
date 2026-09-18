@@ -1,5 +1,11 @@
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
+# sbom.cdx.json is generated from cmake/NLODependencies.cmake; fail if a pin was
+# bumped without regenerating it (python tools/write_sbom.py).
+add_test(NAME test_sbom_pins_match
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/write_sbom.py" --check
+)
+
 set(_PY_PKG_DIR "${CMAKE_SOURCE_DIR}/python")
 if(WIN32)
   set(_NLOLIB_DLL "${_PY_PKG_DIR}/$<CONFIG>/nlolib.dll")

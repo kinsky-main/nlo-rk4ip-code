@@ -71,6 +71,28 @@ resolved:
 - `FETCH` always builds glslang through CMake `FetchContent`.
 
 `GLSLANG_GIT_TAG` defaults to `12.3.1` and is used only by the fetch provider.
+
+## Third-Party Pins and the SBOM
+
+Every third-party source that is compiled into nlolib is pinned in one file,
+`cmake/NLODependencies.cmake`: release version, archive URL and SHA-256. The
+`FetchContent` calls verify the hash, so a build either uses exactly that
+archive or fails at configure time. To bump a dependency, edit the version and
+hash there and regenerate the bill of materials:
+
+```bash
+python tools/write_sbom.py
+```
+
+`sbom.cdx.json` is the machine-readable dependency list in CycloneDX 1.6
+format (ECMA-424). It records, for every component, the exact version,
+licence, source archive and hash, and whether it is compiled in, a runtime
+requirement on the target machine, or build/test tooling that is never
+shipped. `ctest -R test_sbom_pins_match` fails when the SBOM is stale.
+
+`conanfile.txt` lists only the host-side pieces a package manager can supply
+(Vulkan headers and loader, `glslangValidator`); it is optional and unused when
+a Vulkan SDK or the distro development packages are installed.
 The project supports CMake `3.22.1+`; newer CMake versions may expose
 `Vulkan::glslang` directly, but that target is not required.
 

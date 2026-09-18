@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 configure_build_configurations()
 
-project(nlolib VERSION 1.10.32 LANGUAGES C)
+project(nlolib VERSION 1.11.0 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -31,18 +31,8 @@ if(NOT ENABLE_VULKAN_BACKEND)
   endif()
 endif()
 
-set(VULKAN_HEADERS_URL
-  "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/heads/main.zip"
-  CACHE STRING "URL used to fetch Vulkan headers when local headers are unavailable")
-set(GLSLANG_GIT_TAG
-  "12.3.1"
-  CACHE STRING "glslang git tag used for VkFFT when NLOLIB_GLSLANG_PROVIDER=FETCH")
-set(SQLITE_AMALGAMATION_URL
-  "https://www.sqlite.org/2025/sqlite-amalgamation-3490200.zip"
-  CACHE STRING "URL used to fetch SQLite amalgamation when SQLite3 is unavailable")
-set(FFTW_GIT_TAG
-  "fftw-3.3.10"
-  CACHE STRING "FFTW git tag used for in-tree static FFTW builds")
+# Every third-party source pin (version, URL, SHA-256) lives in one place.
+include(NLODependencies)
 option(NLOLIB_STATIC_MSVC_RUNTIME
   "Link the MSVC runtime statically so redistributables are not required"
   ${WIN32})

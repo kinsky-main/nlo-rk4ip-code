@@ -12,7 +12,9 @@ function(configure_docs_target)
   include(FetchContent)
   FetchContent_Declare(
     doxygen-awesome-css
-    URL https://github.com/jothepro/doxygen-awesome-css/archive/refs/heads/main.zip
+    URL "${DOXYGEN_AWESOME_CSS_URL}"
+    URL_HASH "SHA256=${DOXYGEN_AWESOME_CSS_SHA256}"
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   )
   FetchContent_MakeAvailable(doxygen-awesome-css)
   FetchContent_GetProperties(doxygen-awesome-css SOURCE_DIR AWESOME_CSS_DIR)
