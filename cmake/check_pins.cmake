@@ -32,17 +32,21 @@ foreach(_entry IN LISTS _pins)
   set(_sha "${${_sha_var}}")
   get_filename_component(_file "${_url}" NAME)
 
-  file(DOWNLOAD "${_url}" "${_tmp}/${_name}-${_file}"
-    EXPECTED_HASH "SHA256=${_sha}"
-    STATUS _status
-    TIMEOUT 120
-  )
+  # Hash is checked by hand rather than with EXPECTED_HASH so a mismatch is
+  # reported for every pin instead of aborting the script at the first one.
+  file(DOWNLOAD "${_url}" "${_tmp}/${_name}-${_file}" STATUS _status TIMEOUT 120)
   list(GET _status 0 _code)
   list(GET _status 1 _msg)
-  if(_code EQUAL 0)
+  if(NOT _code EQUAL 0)
+    message(STATUS "FAIL  ${_name}: ${_url}\n        download: ${_msg}")
+    set(_failed 1)
+    continue()
+  endif()
+  file(SHA256 "${_tmp}/${_name}-${_file}" _actual)
+  if(_actual STREQUAL _sha)
     message(STATUS "OK    ${_name}: ${_url}")
   else()
-    message(STATUS "FAIL  ${_name}: ${_url}\n        ${_msg}")
+    message(STATUS "FAIL  ${_name}: ${_url}\n        expected ${_sha}\n        got      ${_actual}")
     set(_failed 1)
   endif()
 endforeach()

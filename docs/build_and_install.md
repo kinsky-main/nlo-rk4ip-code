@@ -84,6 +84,13 @@ hash there and regenerate the bill of materials:
 python tools/write_sbom.py
 ```
 
+To confirm every pinned archive is still reachable and matches its hash
+without configuring the project (needs network, takes a few seconds):
+
+```bash
+cmake -P cmake/check_pins.cmake
+```
+
 `sbom.cdx.json` is the machine-readable dependency list in CycloneDX 1.6
 format (ECMA-424). It records, for every component, the exact version,
 licence, source archive and hash, and whether it is compiled in, a runtime
