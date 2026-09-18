@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 include(NLOBuildConfig)
 configure_build_configurations()
 
-project(nlolib VERSION 1.10.31 LANGUAGES C)
+project(nlolib VERSION 1.10.32 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -43,25 +43,22 @@ set(SQLITE_AMALGAMATION_URL
 set(FFTW_GIT_TAG
   "fftw-3.3.10"
   CACHE STRING "FFTW git tag used for in-tree static FFTW builds")
-if(WIN32)
-  set(CBLAS_PREFER_SYSTEM_DEFAULT OFF)
-else()
-  set(CBLAS_PREFER_SYSTEM_DEFAULT ON)
+option(NLOLIB_STATIC_MSVC_RUNTIME
+  "Link the MSVC runtime statically so redistributables are not required"
+  ${WIN32})
+if(WIN32 AND MSVC AND NLOLIB_STATIC_MSVC_RUNTIME)
+  # Removes the MSVCP140/VCRUNTIME140 imports, so a client machine needs no
+  # Visual C++ redistributable.  Safe here because the public API is
+  # caller-allocates throughout: nothing malloc'd inside the library is ever
+  # freed by the caller, so a private CRT heap cannot be crossed.
+  # Set before add_subdirectory so fetched dependencies match; mismatched CRTs
+  # do not link.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
-option(CBLAS_PREFER_SYSTEM
-  "Prefer a system-provided OpenBLAS/CBLAS before fetching OpenBLAS"
-  ${CBLAS_PREFER_SYSTEM_DEFAULT})
 
 if(ENABLE_VKFFT)
   enable_language(CXX)
 endif()
-
-set(OPENBLAS_URL
-  "https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.30/OpenBLAS-0.3.30.tar.gz"
-  CACHE STRING "URL used to fetch OpenBLAS source for in-tree static CBLAS builds")
-set(OPENBLAS_WINDOWS_URL
-  "https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.30/OpenBLAS-0.3.30-x64.zip"
-  CACHE STRING "URL used to fetch the prebuilt OpenBLAS package used on Windows")
 
 include(NLOVersioning)
 include(NLODocs)

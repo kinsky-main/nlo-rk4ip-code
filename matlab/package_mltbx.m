@@ -35,6 +35,11 @@ if ~isfolder(stageDir)
           'Staging directory not found: %s', stageDir);
 end
 
+% Generate the loadlibrary prototype and thunk here, on the build machine,
+% so the shipped toolbox never has to parse the header — and therefore never
+% needs a C compiler on the client.
+package_mltbx_generate_prototype(repoRoot, stageDir);
+
 version = package_mltbx_read_version(fullfile(repoRoot, "CMakeLists.txt"));
 platformTag = package_mltbx_platform_tag();
 artifactName = sprintf('nlolib-%s-%s.mltbx', version, platformTag);
@@ -74,6 +79,29 @@ opts.SupportedPlatforms = supportedPlatforms;
 matlab.addons.toolbox.packageToolbox(opts);
 
 fprintf('Created toolbox bundle: %s\n', artifactPath);
+end
+
+function package_mltbx_generate_prototype(repoRoot, stageDir)
+%PACKAGE_MLTBX_GENERATE_PROTOTYPE Emit nlolib_proto.m and its thunk into stageDir.
+if ispc
+    libFile = "nlolib.dll";
+elseif ismac
+    libFile = "libnlolib.dylib";
+else
+    libFile = "libnlolib.so";
+end
+
+libraryPath = fullfile(stageDir, "lib", libFile);
+headerPath = fullfile(stageDir, "lib", "nlolib_matlab.h");
+if ~isfile(libraryPath) || ~isfile(headerPath)
+    error('nlolib:matlabStageIncomplete', ...
+          ['Staged library or header missing; cannot generate the ' ...
+           'loadlibrary prototype.\n  %s\n  %s'], libraryPath, headerPath);
+end
+
+matlabDir = fullfile(repoRoot, "matlab");
+addpath(matlabDir);
+generate_library_prototype(libraryPath, headerPath, stageDir);
 end
 
 function version = package_mltbx_read_version(cmakePath)

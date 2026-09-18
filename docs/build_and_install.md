@@ -7,8 +7,6 @@
 - CMake `3.22.1+`
 - C99 compiler toolchain
 - FFTW build prerequisites handled by CMake
-- OpenBLAS/CBLAS dependency resolved by CMake from system install, fetched
-  source, or fetched Windows binary
 - Vulkan toolchain only when `ENABLE_VULKAN_BACKEND=ON`
 - glslang development libraries when `ENABLE_VKFFT=ON`; CMake can fetch
   glslang when system development files are unavailable

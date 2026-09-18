@@ -9,6 +9,73 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#else
+#  include <dlfcn.h>
+#endif
+
+/**
+ * @brief Report whether a Vulkan loader is installed on this machine.
+ *
+ * nlolib is built against the Vulkan loader, but a machine that only ever runs
+ * the CPU backend has no reason to have one.  On Windows the import is
+ * delay-loaded, so the library itself loads fine without vulkan-1.dll -- but
+ * touching any Vulkan entry point would then raise a delay-load exception.
+ * Probing first keeps that failure in ordinary control flow: callers fall back
+ * to the CPU backend with a readable reason instead of crashing.
+ *
+ * The result is cached; a loader does not appear or vanish mid-process.
+ */
+static int vk_auto_runtime_available(void)
+{
+    /* 0 = not probed, 1 = available, -1 = unavailable. */
+    static int cached_state = 0;
+    if (cached_state != 0) {
+        return cached_state > 0;
+    }
+
+#if defined(_WIN32)
+    HMODULE loader = LoadLibraryA("vulkan-1.dll");
+    if (loader == NULL) {
+        cached_state = -1;
+        return 0;
+    }
+    const int has_entry =
+        (GetProcAddress(loader, "vkGetInstanceProcAddr") != NULL) &&
+        (GetProcAddress(loader, "vkCreateInstance") != NULL);
+    /* Deliberately not freed: the delay-load thunks bind against this module,
+       so it must stay resident for the rest of the process. */
+    cached_state = has_entry ? 1 : -1;
+    return has_entry;
+#else
+#  if defined(__APPLE__)
+    static const char* const loader_names[] = {
+        "libvulkan.1.dylib", "libvulkan.dylib", "libMoltenVK.dylib"
+    };
+#  else
+    static const char* const loader_names[] = {
+        "libvulkan.so.1", "libvulkan.so"
+    };
+#  endif
+    for (size_t i = 0u; i < sizeof(loader_names) / sizeof(loader_names[0]); ++i) {
+        void* loader = dlopen(loader_names[i], RTLD_LAZY | RTLD_LOCAL);
+        if (loader == NULL) {
+            continue;
+        }
+        const int has_entry = (dlsym(loader, "vkGetInstanceProcAddr") != NULL);
+        if (has_entry) {
+            cached_state = 1;
+            return 1;
+        }
+        dlclose(loader);
+    }
+    cached_state = -1;
+    return 0;
+#endif
+}
+
 static void vk_auto_copy_reason(
     char* reason,
     size_t reason_capacity,
@@ -218,6 +285,14 @@ int vk_auto_context_init(
 
     vk_auto_reset_context(context);
     vk_auto_copy_reason(reason, reason_capacity, "");
+
+    /* Must precede every other Vulkan call in this process. */
+    if (!vk_auto_runtime_available()) {
+        vk_auto_copy_reason(reason,
+                            reason_capacity,
+                            "No Vulkan loader installed; using the CPU backend.");
+        return -1;
+    }
 
     VkApplicationInfo app_info = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,

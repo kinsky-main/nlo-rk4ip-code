@@ -38,15 +38,12 @@ endif()
 
 include(ResolveVulkan)
 resolve_vulkan(vk_headers_available vk_loader_available)
-include(NLOCblas)
-configure_cblas(cblas_target cblas_include_dirs)
 
 target_include_directories(bench_solver_backend PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_CURRENT_LIST_DIR}
 )
 
-target_link_libraries(bench_solver_backend PRIVATE ${cblas_target})
 include(NLOSQLite)
 configure_sqlite(bench_solver_backend)
 
@@ -92,9 +89,6 @@ endif()
 if(WIN32)
   target_compile_definitions(bench_solver_backend PRIVATE NLOLIB_EXPORTS)
   set(runtime_hints "${SQLITE_RUNTIME_HINTS}")
-  if(CBLAS_RUNTIME_HINTS)
-    list(APPEND runtime_hints "${CBLAS_RUNTIME_HINTS}")
-  endif()
   add_custom_command(TARGET bench_solver_backend POST_BUILD
     COMMAND ${CMAKE_COMMAND}
             -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:bench_solver_backend>"
@@ -110,9 +104,8 @@ endif()
 
 target_include_directories(bench_solver_backend PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
 target_link_libraries(bench_solver_backend PRIVATE Vulkan::Vulkan)
-if(TARGET vk_shaders)
-  add_dependencies(bench_solver_backend vk_shaders)
-endif()
+include(NLOVulkanBackend)
+nlolib_use_embedded_spirv(bench_solver_backend)
 
 if(BUILD_TESTING)
   add_test(NAME test_bench_solver_backend_tensor_dry_run

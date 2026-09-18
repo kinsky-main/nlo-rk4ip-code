@@ -4,11 +4,7 @@ add_executable(test_nlo_numerics
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
 )
 
-include(NLOCblas)
-configure_cblas(cblas_target cblas_include_dirs)
-
 target_include_directories(test_nlo_numerics PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(test_nlo_numerics PRIVATE ${cblas_target})
 target_compile_definitions(test_nlo_numerics PRIVATE
   ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
   ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
@@ -21,7 +17,6 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND}
             -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_nlo_numerics>"
             -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_nlo_numerics>"
-            -DNLO_RUNTIME_HINTS="${CBLAS_RUNTIME_HINTS}"
             -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
   )
 endif()
@@ -62,7 +57,6 @@ target_include_directories(test_nlo_vector_backend PRIVATE
 if(ENABLE_VULKAN_BACKEND)
   target_include_directories(test_nlo_vector_backend PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
 endif()
-target_link_libraries(test_nlo_vector_backend PRIVATE ${cblas_target})
 target_compile_definitions(test_nlo_vector_backend PRIVATE
   ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
   ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
@@ -70,9 +64,8 @@ target_compile_definitions(test_nlo_vector_backend PRIVATE
 if(ENABLE_VULKAN_BACKEND)
   target_link_libraries(test_nlo_vector_backend PRIVATE Vulkan::Vulkan)
 endif()
-if(TARGET vk_shaders)
-  add_dependencies(test_nlo_vector_backend vk_shaders)
-endif()
+include(NLOVulkanBackend)
+nlolib_use_embedded_spirv(test_nlo_vector_backend)
 if(UNIX)
   target_link_libraries(test_nlo_vector_backend PRIVATE m)
 endif()
@@ -81,7 +74,6 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND}
             -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_nlo_vector_backend>"
             -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_nlo_vector_backend>"
-            -DNLO_RUNTIME_HINTS="${CBLAS_RUNTIME_HINTS}"
             -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
   )
 endif()
@@ -98,14 +90,12 @@ if(ENABLE_VULKAN_BACKEND)
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}/src/generated
   )
-  target_link_libraries(test_nlo_vector_backend_vulkan PRIVATE ${cblas_target} Vulkan::Vulkan)
+  target_link_libraries(test_nlo_vector_backend_vulkan PRIVATE Vulkan::Vulkan)
   target_compile_definitions(test_nlo_vector_backend_vulkan PRIVATE
     ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
     ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
   )
-  if(TARGET vk_shaders)
-    add_dependencies(test_nlo_vector_backend_vulkan vk_shaders)
-  endif()
+  nlolib_use_embedded_spirv(test_nlo_vector_backend_vulkan)
   if(UNIX)
     target_link_libraries(test_nlo_vector_backend_vulkan PRIVATE m)
   endif()
@@ -114,7 +104,6 @@ if(ENABLE_VULKAN_BACKEND)
       COMMAND ${CMAKE_COMMAND}
               -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_nlo_vector_backend_vulkan>"
               -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_nlo_vector_backend_vulkan>"
-              -DNLO_RUNTIME_HINTS="${CBLAS_RUNTIME_HINTS}"
               -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
     )
   endif()

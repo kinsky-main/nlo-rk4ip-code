@@ -19,7 +19,7 @@
 ## Extensions
 
 - [ ] Add Massively Parallel Algorithm solver mode for coupled mode problems.
-- [ ] OpenMP backend for multi-core CPU parallelism, compile CBLAS with OpenMP support and add OpenMP pragmas to CPU kernels.
+- [ ] OpenMP backend for multi-core CPU parallelism: add OpenMP pragmas to the CPU kernels in `src/numerics/vector_ops.c`. (These were CBLAS calls until the OpenBLAS dependency was dropped; they are now plain loops, which are straightforward to parallelise but no longer get BLAS threading for free.)
 - [ ] Add example problem documentation on the physics of the problems (Do this in the report first).
 - [ ] Review directory and module sturcture for better organisation. Currently there are some looped dependencies between modules which are not ideal, e.g. core -> physics -> core.
 - [ ] Add finite difference kernel for solving course/sharp problems with high accuracy and ability to parallelise much more efficiently on GPU following the approach used in [NLSEMagic](https://github.com/sumseq/NLSEMagic).

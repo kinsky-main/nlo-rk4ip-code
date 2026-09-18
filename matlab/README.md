@@ -29,11 +29,15 @@ nlolib_setup();
 api = nlolib.NLolib();
 ```
 
-Requires MATLAB R2019b or later, plus a C compiler visible to MATLAB on
-Windows — `loadlibrary` parses `nlolib_matlab.h` at load time. The shared library (`nlolib.dll` / `libnlolib.so` /
-`libnlolib.dylib`) and the header `nlolib_matlab.h` must be reachable at
-runtime; the wrapper searches common staged and build-tree locations, and
-`NLOLIB_LIBRARY` overrides the search.
+Requires MATLAB R2019b or later and nothing else — no C compiler, no Visual C++
+redistributable, no Vulkan runtime. The packaged toolbox ships a prebuilt
+`loadlibrary` prototype, so the header is never parsed on the client.
+
+The shared library (`nlolib.dll` / `libnlolib.so` / `libnlolib.dylib`) must be
+reachable at runtime; the wrapper searches common staged and build-tree
+locations, and `NLOLIB_LIBRARY` overrides the search. In a build tree with no
+staged prototype the wrapper falls back to parsing `nlolib_matlab.h`, which
+does need a compiler — run `matlab/generate_library_prototype.m` to avoid it.
 
 ## Minimal Math-to-API Example
 

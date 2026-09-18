@@ -59,9 +59,7 @@ if(ENABLE_RK4_DEBUG_DIAGNOSTICS)
 endif()
 
 add_subdirectory(fft)
-include(NLOCblas)
-configure_cblas(cblas_target cblas_include_dirs)
-target_link_libraries(nlolib PUBLIC fft_backend ${cblas_target})
+target_link_libraries(nlolib PUBLIC fft_backend)
 include(NLOSQLite)
 configure_sqlite(nlolib)
 
@@ -80,9 +78,6 @@ endif()
 
 if(WIN32)
   set(runtime_hints "${SQLITE_RUNTIME_HINTS}")
-  if(CBLAS_RUNTIME_HINTS)
-    list(APPEND runtime_hints "${CBLAS_RUNTIME_HINTS}")
-  endif()
   add_custom_command(TARGET nlolib POST_BUILD
     COMMAND ${CMAKE_COMMAND}
             -DRUNTIME_SOURCE="$<TARGET_FILE:nlolib>"

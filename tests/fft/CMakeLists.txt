@@ -34,8 +34,6 @@ endif()
 
 include(ResolveVulkan)
 resolve_vulkan(vk_headers_available vk_loader_available)
-include(NLOCblas)
-configure_cblas(cblas_target cblas_include_dirs)
 
 target_include_directories(test_fft PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -43,7 +41,7 @@ target_include_directories(test_fft PRIVATE
 if(ENABLE_VULKAN_BACKEND)
   target_include_directories(test_fft PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
 endif()
-target_link_libraries(test_fft PRIVATE fft_backend ${cblas_target})
+target_link_libraries(test_fft PRIVATE fft_backend)
 target_compile_definitions(test_fft PRIVATE
   ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
   ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
@@ -51,9 +49,8 @@ target_compile_definitions(test_fft PRIVATE
 if(ENABLE_VULKAN_BACKEND)
   target_link_libraries(test_fft PRIVATE Vulkan::Vulkan)
 endif()
-if(TARGET vk_shaders)
-  add_dependencies(test_fft vk_shaders)
-endif()
+include(NLOVulkanBackend)
+nlolib_use_embedded_spirv(test_fft)
 if(UNIX)
   target_link_libraries(test_fft PRIVATE m)
 endif()
@@ -62,7 +59,6 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND}
             -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_fft>"
             -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_fft>"
-            -DNLO_RUNTIME_HINTS="${CBLAS_RUNTIME_HINTS}"
             -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
   )
 endif()

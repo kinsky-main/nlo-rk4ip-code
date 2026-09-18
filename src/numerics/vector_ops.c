@@ -1,26 +1,14 @@
 /**
  * @file vector_ops.c
  * @dir src/numerics
- * @brief Vector operations for numerical kernels (CBLAS-backed where available).
+ * @brief Vector operations for numerical kernels.
  * @author Wenzel Kinsky
  * @date 2026-03-10
  */
 
 #include "numerics/vector_ops.h"
-#include <cblas.h>
-#include <limits.h>
 #include <math.h>
 #include <string.h>
-
-static int try_get_blas_length(size_t n, int* out_n)
-{
-    if (out_n == NULL || n > (size_t)INT_MAX) {
-        return 0;
-    }
-
-    *out_n = (int)n;
-    return 1;
-}
 
 void real_fill(double* dst, size_t n, double value)
 {
@@ -36,12 +24,6 @@ void real_fill(double* dst, size_t n, double value)
 void real_copy(double* dst, const double* src, size_t n)
 {
     if (dst == NULL || src == NULL) {
-        return;
-    }
-
-    int blas_n = 0;
-    if (try_get_blas_length(n, &blas_n)) {
-        cblas_dcopy(blas_n, src, 1, dst, 1);
         return;
     }
 
@@ -107,12 +89,6 @@ void complex_copy(nlo_complex* dst, const nlo_complex* src, size_t n)
         return;
     }
 
-    int blas_n = 0;
-    if (try_get_blas_length(n, &blas_n)) {
-        cblas_zcopy(blas_n, src, 1, dst, 1);
-        return;
-    }
-
     memmove(dst, src, n * sizeof(*dst));
 }
 
@@ -135,16 +111,6 @@ void complex_axpy_real(nlo_complex* dst, const double* src, nlo_complex alpha, s
         return;
     }
 
-    int blas_n = 0;
-    if (try_get_blas_length(n, &blas_n)) {
-        double* dst_lanes = (double*)(void*)dst;
-        const double alpha_re = RE(alpha);
-        const double alpha_im = IM(alpha);
-        cblas_daxpy(blas_n, alpha_re, src, 1, dst_lanes, 2);
-        cblas_daxpy(blas_n, alpha_im, src, 1, dst_lanes + 1, 2);
-        return;
-    }
-
     for (size_t i = 0u; i < n; ++i) {
         const double term = src[i];
         dst[i] = make(RE(dst[i]) + (RE(alpha) * term),
@@ -158,13 +124,6 @@ void complex_scalar_mul_inplace(nlo_complex* dst, nlo_complex alpha, size_t n)
         return;
     }
 
-    int blas_n = 0;
-    if (try_get_blas_length(n, &blas_n)) {
-        const double alpha_lanes[2] = { RE(alpha), IM(alpha) };
-        cblas_zscal(blas_n, alpha_lanes, dst, 1);
-        return;
-    }
-
     for (size_t i = 0u; i < n; ++i) {
         dst[i] = mul(dst[i], alpha);
     }
@@ -173,14 +132,6 @@ void complex_scalar_mul_inplace(nlo_complex* dst, nlo_complex alpha, size_t n)
 void complex_scalar_mul(nlo_complex* dst, const nlo_complex* src, nlo_complex alpha, size_t n)
 {
     if (dst == NULL || src == NULL) {
-        return;
-    }
-
-    int blas_n = 0;
-    if (try_get_blas_length(n, &blas_n)) {
-        const double alpha_lanes[2] = { RE(alpha), IM(alpha) };
-        cblas_zcopy(blas_n, src, 1, dst, 1);
-        cblas_zscal(blas_n, alpha_lanes, dst, 1);
         return;
     }
 
@@ -328,13 +279,6 @@ void complex_real_pow_inplace(nlo_complex* dst, size_t n, double exponent)
 void complex_add_inplace(nlo_complex* dst, const nlo_complex* src, size_t n)
 {
     if (dst == NULL || src == NULL) {
-        return;
-    }
-
-    int blas_n = 0;
-    if (try_get_blas_length(n, &blas_n)) {
-        const double one[2] = { 1.0, 0.0 };
-        cblas_zaxpy(blas_n, one, src, 1, dst, 1);
         return;
     }
 

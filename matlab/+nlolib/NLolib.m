@@ -83,25 +83,32 @@ classdef NLolib < handle
             end
 
             if ~libisloaded(obj.LIBNAME)
-                headerPath = nlolib.NLolib.resolve_header();
+                interfaces = nlolib.NLolib.resolve_interfaces();
                 dllCandidates = nlolib.NLolib.resolve_library_candidates(libraryPath);
                 loaded = false;
                 loadErrors = strings(0, 1);
-                for idx = 1:numel(dllCandidates)
-                    dllPath = dllCandidates{idx};
-                    try
-                        nlolib.NLolib.prepend_library_dir_to_path(dllPath);
-                        [notfound, loadWarnings] = loadlibrary(dllPath, headerPath, ...
-                                                               'alias', obj.LIBNAME);
-                        nlolib.NLolib.validate_load_result(notfound, loadWarnings, ...
-                                                           dllPath, headerPath);
-                        loaded = true;
-                        break;
-                    catch ME
-                        loadErrors(end + 1, 1) = string(dllPath) + " -> " + string(ME.message); %#ok<AGROW>
-                        if libisloaded(obj.LIBNAME)
-                            unloadlibrary(obj.LIBNAME);
+                for kdx = 1:numel(interfaces)
+                    spec = interfaces{kdx};
+                    for idx = 1:numel(dllCandidates)
+                        dllPath = dllCandidates{idx};
+                        try
+                            nlolib.NLolib.prepend_library_dir_to_path(dllPath);
+                            [notfound, loadWarnings] = loadlibrary(dllPath, spec.arg, ...
+                                                                   'alias', obj.LIBNAME);
+                            nlolib.NLolib.validate_load_result(notfound, loadWarnings, ...
+                                                               dllPath, spec.description);
+                            loaded = true;
+                            break;
+                        catch ME
+                            loadErrors(end + 1, 1) = string(dllPath) + " [" + ...
+                                string(spec.description) + "] -> " + string(ME.message); %#ok<AGROW>
+                            if libisloaded(obj.LIBNAME)
+                                unloadlibrary(obj.LIBNAME);
+                            end
                         end
+                    end
+                    if loaded
+                        break;
                     end
                 end
                 if ~loaded
@@ -1133,6 +1140,78 @@ classdef NLolib < handle
     end
 
     methods (Static, Access = private)
+        function interfaces = resolve_interfaces()
+            %RESOLVE_INTERFACES Ordered ways to describe the library to loadlibrary.
+            %   A staged prototype (nlolib_proto.m plus its sibling thunk) is
+            %   preferred: loadlibrary consumes it directly and never parses a
+            %   header, which is the only step that needs a C compiler on this
+            %   machine.  The header is kept as a fallback for build trees that
+            %   have not generated a prototype, and for the case where a stale
+            %   prototype no longer matches a freshly built library.
+            interfaces = {};
+
+            protoFcn = nlolib.NLolib.resolve_prototype();
+            if ~isempty(protoFcn)
+                interfaces{end + 1} = struct( ...
+                    'arg',         protoFcn, ...
+                    'description', 'prototype nlolib_proto (no compiler needed)');
+            end
+
+            try
+                headerPath = nlolib.NLolib.resolve_header();
+                interfaces{end + 1} = struct( ...
+                    'arg',         headerPath, ...
+                    'description', ['header ' headerPath ' (needs a C compiler)']);
+            catch ME
+                if isempty(interfaces)
+                    rethrow(ME);
+                end
+            end
+        end
+
+        function protoFcn = resolve_prototype()
+            %RESOLVE_PROTOTYPE Locate a staged loadlibrary prototype, if any.
+            %   Returns a function handle to nlolib_proto, or [] when no usable
+            %   prototype is installed.  The prototype resolves its thunk
+            %   relative to its own folder, so a prototype without a matching
+            %   thunk for this architecture is rejected rather than tried.
+            protoFcn = [];
+
+            roots = nlolib.NLolib.resolve_roots();
+            candidates = {};
+            for idx = 1:numel(roots)
+                root = roots{idx};
+                candidates{end + 1} = fullfile(root, 'nlolib_proto.m'); %#ok<AGROW>
+                candidates{end + 1} = fullfile(root, 'lib', 'nlolib_proto.m'); %#ok<AGROW>
+                candidates{end + 1} = fullfile(root, 'build', 'matlab_toolbox', ...
+                                               'nlolib_proto.m'); %#ok<AGROW>
+            end
+            candidates = unique(candidates, 'stable');
+
+            % MATLAB names the thunk after the platform, using 'pcwin64' on
+            % Windows where computer('arch') reports 'win64'.
+            archToken = computer('arch');
+            if strcmp(archToken, 'win64')
+                archToken = 'pcwin64';
+            end
+
+            for idx = 1:numel(candidates)
+                protoPath = candidates{idx};
+                if ~isfile(protoPath)
+                    continue;
+                end
+                protoDir = fileparts(protoPath);
+                thunks = dir(fullfile(protoDir, ['nlolib_thunk_' archToken '.*']));
+                thunks = thunks(~[thunks.isdir]);
+                if isempty(thunks)
+                    continue;
+                end
+                addpath(protoDir);
+                protoFcn = str2func('nlolib_proto');
+                return;
+            end
+        end
+
         function headerPath = resolve_header()
             %RESOLVE_HEADER Locate nlolib_matlab.h relative to this file.
             roots = nlolib.NLolib.resolve_roots();
@@ -1896,16 +1975,16 @@ classdef NLolib < handle
             roots = unique({containerDir, parentDir}, 'stable');
         end
 
-        function validate_load_result(notfound, loadWarnings, dllPath, headerPath)
+        function validate_load_result(notfound, loadWarnings, dllPath, interfaceDescription)
             %VALIDATE_LOAD_RESULT Surface loadlibrary diagnostics clearly.
             if ~isempty(notfound)
                 missingText = char(nlolib.NLolib.as_text(notfound));
                 error('nlolib:loadlibraryNotFound', ...
                       ['loadlibrary could not resolve one or more symbols.\n' ...
-                       'Library: %s\n' ...
-                       'Header : %s\n' ...
+                       'Library  : %s\n' ...
+                       'Interface: %s\n' ...
                        'Missing symbols:\n%s'], ...
-                      dllPath, headerPath, missingText);
+                      dllPath, interfaceDescription, missingText);
             end
 
             warningText = strtrim(char(nlolib.NLolib.as_text(loadWarnings)));
@@ -1913,9 +1992,9 @@ classdef NLolib < handle
                 warning('nlolib:loadlibraryWarnings', ...
                         ['loadlibrary produced parser warnings.\n' ...
                          'These are often non-fatal, but unresolved types will fail fast later.\n' ...
-                         'Library: %s\n' ...
-                         'Header : %s\n\n%s'], ...
-                        dllPath, headerPath, warningText);
+                         'Library  : %s\n' ...
+                         'Interface: %s\n\n%s'], ...
+                        dllPath, interfaceDescription, warningText);
             end
         end
 

@@ -1,3 +1,17 @@
+# Delay-load the Vulkan loader on Windows so vulkan-1.dll is only pulled in on
+# the first Vulkan call, not when the library itself is loaded.  Without this a
+# machine with no Vulkan runtime -- common for CPU-only use, and for the MATLAB
+# toolbox in particular -- cannot load nlolib at all.  vk_auto_context.c probes
+# for the loader before touching any entry point, so the delayed import is never
+# triggered when it is absent.
+function(nlolib_delay_load_vulkan target)
+  if(NOT WIN32 OR NOT MSVC)
+    return()
+  endif()
+  target_link_options(${target} PRIVATE "/DELAYLOAD:vulkan-1.dll")
+  target_link_libraries(${target} PRIVATE delayimp)
+endfunction()
+
 function(configure_vulkan_backend target target_source_dir target_binary_dir)
   include(ResolveVulkan)
   resolve_vulkan(vk_headers_available vk_loader_available)
@@ -74,33 +88,54 @@ function(configure_vulkan_backend target target_source_dir target_binary_dir)
   endforeach()
 
   add_custom_target(vk_shaders DEPENDS ${vk_spv_outputs})
-  add_dependencies(${target} vk_shaders)
 
-  set(VK_SHADER_REAL_FILL_PATH "${VK_KERNEL_BINARY_DIR}/real_fill.spv")
-  set(VK_SHADER_REAL_MUL_INPLACE_PATH "${VK_KERNEL_BINARY_DIR}/real_mul_inplace.spv")
-  set(VK_SHADER_COMPLEX_FILL_PATH "${VK_KERNEL_BINARY_DIR}/complex_fill.spv")
-  set(VK_SHADER_COMPLEX_SCALAR_MUL_INPLACE_PATH "${VK_KERNEL_BINARY_DIR}/complex_scalar_mul_inplace.spv")
-  set(VK_SHADER_COMPLEX_ADD_INPLACE_PATH "${VK_KERNEL_BINARY_DIR}/complex_add_inplace.spv")
-  set(VK_SHADER_COMPLEX_MUL_INPLACE_PATH "${VK_KERNEL_BINARY_DIR}/complex_mul_inplace.spv")
-  set(VK_SHADER_COMPLEX_MAGNITUDE_SQUARED_PATH "${VK_KERNEL_BINARY_DIR}/complex_magnitude_squared.spv")
-  set(VK_SHADER_COMPLEX_EXP_INPLACE_PATH "${VK_KERNEL_BINARY_DIR}/complex_exp_inplace.spv")
-  set(VK_SHADER_COMPLEX_REAL_POW_INPLACE_PATH "${VK_KERNEL_BINARY_DIR}/complex_real_pow_inplace.spv")
-  set(VK_SHADER_COMPLEX_RELATIVE_ERROR_REDUCE_PATH "${VK_KERNEL_BINARY_DIR}/complex_relative_error_reduce.spv")
-  set(VK_SHADER_REAL_MAX_REDUCE_PATH "${VK_KERNEL_BINARY_DIR}/real_max_reduce.spv")
-  set(VK_SHADER_COMPLEX_WEIGHTED_RMS_REDUCE_PATH "${VK_KERNEL_BINARY_DIR}/complex_weighted_rms_reduce.spv")
-  set(VK_SHADER_PAIR_SUM_REDUCE_PATH "${VK_KERNEL_BINARY_DIR}/pair_sum_reduce.spv")
-  set(VK_SHADER_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA_PATH "${VK_KERNEL_BINARY_DIR}/complex_axis_unshifted_from_delta.spv")
-  set(VK_SHADER_COMPLEX_AXIS_CENTERED_FROM_DELTA_PATH "${VK_KERNEL_BINARY_DIR}/complex_axis_centered_from_delta.spv")
-  set(VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_T_PATH "${VK_KERNEL_BINARY_DIR}/complex_mesh_from_axis_tfast_t.spv")
-  set(VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_Y_PATH "${VK_KERNEL_BINARY_DIR}/complex_mesh_from_axis_tfast_y.spv")
-  set(VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_X_PATH "${VK_KERNEL_BINARY_DIR}/complex_mesh_from_axis_tfast_x.spv")
+  # Compile the SPIR-V modules into the library rather than loading them from
+  # disk at runtime, so a packaged toolbox does not depend on the build tree.
+  set(VK_SHADER_BLOB_DIR "${target_binary_dir}/generated")
+  set(VK_SHADER_BLOB_SOURCE "${VK_SHADER_BLOB_DIR}/vk_shader_blobs.c")
+  set(VK_SHADER_BLOB_HEADER "${VK_SHADER_BLOB_DIR}/vk_shader_blobs.h")
+  file(MAKE_DIRECTORY "${VK_SHADER_BLOB_DIR}")
 
-  configure_file(
-    "${target_source_dir}/backend/vulkan/nlo_vk_shader_paths.h.in"
-    "${target_binary_dir}/generated/vk_shader_paths.h"
-    @ONLY
+  add_custom_command(
+    OUTPUT "${VK_SHADER_BLOB_SOURCE}" "${VK_SHADER_BLOB_HEADER}"
+    COMMAND ${CMAKE_COMMAND}
+      "-DSPV_NAMES=${vk_kernel_names}"
+      "-DSPV_FILES=${vk_spv_outputs}"
+      "-DOUTPUT_SOURCE=${VK_SHADER_BLOB_SOURCE}"
+      "-DOUTPUT_HEADER=${VK_SHADER_BLOB_HEADER}"
+      -P "${CMAKE_SOURCE_DIR}/cmake/embed_spirv.cmake"
+    DEPENDS ${vk_spv_outputs} "${CMAKE_SOURCE_DIR}/cmake/embed_spirv.cmake"
+    COMMENT "Embedding SPIR-V modules into vk_shader_blobs.c"
+    VERBATIM
   )
+  add_custom_target(vk_shader_blobs
+    DEPENDS "${VK_SHADER_BLOB_SOURCE}" "${VK_SHADER_BLOB_HEADER}")
+  add_dependencies(vk_shader_blobs vk_shaders)
+  add_dependencies(${target} vk_shader_blobs)
 
-  target_include_directories(${target} PRIVATE "${target_binary_dir}/generated")
+  target_sources(${target} PRIVATE "${VK_SHADER_BLOB_SOURCE}")
+  set_source_files_properties("${VK_SHADER_BLOB_SOURCE}" PROPERTIES GENERATED TRUE)
+
+  target_include_directories(${target} PRIVATE "${VK_SHADER_BLOB_DIR}")
   target_link_libraries(${target} PUBLIC Vulkan::Headers Vulkan::Vulkan)
+  nlolib_delay_load_vulkan(${target})
+
+  # Published so tests and benchmarks that compile the Vulkan backend sources
+  # directly can pick up the same embedded shaders.
+  set(NLOLIB_VK_SHADER_BLOB_DIR "${VK_SHADER_BLOB_DIR}"
+      CACHE INTERNAL "Directory holding the generated SPIR-V blob sources" FORCE)
+  set(NLOLIB_VK_SHADER_BLOB_SOURCE "${VK_SHADER_BLOB_SOURCE}"
+      CACHE INTERNAL "Generated SPIR-V blob translation unit" FORCE)
+endfunction()
+
+# Attach the embedded SPIR-V modules to a target that compiles the Vulkan
+# backend sources itself (tests, benchmarks) rather than linking nlolib.
+function(nlolib_use_embedded_spirv target)
+  if(NOT TARGET vk_shader_blobs)
+    return()
+  endif()
+  add_dependencies(${target} vk_shader_blobs)
+  set_source_files_properties("${NLOLIB_VK_SHADER_BLOB_SOURCE}" PROPERTIES GENERATED TRUE)
+  target_sources(${target} PRIVATE "${NLOLIB_VK_SHADER_BLOB_SOURCE}")
+  target_include_directories(${target} PRIVATE "${NLOLIB_VK_SHADER_BLOB_DIR}")
 endfunction()

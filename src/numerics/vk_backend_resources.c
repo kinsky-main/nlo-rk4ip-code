@@ -4,7 +4,7 @@
  */
 
 #include "numerics/vk_backend_internal.h"
-#include "vk_shader_paths.h"
+#include "vk_shader_blobs.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -167,81 +167,25 @@ void vk_destroy_buffer_raw(vector_backend* backend, VkBuffer* buffer, VkDeviceMe
     }
 }
 
-static vec_status vk_read_binary_file(const char* path, uint32_t** out_words, size_t* out_size)
-{
-    if (path == NULL || out_words == NULL || out_size == NULL) {
-        return VEC_STATUS_INVALID_ARGUMENT;
-    }
-
-    FILE* fp = fopen(path, "rb");
-    if (fp == NULL) {
-        return VEC_STATUS_BACKEND_UNAVAILABLE;
-    }
-
-    if (fseek(fp, 0, SEEK_END) != 0) {
-        fclose(fp);
-        return VEC_STATUS_BACKEND_UNAVAILABLE;
-    }
-
-    long file_size_long = ftell(fp);
-    if (file_size_long <= 0) {
-        fclose(fp);
-        return VEC_STATUS_BACKEND_UNAVAILABLE;
-    }
-
-    const size_t file_size = (size_t)file_size_long;
-    if ((file_size % sizeof(uint32_t)) != 0u) {
-        fclose(fp);
-        return VEC_STATUS_BACKEND_UNAVAILABLE;
-    }
-
-    if (fseek(fp, 0, SEEK_SET) != 0) {
-        fclose(fp);
-        return VEC_STATUS_BACKEND_UNAVAILABLE;
-    }
-
-    uint32_t* words = (uint32_t*)malloc(file_size);
-    if (words == NULL) {
-        fclose(fp);
-        return VEC_STATUS_ALLOCATION_FAILED;
-    }
-
-    size_t nread = fread(words, 1u, file_size, fp);
-    fclose(fp);
-    if (nread != file_size) {
-        free(words);
-        return VEC_STATUS_BACKEND_UNAVAILABLE;
-    }
-
-    *out_words = words;
-    *out_size = file_size;
-    return VEC_STATUS_OK;
-}
-
 static vec_status vk_create_compute_pipeline(
     vector_backend* backend,
-    const char* shader_path,
+    const nlo_spirv_blob* shader,
     VkPipeline* out_pipeline
 )
 {
-    uint32_t* shader_words = NULL;
-    size_t shader_size = 0u;
-    vec_status status = vk_read_binary_file(shader_path, &shader_words, &shader_size);
-    if (status != VEC_STATUS_OK) {
-        return status;
+    if (shader == NULL || shader->words == NULL || shader->size_bytes == 0u) {
+        return VEC_STATUS_INVALID_ARGUMENT;
     }
 
     VkShaderModuleCreateInfo module_info = {
         .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-        .codeSize = shader_size,
-        .pCode = shader_words
+        .codeSize = shader->size_bytes,
+        .pCode = shader->words
     };
     VkShaderModule module = VK_NULL_HANDLE;
     if (vkCreateShaderModule(backend->vk.device, &module_info, NULL, &module) != VK_SUCCESS) {
-        free(shader_words);
         return VEC_STATUS_BACKEND_UNAVAILABLE;
     }
-    free(shader_words);
 
     VkPipelineShaderStageCreateInfo stage_info = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -450,29 +394,29 @@ static vec_status vk_create_descriptor_resources(
 
 static vec_status vk_create_kernels(vector_backend* backend)
 {
-    const char* shader_paths[VK_KERNEL_COUNT] = {
-        VK_SHADER_REAL_FILL_PATH,
-        VK_SHADER_REAL_MUL_INPLACE_PATH,
-        VK_SHADER_COMPLEX_FILL_PATH,
-        VK_SHADER_COMPLEX_SCALAR_MUL_INPLACE_PATH,
-        VK_SHADER_COMPLEX_ADD_INPLACE_PATH,
-        VK_SHADER_COMPLEX_MUL_INPLACE_PATH,
-        VK_SHADER_COMPLEX_MAGNITUDE_SQUARED_PATH,
-        VK_SHADER_COMPLEX_EXP_INPLACE_PATH,
-        VK_SHADER_COMPLEX_REAL_POW_INPLACE_PATH,
-        VK_SHADER_COMPLEX_RELATIVE_ERROR_REDUCE_PATH,
-        VK_SHADER_REAL_MAX_REDUCE_PATH,
-        VK_SHADER_COMPLEX_WEIGHTED_RMS_REDUCE_PATH,
-        VK_SHADER_PAIR_SUM_REDUCE_PATH,
-        VK_SHADER_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA_PATH,
-        VK_SHADER_COMPLEX_AXIS_CENTERED_FROM_DELTA_PATH,
-        VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_T_PATH,
-        VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_Y_PATH,
-        VK_SHADER_COMPLEX_MESH_FROM_AXIS_TFAST_X_PATH
+    const nlo_spirv_blob* shaders[VK_KERNEL_COUNT] = {
+        &nlo_spirv_real_fill,
+        &nlo_spirv_real_mul_inplace,
+        &nlo_spirv_complex_fill,
+        &nlo_spirv_complex_scalar_mul_inplace,
+        &nlo_spirv_complex_add_inplace,
+        &nlo_spirv_complex_mul_inplace,
+        &nlo_spirv_complex_magnitude_squared,
+        &nlo_spirv_complex_exp_inplace,
+        &nlo_spirv_complex_real_pow_inplace,
+        &nlo_spirv_complex_relative_error_reduce,
+        &nlo_spirv_real_max_reduce,
+        &nlo_spirv_complex_weighted_rms_reduce,
+        &nlo_spirv_pair_sum_reduce,
+        &nlo_spirv_complex_axis_unshifted_from_delta,
+        &nlo_spirv_complex_axis_centered_from_delta,
+        &nlo_spirv_complex_mesh_from_axis_tfast_t,
+        &nlo_spirv_complex_mesh_from_axis_tfast_y,
+        &nlo_spirv_complex_mesh_from_axis_tfast_x
     };
 
     for (size_t i = 0u; i < (size_t)VK_KERNEL_COUNT; ++i) {
-        vec_status status = vk_create_compute_pipeline(backend, shader_paths[i], &backend->vk.kernels[i].pipeline);
+        vec_status status = vk_create_compute_pipeline(backend, shaders[i], &backend->vk.kernels[i].pipeline);
         if (status != VEC_STATUS_OK) {
             return status;
         }

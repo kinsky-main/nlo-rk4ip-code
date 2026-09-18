@@ -1,6 +1,6 @@
 # nlolib Docs
 
-`nlolib` is a C99 nonlinear optics library with CPU CBLAS and Vulkan compute
+`nlolib` is a C99 nonlinear optics library with CPU and Vulkan compute
 backends, plus Python, MATLAB, and Julia bindings.
 
 This site is organized as a guide-first manual with separate API reference

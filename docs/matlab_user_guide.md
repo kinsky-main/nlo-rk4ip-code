@@ -31,12 +31,19 @@ wrapper over the native shared library. There is no Python or MEX dependency.
 ### Prerequisites
 
 - MATLAB R2019b or later.
-- A C compiler visible to MATLAB. `loadlibrary` parses `nlolib_matlab.h` at
-  load time and needs one on Windows; check with `mex -setup C` if the load
-  fails while complaining about the header.
+- No C compiler, and no Visual C++ redistributable. The packaged toolbox ships
+  a prebuilt `loadlibrary` prototype (`nlolib_proto.m` plus its thunk), so the
+  header is never parsed on your machine, and the library links the MSVC
+  runtime statically.
 - For the Vulkan backend, a GPU driver shipping the Vulkan loader (standard
   NVIDIA / AMD / Intel desktop drivers include it). The CPU backend needs
-  nothing extra.
+  nothing extra — the library loads and runs with no Vulkan runtime installed.
+
+Working from a build tree rather than a packaged toolbox is the one case that
+still needs a compiler: with no prototype staged, `loadlibrary` falls back to
+parsing `nlolib_matlab.h`. Run `matlab/generate_library_prototype.m` once to
+remove that fallback, or check `mex -setup C` if the load fails complaining
+about the header.
 
 ### Option A — toolbox install (recommended)
 
@@ -708,7 +715,7 @@ back from the database.
 |---|---|---|
 | `nlolib:libraryNotFound` | no `nlolib.dll` / `libnlolib.so` on any search path | set `NLOLIB_LIBRARY`, or pass the path to the constructor |
 | `nlolib:headerNotFound` | `nlolib_matlab.h` missing next to the library | rebuild the `matlab_stage` target, or reinstall the toolbox |
-| `nlolib:libraryLoadFailed` | every candidate failed to load | check the per-candidate reasons in the message; usually a header-parse failure (check `mex -setup C`) or an architecture mismatch |
+| `nlolib:libraryLoadFailed` | every candidate failed to load | the message lists each library and the interface used (prototype or header); a header-parse failure means no prototype was staged and no compiler is set up — run `matlab/generate_library_prototype.m` or `mex -setup C`. Otherwise suspect an architecture mismatch |
 | `nlolib:loadlibraryWarnings` | header parsed with warnings | non-fatal on its own, but unresolved types fail later — treat it as a real signal |
 | `nlolib:simConfigTypeUnavailable` | stale or duplicate parsed type table | `nlolib.NLolib.unload(); clear classes;` then confirm only one `nlolib` package is on the path |
 | `nlolib:inputFieldLengthMismatch` | `cfg.num_time_samples ~= numel(inputField)` | for tensor runs set it to `nt*nx*ny` |
