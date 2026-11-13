@@ -30,6 +30,9 @@ add_custom_command(TARGET matlab_stage POST_BUILD
         "${CMAKE_SOURCE_DIR}/matlab/nlolib_setup.m"
         "${MATLAB_STAGE_DIR}/nlolib_setup.m"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/matlab/resources"
+        "${MATLAB_STAGE_DIR}/resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/examples/matlab"
         "${MATLAB_STAGE_DIR}/examples/matlab"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

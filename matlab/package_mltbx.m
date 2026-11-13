@@ -21,8 +21,16 @@ if ~isfolder(distDir)
     mkdir(distDir);
 end
 
-cmakeCommand = sprintf('cmake --build "%s" --config %s --target matlab_stage', ...
-                       buildDirAbs, char(string(config)));
+% MATLAB's system() inherits its bundled runtime library path, which makes
+% host tools such as cmake load MATLAB's older libstdc++. Clear it for cmake.
+envPrefix = '';
+if ismac
+    envPrefix = 'env -u DYLD_LIBRARY_PATH ';
+elseif isunix
+    envPrefix = 'env -u LD_LIBRARY_PATH ';
+end
+cmakeCommand = sprintf('%scmake --build "%s" --config %s --target matlab_stage', ...
+                       envPrefix, buildDirAbs, char(string(config)));
 [status, output] = system(cmakeCommand);
 if status ~= 0
     error('nlolib:matlabPackageBuildFailed', ...
@@ -61,7 +69,9 @@ opts.Description = sprintf(['nlolib MATLAB bindings and staged runtime libraries
 opts.AuthorName = "nlolib";
 opts.MinimumMatlabRelease = "R2019b";
 opts.OutputFile = artifactPath;
-opts.ToolboxMatlabPath = {char(stageDir), char(fullfile(stageDir, "examples", "matlab"))};
+% Only the package root goes on the permanent path; examples (and their
+% generic +backend helpers) are added per session by nlolib_setup().
+opts.ToolboxMatlabPath = {char(stageDir)};
 supportedPlatforms = opts.SupportedPlatforms;
 supportedPlatforms.Win64 = false;
 supportedPlatforms.Glnxa64 = false;

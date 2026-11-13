@@ -77,5 +77,6 @@ for idx = 1:10
     repoRoot = parentDir;
 end
 
-repoRoot = fileparts(fileparts(fileparts(char(startDir))));
+% No repo markers (e.g. installed toolbox): <root>/examples/matlab -> <root>.
+repoRoot = fileparts(fileparts(char(startDir)));
 end

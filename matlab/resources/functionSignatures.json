@@ -1,0 +1,148 @@
+{
+  "_schemaVersion": "1.0.0",
+  "nlolib.NLolib.NLolib": {
+    "inputs": [
+      {"name": "libraryPath", "kind": "optional", "type": ["file=*.so,*.dll,*.dylib"], "purpose": "Explicit path to the nlolib shared library"}
+    ],
+    "outputs": [
+      {"name": "obj", "type": "nlolib.NLolib"}
+    ]
+  },
+  "nlolib.NLolib.propagate": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "pulse", "kind": "required", "type": "struct", "purpose": "Pulse spec: samples, delta_time, optional tensor_nt/nx/ny, delta_x/y, potential_grid"},
+      {"name": "linearOp", "kind": "optional", "type": [["char", "choices={'gvd','none'}"], ["string", "choices={\"gvd\",\"none\"}"], ["struct"]], "purpose": "Linear operator: preset, struct('expr', ..., 'params', ...) or struct('fn', @(...) ...)"},
+      {"name": "nonlinearOp", "kind": "optional", "type": [["char", "choices={'kerr','none'}"], ["string", "choices={\"kerr\",\"none\"}"], ["struct"]], "purpose": "Nonlinear operator: preset, struct('expr', ..., 'params', ...) or struct('fn', @(A, I, V) ...)"},
+      {"name": "options", "kind": "optional", "type": "struct", "purpose": "propagation_distance, preset, records, output, error_tolerance, starting/max/min_step_size, exec_options, storage"}
+    ],
+    "outputs": [
+      {"name": "result", "type": "struct"}
+    ]
+  },
+  "nlolib.NLolib.query_runtime_limits": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "config", "kind": "optional", "type": "struct", "purpose": "Simulation config to size against"},
+      {"name": "execOptions", "kind": "optional", "type": "struct", "purpose": "Execution options (backend_type, fft_backend, ...)"}
+    ],
+    "outputs": [
+      {"name": "limits", "type": "struct"}
+    ]
+  },
+  "nlolib.NLolib.storage_is_available": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"}
+    ],
+    "outputs": [
+      {"name": "tf", "type": "logical"}
+    ]
+  },
+  "nlolib.NLolib.set_log_file": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "path", "kind": "required", "type": [["char"], ["string"]], "purpose": "Log file path; empty disables file logging"},
+      {"name": "append", "kind": "optional", "type": "logical", "purpose": "Append instead of truncate (default false)"}
+    ]
+  },
+  "nlolib.NLolib.set_log_buffer": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "capacityBytes", "kind": "optional", "type": ["numeric", "scalar", "positive"], "purpose": "Ring buffer size in bytes (default 262144)"}
+    ]
+  },
+  "nlolib.NLolib.clear_log_buffer": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"}
+    ]
+  },
+  "nlolib.NLolib.read_log_buffer": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "consume", "kind": "optional", "type": "logical", "purpose": "Remove returned text from the buffer (default true)"},
+      {"name": "maxBytes", "kind": "optional", "type": ["numeric", "scalar"], "purpose": "Maximum bytes to read (default 262144)"}
+    ],
+    "outputs": [
+      {"name": "text", "type": "string"}
+    ]
+  },
+  "nlolib.NLolib.tail_logs": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "consume", "kind": "optional", "type": "logical", "purpose": "Remove printed text from the buffer (default true)"},
+      {"name": "maxBytes", "kind": "optional", "type": ["numeric", "scalar"], "purpose": "Maximum bytes to print (default 262144)"}
+    ],
+    "outputs": [
+      {"name": "text", "type": "string"}
+    ]
+  },
+  "nlolib.NLolib.set_log_level": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "level", "kind": "optional", "type": ["numeric", "scalar", "integer"], "purpose": "Log level threshold (default 2)"}
+    ]
+  },
+  "nlolib.NLolib.set_progress_options": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "enabled", "kind": "optional", "type": "logical", "purpose": "Show the progress bar (default true)"},
+      {"name": "milestonePercent", "kind": "optional", "type": ["numeric", "scalar", "integer"], "purpose": "Percent between progress updates (default 5)"},
+      {"name": "emitOnStepAdjust", "kind": "optional", "type": "logical", "purpose": "Also report step-size changes (default false)"}
+    ]
+  },
+  "nlolib.NLolib.set_progress_stream": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "streamMode", "kind": "optional", "type": ["numeric", "scalar", "integer"], "purpose": "Progress output stream (default 0 = stderr)"}
+    ]
+  },
+  "nlolib.NLolib.perf_profile_set_enabled": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"},
+      {"name": "enabled", "kind": "optional", "type": "logical", "purpose": "Enable perf counters (default true)"}
+    ]
+  },
+  "nlolib.NLolib.perf_profile_is_enabled": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"}
+    ],
+    "outputs": [
+      {"name": "tf", "type": "logical"}
+    ]
+  },
+  "nlolib.NLolib.perf_profile_reset": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"}
+    ]
+  },
+  "nlolib.NLolib.perf_profile_read": {
+    "inputs": [
+      {"name": "obj", "kind": "required", "type": "nlolib.NLolib"}
+    ],
+    "outputs": [
+      {"name": "snapshot", "type": "struct"}
+    ]
+  },
+  "nlolib.NLolib.unload": {
+    "inputs": []
+  },
+  "nlolib.translate_runtime_handle": {
+    "inputs": [
+      {"name": "fn", "kind": "required", "type": "function_handle", "purpose": "Operator handle to compile into a runtime expression"},
+      {"name": "context", "kind": "required", "type": ["char", "choices={'dispersion_factor','dispersion','nonlinear'}"], "purpose": "Which argument list the handle binds: @(A, w), @(A, D, h, w) or @(A, I, V)"},
+      {"name": "runtime", "kind": "optional", "type": "struct", "purpose": "Runtime options, e.g. constant_bindings"}
+    ],
+    "outputs": [
+      {"name": "expression", "type": "string"},
+      {"name": "constants", "type": "double"}
+    ]
+  },
+  "nlolib_setup": {
+    "inputs": [
+      {"name": "saveToPath", "kind": "optional", "type": "logical", "purpose": "Also save the updated MATLAB path (default false)"}
+    ],
+    "outputs": [
+      {"name": "addedPaths", "type": "string"}
+    ]
+  }
+}
