@@ -166,6 +166,9 @@ classdef NLolib < handle
             %   OPTIONS (high-level)
             %     propagation_distance - required, > 0
             %     preset               - "fast" | "balanced" | "accuracy"
+            %     error_tolerance      - adaptive-step error target; preset default
+            %     starting_step_size, max_step_size, min_step_size
+            %                          - step bounds in z units; preset default
             %     records              - z samples to record; preset default
             %     output               - "dense" | "final" (forces records = 1)
             %     exec_options         - execution options struct, below
@@ -1662,6 +1665,15 @@ classdef NLolib < handle
                 preset = lower(string(options.preset));
             end
             defaults = nlolib.NLolib.solver_defaults(preset, zEnd);
+            % Explicit solver fields override the preset, as in the Python API.
+            solverFields = {'starting_step_size', 'max_step_size', ...
+                            'min_step_size', 'error_tolerance'};
+            for idx = 1:numel(solverFields)
+                name = solverFields{idx};
+                if isfield(options, name) && ~isempty(options.(name))
+                    defaults.(name) = double(options.(name));
+                end
+            end
 
             output = "dense";
             if isfield(options, 'output') && ~isempty(options.output)

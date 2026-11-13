@@ -312,6 +312,8 @@ handle:
 |---|---|---|
 | `propagation_distance` | *required*, > 0 | total \f$z\f$ to propagate |
 | `preset` | `"balanced"` | solver defaults, see below |
+| `error_tolerance` | from preset | adaptive-step error target |
+| `starting_step_size`, `max_step_size`, `min_step_size` | from preset | step bounds, in \f$z\f$ units |
 | `records` | from preset | number of \f$z\f$ samples to record |
 | `output` | `"dense"` | `"final"` forces `records = 1` |
 | `exec_options` | `struct()` | backend and telemetry selection |
@@ -328,7 +330,8 @@ Step sizes scale with the propagation distance \f$L\f$:
 | `"accuracy"` | \f$L/400\f$ | \f$L/50\f$ | \f$L/80000\f$ | `1e-7` | 192 |
 
 The solver is adaptive, so these are bounds and an initial guess, not a fixed
-schedule. Use the low-level API when you need exact control.
+schedule. Any of `error_tolerance`, `starting_step_size`, `max_step_size` and
+`min_step_size` set in `options` replaces the preset value.
 
 ### Execution options
 
@@ -771,6 +774,7 @@ plotting helpers.
 |---|---|
 | [`standalone_transverse_grin_beam.m`](../examples/matlab/standalone_transverse_grin_beam.m) | transverse x-y run, potential grid, analytical centroid check |
 | [`standalone_spatiotemporal_kerr_bullet.m`](../examples/matlab/standalone_spatiotemporal_kerr_bullet.m) | full 3+1D Kerr propagation against Gaussian beam/pulse laws |
+| [`grin_fiber_soliton_fission.m`](../examples/matlab/grin_fiber_soliton_fission.m) | 3+1D higher-order soliton fission and dispersive wave in a GRIN fibre |
 | [`runtime_temporal_demo.m`](../examples/matlab/runtime_temporal_demo.m) | function-handle linear operator, log buffer, progress options |
 | [`second_order_soliton_rk4ip.m`](../examples/matlab/second_order_soliton_rk4ip.m) | analytical soliton validation with step-history telemetry |
 | [`linear_drift_rk4ip.m`](../examples/matlab/linear_drift_rk4ip.m) | purely dispersive drift with an analytical reference |

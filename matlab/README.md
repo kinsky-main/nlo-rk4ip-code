@@ -114,6 +114,8 @@ Self-contained scripts that run against an installed toolbox:
   — transverse x-y propagation with a GRIN potential grid.
 - [`examples/matlab/standalone_spatiotemporal_kerr_bullet.m`](../examples/matlab/standalone_spatiotemporal_kerr_bullet.m)
   — coupled 3+1D Kerr propagation validated against Gaussian beam/pulse laws.
+- [`examples/matlab/grin_fiber_soliton_fission.m`](../examples/matlab/grin_fiber_soliton_fission.m)
+  — higher-order soliton fission in the fundamental mode of a GRIN fibre.
 
 Repo-helper examples (run `addpath('examples/matlab')` first) cover callable
 runtime operators, soliton and linear-drift validation, GRIN fibre transverse
