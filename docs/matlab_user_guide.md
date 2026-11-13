@@ -54,8 +54,10 @@ Download `nlolib.mltbx` from the GitHub release page and double-click it, or:
 matlab.addons.install('nlolib.mltbx');
 ```
 
-The toolbox bundles the package, the shared library, `nlolib_matlab.h`, and the
-example scripts.
+The toolbox bundles the package, the shared library for each supported
+platform (under `lib/<arch>`), `nlolib_matlab.h`, and the example scripts.
+Installing a newer `nlolib.mltbx` replaces the installed version. Installing puts only the package on the MATLAB path; run
+`nlolib_setup()` to add the example folder for the current session.
 
 ### Option B — build tree
 

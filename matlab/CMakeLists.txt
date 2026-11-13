@@ -18,9 +18,7 @@ add_custom_command(TARGET matlab_stage POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E remove_directory "${MATLAB_STAGE_DIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${MATLAB_STAGE_DIR}/+nlolib"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${MATLAB_STAGE_DIR}/lib"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${MATLAB_STAGE_DIR}/lib/win64"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${MATLAB_STAGE_DIR}/lib/glnxa64"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${MATLAB_STAGE_DIR}/lib/maci64"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${MATLAB_STAGE_DIR}/lib/${MATLAB_PLATFORM_SUBDIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${MATLAB_STAGE_DIR}/examples/matlab"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${MATLAB_STAGE_DIR}/docs"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -46,15 +44,7 @@ add_custom_command(TARGET matlab_stage POST_BUILD
         "${MATLAB_STAGE_DIR}/lib/nlolib_matlab.h"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:nlolib>"
-        "${MATLAB_STAGE_DIR}/lib/$<TARGET_FILE_NAME:nlolib>"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "$<TARGET_FILE:nlolib>"
         "${MATLAB_STAGE_DIR}/lib/${MATLAB_PLATFORM_SUBDIR}/$<TARGET_FILE_NAME:nlolib>"
-    COMMAND ${CMAKE_COMMAND}
-        -DRUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
-        -DRUNTIME_DEST="${MATLAB_STAGE_DIR}/lib"
-        -DRUNTIME_HINTS="${SQLITE_RUNTIME_HINTS}"
-        -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
     COMMAND ${CMAKE_COMMAND}
         -DRUNTIME_SOURCE="$<TARGET_FILE:nlolib>"
         -DRUNTIME_DEST="${MATLAB_STAGE_DIR}/lib/${MATLAB_PLATFORM_SUBDIR}"

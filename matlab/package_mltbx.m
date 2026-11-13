@@ -4,7 +4,11 @@ function artifactPath = package_mltbx(buildDir, config)
 %   artifactPath = package_mltbx(buildDir, config)
 %
 % This helper stages files via CMake target `matlab_stage` and then emits
-% a platform-tagged `.mltbx` bundle under `<repo>/dist`.
+% a platform-tagged `.mltbx` bundle under `<repo>/dist`.  Platform binaries
+% (shared library, loadlibrary prototype and thunk) live in lib/<arch>, so
+% bundles from several platforms can be combined with merge_mltbx.
+%
+% See also MERGE_MLTBX.
 
 if nargin < 1 || strlength(string(buildDir)) == 0
     buildDir = "build";
@@ -61,8 +65,9 @@ if isfile(artifactPath)
     delete(artifactPath);
 end
 
-identifier = sprintf('nlolib-%s', platformTag);
-opts = matlab.addons.toolbox.ToolboxOptions(stageDir, identifier);
+% One identifier for every platform, so a multi-platform bundle built with
+% merge_mltbx updates an installed single-platform one in place.
+opts = matlab.addons.toolbox.ToolboxOptions(stageDir, package_mltbx_identifier());
 opts.ToolboxName = "nlolib";
 opts.ToolboxVersion = char(version);
 opts.Summary = "GPU-first nonlinear optics propagation library";
@@ -105,7 +110,10 @@ else
     libFile = "libnlolib.so";
 end
 
-libraryPath = fullfile(stageDir, "lib", libFile);
+% The prototype and thunk sit beside the library in lib/<arch>; the thunk
+% name is platform-specific and the prototype refers to it.
+archDir = fullfile(stageDir, "lib", package_mltbx_platform_tag());
+libraryPath = fullfile(archDir, libFile);
 headerPath = fullfile(stageDir, "lib", "nlolib_matlab.h");
 if ~isfile(libraryPath) || ~isfile(headerPath)
     error('nlolib:matlabStageIncomplete', ...
@@ -115,7 +123,7 @@ end
 
 matlabDir = fullfile(repoRoot, "matlab");
 addpath(matlabDir);
-generate_library_prototype(libraryPath, headerPath, stageDir);
+generate_library_prototype(libraryPath, headerPath, archDir);
 end
 
 function version = package_mltbx_read_version(cmakePath)
@@ -131,6 +139,11 @@ if isempty(tokens)
 else
     version = string(tokens{1});
 end
+end
+
+function id = package_mltbx_identifier()
+%PACKAGE_MLTBX_IDENTIFIER Toolbox GUID shared by all platform bundles.
+id = 'nlolib';
 end
 
 function tag = package_mltbx_platform_tag()

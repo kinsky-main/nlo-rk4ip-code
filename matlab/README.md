@@ -37,7 +37,33 @@ The shared library (`nlolib.dll` / `libnlolib.so` / `libnlolib.dylib`) must be
 reachable at runtime; the wrapper searches common staged and build-tree
 locations, and `NLOLIB_LIBRARY` overrides the search. In a build tree with no
 staged prototype the wrapper falls back to parsing `nlolib_matlab.h`, which
-does need a compiler — run `matlab/generate_library_prototype.m` to avoid it.
+does need a compiler — run `matlab/generate_library_prototype.m` to avoid it,
+and `matlab/build_progress_mex.m` for the live progress bar.
+
+## Packaging a Release
+
+Build one toolbox per platform, then merge them into a single `.mltbx` that
+serves Windows and Linux users alike (one release asset, e.g. for File
+Exchange):
+
+```matlab
+% On each platform, from the repo root (needs a C compiler for the MEX):
+addpath('matlab');
+package_mltbx('build');   % -> dist/nlolib-<version>-<arch>.mltbx
+
+% On any machine, with all bundles copied into dist/:
+merge_mltbx(["dist/nlolib-1.13.0-glnxa64.mltbx", "dist/nlolib-1.13.0-win64.mltbx"]);
+% -> dist/nlolib-1.13.0.mltbx
+```
+
+Each bundle keeps its shared library, `loadlibrary` prototype and thunk in
+`lib/<arch>`, and its progress MEX in `+nlolib/private` with the platform
+extension, so the merge only adds files. `merge_mltbx` stops if the bundles'
+versions differ or if any shared file differs (line endings aside), since
+that means they were built from different sources. All bundles use the
+toolbox identifier `nlolib`, so installing a newer one replaces the old;
+toolboxes packaged before this change used `nlolib-<arch>` and must be
+uninstalled once by hand.
 
 ## Minimal Math-to-API Example
 
