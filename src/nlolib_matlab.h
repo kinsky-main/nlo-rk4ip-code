@@ -441,9 +441,10 @@ typedef struct
  * loadlibrary() cannot represent function-pointer members: it warns
  * "The data type 'FcnPtr' ... does not exist.  The structure may not be
  * usable." and degrades the whole enclosing structure.  The field is
- * therefore mirrored as void* below, which is layout-compatible on every
- * platform nlolib supports and keeps propagate_options usable from MATLAB.
- * Callbacks are not invocable through this FFI; pass NULL (the default).
+ * therefore mirrored as uint64_t below, which is layout-compatible on the
+ * 64-bit platforms nlolib supports and lets MATLAB store a callback address.
+ * MATLAB functions cannot be callbacks; the wrapper passes the C callback
+ * from its progress_mex MEX file, or 0 (no callback).
  */
 
 /**
@@ -514,7 +515,7 @@ typedef struct
     const storage_options *storage_options;
     const double *explicit_record_z;
     size_t explicit_record_z_count;
-    void *progress_callback; /* progress_callback fn-ptr; see note above. */
+    uint64_t progress_callback; /* progress_callback address; see note above. */
     void *progress_user_data;
 } propagate_options;
 

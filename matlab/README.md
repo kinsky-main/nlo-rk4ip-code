@@ -157,6 +157,15 @@ array read-back uses pointer arithmetic (`ptr = ptr + 1`).
 objects that back the pointer fields. It must stay in scope for as long as the
 config is used, otherwise MATLAB frees the buffers underneath the library.
 
+MATLAB does not show the library's stdout/stderr, and `loadlibrary` cannot
+take MATLAB functions as C callbacks. `matlab/mex/progress_mex.c` supplies the
+C `progress_callback` instead: it prints nlolib's log buffer and a progress
+line with `mexPrintf` (at most once per second, redrawn in place or one line
+per milestone) and returns 0 on Ctrl+C. `package_mltbx` compiles it into
+`+nlolib/private`, so toolbox users need no compiler. `propagate_options`
+declares the callback field as `uint64_t` in `nlolib_matlab.h` so MATLAB can
+store the address.
+
 Why the binding is not generated with `clibgen`:
 [docs/matlab_binding_clibgen_evaluation.md](../docs/matlab_binding_clibgen_evaluation.md).
 

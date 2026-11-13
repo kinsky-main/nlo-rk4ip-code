@@ -162,3 +162,6 @@ __pypackages__/
 
 # Pyenv
 *.python-version
+
+# Locally built MATLAB progress MEX (see matlab/build_progress_mex.m)
+matlab/+nlolib/private/progress_mex.mex*

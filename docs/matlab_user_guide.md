@@ -43,7 +43,8 @@ Working from a build tree rather than a packaged toolbox is the one case that
 still needs a compiler: with no prototype staged, `loadlibrary` falls back to
 parsing `nlolib_matlab.h`. Run `matlab/generate_library_prototype.m` once to
 remove that fallback, or check `mex -setup C` if the load fails complaining
-about the header.
+about the header. Run `matlab/build_progress_mex.m` once as well to get the
+live progress bar in a build tree.
 
 ### Option A — toolbox install (recommended)
 
@@ -343,6 +344,8 @@ MATLAB-only keys handled by the wrapper.
 | `forced_device_budget_bytes` | `0` | override the detected device budget |
 | `capture_step_history` | `false` | fill `result.step_history` |
 | `step_history_capacity` | `200000` | step events to preallocate |
+| `matlab_live_progress` | `true` (`false` under `-batch`) | print progress and logs in the Command Window during the run; Ctrl+C aborts |
+| `matlab_progress_style` | auto | `"inline"` redraws one line in place; `"lines"` prints one line per progress milestone. Defaults to `"lines"` in browser-based MATLAB |
 | `matlab_stream_logs` | `false` | drain the runtime log buffer after the call |
 | `matlab_log_buffer_bytes` | `262144` | buffer size used when streaming logs |
 | `matlab_progress_stream` | auto | `0` stderr, `1` stdout, `2` both; defaults to *both* when MATLAB has no desktop |
@@ -616,13 +619,33 @@ propagation fails — the fastest way to diagnose a failing run.
 
 ### Progress
 
+The MATLAB desktop and the VS Code MATLAB extension do not show the library's
+own stdout/stderr. `propagate` therefore prints a live progress line, and every
+runtime log line, through the Command Window while the solver runs, and Ctrl+C
+stops the run. This uses a small MEX file shipped with the toolbox
+(`+nlolib/private/progress_mex`). Without it (a build tree where
+`matlab/build_progress_mex.m` has not been run), the logs are printed after the
+run instead and the progress bar is not shown.
+
+The progress line is redrawn at most once per second, so a fast solver cannot
+queue more updates than the Command Window can paint. In browser-based MATLAB
+(matlab-proxy, MATLAB Online, and the R2025a+ desktop) the Command Window
+prints backspaces rather than erasing with them, so `propagate` prints one line
+per progress milestone instead (every 5% by default; see
+`set_progress_options`). Set `exec_options.matlab_progress_style` to `"inline"`
+or `"lines"` to override the choice.
+
+Under `-batch` the library's own console progress bar is used instead; set
+`exec_options.matlab_live_progress` to choose explicitly.
+
 ```matlab
+api.set_progress_options(false);             % no progress output at all
 api.set_progress_options(true, 10, false);   % enabled, every 10%, not on step adjust
-api.set_progress_stream(2);                  % 0 stderr, 1 stdout, 2 both
+api.set_progress_stream(2);                  % console bar: 0 stderr, 1 stdout, 2 both
 ```
 
-When MATLAB runs without a desktop (`-batch`, `-nodesktop`), `propagate`
-selects stream mode *both* automatically so progress survives redirection; set
+When the console bar is used and MATLAB has no desktop, `propagate` selects
+stream mode *both* automatically so progress survives redirection; set
 `exec_options.matlab_progress_stream` to override.
 
 ### Perf counters

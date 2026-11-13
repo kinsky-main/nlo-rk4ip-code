@@ -97,6 +97,7 @@ classdef NLolib < handle
                                                                    'alias', obj.LIBNAME);
                             nlolib.NLolib.validate_load_result(notfound, loadWarnings, ...
                                                                dllPath, spec.description);
+                            nlolib.NLolib.loaded_library_path(dllPath);
                             loaded = true;
                             break;
                         catch ME
@@ -179,6 +180,13 @@ classdef NLolib < handle
             %     step_history_capacity - default 200000 events
             %     matlab_stream_logs    - drain the log buffer after the call
             %                             and attach it to failure messages
+            %     matlab_live_progress  - print progress and logs in the Command
+            %                             Window while running; Ctrl+C aborts.
+            %                             Default true except under -batch.
+            %     matlab_progress_style - "inline" (one line redrawn in place)
+            %                             or "lines" (one line per milestone).
+            %                             Default "lines" in browser-based
+            %                             MATLAB, "inline" otherwise.
             %     matlab_log_buffer_bytes, matlab_progress_stream, matlab_debug
             %
             %   Example with telemetry:
@@ -411,6 +419,34 @@ classdef NLolib < handle
             elseif nlolib.NLolib.running_in_batch_mode()
                 requestedProgressStream = int32(2); % NLOLIB_PROGRESS_STREAM_BOTH
             end
+            % Live progress: nlolib calls the progress_mex C callback, which
+            % prints the log buffer and a progress line through MATLAB. The
+            % native stderr bar is switched off for the call, since MATLAB
+            % does not show the library's stdout/stderr.
+            liveProgress = ~nlolib.NLolib.batch_startup();
+            if isstruct(execOptions) && isfield(execOptions, 'matlab_live_progress') && ...
+                    ~isempty(execOptions.matlab_live_progress)
+                liveProgress = any(logical(execOptions.matlab_live_progress(:)));
+            end
+            progressStyle = nlolib.NLolib.default_progress_style();
+            if isstruct(execOptions) && isfield(execOptions, 'matlab_progress_style') && ...
+                    ~isempty(execOptions.matlab_progress_style)
+                progressStyle = validatestring(execOptions.matlab_progress_style, ...
+                                               {'inline', 'lines'});
+            end
+            progressSettings = nlolib.NLolib.progress_settings();
+            callbackAddress = uint64(0);
+            if liveProgress && progressSettings.enabled
+                callbackAddress = nlolib.NLolib.live_progress_callback( ...
+                    progressStyle, progressSettings.milestone_percent);
+            end
+            liveProgress = callbackAddress ~= uint64(0);
+            if liveProgress
+                streamLogs = true;
+                nlolib.NLolib.apply_native_progress(false, progressSettings);
+                restoreProgress = onCleanup( ...
+                    @() nlolib.NLolib.apply_native_progress(true, progressSettings)); %#ok<NASGU>
+            end
             if streamLogs && ...
                     nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_set_log_buffer') && ...
                     nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_clear_log_buffer')
@@ -466,6 +502,7 @@ classdef NLolib < handle
             propagateOptions.return_records = int32(logical(returnRecords));
             propagateOptions.exec_options = execOptsPtr;
             propagateOptions.storage_options = storageOptsPtr;
+            propagateOptions.progress_callback = callbackAddress;
 
             recordsWrittenPtr = libpointer('uint64Ptr', uint64(0));
             propagateOutput = libstruct('propagate_output');
@@ -774,6 +811,12 @@ classdef NLolib < handle
                                 int32(milestonePercent), ...
                                 int32(logical(emitOnStepAdjust)));
             [statusCode, statusName, statusDetail] = nlolib.NLolib.normalize_status(statusRaw);
+            if statusCode == 0
+                nlolib.NLolib.progress_settings(struct( ...
+                    'enabled', logical(enabled), ...
+                    'milestone_percent', int32(milestonePercent), ...
+                    'emit_on_step_adjust', logical(emitOnStepAdjust)));
+            end
             if statusCode ~= 0
                 if strlength(statusDetail) > 0
                     error('nlolib:progressOptionsFailed', ...
@@ -1346,6 +1389,85 @@ classdef NLolib < handle
             try
                 names = libfunctions(libName);
                 tf = any(strcmp(names, functionName));
+            catch
+                tf = false;
+            end
+        end
+
+        function path = loaded_library_path(newPath)
+            %LOADED_LIBRARY_PATH Remember which shared library loadlibrary used.
+            persistent stored
+            if nargin > 0
+                stored = char(string(newPath));
+            end
+            if isempty(stored)
+                stored = '';
+            end
+            path = stored;
+        end
+
+        function settings = progress_settings(newSettings)
+            %PROGRESS_SETTINGS Last progress options set through set_progress_options.
+            persistent stored
+            if nargin > 0
+                stored = newSettings;
+            end
+            if isempty(stored)
+                stored = struct('enabled', true, 'milestone_percent', int32(5), ...
+                                'emit_on_step_adjust', false);
+            end
+            settings = stored;
+        end
+
+        function apply_native_progress(enabled, settings)
+            %APPLY_NATIVE_PROGRESS Toggle the library's own stdout/stderr bar.
+            calllib('nlolib', 'nlolib_set_progress_options', ...
+                    int32(logical(enabled)), ...
+                    int32(settings.milestone_percent), ...
+                    int32(logical(settings.emit_on_step_adjust)));
+        end
+
+        function address = live_progress_callback(style, milestonePercent)
+            %LIVE_PROGRESS_CALLBACK Address of the progress_mex C callback, or 0.
+            %   Returns 0 when the MEX file is not built for this platform,
+            %   so propagate falls back to printing logs after the run.
+            address = uint64(0);
+            libraryPath = nlolib.NLolib.loaded_library_path();
+            if isempty(libraryPath) || exist('progress_mex', 'file') ~= 3 || ...
+                    ~nlolib.NLolib.has_library_function('nlolib', 'nlolib_read_log_buffer')
+                return;
+            end
+            address = progress_mex('callback', libraryPath, char(style), ...
+                                   double(milestonePercent));
+        end
+
+        function style = default_progress_style()
+            %DEFAULT_PROGRESS_STYLE "lines" where the Command Window ignores backspace.
+            %   Browser-based Command Windows (matlab-proxy, MATLAB Online, and
+            %   the R2025a+ desktop) print backspaces instead of erasing, so an
+            %   in-place bar grows into one very long line.
+            style = 'inline';
+            browserUi = ~isempty(getenv('MWI_APP_PORT')) || ...
+                        contains(getenv('MW_CONTEXT_TAGS'), 'MATLAB_PROXY');
+            try
+                browserUi = browserUi || matlab.internal.environment.context.isMATLABOnline();
+            catch
+            end
+            try
+                browserUi = browserUi || ...
+                    (usejava('desktop') && ~isMATLABReleaseOlderThan('R2025a'));
+            catch
+            end
+            if browserUi
+                style = 'lines';
+            end
+        end
+
+        function tf = batch_startup()
+            %BATCH_STARTUP True when MATLAB was started with -batch.
+            tf = false;
+            try
+                tf = batchStartupOptionUsed();
             catch
                 tf = false;
             end
