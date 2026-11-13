@@ -30,6 +30,8 @@ set(vector_backend_test_sources
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_format.c
 )
 if(ENABLE_VULKAN_BACKEND)
   list(APPEND vector_backend_test_sources

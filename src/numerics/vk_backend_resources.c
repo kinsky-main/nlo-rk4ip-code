@@ -5,6 +5,7 @@
 
 #include "numerics/vk_backend_internal.h"
 #include "vk_shader_blobs.h"
+#include "io/log_sink.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -367,7 +368,7 @@ static vec_status vk_create_descriptor_resources(
         if (next_count < VK_DESCRIPTOR_SET_MIN_COUNT) {
             next_count = VK_DESCRIPTOR_SET_MIN_COUNT;
         }
-        fprintf(stderr,
+        log_emit(LOG_LEVEL_WARN,
                 "[vk] descriptor set allocation failed at %u sets; retrying at %u sets.\n",
                 target_count,
                 next_count);
@@ -375,7 +376,7 @@ static vec_status vk_create_descriptor_resources(
     }
 
     if (backend->vk.descriptor_set_count == 0u || backend->vk.descriptor_sets == NULL) {
-        fprintf(stderr,
+        log_emit(LOG_LEVEL_ERROR,
                 "[vk] failed to allocate descriptor sets in range [%u, %u].\n",
                 VK_DESCRIPTOR_SET_MIN_COUNT,
                 vk_select_descriptor_set_target(config));

@@ -13,6 +13,8 @@ add_executable(test_fft
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
+  ${CMAKE_SOURCE_DIR}/src/io/log_format.c
 )
 if(ENABLE_VKFFT)
   set_target_properties(test_fft PROPERTIES LINKER_LANGUAGE CXX)

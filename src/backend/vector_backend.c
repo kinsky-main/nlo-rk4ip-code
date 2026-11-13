@@ -8,6 +8,7 @@
 
 #include "backend/vector_backend_internal.h"
 #include "backend/vk_auto_context.h"
+#include "io/log_sink.h"
 #include "numerics/vector_ops.h"
 #include "numerics/vk_vector_ops.h"
 #include <limits.h>
@@ -343,7 +344,7 @@ vector_backend* vector_backend_create_vulkan(const vk_backend_config* config)
     if (config->physical_device == VK_NULL_HANDLE ||
         config->device == VK_NULL_HANDLE ||
         config->queue == VK_NULL_HANDLE) {
-        fprintf(stderr,
+        log_emit(LOG_LEVEL_ERROR,
                 "[nlolib] Vulkan backend config is incomplete: physical_device/device/queue must either all be set or all be omitted for auto selection.\n");
         return NULL;
     }
@@ -369,7 +370,7 @@ static vector_backend* vector_backend_create_auto(const vk_backend_config* confi
     char reason[256];
     vk_auto_context auto_ctx;
     if (vk_auto_context_init(&auto_ctx, reason, sizeof(reason)) != 0) {
-        fprintf(stderr,
+        log_emit(LOG_LEVEL_ERROR,
                 "[nlolib] auto backend selection failed: %s\n",
                 (reason[0] != '\0') ? reason : "unknown Vulkan setup error");
         return NULL;
@@ -417,7 +418,7 @@ static vector_backend* vector_backend_create_auto(const vk_backend_config* confi
              auto_ctx.device_name);
 #endif
 
-    fprintf(stderr,
+    log_emit(LOG_LEVEL_INFO,
             "[nlolib] auto backend selected Vulkan device='%s' type=%s device_local_bytes=%llu\n",
             (backend->vk.device_name[0] != '\0') ? backend->vk.device_name : "unknown",
             vk_device_type_to_string(backend->vk.device_type),
@@ -483,7 +484,7 @@ vec_status vec_query_memory_info(
             &available_device_local);
 
         if (vk_memory_info_source_logged == 0) {
-            fprintf(stderr,
+            log_emit(LOG_LEVEL_INFO,
                     "[vk] memory_info source=%s device_local_total_bytes=%zu device_local_available_bytes=%zu\n",
                     used_budget_extension ? "VK_EXT_memory_budget" : "heap_total_fallback",
                     total_device_local,
