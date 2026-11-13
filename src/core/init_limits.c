@@ -10,6 +10,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #elif defined(__linux__)
+#include <stdio.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #elif defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
@@ -68,12 +69,29 @@ size_t query_available_system_memory_bytes(void)
 
     return (size_t)mem_status.ullAvailPhys;
 #elif defined(__linux__)
-    struct sysinfo info;
-    if (sysinfo(&info) != 0) {
-        return 0;
+    // MemAvailable counts reclaimable page cache; sysinfo().freeram does not,
+    // and on a machine with a warm cache it under-reports by an order of
+    // magnitude.  Fall back to freeram on kernels without MemAvailable.
+    unsigned long long bytes = 0u;
+    FILE* meminfo = fopen("/proc/meminfo", "r");
+    if (meminfo != NULL) {
+        char line[128];
+        unsigned long long available_kib = 0u;
+        while (fgets(line, sizeof(line), meminfo) != NULL) {
+            if (sscanf(line, "MemAvailable: %llu kB", &available_kib) == 1) {
+                bytes = available_kib * 1024ull;
+                break;
+            }
+        }
+        fclose(meminfo);
     }
-
-    unsigned long long bytes = (unsigned long long)info.freeram * (unsigned long long)info.mem_unit;
+    if (bytes == 0u) {
+        struct sysinfo info;
+        if (sysinfo(&info) != 0) {
+            return 0;
+        }
+        bytes = (unsigned long long)info.freeram * (unsigned long long)info.mem_unit;
+    }
     if (bytes > (unsigned long long)SIZE_MAX) {
         return SIZE_MAX;
     }
