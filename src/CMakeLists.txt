@@ -67,6 +67,17 @@ if(UNIX)
   target_link_libraries(nlolib PUBLIC m)
 endif()
 
+# Embed the C++ runtime (pulled in by glslang/VkFFT) so hosts that preload an
+# older libstdc++ -- notably MATLAB's sys/os/glnxa64 -- can still load nlolib.
+# --exclude-libs keeps the embedded runtime symbols private to nlolib.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  target_link_options(nlolib PRIVATE
+    -static-libstdc++
+    -static-libgcc
+    -Wl,--exclude-libs,ALL
+  )
+endif()
+
 if(ENABLE_VULKAN_BACKEND)
   include(NLOVulkanBackend)
   configure_vulkan_backend(
