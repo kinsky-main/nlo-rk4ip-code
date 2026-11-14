@@ -1,0 +1,71 @@
+{
+  "_comment": [
+    "Canonical names and values for the nlolib C API enums and limits, as every",
+    "binding is expected to expose them. tools/check_api_parity.py reads this and",
+    "the three binding sources and fails if any of them is missing a name or",
+    "disagrees about a value.",
+    "",
+    "This exists because the MATLAB wrapper went for a long time with no named",
+    "constants at all -- callers passed magic integers copied out of doc comments",
+    "-- and nothing caught it. Values here must match the C definitions in",
+    "src/nlolib.h and src/nlolib_matlab.h.",
+    "",
+    "Not listed, deliberately: the NLO_VECTOR_BACKEND_* and NLO_FFT_BACKEND_*",
+    "aliases, which exist only in the Python package as back-compatibility for an",
+    "older spelling, and Python's private LEGACY_NT_MAX."
+  ],
+
+  "constants": {
+    "NT_MAX": 18446744073709551615,
+    "STORAGE_RUN_ID_MAX": 64,
+
+    "VECTOR_BACKEND_CPU": 0,
+    "VECTOR_BACKEND_VULKAN": 1,
+    "VECTOR_BACKEND_AUTO": 2,
+
+    "FFT_BACKEND_AUTO": 0,
+    "FFT_BACKEND_FFTW": 1,
+    "FFT_BACKEND_VKFFT": 2,
+
+    "NONLINEAR_MODEL_EXPR": 0,
+    "NONLINEAR_MODEL_KERR_RAMAN": 1,
+
+    "TENSOR_LAYOUT_XYT_T_FAST": 0,
+
+    "STORAGE_DB_CAP_POLICY_STOP_WRITES": 0,
+    "STORAGE_DB_CAP_POLICY_FAIL": 1,
+
+    "PROPAGATE_OUTPUT_DENSE": 0,
+    "PROPAGATE_OUTPUT_FINAL_ONLY": 1,
+
+    "NLOLIB_STATUS_OK": 0,
+    "NLOLIB_STATUS_INVALID_ARGUMENT": 1,
+    "NLOLIB_STATUS_ALLOCATION_FAILED": 2,
+    "NLOLIB_STATUS_NOT_IMPLEMENTED": 3,
+    "NLOLIB_STATUS_ABORTED": 4,
+
+    "NLOLIB_LOG_LEVEL_ERROR": 0,
+    "NLOLIB_LOG_LEVEL_WARN": 1,
+    "NLOLIB_LOG_LEVEL_INFO": 2,
+    "NLOLIB_LOG_LEVEL_DEBUG": 3,
+
+    "NLOLIB_PROGRESS_STREAM_STDERR": 0,
+    "NLOLIB_PROGRESS_STREAM_STDOUT": 1,
+    "NLOLIB_PROGRESS_STREAM_BOTH": 2,
+
+    "PROGRESS_EVENT_ACCEPTED": 0,
+    "PROGRESS_EVENT_REJECTED": 1,
+    "PROGRESS_EVENT_FINISH": 2
+  },
+
+  "known_gaps": {
+    "_comment": [
+      "Names a binding is allowed not to export yet, each with the reason. A gap",
+      "listed here that has since been closed is also reported, so this list",
+      "cannot quietly outlive the gap it describes."
+    ],
+    "python": {},
+    "julia": {},
+    "matlab": {}
+  }
+}

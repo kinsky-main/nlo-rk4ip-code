@@ -171,8 +171,25 @@ classdef NLolib < handle
             %                          - step bounds in z units; preset default
             %     records              - z samples to record; preset default
             %     output               - "dense" | "final" (forces records = 1)
+            %     t_eval               - explicit record positions in z, each
+            %                            within [0, propagation_distance] and
+            %                            nondecreasing. Sets the record count,
+            %                            so 'records' is ignored when given.
             %     exec_options         - execution options struct, below
             %     storage              - SQLite storage options struct
+            %
+            %   BUILT-IN NONLINEAR MODEL (high-level)
+            %     Set these to use the compiled Kerr+Raman model instead of a
+            %     nonlinear expression. See nlolib.constants for the values.
+            %     nonlinear_model      - NONLINEAR_MODEL_EXPR (default) or
+            %                            NONLINEAR_MODEL_KERR_RAMAN
+            %     nonlinear_gamma      - Kerr coefficient
+            %     raman_fraction       - fractional Raman contribution
+            %     raman_tau1, raman_tau2
+            %                          - Raman response time constants
+            %     shock_omega0         - self-steepening reference frequency
+            %     raman_response_time  - explicit complex response samples,
+            %                            used in place of tau1/tau2
             %
             %   EXECUTION OPTIONS
             %     backend_type          - 0 CPU, 1 Vulkan, 2 auto (default)
@@ -251,7 +268,15 @@ classdef NLolib < handle
 
                 result = struct();
                 result.records = records;
-                result.z_axis = nlolib.NLolib.make_z_axis(zAxis(end), size(records, 1));
+                % zAxis already holds the intended record positions, which for
+                % an explicit t_eval are not a linspace and cannot be rebuilt
+                % from the endpoint. Only fall back when fewer records came
+                % back than were asked for.
+                if numel(zAxis) == size(records, 1)
+                    result.z_axis = zAxis;
+                else
+                    result.z_axis = nlolib.NLolib.make_z_axis(zAxis(end), size(records, 1));
+                end
                 if size(records, 1) > 0
                     result.final = records(end, :);
                 else
@@ -497,7 +522,11 @@ classdef NLolib < handle
 
             propagateOptions = libstruct('propagate_options');
             propagateOptions.num_recorded_samples = numRecordedSamples;
-            if numRecordedSamples == uint64(1)
+            % An explicit config.output_mode wins; otherwise keep inferring it
+            % from the record count, which is what the low-level form relies on.
+            if isstruct(config) && isfield(config, 'output_mode') && ~isempty(config.output_mode)
+                propagateOptions.output_mode = int32(config.output_mode);
+            elseif numRecordedSamples == uint64(1)
                 propagateOptions.output_mode = int32(1);
             else
                 propagateOptions.output_mode = int32(0);
@@ -506,6 +535,21 @@ classdef NLolib < handle
             propagateOptions.exec_options = execOptsPtr;
             propagateOptions.storage_options = storageOptsPtr;
             propagateOptions.progress_callback = callbackAddress;
+
+            % Explicit record positions. recordZPtr must outlive the calllib
+            % below, so keep it in a local rather than inlining the libpointer.
+            recordZPtr = libpointer('doublePtr');
+            if isstruct(config) && isfield(config, 'explicit_record_z') && ~isempty(config.explicit_record_z)
+                recordZ = reshape(double(config.explicit_record_z), 1, []);
+                nlolib.NLolib.validate_record_z( ...
+                    recordZ, nlolib.NLolib.resolve_propagation_distance(config));
+                recordZPtr = libpointer('doublePtr', recordZ);
+                propagateOptions.explicit_record_z = recordZPtr;
+                propagateOptions.explicit_record_z_count = uint64(numel(recordZ));
+            else
+                propagateOptions.explicit_record_z = recordZPtr;
+                propagateOptions.explicit_record_z_count = uint64(0);
+            end
 
             recordsWrittenPtr = libpointer('uint64Ptr', uint64(0));
             propagateOutput = libstruct('propagate_output');
@@ -1046,6 +1090,29 @@ classdef NLolib < handle
                 return;
             end
             zAxis = linspace(0.0, distance, numRecords);
+        end
+
+        function validate_record_z(recordZ, distance)
+            %VALIDATE_RECORD_Z Check explicit record positions before the call.
+            %   Mirrors the Python and Julia checks: non-empty, monotonic
+            %   nondecreasing, and every value within [0, distance]. The solver
+            %   walks the list in order, so an unsorted list would silently
+            %   drop records rather than fail.
+            if isempty(recordZ)
+                error('nlolib:invalidRecordZ', 't_eval must be non-empty');
+            end
+            if ~isnumeric(recordZ) || ~isreal(recordZ) || any(~isfinite(recordZ))
+                error('nlolib:invalidRecordZ', ...
+                      't_eval must be real finite numbers');
+            end
+            if any(recordZ < 0.0) || any(recordZ > double(distance))
+                error('nlolib:invalidRecordZ', ...
+                      't_eval values must be within [0, propagation_distance]');
+            end
+            if any(diff(recordZ) < 0.0)
+                error('nlolib:invalidRecordZ', ...
+                      't_eval must be monotonic nondecreasing');
+            end
         end
 
         function distance = resolve_propagation_distance(config)
@@ -1696,6 +1763,16 @@ classdef NLolib < handle
                 error('nlolib:invalidSimulateOptions', ...
                       'options.records must be a positive integer');
             end
+
+            % Explicit record positions. These define the record count, so
+            % options.records is ignored when t_eval is given -- same rule as
+            % the Python and Julia APIs.
+            recordZ = [];
+            if isfield(options, 't_eval') && ~isempty(options.t_eval)
+                recordZ = reshape(double(options.t_eval), 1, []);
+                nlolib.NLolib.validate_record_z(recordZ, zEnd);
+                numRecords = numel(recordZ);
+            end
             numRecords = uint64(numRecords);
 
             if isfield(options, 'exec_options') && ~isempty(options.exec_options)
@@ -1746,6 +1823,20 @@ classdef NLolib < handle
             end
             runtime.constants = [linearConstants, nonlinearConstants];
 
+            % Built-in nonlinear model parameters. prepare_sim_config already
+            % reads these from cfg.runtime; before this they were reachable
+            % only by hand-building a config for the low-level form, so the
+            % high-level call could not select Kerr+Raman at all.
+            physicsFields = {'nonlinear_model', 'nonlinear_gamma', ...
+                             'raman_fraction', 'raman_tau1', 'raman_tau2', ...
+                             'shock_omega0', 'raman_response_time'};
+            for idx = 1:numel(physicsFields)
+                name = physicsFields{idx};
+                if isfield(options, name) && ~isempty(options.(name))
+                    runtime.(name) = options.(name);
+                end
+            end
+
             cfg = struct();
             cfg.num_time_samples = numTimeSamples;
             cfg.propagation_distance = zEnd;
@@ -1771,8 +1862,22 @@ classdef NLolib < handle
             cfg.delta_x = pulseSpec.delta_x;
             cfg.delta_y = pulseSpec.delta_y;
             cfg.runtime = runtime;
+            if ~isempty(recordZ)
+                cfg.explicit_record_z = recordZ;
+            end
+            % Carry the requested mode rather than letting the call path infer
+            % it from the record count: output="dense" with records=1, and any
+            % single-element t_eval, must still record at that z rather than
+            % collapsing to the final-field-only mode.
+            if output == "final"
+                cfg.output_mode = nlolib.constants.PROPAGATE_OUTPUT_FINAL_ONLY;
+            else
+                cfg.output_mode = nlolib.constants.PROPAGATE_OUTPUT_DENSE;
+            end
 
-            if double(numRecords) == 1
+            if ~isempty(recordZ)
+                zAxis = recordZ;
+            elseif double(numRecords) == 1
                 zAxis = zEnd;
             else
                 zAxis = linspace(0.0, zEnd, double(numRecords));

@@ -16,6 +16,12 @@
 % Operator helpers
 %   translate_runtime_handle - Compile a function handle into a runtime expression.
 %
+% Named values
+%   constants                - C API enum values and limits, by name.
+%
+% Result helpers
+%   tensor_record_view       - Reshape a coupled record into an (nt, ny, nx) volume.
+%
 % Low-level C API bridge
 %   prepare_sim_config       - Build a sim_config libstruct from a MATLAB struct.
 %   pack_complex_array       - Pack a complex vector for the C API.

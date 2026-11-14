@@ -1,5 +1,7 @@
 const RUNTIME_OPERATOR_CONSTANTS_MAX = 16
 const STORAGE_RUN_ID_MAX = 64
+# Unbounded sentinel for the time-sample count; prefer query_runtime_limits.
+const NT_MAX = typemax(UInt64)
 
 const TENSOR_LAYOUT_XYT_T_FAST = Cint(0)
 
