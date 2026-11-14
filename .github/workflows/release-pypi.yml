@@ -11,6 +11,12 @@ name: release-pypi
 
 on:
   push:
+    # TEMPORARY: workflow_dispatch is only reachable once this file is on the
+    # default branch, so exercise the dry run from the branch instead. Both
+    # publish jobs are gated on a tag ref or an explicit dispatch, so a
+    # branch-triggered run publishes nothing. Removed before merge.
+    branches:
+      - claude/release-pypi-341f14
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
