@@ -6,6 +6,29 @@ The automated path is `.github/workflows/release-pypi.yml`. The local path is
 the three `tools/release/build_wheel_*` scripts, which the workflow itself
 calls — so a release never runs a code path nobody exercises by hand.
 
+## No published wheel was installable before this pipeline
+
+Worth knowing, because it shapes what the smoke test is for. `load()` in
+`python/nlolib/_binding.py` used to resolve exactly one path after the
+`NLOLIB_LIBRARY` override — `<parent-of-package>/Release/nlolib.dll` on
+Windows, `<parent-of-package>/libnlolib.so` elsewhere — and raise if it was
+missing. But `[tool.setuptools.package-data]` and the build scripts put the
+shared library *inside* the package. In an installed wheel that parent
+directory is `site-packages`, so `nlolib.load()` raised `OSError` every time.
+No wheel ever published could be used without the user pointing
+`NLOLIB_LIBRARY` at a library by hand.
+
+It went unnoticed because a local build leaves a second copy at
+`python/Release/nlolib.dll`, outside the package, which is exactly where the
+old lookup pointed — so in-tree development worked while the installed
+artifact did not. Neither copy is tracked in the repository.
+
+`load()` now tries the package directory first and keeps the in-tree layouts
+below it. The smoke test exists to keep this fixed: it installs the wheel into
+a clean virtualenv on a runner with no checkout, **unsets `NLOLIB_LIBRARY`**
+(which would otherwise let the test pass for the wrong reason) and calls
+`nlolib.load()` before running anything.
+
 ## What a wheel contains
 
 The Python package wraps the nlolib shared library through `ctypes`. There is

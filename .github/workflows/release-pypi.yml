@@ -231,11 +231,20 @@ jobs:
           # Run from somewhere else entirely, so nothing can resolve against a
           # working directory instead of the installed package.
           cd "$RUNNER_TEMP"
+          # NLOLIB_LIBRARY short-circuits discovery entirely, so a stray value
+          # would let this pass for the wrong reason. The wheel has to stand on
+          # its own.
+          unset NLOLIB_LIBRARY
           "$py" -I - <<'PY'
+          import os
+
+          assert "NLOLIB_LIBRARY" not in os.environ, "discovery must not be overridden"
+
           import nlolib
 
-          # Fails loudly if the shared library did not ship in the wheel, or if
-          # the wheel's repair left a dependency unresolved.
+          # The whole point of this job. Until this branch, load() looked for the
+          # library outside the package directory, where an installed wheel never
+          # puts it -- so this call raised OSError on every published wheel.
           nlolib.load()
 
           api = nlolib.NLolib()
