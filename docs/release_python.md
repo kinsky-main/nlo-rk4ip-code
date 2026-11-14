@@ -130,7 +130,8 @@ matches it. Two further reasons:
 1. Make sure the version in `CMakeLists.txt` is the one you want to publish.
    The pre-commit hook advances it one MINOR per commit to `main`, so check it
    rather than assuming.
-2. Sync the copy in `pyproject.toml` to match, and commit that.
+2. Sync the derived copies to match and commit that:
+   `python tools/release/check_versions.py --write`.
 3. Tag the commit with the bare version — no `v` prefix — and push the tag:
 
 ```bash
@@ -143,9 +144,10 @@ The workflow then runs:
   is not equal to the project version. The wheel filename carries the version,
   so a mismatch would publish something the tag does not describe.
 - **build** (per platform) — installs the Vulkan loader and glslang, pins the
-  Visual Studio 2022 toolchain on Windows, runs the `build_wheel_*` script,
-  then refuses any wheel tagged `-any` or carrying an unpublishable platform
-  tag.
+  Visual Studio 2022 toolchain on Windows, runs the `build_wheel_*` script
+  (which syncs the derived version copies with
+  `check_versions.py --write` before packaging), then refuses any wheel tagged
+  `-any` or carrying an unpublishable platform tag.
 - **smoke** (per platform) — on a clean runner with no checkout and no build
   tooling, installs the wheel into a fresh virtualenv, calls `nlolib.load()`,
   and runs one small propagation on the CPU backend
@@ -204,9 +206,11 @@ macOS (CPU-only, not published):
 
 Each script configures with `BUMP_PATCH_ON_BUILD=OFF` and
 `INSTALL_GIT_HOOKS=OFF`, so building a wheel no longer rewrites the version in
-`CMakeLists.txt` as a side effect. It does rewrite the `version` field in
-`pyproject.toml` from `CMakeLists.txt` — that copy is derived, and syncing it
-is the point.
+`CMakeLists.txt` as a side effect. It does run
+`tools/release/check_versions.py --write`, which rewrites the derived `version`
+copies in `pyproject.toml` and `julia/Project.toml` from `CMakeLists.txt`
+before packaging. Those copies are derived, syncing them is the point, and
+`--write` only touches a file whose value actually differs.
 
 On Linux the unrepaired `linux_x86_64` wheel is deleted after a successful
 `auditwheel repair`, so everything left in `dist/` is publishable. Prefer the
@@ -218,10 +222,15 @@ python -m twine upload dist/*.whl
 
 ## Known gaps
 
-- `verify` uses `tools/release/read_version.py`, which checks the tag against
-  `CMakeLists.txt` but does not check that `pyproject.toml` agrees. When
-  `tools/release/check_versions.py` lands on `main`, replace that step with
-  `check_versions.py --tag "$GITHUB_REF_NAME"` and add a
-  `check_versions.py --write` step to the build job, dropping the inline
-  version-rewrite heredoc that each `build_wheel_*` script currently carries.
+- `verify` reads `tools/release/read_version.py`, not
+  `check_versions.py`. Deliberate: `check_versions.py` with no `--write` also
+  asserts that the derived copies match `CMakeLists.txt`, and they drift by
+  design — the pre-commit hook advances the CMake MINOR on every commit to
+  `main` while the copies stay where the last release left them, so a bare
+  verify fails on essentially every commit. `check_versions.py` belongs either
+  after `--write` in the same job, which is where the `build_wheel_*` scripts
+  call it, or as `--tag` on a release commit whose copies are already synced.
+  Wiring it into `verify` would mean requiring step 2 of the release to have
+  been committed before the tag, which is good hygiene but would block a
+  release over a copy the build job rewrites anyway.
 - Linux and Windows x86-64 only. No aarch64 wheels on either platform.

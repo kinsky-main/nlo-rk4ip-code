@@ -21,30 +21,11 @@ nlo_configure_verified "$BUILD_DIR" \
   ENABLE_VKFFT=OFF
 
 cmake --build "$BUILD_DIR" --config "$CONFIG"
-python3 - <<'PY'
-import pathlib
-import re
-
-root = pathlib.Path(".")
-cmake_text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
-match = re.search(r"project\([^)]*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", cmake_text)
-if not match:
-    raise RuntimeError("Could not parse CMake project version")
-version = match.group(1)
-
-pyproject = root / "pyproject.toml"
-text = pyproject.read_text(encoding="utf-8")
-updated, count = re.subn(
-    r'(?m)^version\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+"$',
-    f'version = "{version}"',
-    text,
-    count=1,
-)
-if count != 1:
-    raise RuntimeError("Could not update pyproject version")
-pyproject.write_text(updated, encoding="utf-8")
-print(version)
-PY
+# CMakeLists.txt is the source of truth; pyproject.toml carries a copy
+# because a wheel has to name a literal version. --write syncs the copies
+# from it and prints the version -- the release-time sync the tool exists
+# for, and the only version the build is allowed to rewrite.
+python3 tools/release/check_versions.py --write
 
 PKG_DIR="$REPO_ROOT/python/nlolib"
 mkdir -p "$PKG_DIR"

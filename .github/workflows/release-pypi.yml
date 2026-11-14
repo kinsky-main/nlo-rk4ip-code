@@ -61,10 +61,10 @@ jobs:
           # on. ubuntu-26.04 ships a GCC that will not compile our pinned
           # glslang, and ubuntu-latest now resolves to it.
           #
-          # ubuntu-24.04 means glibc 2.39, so auditwheel can only certify
-          # manylinux_2_39. A lower floor would need a manylinux_2_28 container,
-          # which packages neither glslangValidator nor the Vulkan loader --
-          # see docs/release_python.md.
+          # ubuntu-24.04 ships glibc 2.39, and auditwheel certified
+          # manylinux_2_38 off it. A lower floor would need a manylinux_2_28
+          # container, which packages neither glslangValidator nor the Vulkan
+          # loader -- see docs/release_python.md.
           - os: ubuntu-24.04
             name: linux
           - os: windows-2025
