@@ -90,6 +90,25 @@ jobs:
           "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
           "$($sdk.FullName)\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
+      # The image ships Visual Studio 2026, which no MATLAB release accepts as a
+      # C compiler, and runner-images currently routes every Windows label to it
+      # (actions/runner-images#14571). loadlibrary and mex need a compiler MATLAB
+      # knows, so install VS 2022 ourselves and build everything with it, which
+      # is also what the released Windows binaries have always been built with.
+      - name: Install Visual Studio 2022 build tools (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install visualstudio2022buildtools -y --no-progress --ignore-package-exit-codes `
+            --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --includeRecommended --quiet --norestart --nocache"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installPath = & $vswhere -products * -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installPath) { throw 'Visual Studio 2022 with the C++ toolset was not installed' }
+          Write-Host "Visual Studio 2022 at $installPath"
+          # Without this CMake picks the newest Visual Studio on the box, which
+          # would put the library on a different toolchain from the MEX.
+          "CMAKE_GENERATOR=Visual Studio 17 2022" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Set up MATLAB
         uses: matlab-actions/setup-matlab@v3
         with:
@@ -143,13 +162,12 @@ jobs:
           path: dist/nlolib-*-${{ matrix.arch }}.mltbx
           if-no-files-found: error
 
-  release:
-    name: Merge and publish
+  # Separate from publishing so a workflow_dispatch dry run exercises the merge
+  # and its checks; only the upload itself needs a tag.
+  merge:
+    name: Merge bundles
     needs: [verify, package]
-    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
@@ -190,6 +208,29 @@ jobs:
           test -f "$work/fsroot/+nlolib/private/progress_mex.mexw64"
           test -f "$work/fsroot/+nlolib/private/progress_mex.mexa64"
           echo "merged bundle looks right"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mltbx-merged
+          path: dist/nlolib.mltbx
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [verify, merge]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mltbx-merged
+          path: dist
 
       - name: Build release notes
         shell: bash
