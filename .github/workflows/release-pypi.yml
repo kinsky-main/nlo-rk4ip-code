@@ -1,0 +1,303 @@
+name: release-pypi
+
+# Builds one nlolib wheel per supported platform, smoke-tests each on a clean
+# runner, and publishes them to PyPI with Trusted Publishing (OIDC, no stored
+# token).
+#
+# Structured like release-mltbx.yml, and gated the same way: the tag is a bare
+# version, and the version inside the package has to match it. A
+# workflow_dispatch run exercises everything up to the upload and publishes
+# nothing, unless it is dispatched with testpypi=true.
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      testpypi:
+        description: 'Also publish the built wheels to TestPyPI'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Check version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read project version and compare with the tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 tools/release/read_version.py)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Project version: $version"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match project version ${version}; the wheel filename carries the version, so they must agree."
+            exit 1
+          fi
+
+  build:
+    name: Build wheel (${{ matrix.name }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Pinned, not -latest, and the same images release-mltbx.yml builds
+          # on. ubuntu-26.04 ships a GCC that will not compile our pinned
+          # glslang, and ubuntu-latest now resolves to it.
+          #
+          # ubuntu-24.04 means glibc 2.39, so auditwheel can only certify
+          # manylinux_2_39. A lower floor would need a manylinux_2_28 container,
+          # which packages neither glslangValidator nor the Vulkan loader --
+          # see docs/release_python.md.
+          - os: ubuntu-24.04
+            name: linux
+          - os: windows-2025
+            name: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The Vulkan backend needs the loader import library and glslangValidator
+      # at build time. CMake fetches the headers itself, but errors out on these.
+      - name: Install Vulkan loader and glslang (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslang-tools patchelf
+
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'vulkan-sdk.exe'
+          Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe' -OutFile $installer
+          $installArgs = @('--accept-licenses', '--default-answer', '--confirm-command', 'install')
+          $proc = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+          if ($proc.ExitCode -ne 0) { throw "Vulkan SDK installer exited with $($proc.ExitCode)" }
+          $sdk = Get-ChildItem 'C:\VulkanSDK' -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $sdk) { throw 'No Vulkan SDK directory found after install' }
+          "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$($sdk.FullName)\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      # The image ships Visual Studio 2026, which runner-images currently routes
+      # every Windows label to (actions/runner-images#14571). Our pinned glslang
+      # and VkFFT are not built against it anywhere else, and the released
+      # Windows binaries have always come off VS 2022, so install it and build
+      # with it -- same as release-mltbx.yml.
+      - name: Install Visual Studio 2022 build tools (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install visualstudio2022buildtools -y --no-progress --ignore-package-exit-codes `
+            --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --includeRecommended --quiet --norestart --nocache"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installPath = & $vswhere -products * -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installPath) { throw 'Visual Studio 2022 with the C++ toolset was not installed' }
+          Write-Host "Visual Studio 2022 at $installPath"
+          "CMAKE_GENERATOR=Visual Studio 17 2022" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install wheel repair tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            python -m pip install auditwheel
+          else
+            python -m pip install delvewheel
+          fi
+
+      # The same scripts the manual path uses, so a release never exercises a
+      # code path nobody runs locally. They configure with
+      # BUMP_PATCH_ON_BUILD=OFF, build, stage the shared library into the
+      # package, and repair the wheel.
+      - name: Build wheel (Linux)
+        if: runner.os == 'Linux'
+        run: ./tools/release/build_wheel_linux.sh build-wheel-linux Release
+
+      - name: Build wheel (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\tools\release\build_wheel_windows.ps1 -BuildDir build-wheel-win -Config Release
+
+      # A py3-none-any wheel here would mean the platform tag override in
+      # setup.py stopped taking effect: two platforms would then produce the
+      # same filename, and whichever uploaded first would ship its own shared
+      # library to every platform.
+      - name: Check the wheel tags
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -l dist/
+          found=0
+          for wheel in dist/*.whl; do
+            name="$(basename "$wheel")"
+            echo "::notice::built $name"
+            case "$name" in
+              *-any.whl)
+                echo "::error::$name is platform-universal; expected a real platform tag."
+                exit 1
+                ;;
+              *-manylinux_*.whl|*-win_amd64.whl)
+                found=$((found + 1))
+                ;;
+              *)
+                echo "::error::$name does not carry a publishable platform tag."
+                exit 1
+                ;;
+            esac
+          done
+          if [ "$found" -ne 1 ]; then
+            echo "::error::expected exactly one publishable wheel in dist/, found $found."
+            exit 1
+          fi
+          # The version in the filename is what PyPI will record.
+          ls dist/nlolib-${VERSION}-py3-none-*.whl >/dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.name }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  # Deliberately no checkout and no build tooling: the wheel has to stand on its
+  # own, from a clean interpreter, exactly as a user gets it from the index. The
+  # runners have no GPU, so this only ever touches the CPU backend.
+  smoke:
+    name: Smoke-test wheel (${{ matrix.name }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux
+          - os: windows-2025
+            name: windows
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ matrix.name }}
+          path: wheelhouse
+
+      - name: Install the wheel into a clean virtualenv and propagate on the CPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/smoke"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            py="$RUNNER_TEMP/smoke/Scripts/python.exe"
+          else
+            py="$RUNNER_TEMP/smoke/bin/python"
+          fi
+          "$py" -m pip install --upgrade pip
+          "$py" -m pip install --no-index --find-links wheelhouse nlolib
+          "$py" -m pip show -f nlolib
+
+          # Run from somewhere else entirely, so nothing can resolve against a
+          # working directory instead of the installed package.
+          cd "$RUNNER_TEMP"
+          "$py" -I - <<'PY'
+          import nlolib
+
+          # Fails loudly if the shared library did not ship in the wheel, or if
+          # the wheel's repair left a dependency unresolved.
+          nlolib.load()
+
+          api = nlolib.NLolib()
+          # backend_type 0: the CPU backend. Never Vulkan -- no GPU here.
+          assert nlolib.VECTOR_BACKEND_CPU == 0
+          cpu = nlolib.default_execution_options(nlolib.VECTOR_BACKEND_CPU)
+
+          limits = api.query_runtime_limits(exec_options=cpu)
+          assert int(limits.max_num_time_samples_runtime) > 0
+
+          n = 64
+          cfg = nlolib.prepare_sim_config(
+              n,
+              propagation_distance=0.0,
+              starting_step_size=0.01,
+              max_step_size=0.1,
+              min_step_size=0.001,
+              error_tolerance=1e-6,
+              pulse_period=1.0,
+              delta_time=0.001,
+              frequency_grid=[0j] * n,
+              runtime=nlolib.RuntimeOperators(constants=[0.0, 0.0, 1.0]),
+          )
+          records = api.propagate(cfg, [0j] * n, 2, cpu).records
+          assert len(records) == 2, records
+          assert len(records[0]) == n, len(records[0])
+          print("wheel smoke test: CPU propagation returned", len(records), "x", len(records[0]))
+          PY
+
+  # TestPyPI is opt-in rather than automatic on every dispatch, so the ordinary
+  # dry run stays a build-and-check with no outward effect. Needs a trusted
+  # publisher on TestPyPI for this repository and the testpypi environment.
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: smoke
+    if: github.event_name == 'workflow_dispatch' && inputs.testpypi
+    runs-on: ubuntu-24.04
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: smoke
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist
+
+      # Every wheel for one version goes up in a single call, so a platform
+      # cannot be left behind by a job that failed after a partial upload.
+      - name: List what is about to be published
+        run: ls -l dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

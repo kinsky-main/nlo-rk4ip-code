@@ -10,7 +10,7 @@ Set-Location $repoRoot
 
 cmake -S . -B $BuildDir `
   -DINSTALL_GIT_HOOKS=OFF `
-  -DBUMP_PATCH_ON_BUILD=ON `
+  -DBUMP_PATCH_ON_BUILD=OFF `
   -DBUILD_TESTING=OFF `
   -DNLOLIB_BUILD_DOCS=OFF `
   -DNLOLIB_BUILD_BENCHMARKS=OFF `
@@ -90,10 +90,13 @@ if (-not (Test-Path (Join-Path $pkgDir "sqlite3.dll"))) {
 python -m pip install --upgrade build
 python -m build
 
+# vulkan-1.dll is delay-loaded and belongs to the user's graphics driver, so it
+# is excluded rather than vendored; nlolib probes for the loader before touching
+# any entry point, so its absence stays benign.
 if (Get-Command delvewheel -ErrorAction SilentlyContinue) {
-    Get-ChildItem dist\python\*.whl | ForEach-Object {
-        delvewheel repair --add-path $pkgDir --wheel-dir dist\python $_.FullName
+    Get-ChildItem dist\*.whl | ForEach-Object {
+        delvewheel repair --exclude vulkan-1.dll --add-path $pkgDir --wheel-dir dist $_.FullName
     }
 }
 
-Write-Host "Built wheels in dist/python/"
+Write-Host "Built wheels in dist/"

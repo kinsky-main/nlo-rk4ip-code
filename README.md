@@ -77,27 +77,26 @@ Generated output:
 - Julia package guide: `julia/README.md`
 
 The PyPI/package readme remains `python/README_PYPI.md`.
-<<<<<<< HEAD
-=======
 
-## Python Benchmarks
+## Python Releases
 
-Run the nlolib-only tensor CPU vs GPU benchmark with:
+Wheels are published to PyPI by `.github/workflows/release-pypi.yml` when a
+bare version tag (`1.16.0`, no `v`) is pushed. One wheel per platform, Linux
+and Windows x86-64, each smoke-tested on a clean runner before anything is
+uploaded. Run the workflow manually for a dry run that builds and checks the
+wheels but publishes nothing.
 
-```powershell
-python examples/python/tensor_backend_scaling_nlolib_rk4ip.py
+To build a wheel locally:
+
+```bash
+./tools/release/build_wheel_linux.sh build-wheel-linux Release
 ```
 
-The nlolib-only runtime plot fits the GPU curve in two regions: a smaller
-ringbuffer-friendly region and a larger transfer-limited region.
-
-The mixed nlolib/MMTools runtime comparison remains:
-
 ```powershell
-python examples/python/tensor_backend_scaling_rk4ip.py
+.\tools\release\build_wheel_windows.ps1 -BuildDir build-wheel-win -Config Release
 ```
 
-It translates MMTools scalar mode counts into GRIN-effective nlolib grid
-sizes, then writes both state-vector-size and scalar-mode-count runtime
-plots for the comparison.
->>>>>>> feat/benchmarking-junk
+Both need the Vulkan loader and `glslangValidator`. See
+[docs/release_python.md](docs/release_python.md) for the full story: the wheel
+tagging, the platform matrix and its glibc floor, Trusted Publishing setup,
+and why macOS is not published.

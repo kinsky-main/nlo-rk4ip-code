@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/cmake_options.sh"
 
 nlo_configure_verified "$BUILD_DIR" \
   INSTALL_GIT_HOOKS=OFF \
-  BUMP_PATCH_ON_BUILD=ON \
+  BUMP_PATCH_ON_BUILD=OFF \
   BUILD_TESTING=OFF \
   NLOLIB_BUILD_DOCS=OFF \
   NLOLIB_BUILD_BENCHMARKS=OFF \

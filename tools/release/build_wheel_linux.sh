@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/cmake_options.sh"
 
 nlo_configure_verified "$BUILD_DIR" \
   INSTALL_GIT_HOOKS=OFF \
-  BUMP_PATCH_ON_BUILD=ON \
+  BUMP_PATCH_ON_BUILD=OFF \
   BUILD_TESTING=OFF \
   NLOLIB_BUILD_DOCS=OFF \
   NLOLIB_BUILD_BENCHMARKS=OFF \
@@ -67,10 +67,18 @@ fi
 python3 -m pip install --upgrade build
 python3 -m build
 
+# repair rewrites the tag from the build machine's bare linux_x86_64 to the
+# manylinux tag the binary has actually earned, under a new filename. The
+# unrepaired wheel is removed so dist/ holds only publishable wheels -- PyPI
+# rejects a linux_x86_64 tag outright.
 if command -v auditwheel >/dev/null 2>&1; then
-  for wheel in dist/*.whl; do
+  for wheel in dist/*-linux_*.whl; do
+    [[ -e "$wheel" ]] || continue
     auditwheel repair "$wheel" -w dist/
+    rm -f "$wheel"
   done
+else
+  echo "auditwheel not found: dist/ holds unrepaired wheels that PyPI will reject." >&2
 fi
 
 echo "Built wheels in dist/"
