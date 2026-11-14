@@ -30,7 +30,7 @@ wrapper over the native shared library. There is no Python or MEX dependency.
 
 ### Prerequisites
 
-- MATLAB R2019b or later.
+- MATLAB R2023b or later, on 64-bit Windows or 64-bit Linux.
 - No C compiler, and no Visual C++ redistributable. The packaged toolbox ships
   a prebuilt `loadlibrary` prototype (`nlolib_proto.m` plus its thunk), so the
   header is never parsed on your machine, and the library links the MSVC
@@ -48,16 +48,57 @@ live progress bar in a build tree.
 
 ### Option A — toolbox install (recommended)
 
-Download `nlolib.mltbx` from the GitHub release page and double-click it, or:
+Fetch and install the newest release in one step:
 
 ```matlab
-matlab.addons.install('nlolib.mltbx');
+f = websave([tempname '.mltbx'], 'https://github.com/kinsky-main/nlo-rk4ip-code/releases/latest/download/nlolib.mltbx');
+matlab.addons.toolbox.installToolbox(f);
 ```
 
-The toolbox bundles the package, the shared library for each supported
-platform (under `lib/<arch>`), `nlolib_matlab.h`, and the example scripts.
-Installing a newer `nlolib.mltbx` replaces the installed version. Installing puts only the package on the MATLAB path; run
-`nlolib_setup()` to add the example folder for the current session.
+That URL always resolves to the current release. To pin a version, replace
+`latest/download` with `download/1.13.0`.
+
+Otherwise download `nlolib.mltbx` from the GitHub release page and
+double-click it in MATLAB, use **Home -> Add-Ons -> Install from File**, or:
+
+```matlab
+matlab.addons.toolbox.installToolbox('nlolib.mltbx');
+```
+
+One bundle covers every supported platform: it carries `lib/win64` and
+`lib/glnxa64` side by side, each holding its own shared library, `loadlibrary`
+prototype and thunk, plus a `progress_mex` per platform. MATLAB loads the
+folder matching `computer('arch')`. The bundle also ships `nlolib_matlab.h`,
+the example scripts, and this guide.
+
+On Linux, do not install from `matlab -batch`: the files are extracted but the
+add-on registration does not survive the session, so the next session finds
+nothing. Use the desktop, or:
+
+```bash
+matlab -nodisplay -r "matlab.addons.toolbox.installToolbox('nlolib.mltbx'); exit"
+```
+
+Older bundles carry a different toolbox identifier and are not replaced
+automatically: one per platform before 1.13.0 (`nlolib-win64`,
+`nlolib-glnxa64`), and the bare name `nlolib` in the first 1.13.0 build.
+Remove such an install by hand first:
+
+```matlab
+guid = '6a93951c-b83c-45dd-97fd-72881ce03474';
+t = matlab.addons.toolbox.installedToolboxes;
+for k = 1:numel(t)
+    if strcmp(t(k).Name, 'nlolib') && ~strcmp(t(k).Guid, guid)
+        matlab.addons.toolbox.uninstallToolbox(t(k));
+    end
+end
+```
+
+Every bundle now shares that fixed GUID, so installing a newer
+`nlolib.mltbx` replaces the installed one in place.
+
+Installing puts only the package on the MATLAB path; run `nlolib_setup()` to
+add the example folder for the current session.
 
 ### Option B — build tree
 

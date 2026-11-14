@@ -15,10 +15,10 @@
 ## Build Notes
 - Top-level build is CMake; root `CMakeLists.txt` adds `src/`, `python/`, `matlab/`, `julia/`, `tests/`, `benchmarks/`, and `examples/`.
 - Prefer configuring with repo-mutating options disabled unless the task explicitly needs them:
-  - `-DNLO_INSTALL_GIT_HOOKS=OFF`
-  - `-DNLO_BUMP_PATCH_ON_BUILD=OFF`
+  - `-DINSTALL_GIT_HOOKS=OFF`
+  - `-DBUMP_PATCH_ON_BUILD=OFF`
 - Docs target is conditional: `NLOLIB_BUILD_DOCS=ON` and Doxygen available, otherwise no `docs` target is created.
-- Benchmarks depend on the Vulkan backend; `NLOLIB_BUILD_BENCHMARKS` is forced off when `NLO_ENABLE_VULKAN_BACKEND=OFF`.
+- Benchmarks depend on the Vulkan backend; `NLOLIB_BUILD_BENCHMARKS` is forced off when `ENABLE_VULKAN_BACKEND=OFF`.
 
 ## Do / Don't
 - Do keep changes minimal and focused.
@@ -60,4 +60,4 @@
 ## Common Issues
 - Python tests are part of the CTest surface when `BUILD_TESTING=ON`, so Python availability matters for full test runs.
 - The docs target is optional even when `NLOLIB_BUILD_DOCS=ON`; missing Doxygen means no `docs` target is generated.
-- Build steps can modify the repo version or install hooks unless `NLO_BUMP_PATCH_ON_BUILD` and `NLO_INSTALL_GIT_HOOKS` are disabled.
+- Build steps can modify the repo version or install hooks unless `BUMP_PATCH_ON_BUILD` and `INSTALL_GIT_HOOKS` are disabled.

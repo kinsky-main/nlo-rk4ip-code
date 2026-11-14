@@ -85,7 +85,7 @@ would move, not disappear.
 **5. Distribution regression.** `clib` interfaces are compiled artifacts tied
 to a specific MATLAB release *and* platform, and the documented workflow
 requires R2023a+. The toolbox currently declares `MinimumMatlabRelease =
-R2019b` and ships one shared library that works across releases. Adopting
+R2023b` and ships one shared library that works across releases. Adopting
 `clibgen` means publishing one built interface per supported MATLAB release.
 
 ## Decision

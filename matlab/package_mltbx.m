@@ -76,7 +76,7 @@ opts.Description = sprintf(['nlolib MATLAB bindings and staged runtime libraries
                             'the user guide under docs/, and platform-specific shared\n' ...
                             'libraries under lib/.']);
 opts.AuthorName = "nlolib";
-opts.MinimumMatlabRelease = "R2019b";
+opts.MinimumMatlabRelease = "R2023b";
 opts.OutputFile = artifactPath;
 % Only the package root goes on the permanent path; examples (and their
 % generic +backend helpers) are added per session by nlolib_setup().
@@ -143,7 +143,11 @@ end
 
 function id = package_mltbx_identifier()
 %PACKAGE_MLTBX_IDENTIFIER Toolbox GUID shared by all platform bundles.
-id = 'nlolib';
+%   A fixed GUID, not a name: the add-on metadata declares this field as a
+%   GUID, and File Exchange rejects a bundle whose identifier is not one.
+%   Never regenerate it — a new GUID makes MATLAB treat the toolbox as a
+%   different add-on, so an installed copy is no longer replaced in place.
+id = '6a93951c-b83c-45dd-97fd-72881ce03474';
 end
 
 function tag = package_mltbx_platform_tag()

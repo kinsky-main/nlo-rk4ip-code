@@ -24,7 +24,7 @@ classdef NLolib < handle
     %   NLOLIB_LIBRARY environment variable to override.
     %
     %   PREREQUISITES
-    %     - MATLAB R2019b or later.
+    %     - MATLAB R2023b or later.
     %     - A GPU driver with the Vulkan loader (ships with standard
     %       NVIDIA / AMD / Intel desktop drivers).
     %

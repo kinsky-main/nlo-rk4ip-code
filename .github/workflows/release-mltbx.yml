@@ -1,0 +1,197 @@
+name: release-mltbx
+
+# Builds the MATLAB toolbox on every supported platform, merges the per-platform
+# bundles into one nlolib.mltbx, and publishes it as a GitHub release asset.
+# File Exchange is linked to this repository's releases and picks the asset up
+# from there, so two things matter and are enforced below:
+#   * the tag is a bare version (no "v"), because File Exchange parses it; and
+#   * the version inside the package matches that tag.
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:   # dry run: builds and uploads artifacts, publishes nothing
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-mltbx-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The MEX files and the package format are produced with this release, which
+  # makes it the real compatibility floor. Keep it in step with
+  # MinimumMatlabRelease in matlab/package_mltbx.m and matlab/merge_mltbx.m.
+  MATLAB_RELEASE: R2023b
+
+jobs:
+  verify:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read project version and compare with the tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 tools/release/read_version.py)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Project version: $version"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$version" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match project version ${version}; File Exchange reads the tag as the release version, so they must agree."
+            exit 1
+          fi
+
+  package:
+    name: Package ${{ matrix.arch }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: glnxa64
+          - os: windows-latest
+            arch: win64
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Vulkan backend needs the loader import library and glslangValidator
+      # at build time. CMake fetches the headers itself, but errors out on these.
+      - name: Install Vulkan loader and glslang (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslang-tools
+
+      - name: Install Vulkan SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'vulkan-sdk.exe'
+          Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe' -OutFile $installer
+          $installArgs = @('--accept-licenses', '--default-answer', '--confirm-command', 'install')
+          $proc = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+          if ($proc.ExitCode -ne 0) { throw "Vulkan SDK installer exited with $($proc.ExitCode)" }
+          $sdk = Get-ChildItem 'C:\VulkanSDK' -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $sdk) { throw 'No Vulkan SDK directory found after install' }
+          "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$($sdk.FullName)\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ env.MATLAB_RELEASE }}
+          cache: true
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DINSTALL_GIT_HOOKS=OFF
+          -DBUMP_PATCH_ON_BUILD=OFF
+          -DBUILD_TESTING=OFF
+          -DNLOLIB_BUILD_DOCS=OFF
+          -DNLOLIB_BUILD_BENCHMARKS=OFF
+          -DNLOLIB_BUILD_EXAMPLES=OFF
+          -DENABLE_VULKAN_BACKEND=ON
+          -DENABLE_VKFFT=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # package_mltbx stages the tree, generates the loadlibrary prototype and
+      # thunk, and compiles the progress MEX, so the shipped toolbox needs no
+      # compiler on the user's machine.
+      - name: Package toolbox
+        uses: matlab-actions/run-command@v3
+        with:
+          command: addpath("matlab"), package_mltbx("build", "Release")
+
+      - name: Check the staged layout
+        shell: bash
+        run: |
+          set -euxo pipefail
+          stage="build/matlab_toolbox"
+          test -f "$stage/lib/nlolib_matlab.h"
+          test -f "$stage/lib/${{ matrix.arch }}/nlolib_proto.m"
+          ls "$stage"/+nlolib/private/progress_mex.*
+          ls dist/nlolib-*-${{ matrix.arch }}.mltbx
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mltbx-${{ matrix.arch }}
+          path: dist/nlolib-*-${{ matrix.arch }}.mltbx
+          if-no-files-found: error
+
+  release:
+    name: Merge and publish
+    needs: [verify, package]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mltbx-*
+          merge-multiple: true
+          path: dist
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: ${{ env.MATLAB_RELEASE }}
+          cache: true
+
+      # merge_mltbx refuses to combine bundles whose shared files differ, so two
+      # build jobs that drifted apart fail here rather than shipping a mismatch.
+      - name: Merge platform bundles
+        uses: matlab-actions/run-command@v3
+        with:
+          command: addpath("matlab"), merge_mltbx(["dist/nlolib-${{ needs.verify.outputs.version }}-glnxa64.mltbx", "dist/nlolib-${{ needs.verify.outputs.version }}-win64.mltbx"], "dist/nlolib.mltbx")
+
+      - name: Check the merged bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/merged"
+          rm -rf "$work"
+          mkdir -p "$work"
+          unzip -q dist/nlolib.mltbx -d "$work"
+          # File Exchange rejects a package whose identifier is not a GUID.
+          grep -Eq '<identifier type="GUID">[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}</identifier>' "$work/metadata/addonProperties.xml"
+          grep -q "<cp:version>${VERSION}</cp:version>" "$work/metadata/coreProperties.xml"
+          test -f "$work/fsroot/lib/win64/nlolib.dll"
+          test -f "$work/fsroot/lib/glnxa64/libnlolib.so"
+          test -f "$work/fsroot/+nlolib/private/progress_mex.mexw64"
+          test -f "$work/fsroot/+nlolib/private/progress_mex.mexa64"
+          echo "merged bundle looks right"
+
+      - name: Build release notes
+        shell: bash
+        run: sed "s/@VERSION@/${VERSION}/g" .github/mltbx-release-notes.md > "$RUNNER_TEMP/notes.md"
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/nlolib.mltbx --clobber
+            gh release edit "$VERSION" --notes-file "$RUNNER_TEMP/notes.md" --latest
+          else
+            gh release create "$VERSION" --title "Version $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --latest dist/nlolib.mltbx
+          fi

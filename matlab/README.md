@@ -29,7 +29,7 @@ nlolib_setup();
 api = nlolib.NLolib();
 ```
 
-Requires MATLAB R2019b or later and nothing else — no C compiler, no Visual C++
+Requires MATLAB R2023b or later and nothing else — no C compiler, no Visual C++
 redistributable, no Vulkan runtime. The packaged toolbox ships a prebuilt
 `loadlibrary` prototype, so the header is never parsed on the client.
 

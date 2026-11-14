@@ -78,9 +78,9 @@ if isfile(outputPath)
     delete(outputPath);
 end
 
-% Same identifier as package_mltbx, so this bundle replaces an installed
-% single-platform one.
-opts = matlab.addons.toolbox.ToolboxOptions(stageDir, 'nlolib');
+% Same fixed GUID as package_mltbx_identifier, so this bundle replaces an
+% installed single-platform one.
+opts = matlab.addons.toolbox.ToolboxOptions(stageDir, '6a93951c-b83c-45dd-97fd-72881ce03474');
 opts.ToolboxName = "nlolib";
 opts.ToolboxVersion = char(version);
 opts.Summary = "GPU-first nonlinear optics propagation library";
@@ -89,7 +89,7 @@ opts.Description = sprintf(['nlolib MATLAB bindings and runtime libraries for %s
                             'the user guide under docs/, and one lib/<arch> folder\n' ...
                             'per platform.'], strjoin(platforms, ', '));
 opts.AuthorName = "nlolib";
-opts.MinimumMatlabRelease = "R2019b";
+opts.MinimumMatlabRelease = "R2023b";
 opts.OutputFile = outputPath;
 opts.ToolboxMatlabPath = {stageDir};
 supported = opts.SupportedPlatforms;

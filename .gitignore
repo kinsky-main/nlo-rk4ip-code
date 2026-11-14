@@ -66,6 +66,9 @@ __pycache__/
 build/
 Debug/
 Release/
+# ...but not the release tooling: Git matches paths case-insensitively on
+# Windows and macOS, so the Release/ pattern above also hides tools/release.
+!tools/release/
 develop-eggs/
 dist/
 downloads/
