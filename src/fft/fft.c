@@ -6,6 +6,7 @@
 #include "fft/fft.h"
 #include "backend/vector_backend_internal.h"
 #include "numerics/vk_vector_ops.h"
+#include "utility/perf_profile.h"
 #include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -583,14 +584,16 @@ vec_status fft_forward_vec(
 
     if (plan->fft_backend == FFT_BACKEND_VKFFT) {
 #if ENABLE_VKFFT
+        const int assess_prev_phase = perf_profile_set_gpu_phase(PERF_GPU_PHASE_FFT);
         vec_status status = VEC_STATUS_OK;
         if (input != output) {
             status = vec_complex_copy(plan->backend, output, input);
-            if (status != VEC_STATUS_OK) {
-                return status;
-            }
         }
-        return fft_vk_execute_inplace(plan, output, 0);
+        if (status == VEC_STATUS_OK) {
+            status = fft_vk_execute_inplace(plan, output, 0);
+        }
+        (void)perf_profile_set_gpu_phase(assess_prev_phase);
+        return status;
 #else
         return VEC_STATUS_UNSUPPORTED;
 #endif
@@ -634,21 +637,21 @@ vec_status fft_inverse_vec(
 
     if (plan->fft_backend == FFT_BACKEND_VKFFT) {
 #if ENABLE_VKFFT
+        const int assess_prev_phase = perf_profile_set_gpu_phase(PERF_GPU_PHASE_FFT);
         vec_status status = VEC_STATUS_OK;
         if (input != output) {
             status = vec_complex_copy(plan->backend, output, input);
-            if (status != VEC_STATUS_OK) {
-                return status;
-            }
         }
-        status = fft_vk_execute_inplace(plan, output, 1);
-        if (status != VEC_STATUS_OK) {
-            return status;
+        if (status == VEC_STATUS_OK) {
+            status = fft_vk_execute_inplace(plan, output, 1);
         }
-
-        return vec_complex_scalar_mul_inplace(plan->backend,
-                                                  output,
-                                                  make(plan->inverse_scale, 0.0));
+        if (status == VEC_STATUS_OK) {
+            status = vec_complex_scalar_mul_inplace(plan->backend,
+                                                    output,
+                                                    make(plan->inverse_scale, 0.0));
+        }
+        (void)perf_profile_set_gpu_phase(assess_prev_phase);
+        return status;
 #else
         return VEC_STATUS_UNSUPPORTED;
 #endif

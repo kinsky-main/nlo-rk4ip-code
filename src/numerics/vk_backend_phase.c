@@ -4,6 +4,62 @@
  */
 
 #include "numerics/vk_backend_internal.h"
+#include "utility/perf_profile.h"
+
+static void vk_ts_begin(vector_backend* backend)
+{
+    backend->vk.ts_cursor = 0u;
+    if (backend->vk.ts_pool == VK_NULL_HANDLE) {
+        return;
+    }
+    VkCommandBuffer cmd = backend->vk.command_buffer;
+    vkCmdResetQueryPool(cmd, backend->vk.ts_pool, 0u, backend->vk.ts_capacity);
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, backend->vk.ts_pool, 0u);
+    backend->vk.ts_tags[0] = (uint8_t)PERF_GPU_PHASE_OTHER;
+    backend->vk.ts_cursor = 1u;
+}
+
+static void vk_ts_mark(vector_backend* backend)
+{
+    if (backend->vk.ts_pool == VK_NULL_HANDLE || backend->vk.ts_cursor == 0u) {
+        return;
+    }
+    if (backend->vk.ts_cursor >= backend->vk.ts_capacity) {
+        perf_profile_add_host_slot(PERF_HOST_SLOT_TIMESTAMP_DROPS, 1.0);
+        return;
+    }
+    const uint32_t index = backend->vk.ts_cursor++;
+    vkCmdWriteTimestamp(backend->vk.command_buffer,
+                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                        backend->vk.ts_pool,
+                        index);
+    backend->vk.ts_tags[index] = (uint8_t)perf_profile_get_gpu_phase();
+}
+
+static void vk_ts_collect(vector_backend* backend)
+{
+    const uint32_t count = backend->vk.ts_cursor;
+    backend->vk.ts_cursor = 0u;
+    if (backend->vk.ts_pool == VK_NULL_HANDLE || count < 2u) {
+        return;
+    }
+    if (vkGetQueryPoolResults(backend->vk.device,
+                              backend->vk.ts_pool,
+                              0u,
+                              count,
+                              (size_t)count * sizeof(uint64_t),
+                              backend->vk.ts_values,
+                              sizeof(uint64_t),
+                              VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) != VK_SUCCESS) {
+        return;
+    }
+    const uint64_t mask = backend->vk.ts_valid_mask;
+    for (uint32_t i = 1u; i < count; ++i) {
+        const uint64_t delta = (backend->vk.ts_values[i] - backend->vk.ts_values[i - 1u]) & mask;
+        perf_profile_add_gpu_phase_time((int)backend->vk.ts_tags[i],
+                                        ((double)delta * backend->vk.ts_period_ns) * 1e-6);
+    }
+}
 
 static vec_status vk_begin_commands_raw(vector_backend* backend)
 {
@@ -49,6 +105,7 @@ void vk_simulation_phase_mark_commands(vector_backend* backend)
         return;
     }
     backend->vk.simulation_phase_has_commands = true;
+    vk_ts_mark(backend);
 }
 
 vec_status vk_simulation_phase_begin(vector_backend* backend)
@@ -68,6 +125,7 @@ vec_status vk_simulation_phase_begin(vector_backend* backend)
     backend->vk.simulation_phase_recording = true;
     backend->vk.simulation_phase_has_commands = false;
     backend->vk.simulation_descriptor_set_cursor = 0u;
+    vk_ts_begin(backend);
     return VEC_STATUS_OK;
 }
 
@@ -122,7 +180,10 @@ vec_status vk_simulation_phase_flush(vector_backend* backend)
             vk_reset_simulation_phase_state(backend);
             return VEC_STATUS_BACKEND_UNAVAILABLE;
         }
+        perf_profile_add_host_slot(PERF_HOST_SLOT_SUBMITS, 1.0);
+        vk_ts_collect(backend);
     }
+    backend->vk.ts_cursor = 0u;
 
     vk_reset_simulation_phase_state(backend);
     return VEC_STATUS_OK;

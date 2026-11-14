@@ -16,12 +16,70 @@
 typedef struct {
     int enabled;
     nlo_perf_profile_snapshot snapshot;
+    int gpu_phase;
+    double gpu_phase_ms[PERF_GPU_PHASE_COUNT];
+    uint64_t gpu_phase_intervals[PERF_GPU_PHASE_COUNT];
+    double host_slots[PERF_HOST_SLOT_COUNT];
 } perf_profile_state;
 
 static perf_profile_state g_nlo_perf_profile_state = {
     0,
+    {0},
+    PERF_GPU_PHASE_OTHER,
+    {0},
+    {0},
     {0}
 };
+
+int perf_profile_set_gpu_phase(int phase)
+{
+    const int previous = g_nlo_perf_profile_state.gpu_phase;
+    if (phase >= 0 && phase < PERF_GPU_PHASE_COUNT) {
+        g_nlo_perf_profile_state.gpu_phase = phase;
+    }
+    return previous;
+}
+
+int perf_profile_get_gpu_phase(void)
+{
+    return g_nlo_perf_profile_state.gpu_phase;
+}
+
+void perf_profile_add_gpu_phase_time(int phase, double elapsed_ms)
+{
+    if (!g_nlo_perf_profile_state.enabled || phase < 0 || phase >= PERF_GPU_PHASE_COUNT) {
+        return;
+    }
+    g_nlo_perf_profile_state.gpu_phase_ms[phase] += elapsed_ms;
+    g_nlo_perf_profile_state.gpu_phase_intervals[phase] += 1u;
+}
+
+void perf_profile_add_host_slot(int slot, double value)
+{
+    if (!g_nlo_perf_profile_state.enabled || slot < 0 || slot >= PERF_HOST_SLOT_COUNT) {
+        return;
+    }
+    g_nlo_perf_profile_state.host_slots[slot] += value;
+}
+
+void perf_profile_gpu_phases_read(
+    double* out_phase_ms,
+    uint64_t* out_phase_intervals,
+    double* out_host_slots
+)
+{
+    if (out_phase_ms != NULL) {
+        memcpy(out_phase_ms, g_nlo_perf_profile_state.gpu_phase_ms, sizeof(g_nlo_perf_profile_state.gpu_phase_ms));
+    }
+    if (out_phase_intervals != NULL) {
+        memcpy(out_phase_intervals,
+               g_nlo_perf_profile_state.gpu_phase_intervals,
+               sizeof(g_nlo_perf_profile_state.gpu_phase_intervals));
+    }
+    if (out_host_slots != NULL) {
+        memcpy(out_host_slots, g_nlo_perf_profile_state.host_slots, sizeof(g_nlo_perf_profile_state.host_slots));
+    }
+}
 
 void perf_profile_set_enabled(int enabled)
 {
@@ -36,6 +94,9 @@ int perf_profile_is_enabled(void)
 void perf_profile_reset(void)
 {
     memset(&g_nlo_perf_profile_state.snapshot, 0, sizeof(g_nlo_perf_profile_state.snapshot));
+    memset(g_nlo_perf_profile_state.gpu_phase_ms, 0, sizeof(g_nlo_perf_profile_state.gpu_phase_ms));
+    memset(g_nlo_perf_profile_state.gpu_phase_intervals, 0, sizeof(g_nlo_perf_profile_state.gpu_phase_intervals));
+    memset(g_nlo_perf_profile_state.host_slots, 0, sizeof(g_nlo_perf_profile_state.host_slots));
 }
 
 void perf_profile_snapshot_read(nlo_perf_profile_snapshot* out_snapshot)

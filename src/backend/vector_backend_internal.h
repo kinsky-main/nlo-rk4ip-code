@@ -140,6 +140,15 @@ typedef struct {
     bool simulation_phase_recording;
     bool simulation_phase_has_commands;
     uint32_t simulation_descriptor_set_cursor;
+
+    /* Assessment instrumentation: phase-tagged timestamp queries (NLO_GPU_TIMESTAMPS=1). */
+    VkQueryPool ts_pool;
+    uint32_t ts_capacity;
+    uint32_t ts_cursor;
+    uint8_t* ts_tags;
+    uint64_t* ts_values;
+    double ts_period_ns;
+    uint64_t ts_valid_mask;
 } vk_backend;
 
 /**

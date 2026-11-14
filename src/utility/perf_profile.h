@@ -135,6 +135,74 @@ void perf_profile_add_gpu_upload(uint64_t count, uint64_t bytes);
 void perf_profile_add_gpu_download(uint64_t count, uint64_t bytes);
 
 /**
+ * @brief GPU work categories used by assessment timestamp instrumentation.
+ */
+typedef enum {
+    PERF_GPU_PHASE_OTHER = 0,
+    PERF_GPU_PHASE_FFT = 1,
+    PERF_GPU_PHASE_LINEAR = 2,
+    PERF_GPU_PHASE_NONLINEAR = 3,
+    PERF_GPU_PHASE_RK_ALGEBRA = 4,
+    PERF_GPU_PHASE_ERROR_NORM = 5,
+    PERF_GPU_PHASE_COUNT = 6
+} perf_gpu_phase;
+
+/**
+ * @brief Host-side slots recorded by assessment instrumentation.
+ */
+typedef enum {
+    PERF_HOST_SLOT_INIT_MS = 0,
+    PERF_HOST_SLOT_SOLVE_MS = 1,
+    PERF_HOST_SLOT_SUBMITS = 2,
+    PERF_HOST_SLOT_TIMESTAMP_DROPS = 3,
+    PERF_HOST_SLOT_COUNT = 4
+} perf_host_slot;
+
+/**
+ * @brief Set the GPU phase that subsequently recorded GPU work is attributed to.
+ *
+ * @param phase One of ::perf_gpu_phase.
+ * @return int Previous phase, for restoring.
+ */
+int perf_profile_set_gpu_phase(int phase);
+
+/**
+ * @brief Return the current GPU attribution phase.
+ *
+ * @return int One of ::perf_gpu_phase.
+ */
+int perf_profile_get_gpu_phase(void);
+
+/**
+ * @brief Accumulate measured GPU execution time for one phase.
+ *
+ * @param phase One of ::perf_gpu_phase.
+ * @param elapsed_ms GPU time in milliseconds.
+ */
+void perf_profile_add_gpu_phase_time(int phase, double elapsed_ms);
+
+/**
+ * @brief Accumulate a host-side slot.
+ *
+ * @param slot One of ::perf_host_slot.
+ * @param value Value to add (milliseconds or a count).
+ */
+void perf_profile_add_host_slot(int slot, double value);
+
+/**
+ * @brief Copy phase GPU times, interval counts and host slots.
+ *
+ * @param out_phase_ms Array of ::PERF_GPU_PHASE_COUNT doubles, or NULL.
+ * @param out_phase_intervals Array of ::PERF_GPU_PHASE_COUNT counts, or NULL.
+ * @param out_host_slots Array of ::PERF_HOST_SLOT_COUNT doubles, or NULL.
+ */
+void perf_profile_gpu_phases_read(
+    double* out_phase_ms,
+    uint64_t* out_phase_intervals,
+    double* out_host_slots
+);
+
+/**
  * @brief Read a monotonic wall-clock timestamp in milliseconds.
  *
  * @return double Monotonic timestamp in milliseconds.
