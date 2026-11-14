@@ -14,6 +14,7 @@ Full rendered documentation is available at
 - Python binding guide: `python/README.md`
 - MATLAB binding guide: `matlab/README.md`
 - Julia binding guide: `julia/README.md`
+- Julia release and registration guide: `docs/release_julia.md`
 
 ## Quick Start
 
@@ -77,6 +78,11 @@ Generated output:
 - Julia package guide: `julia/README.md`
 
 The PyPI/package readme remains `python/README_PYPI.md`.
+
+The Julia package installs from the General registry with `] add NLOLib`, which
+downloads a prebuilt artifact instead of compiling anything; a built checkout
+also works through the `julia_stage` target. Both paths, the release flow and
+registration are in `docs/release_julia.md`.
 <<<<<<< HEAD
 =======
 

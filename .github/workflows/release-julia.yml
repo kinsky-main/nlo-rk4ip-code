@@ -118,11 +118,12 @@ jobs:
           "$($sdk.FullName)\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       # runner-images currently routes every Windows label to Visual Studio 2026
-      # (actions/runner-images#14571). The MATLAB toolbox ships a Windows
-      # nlolib.dll built with VS 2022, and the MSVC runtime is only forward
-      # compatible, so a VS 2026 build here would hand Julia users a DLL needing
-      # a newer redistributable than the rest of the release. Pin the toolchain
-      # so every shipped Windows binary comes off the same one.
+      # (actions/runner-images#14571). The CRT is linked statically
+      # (CMAKE_MSVC_RUNTIME_LIBRARY in the root CMakeLists.txt), so this is not
+      # about redistributables: release-mltbx.yml pins VS 2022 because MATLAB
+      # will not accept VS 2026, and pinning the same toolchain here keeps every
+      # shipped Windows nlolib.dll coming off one compiler we have tested,
+      # instead of releasing a Julia binary from an untried one.
       - name: Install Visual Studio 2022 build tools (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
