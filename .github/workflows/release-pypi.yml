@@ -13,6 +13,12 @@ on:
   push:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
+    # TEMPORARY -- remove before merging. workflow_dispatch cannot reach a
+    # workflow that is not yet on the default branch, so this is how the dry
+    # run gets exercised on the PR branch. Nothing publishes on it: both
+    # publish jobs are gated on workflow_dispatch or on a tag ref.
+    branches:
+      - claude/release-pypi-341f14
   workflow_dispatch:
     inputs:
       testpypi:
