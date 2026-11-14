@@ -72,6 +72,33 @@ resolved:
 
 `GLSLANG_GIT_TAG` defaults to `12.3.1` and is used only by the fetch provider.
 
+## The Project Version
+
+`CMakeLists.txt` holds the version; `pyproject.toml` and `julia/Project.toml`
+carry copies, because a wheel and a Julia package each declare a literal
+version of their own, and `sbom.cdx.json` stamps it too. They must agree at
+every commit, so a release tag can be cut from any commit and the published
+artifacts carry the version their tag names. `test_version_copies_match` and
+`test_sbom_pins_match` fail if they drift.
+
+Nothing advances the version by itself. A release bumps it in one step:
+
+```bash
+python tools/release/check_versions.py --bump minor
+```
+
+That rewrites all three together. `--write` syncs the copies without bumping,
+and the bare command verifies them.
+
+Two options relate to this, both off by default:
+
+- `INSTALL_GIT_HOOKS=ON` installs a pre-commit hook that runs the same check.
+  It changes no file; it only refuses a commit whose versions disagree.
+- `BUMP_PATCH_ON_BUILD=ON` rewrites the version in `CMakeLists.txt` after a
+  successful build. It is a development convenience and must stay off for a
+  release build, whose packaged version is read back out of `CMakeLists.txt`
+  after the build.
+
 ## Third-Party Pins and the SBOM
 
 Every third-party source that is compiled into nlolib is pinned in one file,

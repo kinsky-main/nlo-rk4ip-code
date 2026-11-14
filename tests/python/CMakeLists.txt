@@ -13,6 +13,14 @@ add_test(NAME test_api_parity
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_api_parity.py"
 )
 
+# pyproject.toml and julia/Project.toml each declare a literal version, copied
+# from the CMake project version. They must agree at every commit so a release
+# tag can be cut from any commit: the tag names the version the artifacts carry.
+# Sync them with python tools/release/check_versions.py --write.
+add_test(NAME test_version_copies_match
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/release/check_versions.py"
+)
+
 set(_PY_PKG_DIR "${CMAKE_SOURCE_DIR}/python")
 if(WIN32)
   set(_NLOLIB_DLL "${_PY_PKG_DIR}/$<CONFIG>/nlolib.dll")
