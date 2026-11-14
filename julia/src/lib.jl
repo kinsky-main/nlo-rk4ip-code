@@ -14,6 +14,32 @@ function _package_root()
     return normpath(joinpath(@__DIR__, ".."))
 end
 
+"""
+    _artifact_library_paths()
+
+Locate the shared library inside the installed `nlolib` artifact, if the
+package has one bound for this platform and it is present in the depot.
+
+Returns an empty vector for a plain source checkout, for a platform the
+`Artifacts.toml` does not cover, and for an artifact that has not been
+downloaded, so the development paths below stay reachable.
+"""
+function _artifact_library_paths()
+    artifacts_toml = joinpath(_package_root(), "Artifacts.toml")
+    isfile(artifacts_toml) || return String[]
+
+    hash = try
+        Artifacts.artifact_hash("nlolib", artifacts_toml)
+    catch
+        nothing
+    end
+    (hash === nothing || !Artifacts.artifact_exists(hash)) && return String[]
+
+    root = Artifacts.artifact_path(hash)
+    filename = _library_filename()
+    return [joinpath(root, "lib", filename), joinpath(root, "bin", filename)]
+end
+
 function _candidate_library_paths(path::Union{Nothing, AbstractString})
     filename = _library_filename()
     package_root = _package_root()
@@ -28,6 +54,10 @@ function _candidate_library_paths(path::Union{Nothing, AbstractString})
     if !isempty(env_path)
         push!(candidates, normpath(env_path))
     end
+
+    # The artifact is the installed distribution, so it wins over the build
+    # tree; the paths after it keep a built repo checkout working unchanged.
+    append!(candidates, _artifact_library_paths())
 
     append!(candidates, [
         joinpath(package_root, "lib", filename),
@@ -53,7 +83,7 @@ function load(path::Union{Nothing, AbstractString} = nothing)
     end
 
     candidates = _candidate_library_paths(path)
-    isempty(candidates) && error("Cannot locate nlolib shared library. Set NLOLIB_LIBRARY or build julia_stage.")
+    isempty(candidates) && error("Cannot locate nlolib shared library. Install NLOLib so its artifact is available, set NLOLIB_LIBRARY, or build the julia_stage target.")
 
     errors = String[]
     for candidate in candidates

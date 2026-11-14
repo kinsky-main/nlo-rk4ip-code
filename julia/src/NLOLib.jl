@@ -1,5 +1,6 @@
 module NLOLib
 
+using Artifacts
 using Libdl
 
 include("types.jl")
