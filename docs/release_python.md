@@ -127,6 +127,12 @@ matches it. Two further reasons:
 
 ## Automated release
 
+A tag only runs the workflows that exist at the commit it points at, and
+`release-pypi.yml` is new here. Tags made before it reached `main` -- `1.17.0`
+among them -- cannot build a wheel, and there is nothing to dispatch at them
+either, since `workflow_dispatch` resolves the workflow file at the ref it runs
+against. The first wheel has to come from a tag created after this lands.
+
 1. Make sure the version in `CMakeLists.txt` is the one you want to publish.
    The pre-commit hook advances it one MINOR per commit to `main`, so check it
    rather than assuming.
