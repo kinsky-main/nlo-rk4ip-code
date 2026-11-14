@@ -62,12 +62,20 @@ directly out of `julia/` in a checkout that also has the artifact installed, set
 
 Versions come from `project(nlolib VERSION ...)` in the root `CMakeLists.txt`.
 The tag is the bare version with no `v` prefix, matching `release-mltbx.yml`,
-and `julia/Project.toml` must already declare the same version — the workflow's
-`verify` job fails on either mismatch.
+and `julia/Project.toml` must already declare the same version — the registry
+records the Julia version while the artifact download URLs are built from the
+tag, so the workflow's `verify` job fails on either mismatch.
+
+The packaged copies drift from the CMake version between releases by design
+(see *Version numbering* below), so sync them and commit before tagging:
 
 ```bash
-git tag 1.16.0
-git push origin 1.16.0
+python tools/release/check_versions.py --write
+```
+
+```bash
+git tag "$(python tools/release/read_version.py)"
+git push origin "$(python tools/release/read_version.py)"
 ```
 
 The workflow then, per platform (`ubuntu-24.04` and `windows-2025`, pinned):
@@ -95,7 +103,7 @@ the workflow push to `main`:
 2. you reproduce it locally from the published assets and commit it.
 
 ```bash
-julia julia/tools/bind_artifacts.jl --version 1.16.0 --download \
+julia julia/tools/bind_artifacts.jl --version <version> --download \
     --toml julia/Artifacts.toml \
     x86_64-linux-gnu x86_64-w64-mingw32
 ```
@@ -177,7 +185,10 @@ version that can never be published, and the registered history is mostly gaps.
 It is legal SemVer and General will accept it, but it also means the
 artifact-binding commit from step 2 immediately moves the CMake version past the
 version it just bound, so `julia/Project.toml` and `CMakeLists.txt` cannot both
-stay in step. Bumping at release time instead would remove both problems.
+stay in step. `tools/release/check_versions.py --write` is what makes the copies
+catch up at release time, which is why step 1 runs it; bumping at release time
+instead of on every commit would remove the need for it and both problems with
+it.
 
 ## Files
 

@@ -83,8 +83,6 @@ The Julia package installs from the General registry with `] add NLOLib`, which
 downloads a prebuilt artifact instead of compiling anything; a built checkout
 also works through the `julia_stage` target. Both paths, the release flow and
 registration are in `docs/release_julia.md`.
-<<<<<<< HEAD
-=======
 
 ## Python Benchmarks
 
@@ -106,4 +104,3 @@ python examples/python/tensor_backend_scaling_rk4ip.py
 It translates MMTools scalar mode counts into GRIN-effective nlolib grid
 sizes, then writes both state-vector-size and scalar-mode-count runtime
 plots for the comparison.
->>>>>>> feat/benchmarking-junk

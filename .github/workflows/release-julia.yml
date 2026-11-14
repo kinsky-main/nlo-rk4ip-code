@@ -46,33 +46,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read project version and compare with the tag
+      # CMakeLists.txt is the single source of truth. On a tag,
+      # check_versions.py enforces that the tag and both packaged copies
+      # agree with it, which this workflow needs twice over: the registry
+      # records the version from julia/Project.toml while the artifact
+      # download URLs are built from the tag, so a drift would register a
+      # version whose artifact lives under a different tag.
+      - name: Check the version against the tag and the packaged copies
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python3 tools/release/read_version.py)"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="$(python3 tools/release/check_versions.py --tag "${GITHUB_REF_NAME}")"
+          else
+            # A dry run only needs the version to name the tarballs. The
+            # packaged copies drift from the CMake version by design between
+            # releases -- the pre-commit hook bumps MINOR on every commit to
+            # main while the copies stay where the last release left them --
+            # so checking them here would fail almost every dispatch run.
+            version="$(python3 tools/release/read_version.py)"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Project version: $version"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$version" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match project version ${version}; the artifact download URLs are built from the tag, so they must agree."
-            exit 1
-          fi
-
-      # The registry records the version from julia/Project.toml and the
-      # artifact URLs point at the tag, so a drift here would register a version
-      # whose artifact lives under a different tag.
-      - name: Compare julia/Project.toml with the project version
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${{ steps.version.outputs.version }}"
-          julia_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' julia/Project.toml | head -1)"
-          echo "julia/Project.toml version: $julia_version"
-          if [ "$julia_version" != "$version" ]; then
-            echo "::error::julia/Project.toml declares ${julia_version} but the project version is ${version}."
-            exit 1
-          fi
 
   build:
     name: Build ${{ matrix.triplet }}

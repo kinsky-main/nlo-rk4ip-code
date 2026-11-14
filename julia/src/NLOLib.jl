@@ -51,6 +51,8 @@ export propagate
 export wrap_records
 export final_record
 export tensor_record_view
+export NT_MAX
+export STORAGE_RUN_ID_MAX
 export TENSOR_LAYOUT_XYT_T_FAST
 export NONLINEAR_MODEL_EXPR
 export NONLINEAR_MODEL_KERR_RAMAN

@@ -153,6 +153,8 @@ phase, and coupled dispersion/nonlinearity/diffraction. The full index is in the
 | Symbol | Purpose |
 |---|---|
 | `nlolib.NLolib` | wrapper class: `propagate`, `query_runtime_limits`, logging, progress, perf counters, storage availability |
+| `nlolib.constants` | C API enum values and limits by name, matching the Python and Julia packages |
+| `nlolib.tensor_record_view` | coupled record row → `(nt, ny, nx)` volume |
 | `nlolib.translate_runtime_handle` | function handle → runtime expression plus captured constants |
 | `nlolib.prepare_sim_config` | MATLAB config struct → `simulation_config` / `runtime_operator_params` libstructs |
 | `nlolib.pack_complex_array` | complex vector → `nlo_complex*` buffer |
@@ -165,12 +167,13 @@ phase, and coupled dispersion/nonlinearity/diffraction. The full index is in the
 |---|---|---|
 | `test_matlab_binding_types` | no | Every `libstruct('T')`/`libpointer('TPtr')` name resolves to a typedef in `src/nlolib_matlab.h` |
 | `test_matlab_header_abi` | no | Compile-time `sizeof`/`offsetof` parity between `nlolib_matlab.h` and the canonical headers |
-| `test_matlab_bindings` | yes | Runtime-handle translation plus an end-to-end FFI smoke suite (propagate, step history, runtime limits, log buffer, perf counters) |
+| `test_api_parity` | no | Every API constant agrees in name and value across the Python, Julia and MATLAB sources (`tests/api_parity.json`) |
+| `test_matlab_bindings` | yes | Runtime-handle translation, the public package surface, plus an end-to-end FFI smoke suite (propagate, step history, runtime limits, log buffer, perf counters) |
 
 Run the MATLAB-free checks alone with:
 
 ```bash
-ctest --test-dir build -R "test_matlab_binding_types|test_matlab_header_abi"
+ctest --test-dir build -R "test_matlab_binding_types|test_matlab_header_abi|test_api_parity"
 ```
 
 ## Design Notes
