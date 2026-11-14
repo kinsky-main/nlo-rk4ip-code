@@ -60,18 +60,22 @@ directly out of `julia/` in a checkout that also has the artifact installed, set
 
 ### 1. Tag
 
-Versions come from `project(nlolib VERSION ...)` in the root `CMakeLists.txt`.
-The tag is the bare version with no `v` prefix, matching `release-mltbx.yml`,
-and `julia/Project.toml` must already declare the same version — the registry
-records the Julia version while the artifact download URLs are built from the
-tag, so the workflow's `verify` job fails on either mismatch.
+Versions come from `project(nlolib VERSION ...)` in the root `CMakeLists.txt`,
+and `julia/Project.toml` carries a copy of it. The two agree at every commit —
+nothing advances the version automatically — so a tag can be cut from any
+commit. The tag is the bare version with no `v` prefix, matching
+`release-mltbx.yml`, and the workflow's `verify` job fails if the tag and the
+copy disagree: the registry records the Julia version while the artifact
+download URLs are built from the tag.
 
-The packaged copies drift from the CMake version between releases by design
-(see *Version numbering* below), so sync them and commit before tagging:
+Advancing the version is a deliberate step, one command that rewrites
+`CMakeLists.txt`, both literal copies and `sbom.cdx.json` together:
 
 ```bash
-python tools/release/check_versions.py --write
+python tools/release/check_versions.py --bump minor
 ```
+
+Commit that, then tag it:
 
 ```bash
 git tag "$(python tools/release/read_version.py)"
@@ -138,6 +142,13 @@ Two details the script exists to get right:
 Nothing in this repository submits to General; the first registration is
 deliberately manual.
 
+The first version that can be registered is the first release whose tag
+carries this workflow. `1.17.0` predates it — `release-julia.yml` is not in
+that commit's tree, so no Julia tarballs exist for it and none can be made:
+`workflow_dispatch` resolves the workflow file at the ref it is dispatched
+against, and that ref has no such file. `1.17.0` is a MATLAB-only release
+permanently, and the Julia package starts at the next bumped version.
+
 1. Install the [JuliaRegistrator](https://github.com/JuliaRegistries/Registrator)
    GitHub App on `kinsky-main/nlo-rk4ip-code`.
 2. Comment on the commit that added `julia/Artifacts.toml`:
@@ -166,9 +177,17 @@ or double-publish.
   already sufficient.
 - **A new package must be registered at `0.0.1`, `0.1.0` or `1.0.0` to
   auto-merge.** The project version is well past that, so the first
-  registration will not auto-merge; it needs a General maintainer to merge it by
-  hand after the waiting period, or the package has to be first registered at
-  `1.0.0` and moved to the real version afterwards. Decide this before step 3.
+  registration will not auto-merge. It is not rejected either: the pull
+  request is labelled for a General maintainer, who merges it by hand after
+  the usual waiting period for new packages. That is a one-time cost, and
+  every later release passes AutoMerge normally.
+
+  Registering `1.0.0` first does **not** avoid it. AutoMerge also checks that
+  a new version follows the previous one, accepting only the next patch,
+  minor or major, so the jump from `1.0.0` to the real version needs the same
+  manual merge — and `1.0.0` would additionally need a tag and artifact
+  tarballs of its own, which do not exist. Register at the real version and
+  accept the one manual merge.
 - The repository is public and GPL-2.0 licensed with a `LICENSE` file at the
   root, which satisfies the license check.
 - AutoMerge installs and imports the package on its own runners. `NLOLib` does
@@ -177,18 +196,24 @@ or double-publish.
 
 #### Version numbering
 
-Worth settling before the first registration: `.git/hooks/pre-commit`, generated
-from `cmake/pre-commit.in`, bumps the CMake **minor** version on every commit to
-`main`. A registered package cannot re-register or reuse a version and must
-increase monotonically, so under that scheme every merged commit burns a minor
-version that can never be published, and the registered history is mostly gaps.
-It is legal SemVer and General will accept it, but it also means the
-artifact-binding commit from step 2 immediately moves the CMake version past the
-version it just bound, so `julia/Project.toml` and `CMakeLists.txt` cannot both
-stay in step. `tools/release/check_versions.py --write` is what makes the copies
-catch up at release time, which is why step 1 runs it; bumping at release time
-instead of on every commit would remove the need for it and both problems with
-it.
+The version is frozen between releases and advances only when someone runs
+`check_versions.py --bump`. **A registered Julia package depends on that, and
+reintroducing a bump-on-commit hook would silently break the artifact
+binding.** The reason is step 2: the binding commit records a
+`git-tree-sha1` and a URL that both name the version its tag published. If a
+hook bumped the version as that commit landed, the commit would declare one
+version in `julia/Project.toml` while binding the artifact of another, and the
+next tag would publish a package whose artifact URL points at the previous
+release's assets. `Pkg` would install it and fail on a hash mismatch, or
+worse, succeed with the wrong binary.
+
+A registry version can also never be reused and must increase monotonically,
+so a per-commit bump burns a version per commit and leaves the registered
+history mostly gaps. Both problems are gone at the root rather than worked
+around: no commit moves the version, so nothing has to be resynchronised at
+release time. The invariant is enforced by the `test_version_copies_match`
+and `test_sbom_pins_match` CTest cases, the pre-commit hook, and the `verify`
+job of each release workflow.
 
 ## Files
 

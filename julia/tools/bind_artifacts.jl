@@ -20,15 +20,15 @@
 #
 # Usage:
 #   # on each build platform
-#   julia julia/tools/bind_artifacts.jl --version 1.16.0 \
+#   julia julia/tools/bind_artifacts.jl --version 1.18.0 \
 #       --toml frag-x86_64-linux-gnu.toml \
-#       x86_64-linux-gnu=dist/nlolib-julia-1.16.0-x86_64-linux-gnu.tar.gz
+#       x86_64-linux-gnu=dist/nlolib-julia-1.18.0-x86_64-linux-gnu.tar.gz
 #
 #   # anywhere, from the fragments
 #   julia julia/tools/bind_artifacts.jl --merge --toml julia/Artifacts.toml frag-*.toml
 #
 #   # after the release exists, to reproduce the committed file from the assets
-#   julia julia/tools/bind_artifacts.jl --version 1.16.0 --download \
+#   julia julia/tools/bind_artifacts.jl --version 1.18.0 --download \
 #       --toml frag.toml x86_64-linux-gnu
 #
 # Options:
