@@ -16,7 +16,7 @@ function Get-ProjectVersion {
     return $match.Groups[1].Value
 }
 
-$versionBeforeBuild = Get-ProjectVersion
+$version = Get-ProjectVersion
 
 # NOTE: these option names are NOT prefixed. They were renamed from NLO_* in
 # commit 2669906; a -D for a name the project never reads is silently ignored
@@ -25,7 +25,7 @@ $versionBeforeBuild = Get-ProjectVersion
 # actually reached the project with the value we asked for.
 $cmakeOptions = [ordered]@{
     INSTALL_GIT_HOOKS       = "OFF"
-    BUMP_PATCH_ON_BUILD     = "ON"
+    BUMP_PATCH_ON_BUILD     = "OFF"
     BUILD_TESTING           = "OFF"
     NLOLIB_BUILD_DOCS       = "OFF"
     NLOLIB_BUILD_BENCHMARKS = "OFF"
@@ -70,43 +70,16 @@ if ($optionProblems.Count -gt 0) {
 cmake --build $BuildDir --config $Config
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed" }
 
-# The patch bump runs as an ALL target during the build above; confirm it did.
-$versionAfterBuild = Get-ProjectVersion
-if ($versionAfterBuild -eq $versionBeforeBuild) {
-    throw ("Patch version was not bumped (still $versionAfterBuild). " +
-           "Expected BUMP_PATCH_ON_BUILD=ON to advance it during the build.")
-}
-Write-Host "Bumped project version: $versionBeforeBuild -> $versionAfterBuild"
-@'
-import pathlib
-import re
-
-root = pathlib.Path(".")
-cmake_text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
-match = re.search(r"project\([^)]*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", cmake_text)
-if not match:
-    raise RuntimeError("Could not parse CMake project version")
-version = match.group(1)
-
-pyproject = root / "pyproject.toml"
-text = pyproject.read_text(encoding="utf-8")
-updated, count = re.subn(
-    r'(?m)^version\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+"$',
-    f'version = "{version}"',
-    text,
-    count=1,
-)
-if count != 1:
-    raise RuntimeError("Could not update pyproject version")
-pyproject.write_text(updated, encoding="utf-8")
-print(version)
-'@ | python -
-if ($LASTEXITCODE -ne 0) { throw "Failed to sync pyproject.toml version" }
+# package_mltbx reads the version back out of CMakeLists.txt to name the bundle
+# and stamp its metadata, so the tree must already carry the version being
+# released. Fail here rather than ship a bundle named after something else.
+python tools/release/check_versions.py
+if ($LASTEXITCODE -ne 0) { throw "Project version and its packaged copies disagree" }
 
 matlab -batch "addpath('matlab'); package_mltbx('$BuildDir', '$Config')"
 if ($LASTEXITCODE -ne 0) { throw "MATLAB toolbox packaging failed" }
 
-$artifact = Join-Path $repoRoot "dist/nlolib-$versionAfterBuild-win64.mltbx"
+$artifact = Join-Path $repoRoot "dist/nlolib-$version-win64.mltbx"
 if (-not (Test-Path $artifact)) {
     throw "Expected toolbox artifact was not produced: $artifact"
 }

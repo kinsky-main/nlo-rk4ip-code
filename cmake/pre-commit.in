@@ -2,10 +2,38 @@
 set -eu
 
 # @HOOK_MARKER@
-branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-if [ "$branch" != "main" ]; then
+#
+# The project version lives in CMakeLists.txt. pyproject.toml and
+# julia/Project.toml carry copies, because a wheel and a Julia package each
+# have to declare a literal version of their own.
+#
+# Nothing advances the version by itself. A release bumps it deliberately:
+#
+#   python tools/release/check_versions.py --bump minor
+#
+# This hook only enforces that the three agree, so every commit names one
+# self-consistent version and a release tag can be cut from any commit.
+#
+# An earlier version of this hook bumped the MINOR version on every commit to
+# main instead. That advanced CMakeLists.txt once per commit while the copies
+# stayed where the last release left them, so the packaged version never
+# matched its tag and no equality check could be enforced anywhere.
+
+python_bin="@HOOK_PYTHON@"
+if [ ! -x "$python_bin" ]; then
+  python_bin="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+fi
+
+# A missing interpreter must not block a commit; the same check runs in CTest
+# and in the release workflows.
+if [ -z "$python_bin" ]; then
+  echo "pre-commit: no Python interpreter found; skipping the version check." >&2
   exit 0
 fi
 
-"@CMAKE_COMMAND@" -DVERSION_FILE="@HOOK_VERSION_FILE@" -DBUMP_KIND=MINOR -DPROJECT_ROOT="@HOOK_PROJECT_ROOT@" -P "@HOOK_BUMP_SCRIPT@"
-git add "@HOOK_VERSION_FILE@"
+if ! "$python_bin" "@HOOK_CHECK_SCRIPT@" >/dev/null; then
+  echo "pre-commit: sync them with" >&2
+  echo "  python tools/release/check_versions.py --write" >&2
+  echo "then stage the result." >&2
+  exit 1
+fi

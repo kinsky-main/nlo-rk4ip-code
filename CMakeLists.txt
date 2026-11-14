@@ -10,13 +10,17 @@ project(nlolib VERSION 1.17.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
 
 option(ENABLE_RK4_DEBUG_DIAGNOSTICS "Enable debug-only RK4/dispersion diagnostics in Debug builds" ON)
-option(INSTALL_GIT_HOOKS "Install repository git hooks during CMake configure" OFF)
+option(INSTALL_GIT_HOOKS "Install the pre-commit hook that checks the version copies agree" OFF)
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
 option(NLOLIB_BUILD_MATLAB_TESTS "Enable MATLAB runtime-handle parser tests when MATLAB is available" OFF)
 option(ENABLE_VULKAN_BACKEND "Enable Vulkan vector backend and shader compilation path" ON)
 option(ENABLE_VKFFT "Enable VkFFT backend integration for Vulkan FFT execution" ON)
+# Keep this OFF for a release build: the packaged version is read back from
+# CMakeLists.txt after the build, so a bump mid-build publishes a version that
+# does not match its tag. Bump deliberately with
+# tools/release/check_versions.py --bump instead.
 option(BUMP_PATCH_ON_BUILD "Bump patch version in CMakeLists.txt after successful builds" OFF)
 option(SQLITE_USE_FETCHCONTENT "Deprecated: SQLite amalgamation is always used" ON)
 set(NLOLIB_GLSLANG_PROVIDER "FETCH" CACHE STRING
@@ -53,7 +57,7 @@ endif()
 include(NLOVersioning)
 include(NLODocs)
 if(INSTALL_GIT_HOOKS)
-  install_minor_version_hook(VERSION_FILE "${CMAKE_CURRENT_LIST_FILE}")
+  install_version_check_hook()
 endif()
 
 add_subdirectory(src)
