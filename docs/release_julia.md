@@ -103,6 +103,11 @@ julia julia/tools/bind_artifacts.jl --version 1.16.0 --download \
 Then diff it against the asset the workflow published; they must be identical.
 Commit `julia/Artifacts.toml` through a normal pull request.
 
+`--download` matters: gzip records a timestamp, so rebuilding a tarball from the
+same tree yields a different `sha256` even though the `git-tree-sha1` is
+unchanged. The hash that has to be recorded is the one of the asset users will
+actually fetch, which is the published file.
+
 The alternative — generating the file in the workflow and committing it back
 from CI — removes this step but gives the release workflow write access to the
 default branch, and the thing it would push is exactly the thing that decides

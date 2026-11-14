@@ -22,8 +22,6 @@ on:
   push:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
-    branches:
-      - 'claude/release-julia-**'   # TEMPORARY: dry run before this file is on main
   workflow_dispatch:   # dry run: builds, tests and uploads artifacts, publishes nothing
 
 permissions:
