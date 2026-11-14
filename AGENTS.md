@@ -14,9 +14,19 @@
 
 ## Build Notes
 - Top-level build is CMake; root `CMakeLists.txt` adds `src/`, `python/`, `matlab/`, `julia/`, `tests/`, `benchmarks/`, and `examples/`.
-- Prefer configuring with repo-mutating options disabled unless the task explicitly needs them:
-  - `-DINSTALL_GIT_HOOKS=OFF`
-  - `-DBUMP_PATCH_ON_BUILD=OFF`
+- Both repo-mutating options now default to `OFF`; pass them explicitly only to
+  turn one on:
+  - `-DBUMP_PATCH_ON_BUILD=ON` rewrites the version in `CMakeLists.txt` after a
+    successful build. Never use it for a release build: the packaged version is
+    read back out of `CMakeLists.txt`, so a mid-build bump publishes a version
+    that does not match its tag.
+  - `-DINSTALL_GIT_HOOKS=ON` installs a pre-commit hook that only checks the
+    version copies agree. It does not change any file.
+- The version is advanced deliberately, by one command:
+  `python tools/release/check_versions.py --bump minor`. It rewrites
+  `CMakeLists.txt`, the `pyproject.toml` / `julia/Project.toml` copies and
+  `sbom.cdx.json` together, so every commit names one self-consistent version
+  and a release tag can be cut from any commit.
 - Docs target is conditional: `NLOLIB_BUILD_DOCS=ON` and Doxygen available, otherwise no `docs` target is created.
 - Benchmarks depend on the Vulkan backend; `NLOLIB_BUILD_BENCHMARKS` is forced off when `ENABLE_VULKAN_BACKEND=OFF`.
 
@@ -60,4 +70,5 @@
 ## Common Issues
 - Python tests are part of the CTest surface when `BUILD_TESTING=ON`, so Python availability matters for full test runs.
 - The docs target is optional even when `NLOLIB_BUILD_DOCS=ON`; missing Doxygen means no `docs` target is generated.
-- Build steps can modify the repo version or install hooks unless `BUMP_PATCH_ON_BUILD` and `INSTALL_GIT_HOOKS` are disabled.
+- Only `BUMP_PATCH_ON_BUILD=ON` makes a build rewrite the repo version; it is off by default.
+- `test_version_copies_match` fails when `CMakeLists.txt`, `pyproject.toml` and `julia/Project.toml` disagree, and `test_sbom_pins_match` fails when `sbom.cdx.json` is behind. Fix both with `python tools/release/check_versions.py --write`, not by editing one file by hand.

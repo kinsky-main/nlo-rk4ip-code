@@ -35,18 +35,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read project version and compare with the tag
+      # check_versions.py checks the tag against the CMake project version and
+      # the pyproject.toml / julia/Project.toml copies against it, so a release
+      # cannot be cut from a tree whose version is inconsistent.
+      - name: Check the version and the tag
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python3 tools/release/read_version.py)"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="$(python3 tools/release/check_versions.py --tag "${GITHUB_REF_NAME}")"
+          else
+            version="$(python3 tools/release/check_versions.py)"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Project version: $version"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$version" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match project version ${version}; File Exchange reads the tag as the release version, so they must agree."
-            exit 1
-          fi
 
   package:
     name: Package ${{ matrix.arch }}

@@ -77,22 +77,21 @@ function(file_is_writable path out_var)
   set("${out_var}" "${can_write}" PARENT_SCOPE)
 endfunction()
 
-function(install_minor_version_hook)
-  set(options)
-  set(oneValueArgs VERSION_FILE)
-  set(multiValueArgs)
-  cmake_parse_arguments(NLO "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-  if(NOT NLO_VERSION_FILE)
-    message(FATAL_ERROR "install_minor_version_hook requires VERSION_FILE.")
-  endif()
-
+# Installs a pre-commit hook that fails when the version in CMakeLists.txt and
+# the copies in pyproject.toml and julia/Project.toml disagree. It does not
+# change the version: a release bumps it with
+# tools/release/check_versions.py --bump.
+function(install_version_check_hook)
   resolve_git_dir(git_dir)
   if(NOT IS_DIRECTORY "${git_dir}")
     return()
   endif()
 
-  set(hook_marker "nlolib-auto-minor-version-hook")
+  set(hook_marker "nlolib-version-check-hook")
+  # The hook this one replaces. Both markers count as ours, otherwise the
+  # bumping hook left in a working copy would be mistaken for the developer's
+  # own and kept forever.
+  set(legacy_hook_marker "nlolib-auto-minor-version-hook")
   set(pre_commit_hook "${git_dir}/hooks/pre-commit")
   get_filename_component(hook_dir "${pre_commit_hook}" DIRECTORY)
   set(install_hook TRUE)
@@ -101,7 +100,7 @@ function(install_minor_version_hook)
     get_filename_component(hook_parent "${hook_dir}" DIRECTORY)
     directory_is_writable("${hook_parent}" hook_parent_writable)
     if(NOT IS_DIRECTORY "${hook_parent}" OR NOT hook_parent_writable)
-      message(STATUS "Pre-commit hook path is not writable; skipping automatic minor version hook installation.")
+      message(STATUS "Pre-commit hook path is not writable; skipping version check hook installation.")
       return()
     endif()
     file(MAKE_DIRECTORY "${hook_dir}")
@@ -113,16 +112,17 @@ function(install_minor_version_hook)
     directory_is_writable("${hook_dir}" hook_path_writable)
   endif()
   if(NOT hook_path_writable)
-    message(STATUS "Pre-commit hook path is not writable; skipping automatic minor version hook installation.")
+    message(STATUS "Pre-commit hook path is not writable; skipping version check hook installation.")
     return()
   endif()
 
   if(EXISTS "${pre_commit_hook}")
     file(READ "${pre_commit_hook}" existing_hook)
     string(FIND "${existing_hook}" "${hook_marker}" marker_index)
-    if(marker_index EQUAL -1)
+    string(FIND "${existing_hook}" "${legacy_hook_marker}" legacy_marker_index)
+    if(marker_index EQUAL -1 AND legacy_marker_index EQUAL -1)
       set(install_hook FALSE)
-      message(STATUS "Existing pre-commit hook detected; skipping automatic minor version hook installation.")
+      message(STATUS "Existing pre-commit hook detected; skipping version check hook installation.")
     endif()
   endif()
 
@@ -130,10 +130,35 @@ function(install_minor_version_hook)
     return()
   endif()
 
+  # Resolved at configure time so the hook does not depend on the developer's
+  # PATH, but the hook falls back to PATH and skips itself if neither works.
+  if(Python3_EXECUTABLE)
+    set(hook_python "${Python3_EXECUTABLE}")
+  else()
+    find_program(NLO_HOOK_PYTHON NAMES python3 python)
+    set(hook_python "${NLO_HOOK_PYTHON}")
+  endif()
+
+  # On Windows this can resolve to the WindowsApps execution alias, which is a
+  # Store launcher rather than an interpreter on a machine without Store
+  # Python. It is executable either way, so the hook's own -x test would not
+  # catch it; run it here instead and fall back to PATH if it is a stub.
+  if(hook_python)
+    execute_process(
+      COMMAND "${hook_python}" -c "pass"
+      RESULT_VARIABLE hook_python_status
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(NOT hook_python_status EQUAL 0)
+      set(hook_python "")
+    endif()
+  endif()
+  set(HOOK_PYTHON "${hook_python}")
+
   set(HOOK_MARKER "${hook_marker}")
-  set(HOOK_VERSION_FILE "${NLO_VERSION_FILE}")
-  set(HOOK_BUMP_SCRIPT "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/bump_version.cmake")
-  get_filename_component(HOOK_PROJECT_ROOT "${NLO_VERSION_FILE}" DIRECTORY)
+  get_filename_component(hook_repo_root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}" DIRECTORY)
+  set(HOOK_CHECK_SCRIPT "${hook_repo_root}/tools/release/check_versions.py")
   configure_file(
     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/pre-commit.in"
     "${pre_commit_hook}"
