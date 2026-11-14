@@ -66,14 +66,16 @@ fails confusingly, instead of a clean "no matching distribution".
 
 | Platform | Runner | Wheel tag | Repair |
 | --- | --- | --- | --- |
-| Linux x86-64 | `ubuntu-24.04` | `py3-none-manylinux_2_39_x86_64` | `auditwheel` |
+| Linux x86-64 | `ubuntu-24.04` | `py3-none-manylinux_2_38_x86_64` | `auditwheel` |
 | Windows x86-64 | `windows-2025` | `py3-none-win_amd64` | `delvewheel` |
 
 ### Why `ubuntu-24.04` and not a manylinux container
 
-`ubuntu-24.04` ships glibc 2.39, so `auditwheel` can only certify
-`manylinux_2_39`. That is a high floor: `pip install nlolib` will not find a
-wheel on Ubuntu 22.04, Debian 12 or RHEL 9. It was still the right trade here:
+`ubuntu-24.04` ships glibc 2.39, and `auditwheel` certifies the built library
+as `manylinux_2_38` — read the tag off the build log rather than deriving it
+from the image's glibc, which is what the `Check the wheel tags` step exists
+for. Either way it is a high floor: `pip install nlolib` will not find a wheel
+on Ubuntu 22.04, Debian 12 or RHEL 9. It was still the right trade here:
 
 - The build needs a real `libvulkan.so` on disk and `glslangValidator` on
   `PATH` (see `cmake/ResolveVulkan.cmake` and `cmake/NLOVulkanBackend.cmake`).

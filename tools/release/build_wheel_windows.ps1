@@ -4,6 +4,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Native commands (cmake, python, delvewheel) do not trip ErrorActionPreference,
+# so without this a failed build falls straight through to the staging steps and
+# the script reports success. PowerShell 7+; harmless on 5.1, where the explicit
+# exit-code check below still applies.
+$PSNativeCommandUseErrorActionPreference = $true
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $repoRoot
@@ -93,10 +98,21 @@ python -m build
 # vulkan-1.dll is delay-loaded and belongs to the user's graphics driver, so it
 # is excluded rather than vendored; nlolib probes for the loader before touching
 # any entry point, so its absence stays benign.
+#
+# Repaired into a staging directory and moved back, not written straight to
+# dist\: delvewheel keeps the win_amd64 filename, so repairing in place makes it
+# copy the wheel onto itself and fail with WinError 32.
 if (Get-Command delvewheel -ErrorAction SilentlyContinue) {
+    $repaired = Join-Path $repoRoot "dist\repaired"
+    New-Item -ItemType Directory -Force -Path $repaired | Out-Null
     Get-ChildItem dist\*.whl | ForEach-Object {
-        delvewheel repair --exclude vulkan-1.dll --add-path $pkgDir --wheel-dir dist $_.FullName
+        delvewheel repair --exclude vulkan-1.dll --add-path $pkgDir --wheel-dir $repaired $_.FullName
+        if ($LASTEXITCODE -ne 0) { throw "delvewheel repair failed for $($_.Name) with exit code $LASTEXITCODE" }
+        Move-Item -Force (Join-Path $repaired $_.Name) $_.FullName
     }
+    Remove-Item -Recurse -Force $repaired
+} else {
+    Write-Warning "delvewheel not found: dist\ holds unrepaired wheels."
 }
 
 Write-Host "Built wheels in dist/"
