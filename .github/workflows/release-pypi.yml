@@ -136,9 +136,11 @@ jobs:
       # code path nobody runs locally. They configure with
       # BUMP_PATCH_ON_BUILD=OFF, build, stage the shared library into the
       # package, and repair the wheel.
+      # Invoked through bash rather than executed: the scripts are authored on
+      # Windows and carry mode 644 in the index, so a checkout has no exec bit.
       - name: Build wheel (Linux)
         if: runner.os == 'Linux'
-        run: ./tools/release/build_wheel_linux.sh build-wheel-linux Release
+        run: bash ./tools/release/build_wheel_linux.sh build-wheel-linux Release
 
       - name: Build wheel (Windows)
         if: runner.os == 'Windows'
