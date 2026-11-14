@@ -147,17 +147,25 @@ jobs:
         run: |
           set -euo pipefail
           source tools/release/cmake_options.sh
-          nlo_configure_verified build \
-            CMAKE_BUILD_TYPE=Release \
-            INSTALL_GIT_HOOKS=OFF \
-            BUMP_PATCH_ON_BUILD=OFF \
-            BUILD_TESTING=OFF \
-            NLOLIB_BUILD_DOCS=OFF \
-            NLOLIB_BUILD_BENCHMARKS=OFF \
-            NLOLIB_BUILD_EXAMPLES=OFF \
-            ENABLE_VULKAN_BACKEND=ON \
-            ENABLE_VKFFT=ON \
+          options=(
+            INSTALL_GIT_HOOKS=OFF
+            BUMP_PATCH_ON_BUILD=OFF
+            BUILD_TESTING=OFF
+            NLOLIB_BUILD_DOCS=OFF
+            NLOLIB_BUILD_BENCHMARKS=OFF
+            NLOLIB_BUILD_EXAMPLES=OFF
+            ENABLE_VULKAN_BACKEND=ON
+            ENABLE_VKFFT=ON
             SQLITE_USE_FETCHCONTENT=ON
+          )
+          # The Visual Studio generator is multi-config, so it never reads
+          # CMAKE_BUILD_TYPE and leaves it UNINITIALIZED in the cache, which
+          # nlo_configure_verified correctly rejects. --config Release on the
+          # build command picks the configuration there.
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            options+=(CMAKE_BUILD_TYPE=Release)
+          fi
+          nlo_configure_verified build "${options[@]}"
 
       - name: Stage the Julia package
         run: cmake --build build --config Release --parallel --target julia_stage
