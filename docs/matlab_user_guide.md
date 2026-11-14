@@ -359,8 +359,29 @@ handle:
 | `starting_step_size`, `max_step_size`, `min_step_size` | from preset | step bounds, in \f$z\f$ units |
 | `records` | from preset | number of \f$z\f$ samples to record |
 | `output` | `"dense"` | `"final"` forces `records = 1` |
+| `t_eval` | none | explicit \f$z\f$ positions to record at; sets the record count, so `records` is ignored when given |
+| `nonlinear_model` | `NONLINEAR_MODEL_EXPR` | `NONLINEAR_MODEL_KERR_RAMAN` selects the compiled Kerr+Raman model instead of the nonlinear expression |
+| `nonlinear_gamma` | `0.0` | Kerr coefficient for the built-in model |
+| `raman_fraction` | `0.0` | fractional Raman contribution |
+| `raman_tau1`, `raman_tau2` | `0.0122`, `0.0320` | Raman response time constants |
+| `shock_omega0` | `0.0` | self-steepening reference frequency |
+| `raman_response_time` | none | explicit complex response samples, used in place of `tau1`/`tau2` |
 | `exec_options` | `struct()` | backend and telemetry selection |
 | `storage` | none | SQLite storage options |
+
+`t_eval` values must lie within \f$[0, L]\f$ and be nondecreasing; the solver
+walks the list in order, so an unsorted list would silently drop records. The
+returned `result.z_axis` is then the list you asked for rather than a linspace:
+
+```matlab
+options.propagation_distance = 0.05;
+options.t_eval               = [0.0, 0.005, 0.02, 0.05];
+result = api.propagate(pulse, "gvd", "kerr", options);   % 4 records
+```
+
+The nonlinear-model fields are the same ones the low-level `runtime`
+sub-struct takes, and the names and values match the Python and Julia
+packages. Use `nlolib.constants` rather than writing the integers by hand.
 
 ### Presets
 
@@ -383,8 +404,8 @@ MATLAB-only keys handled by the wrapper.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `backend_type` | `2` | `0` CPU, `1` Vulkan, `2` auto |
-| `fft_backend` | `0` | `0` auto, `1` FFTW, `2` VkFFT |
+| `backend_type` | `2` | `0` CPU, `1` Vulkan, `2` auto — see `nlolib.constants.VECTOR_BACKEND_*` |
+| `fft_backend` | `0` | `0` auto, `1` FFTW, `2` VkFFT — see `nlolib.constants.FFT_BACKEND_*` |
 | `device_heap_fraction` | `0.70` | fraction of the device budget the solver may use |
 | `record_ring_target` | `0` | record ring size hint; `0` lets the library choose |
 | `forced_device_budget_bytes` | `0` | override the detected device budget |
@@ -408,6 +429,33 @@ options.exec_options = execOptions;
 ```
 
 <a name="result"></a>
+
+### Named values
+
+`nlolib.constants` carries every C API enum value and limit by name, with the
+same names and values the Python (`nlolib.*`) and Julia (`NLOLib.*`) packages
+export, so a script reads the same way in all three. Enum-like values are
+`int32` and the limits are `uint64`, matching the C field types, so they drop
+straight into a config or options struct with no cast:
+
+```matlab
+execOptions = struct( ...
+    'backend_type', nlolib.constants.VECTOR_BACKEND_VULKAN, ...
+    'fft_backend',  nlolib.constants.FFT_BACKEND_VKFFT);
+
+options.nonlinear_model = nlolib.constants.NONLINEAR_MODEL_KERR_RAMAN;
+```
+
+The groups are `VECTOR_BACKEND_*`, `FFT_BACKEND_*`, `NONLINEAR_MODEL_*`,
+`TENSOR_LAYOUT_*`, `STORAGE_DB_CAP_POLICY_*`, `PROPAGATE_OUTPUT_*`,
+`NLOLIB_STATUS_*`, `NLOLIB_LOG_LEVEL_*`, `NLOLIB_PROGRESS_STREAM_*` and
+`PROGRESS_EVENT_*`, plus the `NT_MAX` and `STORAGE_RUN_ID_MAX` limits. Run
+`doc nlolib.constants` for the annotated list.
+
+`tests/api_parity.json` is the canonical list, and
+`tools/check_api_parity.py` (CTest name `test_api_parity`, no interpreters or
+MATLAB needed) fails if any binding is missing a name or disagrees about a
+value.
 
 ## Reading the Result
 
@@ -520,6 +568,16 @@ linearOperator = struct( ...
 
 Note that the temporal symbol is `wt`, not `w`, once the run is a tensor run.
 Full script: [`examples/matlab/standalone_spatiotemporal_kerr_bullet.m`](../examples/matlab/standalone_spatiotemporal_kerr_bullet.m).
+
+Each record comes back as one flat row of `nt*nx*ny` samples, in
+`TENSOR_LAYOUT_XYT_T_FAST` order. `nlolib.tensor_record_view` reshapes a row
+into a volume indexed as `volume(it, iy, ix)`, which is the same view the Julia
+binding's `tensor_record_view` returns. Index `0` selects the final record:
+
+```matlab
+volume = nlolib.tensor_record_view(result.records, 0, nt, nx, ny);
+imagesc(abs(squeeze(volume(ceil(nt / 2), :, :))).^2);   % x-y slice at pulse centre
+```
 
 Memory grows as the product of the three dimensions times the record count —
 check the budget with [`query_runtime_limits`](#limits) before launching a large

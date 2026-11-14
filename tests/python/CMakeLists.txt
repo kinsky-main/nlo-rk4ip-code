@@ -6,6 +6,13 @@ add_test(NAME test_sbom_pins_match
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/write_sbom.py" --check
 )
 
+# Every binding re-declares the C API enums and limits in its own source, with
+# no compile-time link between the copies. Scans the sources only, so it needs
+# neither Julia nor MATLAB nor a built library.
+add_test(NAME test_api_parity
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_api_parity.py"
+)
+
 set(_PY_PKG_DIR "${CMAKE_SOURCE_DIR}/python")
 if(WIN32)
   set(_NLOLIB_DLL "${_PY_PKG_DIR}/$<CONFIG>/nlolib.dll")

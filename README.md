@@ -77,8 +77,6 @@ Generated output:
 - Julia package guide: `julia/README.md`
 
 The PyPI/package readme remains `python/README_PYPI.md`.
-<<<<<<< HEAD
-=======
 
 ## Python Benchmarks
 
@@ -100,4 +98,3 @@ python examples/python/tensor_backend_scaling_rk4ip.py
 It translates MMTools scalar mode counts into GRIN-effective nlolib grid
 sizes, then writes both state-vector-size and scalar-mode-count runtime
 plots for the comparison.
->>>>>>> feat/benchmarking-junk

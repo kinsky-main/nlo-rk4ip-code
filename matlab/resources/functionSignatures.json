@@ -14,7 +14,7 @@
       {"name": "pulse", "kind": "required", "type": "struct", "purpose": "Pulse spec: samples, delta_time, optional tensor_nt/nx/ny, delta_x/y, potential_grid"},
       {"name": "linearOp", "kind": "optional", "type": [["char", "choices={'gvd','none'}"], ["string", "choices={\"gvd\",\"none\"}"], ["struct"]], "purpose": "Linear operator: preset, struct('expr', ..., 'params', ...) or struct('fn', @(...) ...)"},
       {"name": "nonlinearOp", "kind": "optional", "type": [["char", "choices={'kerr','none'}"], ["string", "choices={\"kerr\",\"none\"}"], ["struct"]], "purpose": "Nonlinear operator: preset, struct('expr', ..., 'params', ...) or struct('fn', @(A, I, V) ...)"},
-      {"name": "options", "kind": "optional", "type": "struct", "purpose": "propagation_distance, preset, records, output, error_tolerance, starting/max/min_step_size, exec_options, storage"}
+      {"name": "options", "kind": "optional", "type": "struct", "purpose": "propagation_distance, preset, records, output, t_eval, error_tolerance, starting/max/min_step_size, nonlinear_model, nonlinear_gamma, raman_fraction, raman_tau1, raman_tau2, shock_omega0, raman_response_time, exec_options, storage"}
     ],
     "outputs": [
       {"name": "result", "type": "struct"}
@@ -125,6 +125,18 @@
   },
   "nlolib.NLolib.unload": {
     "inputs": []
+  },
+  "nlolib.tensor_record_view": {
+    "inputs": [
+      {"name": "records", "kind": "required", "type": "numeric", "purpose": "One record, or the records matrix from propagate"},
+      {"name": "index", "kind": "optional", "type": ["numeric", "scalar", "integer"], "purpose": "Record row to view; 0 or negative counts back from the last"},
+      {"name": "nt", "kind": "required", "type": ["numeric", "scalar", "positive", "integer"], "purpose": "Time samples"},
+      {"name": "nx", "kind": "required", "type": ["numeric", "scalar", "positive", "integer"], "purpose": "Transverse x samples"},
+      {"name": "ny", "kind": "required", "type": ["numeric", "scalar", "positive", "integer"], "purpose": "Transverse y samples"}
+    ],
+    "outputs": [
+      {"name": "volume", "type": "numeric"}
+    ]
   },
   "nlolib.translate_runtime_handle": {
     "inputs": [
