@@ -25,11 +25,6 @@ cmake -S . -B $BuildDir `
   -DENABLE_VKFFT=ON
 
 cmake --build $BuildDir --config $Config
-# CMakeLists.txt is the source of truth; pyproject.toml carries a copy
-# because a wheel has to name a literal version. --write syncs the copies
-# from it and prints the version -- the release-time sync the tool exists
-# for, and the only version the build is allowed to rewrite.
-python tools/release/check_versions.py --write
 
 $pkgDir = Join-Path $repoRoot "python\nlolib"
 New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null

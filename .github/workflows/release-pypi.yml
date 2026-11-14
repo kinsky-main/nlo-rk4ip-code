@@ -36,18 +36,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read project version and compare with the tag
+      # check_versions.py checks the tag against the CMake project version and
+      # the pyproject.toml / julia/Project.toml copies against it, so a release
+      # cannot be cut from a tree whose version is inconsistent. The wheel
+      # filename carries that version, so a wheel from an inconsistent tree
+      # would not be the thing the tag names.
+      - name: Check the version and the tag
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python3 tools/release/read_version.py)"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="$(python3 tools/release/check_versions.py --tag "${GITHUB_REF_NAME}")"
+          else
+            version="$(python3 tools/release/check_versions.py)"
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Project version: $version"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "$version" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match project version ${version}; the wheel filename carries the version, so they must agree."
-            exit 1
-          fi
 
   build:
     name: Build wheel (${{ matrix.name }})
@@ -129,7 +134,8 @@ jobs:
       # The same scripts the manual path uses, so a release never exercises a
       # code path nobody runs locally. They configure with
       # BUMP_PATCH_ON_BUILD=OFF, build, stage the shared library into the
-      # package, and repair the wheel.
+      # package, and repair the wheel. None of them writes a version: verify
+      # has already established that the tree agrees on one.
       # Invoked through bash rather than executed: the scripts are authored on
       # Windows and carry mode 644 in the index, so a checkout has no exec bit.
       - name: Build wheel (Linux)

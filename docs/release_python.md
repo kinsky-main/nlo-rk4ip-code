@@ -133,27 +133,33 @@ among them -- cannot build a wheel, and there is nothing to dispatch at them
 either, since `workflow_dispatch` resolves the workflow file at the ref it runs
 against. The first wheel has to come from a tag created after this lands.
 
-1. Make sure the version in `CMakeLists.txt` is the one you want to publish.
-   The pre-commit hook advances it one MINOR per commit to `main`, so check it
-   rather than assuming.
-2. Sync the derived copies to match and commit that:
-   `python tools/release/check_versions.py --write`.
+1. Bump the version, which is one deliberate command and rewrites
+   `CMakeLists.txt` together with every copy of it:
+
+```bash
+python tools/release/check_versions.py --bump minor
+```
+
+2. Commit that. Nothing advances the version on its own, so every commit
+   until the next bump keeps naming this release.
 3. Tag the commit with the bare version — no `v` prefix — and push the tag:
 
 ```bash
-git tag 1.16.0 && git push origin 1.16.0
+git tag 1.18.0 && git push origin 1.18.0
 ```
 
 The workflow then runs:
 
-- **verify** — reads `tools/release/read_version.py` and fails if the tag name
-  is not equal to the project version. The wheel filename carries the version,
-  so a mismatch would publish something the tag does not describe.
+- **verify** — `tools/release/check_versions.py`, which fails if the tag name
+  is not the CMake project version, or if the copies in `pyproject.toml` and
+  `julia/Project.toml` disagree with it. The wheel filename carries that
+  version, so either mismatch would publish something the tag does not
+  describe. The same job, verbatim, as `release-mltbx.yml`'s.
 - **build** (per platform) — installs the Vulkan loader and glslang, pins the
-  Visual Studio 2022 toolchain on Windows, runs the `build_wheel_*` script
-  (which syncs the derived version copies with
-  `check_versions.py --write` before packaging), then refuses any wheel tagged
-  `-any` or carrying an unpublishable platform tag.
+  Visual Studio 2022 toolchain on Windows, runs the `build_wheel_*` script,
+  then refuses any wheel tagged `-any` or carrying an unpublishable platform
+  tag. Nothing here writes a version: `verify` has already established that
+  the tree agrees on one.
 - **smoke** (per platform) — on a clean runner with no checkout and no build
   tooling, installs the wheel into a fresh virtualenv, calls `nlolib.load()`,
   and runs one small propagation on the CPU backend
@@ -211,12 +217,11 @@ macOS (CPU-only, not published):
 ```
 
 Each script configures with `BUMP_PATCH_ON_BUILD=OFF` and
-`INSTALL_GIT_HOOKS=OFF`, so building a wheel no longer rewrites the version in
-`CMakeLists.txt` as a side effect. It does run
-`tools/release/check_versions.py --write`, which rewrites the derived `version`
-copies in `pyproject.toml` and `julia/Project.toml` from `CMakeLists.txt`
-before packaging. Those copies are derived, syncing them is the point, and
-`--write` only touches a file whose value actually differs.
+`INSTALL_GIT_HOOKS=OFF`, and none of them touches a version. A wheel built
+from a checkout carries whatever `pyproject.toml` says, which the
+`test_version_copies_match` CTest case holds equal to `CMakeLists.txt` at
+every commit. If they ever disagree, `check_versions.py --write` is the fix,
+and it is a repair rather than a step of the build.
 
 On Linux the unrepaired `linux_x86_64` wheel is deleted after a successful
 `auditwheel repair`, so everything left in `dist/` is publishable. Prefer the
@@ -228,15 +233,7 @@ python -m twine upload dist/*.whl
 
 ## Known gaps
 
-- `verify` reads `tools/release/read_version.py`, not
-  `check_versions.py`. Deliberate: `check_versions.py` with no `--write` also
-  asserts that the derived copies match `CMakeLists.txt`, and they drift by
-  design — the pre-commit hook advances the CMake MINOR on every commit to
-  `main` while the copies stay where the last release left them, so a bare
-  verify fails on essentially every commit. `check_versions.py` belongs either
-  after `--write` in the same job, which is where the `build_wheel_*` scripts
-  call it, or as `--tag` on a release commit whose copies are already synced.
-  Wiring it into `verify` would mean requiring step 2 of the release to have
-  been committed before the tag, which is good hygiene but would block a
-  release over a copy the build job rewrites anyway.
+- `tools/release/read_version.py` has no callers left. `verify` used it until
+  the version copies became an enforced invariant; `release-mltbx.yml` dropped
+  it in the same change. It is harmless but dead.
 - Linux and Windows x86-64 only. No aarch64 wheels on either platform.
