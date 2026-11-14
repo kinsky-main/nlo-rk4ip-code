@@ -29,7 +29,7 @@ env:
 jobs:
   verify:
     name: Check version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -56,9 +56,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Pinned, not -latest. The images move: ubuntu-26.04 ships a GCC that
+          # will not compile our pinned glslang, and windows-latest now carries
+          # Visual Studio 2026, which MATLAB R2023b does not accept as a C
+          # compiler for loadlibrary and mex. These two match what the bundles
+          # have always been built on.
+          - os: ubuntu-24.04
             arch: glnxa64
-          - os: windows-latest
+          - os: windows-2025
             arch: win64
     steps:
       - uses: actions/checkout@v4
@@ -107,6 +112,13 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      # loadlibrary and mex both need a C compiler MATLAB recognises; without
+      # one the packaging step fails deep inside loadlibrary, so name it here.
+      - name: Show the C compiler MATLAB found
+        uses: matlab-actions/run-command@v3
+        with:
+          command: cfg = mex.getCompilerConfigurations('C', 'Installed'); if isempty(cfg), disp('NO C COMPILER DETECTED'); else, disp({cfg.Name}); disp({cfg.Version}); end
+
       # package_mltbx stages the tree, generates the loadlibrary prototype and
       # thunk, and compiles the progress MEX, so the shipped toolbox needs no
       # compiler on the user's machine.
@@ -135,7 +147,7 @@ jobs:
     name: Merge and publish
     needs: [verify, package]
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
