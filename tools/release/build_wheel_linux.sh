@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/cmake_options.sh"
 
 nlo_configure_verified "$BUILD_DIR" \
   INSTALL_GIT_HOOKS=OFF \
-  BUMP_PATCH_ON_BUILD=ON \
+  BUMP_PATCH_ON_BUILD=OFF \
   BUILD_TESTING=OFF \
   NLOLIB_BUILD_DOCS=OFF \
   NLOLIB_BUILD_BENCHMARKS=OFF \
@@ -21,30 +21,6 @@ nlo_configure_verified "$BUILD_DIR" \
   ENABLE_VKFFT=ON
 
 cmake --build "$BUILD_DIR" --config "$CONFIG"
-python3 - <<'PY'
-import pathlib
-import re
-
-root = pathlib.Path(".")
-cmake_text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
-match = re.search(r"project\([^)]*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", cmake_text)
-if not match:
-    raise RuntimeError("Could not parse CMake project version")
-version = match.group(1)
-
-pyproject = root / "pyproject.toml"
-text = pyproject.read_text(encoding="utf-8")
-updated, count = re.subn(
-    r'(?m)^version\s*=\s*"[0-9]+\.[0-9]+\.[0-9]+"$',
-    f'version = "{version}"',
-    text,
-    count=1,
-)
-if count != 1:
-    raise RuntimeError("Could not update pyproject version")
-pyproject.write_text(updated, encoding="utf-8")
-print(version)
-PY
 
 PKG_DIR="$REPO_ROOT/python/nlolib"
 mkdir -p "$PKG_DIR"
@@ -67,10 +43,18 @@ fi
 python3 -m pip install --upgrade build
 python3 -m build
 
+# repair rewrites the tag from the build machine's bare linux_x86_64 to the
+# manylinux tag the binary has actually earned, under a new filename. The
+# unrepaired wheel is removed so dist/ holds only publishable wheels -- PyPI
+# rejects a linux_x86_64 tag outright.
 if command -v auditwheel >/dev/null 2>&1; then
-  for wheel in dist/*.whl; do
+  for wheel in dist/*-linux_*.whl; do
+    [[ -e "$wheel" ]] || continue
     auditwheel repair "$wheel" -w dist/
+    rm -f "$wheel"
   done
+else
+  echo "auditwheel not found: dist/ holds unrepaired wheels that PyPI will reject." >&2
 fi
 
 echo "Built wheels in dist/"

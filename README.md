@@ -84,6 +84,29 @@ downloads a prebuilt artifact instead of compiling anything; a built checkout
 also works through the `julia_stage` target. Both paths, the release flow and
 registration are in `docs/release_julia.md`.
 
+## Python Releases
+
+Wheels are published to PyPI by `.github/workflows/release-pypi.yml` when a
+bare version tag (no `v` prefix) is pushed. One wheel per platform, Linux and
+Windows x86-64, each smoke-tested on a clean runner before anything is
+uploaded. Run the workflow manually for a dry run that builds and checks the
+wheels but publishes nothing.
+
+To build a wheel locally:
+
+```bash
+./tools/release/build_wheel_linux.sh build-wheel-linux Release
+```
+
+```powershell
+.\tools\release\build_wheel_windows.ps1 -BuildDir build-wheel-win -Config Release
+```
+
+Both need the Vulkan loader and `glslangValidator`. See
+[docs/release_python.md](docs/release_python.md) for the full story: the wheel
+tagging, the platform matrix and its glibc floor, Trusted Publishing setup,
+and why macOS is not published.
+
 ## Python Benchmarks
 
 Run the nlolib-only tensor CPU vs GPU benchmark with:

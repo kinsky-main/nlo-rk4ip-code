@@ -297,9 +297,16 @@ def load(path: Path | None= None) -> ctypes.CDLL:
         package_dir = Path(__file__).resolve().parent
         package_root = package_dir.parent
         if os.name == "nt":
-            lib_path = package_root.joinpath("Release", "nlolib.dll")
+            names = ("nlolib.dll",)
         else:
-            lib_path = package_root.joinpath("libnlolib.so")
+            names = ("libnlolib.so", "libnlolib.dylib")
+        # The package directory comes first: that is where an installed wheel
+        # carries the library as package data. The entries below it are the
+        # in-tree build layouts, kept so a source checkout still works.
+        candidates = [package_dir / name for name in names]
+        candidates += [package_root / "Release" / name for name in names]
+        candidates += [package_root / name for name in names]
+        lib_path = next((c for c in candidates if c.exists()), candidates[0])
 
     if lib_path is None or not lib_path.exists():
         raise OSError(

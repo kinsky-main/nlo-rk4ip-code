@@ -9,9 +9,12 @@ step is committing the generated `julia/Artifacts.toml` before registering. See
 
 Version policy for distribution builds:
 
-- Patch component (`x.y.Z`) is bumped by CMake on each distribution build.
-- Minor/major are not bumped by release scripts.
-- Python package metadata is synced from `CMakeLists.txt` after CMake build so wheel and toolbox versions match.
+- Nothing bumps the version automatically. `check_versions.py --bump` is the
+  one deliberate step, and it rewrites `CMakeLists.txt` with every copy of it.
+- No release script writes a version. The copies agree at every commit, which
+  the `test_version_copies_match` CTest case enforces, so a wheel, a toolbox
+  and a Julia artifact built from the same commit carry the same version
+  without a sync step.
 
 ## Prerequisites
 
@@ -26,26 +29,11 @@ Version policy for distribution builds:
 
 ## Python Package Publication
 
-### Windows
-
-```powershell
-.\tools\release\build_wheel_windows.ps1 -BuildDir build-wheel-win -Config Release
-python -m twine upload dist\*
-```
-
-### Linux
-
-```bash
-./tools/release/build_wheel_linux.sh build-wheel-linux Release
-python3 -m twine upload dist/*
-```
-
-### macOS (CPU-only packaging path)
-
-```bash
-./tools/release/build_wheel_macos.sh build-wheel-macos Release
-python3 -m twine upload dist/*
-```
+Wheels are published from CI on a version tag, and the manual commands have
+moved along with the rest of that story to
+[release_python.md](release_python.md). Read it rather than this section: the
+wheel tagging, the platform matrix, and why uploading `dist/*` by hand is no
+longer the right default are all covered there.
 
 ## MATLAB Toolbox Publication
 
