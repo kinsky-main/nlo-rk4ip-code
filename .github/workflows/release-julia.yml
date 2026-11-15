@@ -68,6 +68,24 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Project version: $version"
 
+      # The step above only compares version strings. These two gate the other
+      # two things a release tree has to have right, and nothing else in this
+      # workflow would catch either: sbom.cdx.json is the bill of materials for
+      # the pinned dependencies compiled into the binaries this tag publishes,
+      # and every binding re-declares the C API enums and limits in its own
+      # source with no compile-time link to the header, so a tag could
+      # otherwise ship a binding that disagrees with the library it loads.
+      #
+      # Both are CTest cases (test_sbom_pins_match, test_api_parity) that read
+      # source text and need no build, and ci.yml does not run on tags, so this
+      # is the only place a release passes through them.
+      - name: Check the SBOM pins and the binding API constants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/write_sbom.py --check
+          python3 tools/check_api_parity.py
+
   build:
     name: Build ${{ matrix.triplet }}
     needs: verify
