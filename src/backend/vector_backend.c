@@ -983,6 +983,45 @@ vec_status vec_complex_add_inplace(
     return VEC_STATUS_UNSUPPORTED;
 }
 
+vec_status vec_complex_affine_comb_real(
+    vector_backend* backend,
+    vec_buffer* dst,
+    size_t term_count,
+    const vec_buffer* const* srcs,
+    const double* coeffs
+)
+{
+    if (srcs == NULL || coeffs == NULL || term_count < 2u || term_count > 4u) {
+        return VEC_STATUS_INVALID_ARGUMENT;
+    }
+    for (size_t k = 0u; k < term_count; ++k) {
+        const vec_status status = vec_validate_pair(backend, dst, srcs[k], VEC_KIND_COMPLEX64);
+        if (status != VEC_STATUS_OK) {
+            return status;
+        }
+    }
+
+    if (backend->type == VECTOR_BACKEND_CPU) {
+        nlo_complex* out = (nlo_complex*)dst->host_ptr;
+        for (size_t i = 0u; i < dst->length; ++i) {
+            double re = 0.0;
+            double im = 0.0;
+            for (size_t k = 0u; k < term_count; ++k) {
+                const nlo_complex value = ((const nlo_complex*)srcs[k]->host_ptr)[i];
+                re += coeffs[k] * RE(value);
+                im += coeffs[k] * IM(value);
+            }
+            out[i] = make(re, im);
+        }
+        return VEC_STATUS_OK;
+    }
+    if (backend->type == VECTOR_BACKEND_VULKAN) {
+        return vk_op_complex_affine_comb_real(backend, dst, term_count, srcs, coeffs);
+    }
+
+    return VEC_STATUS_UNSUPPORTED;
+}
+
 vec_status vec_complex_exp_inplace(vector_backend* backend, vec_buffer* dst)
 {
     vec_status status = vec_validate_buffer(backend, dst, VEC_KIND_COMPLEX64);

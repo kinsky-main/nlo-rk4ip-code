@@ -127,11 +127,54 @@ static int rk4_nonlinear_depends_on_h(const simulation_state* state)
     return 0;
 }
 
+/* Fused RK algebra: one linear-combination kernel per update instead of a
+ * copy/scale/add chain. Vulkan only; NLO_DISABLE_VK_FUSED_STEP=1 restores the
+ * unfused sequence, which the CPU backend always uses. */
+static int rk4_fused_algebra_enabled(const simulation_state* state)
+{
+    if (vector_backend_get_type(state->backend) != VECTOR_BACKEND_VULKAN) {
+        return 0;
+    }
+    const char* env = getenv("NLO_DISABLE_VK_FUSED_STEP");
+    return (env == NULL || env[0] == '\0' || env[0] == '0') ? 1 : 0;
+}
+
+static vec_status rk4_comb2(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* a,
+    double ca,
+    const vec_buffer* b,
+    double cb
+)
+{
+    const vec_buffer* srcs[2] = {a, b};
+    const double coeffs[2] = {ca, cb};
+    return vec_complex_affine_comb_real(backend, dst, 2u, srcs, coeffs);
+}
+
+static vec_status rk4_comb3(
+    vector_backend* backend,
+    vec_buffer* dst,
+    const vec_buffer* a,
+    double ca,
+    const vec_buffer* b,
+    double cb,
+    const vec_buffer* c,
+    double cc
+)
+{
+    const vec_buffer* srcs[3] = {a, b, c};
+    const double coeffs[3] = {ca, cb, cc};
+    return vec_complex_affine_comb_real(backend, dst, 3u, srcs, coeffs);
+}
+
 static vec_status rk4_capture_interpolated_record(
     simulation_state* state,
     double step_start_z,
     double step_end_z,
-    double record_z
+    double record_z,
+    int fused
 )
 {
     if (state == NULL || state->backend == NULL) {
@@ -166,15 +209,24 @@ static vec_status rk4_capture_interpolated_record(
         alpha = 1.0;
     }
 
-    RK4_CALL(vec_complex_copy(state->backend, work->field_freq_vec, work->previous_field_vec));
-    RK4_CALL(vec_complex_scalar_mul_inplace(state->backend,
-                                                    work->field_freq_vec,
-                                                    make(1.0 - alpha, 0.0)));
-    RK4_CALL(vec_complex_copy(state->backend, work->k_temp_vec, state->current_field_vec));
-    RK4_CALL(vec_complex_scalar_mul_inplace(state->backend,
-                                                    work->k_temp_vec,
-                                                    make(alpha, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(state->backend, work->field_freq_vec, work->k_temp_vec));
+    if (fused) {
+        RK4_CALL(rk4_comb2(state->backend,
+                           work->field_freq_vec,
+                           work->previous_field_vec,
+                           1.0 - alpha,
+                           state->current_field_vec,
+                           alpha));
+    } else {
+        RK4_CALL(vec_complex_copy(state->backend, work->field_freq_vec, work->previous_field_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(state->backend,
+                                                        work->field_freq_vec,
+                                                        make(1.0 - alpha, 0.0)));
+        RK4_CALL(vec_complex_copy(state->backend, work->k_temp_vec, state->current_field_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(state->backend,
+                                                        work->k_temp_vec,
+                                                        make(alpha, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(state->backend, work->field_freq_vec, work->k_temp_vec));
+    }
 
     return simulation_state_capture_snapshot_from_vec(state, work->field_freq_vec);
 }
@@ -230,7 +282,7 @@ static void rk4_debug_log_solver_config(const simulation_state* state, double to
             tol);
 }
 
-static vec_status rk4_step_device(simulation_state *state, size_t step_index)
+static vec_status rk4_step_device(simulation_state *state, size_t step_index, int fused)
 {
     if (state == NULL || state->backend == NULL || state->fft_plan == NULL)
     {
@@ -267,43 +319,61 @@ static vec_status rk4_step_device(simulation_state *state, size_t step_index)
     rk4_debug_log_vec_stats(state, work->k_final_vec, "k1", step_index, state->current_z, step);
     
     // k2 = N(A_I + h*k1/2)
-    RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_final_vec));
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step * 0.5, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+    if (fused) {
+        RK4_CALL(rk4_comb2(backend, work->field_working_vec, work->ip_field_vec, 1.0, work->k_final_vec, 0.5 * step));
+    } else {
+        RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_final_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step * 0.5, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+    }
 
     RK4_CALL(apply_nonlinear_operator_stage(state,
                                                     work->field_working_vec,
                                                     work->k_temp_vec));
     rk4_debug_log_vec_stats(state, work->k_temp_vec, "k2", step_index, state->current_z, step);
-    RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_temp_vec));
+    if (fused) {
+        // k1/6 + k2/3, and the k3 input A_I + h*k2/2
+        RK4_CALL(rk4_comb2(backend, work->k_final_vec, work->k_final_vec, 1.0 / 6.0, work->k_temp_vec, 1.0 / 3.0));
+        RK4_CALL(rk4_comb2(backend, work->field_working_vec, work->ip_field_vec, 1.0, work->k_temp_vec, 0.5 * step));
+    } else {
+        RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_temp_vec));
 
-    // k1/6 + k2/3
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_final_vec, make(1.0 / 6.0, 0.0)));
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(1.0 / 3.0, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
-    
-    // k3 = N(A_I + h*k2/2)
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step * 0.5, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+        // k1/6 + k2/3
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_final_vec, make(1.0 / 6.0, 0.0)));
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(1.0 / 3.0, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
+
+        // k3 = N(A_I + h*k2/2)
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step * 0.5, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+    }
 
     RK4_CALL(apply_nonlinear_operator_stage(state,
                                                     work->field_working_vec,
                                                     work->k_temp_vec));
     rk4_debug_log_vec_stats(state, work->k_temp_vec, "k3", step_index, state->current_z, step);
-    RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_temp_vec));
+    if (fused) {
+        // psi input A_I + h*(k1/6 + k2/3 + k3/3), and the k4 input A_I + h*k3
+        RK4_CALL(rk4_comb3(backend, work->k_final_vec, work->ip_field_vec, 1.0, work->k_final_vec, step, work->k_temp_vec, step / 3.0));
+        RK4_CALL(rk4_comb2(backend, work->field_working_vec, work->ip_field_vec, 1.0, work->k_temp_vec, step));
+    } else {
+        RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_temp_vec));
 
-    // psi = exp(D*h/2) * (A_I + h*(k1/6 + k2/3 + k3/3))
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(1.0 / 3.0, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_final_vec, make(step, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->ip_field_vec));
+        // psi = exp(D*h/2) * (A_I + h*(k1/6 + k2/3 + k3/3))
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(1.0 / 3.0, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_final_vec, make(step, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->ip_field_vec));
+
+        // k4 input A_I + h*k3
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+    }
+
+    // psi = exp(D*h/2) * (A_I + h*(k1/6 + k2/3 + k3/3)); k4 = N(exp(D*h/2) * (A_I + h*k3))
     RK4_CALL(fft_forward_vec(state->fft_plan, work->k_final_vec, work->field_freq_vec));
     RK4_CALL(apply_dispersion_operator_stage(state, work->field_freq_vec));
     RK4_CALL(fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_final_vec));
-
-    // k4 = N(exp(D*h/2) * (A_I + h*k3))
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
     RK4_CALL(fft_forward_vec(state->fft_plan, work->field_working_vec, work->field_freq_vec));
     RK4_CALL(apply_dispersion_operator_stage(state, work->field_freq_vec));
     RK4_CALL(fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->field_working_vec));
@@ -314,10 +384,13 @@ static vec_status rk4_step_device(simulation_state *state, size_t step_index)
     rk4_debug_log_vec_stats(state, work->k_temp_vec, "k4", step_index, state->current_z, step);
 
     // A_{n+1} = exp(D*h/2) * (A_I + h*(k1/6 + k2/3 + k3/3)) + h*k4/6
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(step * 1.0 / 6.0, 0.0)));  
-    RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
-
-    RK4_CALL(vec_complex_copy(backend, state->current_field_vec, work->k_final_vec));
+    if (fused) {
+        RK4_CALL(rk4_comb2(backend, state->current_field_vec, work->k_final_vec, 1.0, work->k_temp_vec, step / 6.0));
+    } else {
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(step * 1.0 / 6.0, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
+        RK4_CALL(vec_complex_copy(backend, state->current_field_vec, work->k_final_vec));
+    }
     rk4_debug_log_vec_stats(state,
                                 state->current_field_vec,
                                 "current_field_end",
@@ -333,6 +406,7 @@ static vec_status rk4_attempt_embedded_erk43(
     double step,
     size_t step_index,
     int reuse_cached_k5,
+    int fused,
     double* out_error
 )
 {
@@ -381,43 +455,61 @@ static vec_status rk4_attempt_embedded_erk43(
     rk4_debug_log_vec_stats(state, work->k_final_vec, "k1", step_index, state->current_z, step);
     
     // k2 = N(A_I + h*k1/2)
-    RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_final_vec));
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step * 0.5, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+    if (fused) {
+        RK4_CALL(rk4_comb2(backend, work->field_working_vec, work->ip_field_vec, 1.0, work->k_final_vec, 0.5 * step));
+    } else {
+        RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_final_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step * 0.5, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+    }
 
     RK4_CALL(apply_nonlinear_operator_stage(state,
                                                     work->field_working_vec,
                                                     work->k_temp_vec));
     rk4_debug_log_vec_stats(state, work->k_temp_vec, "k2", step_index, state->current_z, step);
-    RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_temp_vec));
+    if (fused) {
+        // k1/6 + k2/3, and the k3 input A_I + h*k2/2
+        RK4_CALL(rk4_comb2(backend, work->k_final_vec, work->k_final_vec, 1.0 / 6.0, work->k_temp_vec, 1.0 / 3.0));
+        RK4_CALL(rk4_comb2(backend, work->field_working_vec, work->ip_field_vec, 1.0, work->k_temp_vec, 0.5 * step));
+    } else {
+        RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_temp_vec));
 
-    // k1/6 + k2/3
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_final_vec, make(1.0 / 6.0, 0.0)));
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(1.0 / 3.0, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
+        // k1/6 + k2/3
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_final_vec, make(1.0 / 6.0, 0.0)));
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(1.0 / 3.0, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
 
-    // k3 = N(A_I + h*k2/2)
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step * 0.5, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+        // k3 = N(A_I + h*k2/2)
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step * 0.5, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+    }
 
     RK4_CALL(apply_nonlinear_operator_stage(state,
                                                     work->field_working_vec,
                                                     work->k_temp_vec));
     rk4_debug_log_vec_stats(state, work->k_temp_vec, "k3", step_index, state->current_z, step);
-    RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_temp_vec));
+    if (fused) {
+        // psi input A_I + h*(k1/6 + k2/3 + k3/3), and the k4 input A_I + h*k3
+        RK4_CALL(rk4_comb3(backend, work->k_final_vec, work->ip_field_vec, 1.0, work->k_final_vec, step, work->k_temp_vec, step / 3.0));
+        RK4_CALL(rk4_comb2(backend, work->field_working_vec, work->ip_field_vec, 1.0, work->k_temp_vec, step));
+    } else {
+        RK4_CALL(vec_complex_copy(backend, work->field_working_vec, work->k_temp_vec));
 
-    // psi = exp(D*h/2) * (A_I + h*(k1/6 + k2/3 + k3/3))
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(1.0 / 3.0, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_final_vec, make(step, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->ip_field_vec));
+        // psi = exp(D*h/2) * (A_I + h*(k1/6 + k2/3 + k3/3))
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(1.0 / 3.0, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_final_vec, make(step, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->ip_field_vec));
+
+        // k4 input A_I + h*k3
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
+    }
+
+    // psi = exp(D*h/2) * (A_I + h*(k1/6 + k2/3 + k3/3)); k4 = N(exp(D*h/2) * (A_I + h*k3))
     RK4_CALL(fft_forward_vec(state->fft_plan, work->k_final_vec, work->field_freq_vec));
     RK4_CALL(apply_dispersion_operator_stage(state, work->field_freq_vec));
     RK4_CALL(fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->k_final_vec));
-
-    // k4 = N(exp(D*h/2) * (A_I + h*k3))
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->field_working_vec, make(step, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->field_working_vec, work->ip_field_vec));
     RK4_CALL(fft_forward_vec(state->fft_plan, work->field_working_vec, work->field_freq_vec));
     RK4_CALL(apply_dispersion_operator_stage(state, work->field_freq_vec));
     RK4_CALL(fft_inverse_vec(state->fft_plan, work->field_freq_vec, work->field_working_vec));
@@ -427,12 +519,18 @@ static vec_status rk4_attempt_embedded_erk43(
                                                     work->k_temp_vec));
     rk4_debug_log_vec_stats(state, work->k_temp_vec, "k4", step_index, state->current_z, step);
 
-    // psi{k_final} -> {field_freq}
-    RK4_CALL(vec_complex_copy(backend, work->field_freq_vec, work->k_final_vec));
+    if (fused) {
+        // {field_freq} = psi + h*k4/15, the k4 part of A^[3]; A^[4]{k_final} = psi + h*k4/6
+        RK4_CALL(rk4_comb2(backend, work->field_freq_vec, work->k_final_vec, 1.0, work->k_temp_vec, step / 15.0));
+        RK4_CALL(rk4_comb2(backend, work->k_final_vec, work->k_final_vec, 1.0, work->k_temp_vec, step / 6.0));
+    } else {
+        // psi{k_final} -> {field_freq}
+        RK4_CALL(vec_complex_copy(backend, work->field_freq_vec, work->k_final_vec));
 
-    // A^[4]{k_final} = psi{k_final} + h*k4/6{k_temp}
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(step * 1.0 / 6.0, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
+        // A^[4]{k_final} = psi{k_final} + h*k4/6{k_temp}
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(step * 1.0 / 6.0, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->k_final_vec, work->k_temp_vec));
+    }
 
     // k5{field_working_vec} = N(A^[4]{k_final}) (raw nonlinear operator value, saved for optional next-step k1 reuse).
     RK4_CALL(apply_nonlinear_operator_stage(state,
@@ -441,11 +539,15 @@ static vec_status rk4_attempt_embedded_erk43(
     rk4_debug_log_vec_stats(state, work->field_working_vec, "k5", step_index, state->current_z + step, step);
 
     // A^[3]{field_freq} = psi{field_freq} + (2*6*(h*k4/6){k_temp} + 3*h*k5)/30.
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(0.4, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->field_freq_vec, work->k_temp_vec));
-    RK4_CALL(vec_complex_copy(backend, work->k_temp_vec, work->field_working_vec));
-    RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(step * 0.1, 0.0)));
-    RK4_CALL(vec_complex_add_inplace(backend, work->field_freq_vec, work->k_temp_vec));
+    if (fused) {
+        RK4_CALL(rk4_comb2(backend, work->field_freq_vec, work->field_freq_vec, 1.0, work->field_working_vec, 0.1 * step));
+    } else {
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(0.4, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->field_freq_vec, work->k_temp_vec));
+        RK4_CALL(vec_complex_copy(backend, work->k_temp_vec, work->field_working_vec));
+        RK4_CALL(vec_complex_scalar_mul_inplace(backend, work->k_temp_vec, make(step * 0.1, 0.0)));
+        RK4_CALL(vec_complex_add_inplace(backend, work->field_freq_vec, work->k_temp_vec));
+    }
 
     // Relative ERK4(3)-IP defect:
     //   delta_rel = sqrt(sum(|A^[4]-A^[3]|^2) / sum((a_floor + |A^[4]|)^2))
@@ -500,6 +602,7 @@ void solve_rk4(simulation_state *state)
          state->explicit_record_z_count > 0u);
     const int disable_record_interpolation = (fixed_step_mode && !has_explicit_schedule) ? 1 : 0;
     const int nonlinear_depends_on_h = rk4_nonlinear_depends_on_h(state);
+    const int fused_algebra = rk4_fused_algebra_enabled(state);
     if (state->current_step_size <= 0.0)
     {
         state->current_step_size = state->config->propagation.starting_step_size;
@@ -576,7 +679,7 @@ void solve_rk4(simulation_state *state)
         if (fixed_step_mode) {
             state->current_step_size = step;
             state->current_half_step_exp = 0.5 * step;
-            if (rk4_step_device(state, rk4_step_index) != VEC_STATUS_OK) {
+            if (rk4_step_device(state, rk4_step_index, fused_algebra) != VEC_STATUS_OK) {
                 step_accepted = -1;
             } else {
                 state->current_z += step;
@@ -612,6 +715,7 @@ void solve_rk4(simulation_state *state)
                                                    step,
                                                    rk4_step_index,
                                                    reuse_cached_k5,
+                                                   fused_algebra,
                                                    &error);
                 if (status != VEC_STATUS_OK) {
                     step_accepted = -1;
@@ -743,7 +847,8 @@ void solve_rk4(simulation_state *state)
                 capture_status = rk4_capture_interpolated_record(state,
                                                                      step_start_z,
                                                                      step_end_z,
-                                                                     next_record_z);
+                                                                     next_record_z,
+                                                                     fused_algebra);
             }
             if (capture_status != VEC_STATUS_OK)
             {

@@ -136,3 +136,11 @@ set_tests_properties(test_python_second_order_soliton_plot_cleanup PROPERTIES
 set_tests_properties(test_python_tensor_backend_scaling_cleanup PROPERTIES
   ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
 )
+
+# Fused Vulkan RK algebra against NLO_DISABLE_VK_FUSED_STEP=1; skips without Vulkan.
+add_test(NAME test_python_fused_rk_step
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_fused_rk_step.py"
+)
+set_tests_properties(test_python_fused_rk_step PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
+)

@@ -97,7 +97,8 @@ typedef enum {
     VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_T = 15,
     VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_Y = 16,
     VK_KERNEL_COMPLEX_MESH_FROM_AXIS_TFAST_X = 17,
-    VK_KERNEL_COUNT = 18
+    VK_KERNEL_COMPLEX_AFFINE_COMB_REAL = 18,
+    VK_KERNEL_COUNT = 19
 } vk_kernel_id;
 
 /**
@@ -108,6 +109,9 @@ typedef struct {
     uint32_t pad;
     double scalar0;
     double scalar1;
+    /** Used only by kernels that take more than two scalars. */
+    double scalar2;
+    double scalar3;
 } vk_push_constants;
 
 /**
