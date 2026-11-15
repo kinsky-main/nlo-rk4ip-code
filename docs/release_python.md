@@ -233,7 +233,8 @@ python -m twine upload dist/*.whl
 
 ## Known gaps
 
-- `tools/release/read_version.py` has no callers left. `verify` used it until
-  the version copies became an enforced invariant; `release-mltbx.yml` dropped
-  it in the same change. It is harmless but dead.
+- `tools/release/read_version.py` is no longer used by any workflow. `verify`
+  used it until the version copies became an enforced invariant, and
+  `release-mltbx.yml` dropped it in the same change. It is still the way
+  `docs/release_julia.md` names the tag to cut, so it is not dead.
 - Linux and Windows x86-64 only. No aarch64 wheels on either platform.
