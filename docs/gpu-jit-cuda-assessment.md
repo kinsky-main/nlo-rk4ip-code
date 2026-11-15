@@ -1,9 +1,28 @@
 # GPU JIT / CUDA branch assessment
 
-Status: **PAUSED 2026-11-14, marked for follow-up** — Phases 0 and 3 done, Phase 1/2 partial (1-D cases only), Phase 4 not started. Resume steps at the end of this file. Plan: `docs/tasks-branch-assessment-plan.md` on
-`claude/worktree-audit-9d3049`. Subject: `optimisation/runtim-vulkan-compilation`
-@ `ad0d8ac` plus the saved uncommitted NVRTC work, snapshotted as local branch
-`assess/tasks-snapshot` (never pushed). Baseline: `main` @ `a23ccff`.
+Status: **complete 2026-11-15.** The assessment was paused on 2026-11-14 and
+resumed when the user chose to take forward A (Vulkan JIT) and B (fused step
+plan).
+
+Verdict:
+
+| Feature | Verdict |
+|---|---|
+| A, Vulkan JIT | **port** |
+| B, fused RK algebra | **port second** (judgment call) |
+| B's profiling half | do not port |
+| C, CUDA backend | **archive** |
+| D, NVRTC JIT | **archive** |
+
+The ordered porting plan follows Phase 4.
+
+Plan: `docs/tasks-branch-assessment-plan.md` on `claude/worktree-audit-9d3049`.
+
+Subject: `optimisation/runtim-vulkan-compilation` @ `ad0d8ac` plus the saved
+uncommitted NVRTC work. It is snapshotted as the local branch
+`assess/tasks-snapshot`, which was never pushed.
+
+Baseline: `main` @ `a23ccff`.
 
 ## Pre-registered decision thresholds
 
@@ -32,51 +51,99 @@ thresholds, made precise so they can be applied mechanically.
 - **Gate 1**: *f_op* (operator evaluation + RK algebra share of GPU step time on
   `main`) < 15 % on every GPU case → A and D are low value by Amdahl's law.
 
-## Phase 1/2: measurements so far (PARTIAL — paused 2026-11-14)
+## Phase 1/2: measurements
 
-Harness: `benchmarks/assessment/assess_bench.py` (same Python script for both
-trees; `--tree`/`--lib` pick the build), driven by `run_matrix.sh`, with
-variants interleaved inside each case. Metric: library-internal `solve_rk4`
-wall time (init timed separately), fixed step, 200 steps for the 1-D cases,
-3 warm-ups + 10 timed runs, median (IQR). Raw rows:
-`docs/assessment-data/fixed-partial-2026-11-14.jsonl`; correctness:
-`docs/assessment-data/fixed-partial-correctness.csv`.
+Harness: `benchmarks/assessment/assess_bench.py`. The same Python script drives
+both trees; `--tree` and `--lib` pick the build. `run_matrix.sh` runs it with
+the variants interleaved inside each case, so thermal drift on the laptop GPU
+does not favour one variant.
 
-Variants: `main` (interpreter); `snap_interp` (JIT off, fused off);
-`snap_fused` (B alone); `snap_jit` (A alone); `snap_jit_fused` (A+B, branch
-default); `cuda` (C, JIT off); `nvrtc_jit` (C+D). `main_ts` is `main` with
-timestamp queries on (phase breakdown only).
+Metric: the library-internal `solve_rk4` wall time; init is timed separately.
+Fixed-step runs take 200 steps for the 1-D cases. Each cell is 3 warm-ups plus
+10 timed runs, reported as median (IQR).
 
-Covered: all 1-D cases on all variants. Not yet: GRIN (2+1)-D and (3+1)-D
-tensor cases for the snapshot variants (only `main` rows exist), adaptive
-runs (step-size history), memory headroom (largest grid per backend).
+Raw rows and correctness CSVs are in `docs/assessment-data/`:
+`fixed-partial-2026-11-14.jsonl` (first 1-D pass, all variants),
+`rerun1d-2026-11-15.jsonl`, `fixed2-2026-11-15.jsonl`,
+`adaptive-2026-11-15.jsonl`, `headroom-2026-11-15.jsonl` and
+`memprobe-2026-11-15.*`.
 
-### Solve time, median ms (IQR) and speedup vs main
+Variants:
+
+| Variant | Build | JIT (A) | Fused plan (B) |
+|---|---|---|---|
+| `main` | main, interpreter | — | — |
+| `snap_interp` | snapshot | off | off |
+| `snap_fused` | snapshot | off | on (B alone) |
+| `snap_jit` | snapshot | on (A alone) | off |
+| `snap_jit_fused` | snapshot | on | on (A+B, the branch default) |
+| `cuda` | snapshot | off (C) | — |
+| `nvrtc_jit` | snapshot | on (C+D) | — |
+
+`main_ts` is `main` with timestamp queries on and is used only for the phase
+breakdown. `main_cpu` is `main` on the FFTW CPU backend.
+
+After the 2026-11-15 user decision to take forward A and B, only those two were
+measured on the 2-D/3-D, adaptive and headroom cases. C and D have only the
+1-D first pass.
+
+### Solve time, fixed step: median ms (IQR) and speedup vs main
+
+1-D cases. The Vulkan columns come from the 2026-11-15 rerun, where every IQR
+is ≤ 32 ms and most are ≤ 3 ms. The `cuda` and `nvrtc_jit` columns come from
+the first pass. kerr1d 1024 was not rerun.
 
 | Case | main | snap_interp | snap_fused (B) | snap_jit (A) | snap_jit_fused (A+B) | cuda (C) | nvrtc_jit (C+D) |
 |---|---|---|---|---|---|---|---|
-| kerr1d 1024 | 122 (19) | 120 x1.01 | 121 x1.00 | 90 x1.36 | 69 x1.76 | 137 x0.88 | 69 x1.76 |
-| kerr1d 4096 | 156 (8) | 285 (131) x0.55 | 151 x1.03 | 225 (98) x0.69 | 109 x1.43 | 153 x1.02 | 105 x1.49 |
-| kerr1d 16384 | 124 (12) | 120 x1.03 | 123 x1.01 | 114 (71) x1.08 | 104 (45) x1.19 | 155 x0.80 | 98 x1.27 |
-| kerr1d 65536 | 273 (169) | 204 x1.34 | 207 x1.32 | 156 x1.75 | 125 x2.18 | 190 x1.43 | 132 x2.06 |
-| raman1d 4096 | 259 (4) | 243 x1.07 | 235 x1.10 | 224 (57) x1.15 | 227 (67) x1.14 | 228 x1.13 | 207 x1.25 |
-| raman1d 16384 | 184 (8) | 202 x0.91 | 179 x1.03 | 187 x0.98 | 173 x1.06 | 221 x0.83 | 196 x0.94 |
-| expr1d 16384 | 215 (44) | 179 x1.20 | 182 x1.18 | 127 x1.69 | 96 x2.23 | 242 x0.89 | 104 x2.06 |
+| kerr1d 1024 (1st pass) | 122 (19) | 120 ×1.01 | 121 ×1.00 | 90 ×1.36 | 69 ×1.76 | 137 ×0.88 | 69 ×1.76 |
+| kerr1d 4096 | 142 (1) | 142 ×1.00 | 142 ×1.00 | 111 (32) ×1.28 | 102 ×1.39 | 153 ×1.02¹ | 105 ×1.49¹ |
+| kerr1d 16384 | 112 (2) | 146 ×0.77 | 116 (19) ×0.96 | 101 (10) ×1.11 | 96 ×1.17 | 155 ×0.80¹ | 98 ×1.27¹ |
+| kerr1d 65536 | 172 (1) | 173 ×0.99 | 173 ×0.99 | 130 ×1.32 | 116 (9) ×1.48 | 190 ×1.43¹ | 132 ×2.06¹ |
+| raman1d 4096 | 239 (2) | 228 ×1.05 | 219 ×1.09 | 216 ×1.11 | 207 ×1.16 | 228 ×1.13¹ | 207 ×1.25¹ |
+| raman1d 16384 | 172 (2) | 161 ×1.07 | 154 ×1.12 | 152 ×1.13 | 143 (6) ×1.21 | 221 ×0.83¹ | 196 ×0.94¹ |
+| expr1d 16384 | 168 (1) | 168 ×1.00 | 167 ×1.00 | 101 (7) ×1.66 | 97 (5) ×1.73 | 242 ×0.89¹ | 104 ×2.06¹ |
 
-Caveats: several IQRs are large (laptop GPU clock/thermal noise), for example
-`main` kerr1d 65536 and `snap_interp`/`snap_jit` kerr1d 4096; the
-`snap_interp` ≈ `main` sanity check holds except in those noisy cells. Rerun
-before quoting single cells.
+¹ Speedup against the first-pass `main`, whose IQRs were up to 169 ms; read
+these columns as indicative only.
 
-### Init time (ms, cold first call / median of timed calls)
+2-D/3-D cases have nxy² × 512 points. tensor3d runs 10 steps and grin2p1
+runs 20.
 
-JIT adds ~250–400 ms per propagate call on Vulkan (`snap_jit*` ≈ 500–650 ms vs
-`main` ≈ 200–230 ms): the JIT cache lives on the backend, so every
-`propagate` recompiles. CUDA init is ~20 ms warm, NVRTC ~60 ms warm (driver
-caches). First-in-process cold init is noisy (`main` 10.5 s and `nvrtc_jit`
-6.3 s on the very first run of the session: driver shader-cache warm-up).
+| Case | main | snap_interp | snap_fused (B) | snap_jit (A) | snap_jit_fused (A+B) |
+|---|---|---|---|---|---|
+| tensor3d 64 | 490 (12) | 517 ×0.95 | 503 ×0.97 | 424 ×1.16 | 381 ×1.29 |
+| tensor3d 128 | 1980 (43) | 1974 ×1.00 | 1930 ×1.03 | 1598 ×1.24 | 1423 ×1.39 |
+| grin2p1 64 | 1446 (45) | 1481 ×0.98 | 1477 ×0.98 | 911 ×1.59 | 851 ×1.70 |
+| grin2p1 128 | 5860 (90) | 5929 ×0.99 | 5649 ×1.04 | 3400 ×1.72 | 3086 ×1.90 |
 
-### Gate 1: main's GPU phase breakdown (Vulkan timestamps, % of solve time)
+Sanity check: `snap_interp` matches `main` within noise on every case except
+kerr1d 16384, where it is 0.77×. The snapshot's own baseline is therefore not
+faster than main, and the gains above come from A and B.
+
+What B adds on top of A (`snap_jit` → `snap_jit_fused`): 4–12 %. The largest
+gains are on the biggest grids: tensor3d 128 ×1.12, kerr1d 65536 ×1.12, and
+grin2p1 128 ×1.10.
+
+### Init time
+
+JIT adds about 230–330 ms to every `propagate` call. On the rerun, init is
+≈ 430 ms with JIT and ≈ 205 ms without; 2-D/3-D init is 580–610 ms against
+270–385 ms. The JIT entry cache lives on the backend, so each `propagate`
+compiles again.
+
+On small 1-D problems this outweighs the solve gain. kerr1d 4096
+init+solve is 301 ms on `main` and 535 ms on `snap_jit_fused`; grin2p1 128 is
+6188 ms against 3665 ms.
+
+The pre-registered metric excludes init, but the port must remove this cost;
+see the A conditions below.
+
+Warm CUDA init is ~20 ms and warm NVRTC ~60 ms, because the driver caches
+compiled code.
+
+### GPU phase breakdown on main (Gate 1)
+
+Vulkan timestamps, as % of solve wall time.
 
 | Case | FFT | linear | nonlinear | RK algebra | GPU idle / host | f_op |
 |---|---|---|---|---|---|---|
@@ -87,42 +154,137 @@ caches). First-in-process cold init is noisy (`main` 10.5 s and `nvrtc_jit`
 | raman1d 4096 | 63 % | 5 % | 9 % | 3 % | 20 % | 18 % |
 | raman1d 16384 | 44 % | 7 % | 12 % | 5 % | 32 % | 24 % |
 | expr1d 16384 | 23 % | 8 % | 28 % | 5 % | 36 % | 41 % |
+| tensor3d 64 | 28 % | 19 % | 10 % | 14 % | 29 % | 43 % |
+| tensor3d 128 | 28 % | 19 % | 10 % | 15 % | 27 % | 45 % |
+| grin2p1 64 | 16 % | 12 % | 51 % | 10 % | 10 % | 74 % |
+| grin2p1 128 | 18 % | 12 % | 51 % | 10 % | 9 % | 73 % |
 
-**Gate 1 does not trigger:** f_op is 18–42 % on every 1-D case, above the 15 %
-threshold. At these sizes per-step cost is dominated by per-dispatch latency
-and host overhead (solve time barely grows from nt = 1024 to 65536), which is
-exactly what JIT fusion attacks. "FFT" includes the copies and the inverse
-scaling around each VkFFT call.
+**Gate 1 does not trigger.** f_op is between 18 % and 74 %, always above the
+15 % threshold. It is highest on GRIN, where the interpreted saturable
+nonlinearity alone takes half the solve time. That is also the case where A
+gains most (×1.7). "FFT" includes the copies and the inverse scaling around
+each VkFFT call.
 
-### Correctness so far (relative L2 of final field vs main)
+### Correctness, fixed step
 
-| Case | snap_interp | snap_fused | snap_jit | snap_jit_fused | cuda / nvrtc_jit | main_cpu (FFTW) |
-|---|---|---|---|---|---|---|
-| raman1d 4096 / 16384 | ≤ 9e-15 | ≤ 1e-14 | ≤ 9e-15 | ≤ 1e-14 | 6e-13 / 7e-14 | 8e-14 / 3e-13 |
-| expr1d 16384 | 0 | 0 | 1e-14 | 1e-14 | 3e-11 | 3e-11 |
-| kerr1d (all sizes) | 0 | 0 | 0 | 1e-8 – 5e-8 | 1e-6 – 2e-6 | 9e-8 – 1.2e-6 |
+Relative L2 of the final field against `main`.
 
-Interpretation: on the well-resolved cases (Raman, runtime expression) every
-variant agrees to ≤ 3e-11, inside the 1e-10 bar; JIT without fusion is
-bit-identical to `main` on Kerr. The kerr1d case (γ = 80, 16 rad nonlinear
-phase) is under-resolved at the benchmark step (5e-2 discretisation error vs a
-16× refined run), so it amplifies round-off: `main`'s own CPU and Vulkan
-paths differ by up to 1.2e-6 there, and the difference grows linearly with
-step count. By the pre-registered bar, fused (A+B) and CUDA fail on kerr1d;
-by "no worse than main's own CPU/GPU disagreement" fused passes and CUDA is
-roughly at that level (1.1–1.9e-6 vs 0.1–1.2e-6). Decide which reading
-applies before Phase 4; adaptive step-history comparison is still to do.
+| Case | snap_interp / snap_fused | snap_jit | snap_jit_fused | cuda / nvrtc_jit | main_cpu (FFTW) |
+|---|---|---|---|---|---|
+| raman1d 4096 / 16384 | ≤ 1e-14 | ≤ 9e-15 | ≤ 1e-14 | 6e-13 / 7e-14 | 8e-14 / 3e-13 |
+| expr1d 16384 | 0 | 1e-14 | 1e-14 | 3e-11 | 3e-11 |
+| tensor3d 64 / 128 | 0 | 2.6e-15 | 2.6e-15 | — | 7e-15 |
+| grin2p1 64 / 128 | 0 | 3.3e-15 | 3.4e-15 | — | 1.1e-14 |
+| kerr1d (all sizes) | 0 | 0 | 1e-8 – 5e-8 | 1e-6 – 2e-6 | 9e-8 – 1.2e-6 |
 
-### Provisional reading (not a verdict)
+On every well-resolved case, every A/B variant agrees with `main` to
+≤ 1e-14, inside the 1e-10 bar. A alone is bit-identical to `main` on kerr1d.
 
-- A (Vulkan JIT): 1.36–1.75× alone on 3 of 7 1-D cases, up to 2.2× with B, no
-  new runtime dependency. On track for **port** if the 2-D/3-D cases agree.
-- B (fused plan): ≤ 1.03× alone except where noise dominates; its value is in
-  combination with A. The profiling half is independently useful.
-- C (CUDA): 0.80–1.43×, mostly slower than or level with `main`'s Vulkan; heavy
-  runtime deps. Leaning **archive** unless headroom shows bigger grids fit.
-- D (NVRTC): ~equal to A+B on Vulkan; no gain over porting A. Leaning
-  **archive** with C.
+kerr1d uses γ = 80, which gives 16 rad of nonlinear phase. At the benchmark
+step the case is under-resolved: its discretisation error is 5e-2 against a 16×
+refined run, so it amplifies round-off. B's fused affine combinations
+reassociate floating-point sums, and that produces 1e-8 – 5e-8 on this case.
+`main`'s own CPU and Vulkan paths differ by more, up to 1.2e-6.
+
+**Correctness reading.** This is a deviation from the pre-registered wording,
+and it is recorded here.
+
+- The 1e-10 bar applies to the well-resolved cases, and A and B pass it there.
+- On kerr1d the bar sits below the case's own round-off floor: `main` fails it
+  against itself, CPU vs GPU. There, the bar is "no worse than `main`'s CPU vs
+  GPU disagreement". A+B passes by an order of magnitude; C sits at about that
+  level.
+
+### Correctness, adaptive step (step-size history)
+
+Tolerance is 1e-6, except raman1d at 2e-6. Each case has a single run. The table gives the number of accepted
+steps and the relative L2 of the final field against `main`.
+
+| Case | main | main_cpu | snap_interp | snap_fused | snap_jit | snap_jit_fused | snapshot on CPU |
+|---|---|---|---|---|---|---|---|
+| kerr1d 4096 | 539 | 539, 4e-7 | 610, 2e-3 | 610, 2e-3 | 604, 2e-3 | 604, 2e-3 | — |
+| raman1d 4096 | 95 | 95, 4e-14 | 98, 1.6e-6 | 98, 1.6e-6 | 98, 1.6e-6 | 98, 1.6e-6 | 95, 4e-14 |
+| expr1d 16384 | 87 | 87, 3e-11 | 108, 3.4e-6 | 108, 3.4e-6 | 108, 3.4e-6 | 108, 3.4e-6 | — |
+| tensor3d 64 | 4 | 4, 3e-15 | 4, 0 | 4, 0 | 4, 1e-15 | 4, 1e-15 | — |
+| grin2p1 64 | 7 | 7, 4e-15 | 7, 0 | 7, 0 | 7, 2e-15 | 7, 2e-15 | — |
+
+**The snapshot's Vulkan path breaks adaptive stepping, and the cause is
+not A or B's kernels.** The evidence:
+
+- The step history first diverges at step 2: the snapshot doubles the step
+  and then rejects several times.
+- `snap_interp` (A and B off) shows the same divergence, while the snapshot on
+  CPU matches `main` exactly.
+- The step controller code is identical on both trees.
+
+Root cause: in `92cfa0f` (B's commit, shared with the CUDA stubs),
+`nlo_vk_simulation_phase_flush` became asynchronous. It submits, sets
+`submit_pending`, and no longer waits on the fence.
+`nlo_vk_dispatch_complex_weighted_rms_error` flushes and then immediately
+`memcpy`s the error pair from the staging buffer. The step controller
+therefore reads a stale error, which in practice is the previous attempt's.
+`main`'s flush waits on the fence (`vk_backend_phase.c`).
+
+Fixed-step runs never read a value back mid-solve, so they are unaffected.
+
+Within the snapshot, which shares this bug across all its Vulkan variants:
+
+- B is bit-identical to `snap_interp` in adaptive mode.
+- A changes only kerr1d's history (604 vs 610 steps), by round-off on the
+  under-resolved case.
+- The 2-D/3-D cases take few steps and accept all of them, so they are unaffected.
+
+Per-step cost against `snap_interp`, adaptive mode, single run:
+
+| Variant | kerr1d 4096 | raman1d 4096 | expr1d 16384 | tensor3d 64 | grin2p1 64 |
+|---|---|---|---|---|---|
+| B | ×1.01 | ×1.04 | ×1.00 | ×1.01 | ×0.96 |
+| A | ×1.29 | ×1.04 | ×1.78 | ×1.14 | ×1.46 |
+| A+B | ×1.42 | ×1.09 | ×1.47 | ×1.22 | ×1.61 |
+
+These per-step factors are consistent with the fixed-step factors.
+
+### Memory headroom
+
+Each cell is one run (0 warm-ups). Peak dedicated VRAM comes from
+`nvidia-smi`, sampled every 200 ms; the figure is the peak minus the idle
+reading taken before the run.
+
+About 1.8 GiB of the 8 GiB was already held by other processes (desktop,
+browser), so about 6.2 GiB was usable. The 192 and 256 rows are in
+`headroom-2026-11-15.jsonl`; the probe rows, including 160, are in
+`memprobe-2026-11-15.jsonl`.
+
+| Case (nxy² × 512) | main: solve, VRAM | A+B: solve, VRAM | CUDA (C): solve, VRAM |
+|---|---|---|---|
+| tensor3d 192 | 4.3 s, 5.9 GiB | 3.1 s, 5.6 GiB | — |
+| grin2p1 160 | 9.1 s, 5.6 GiB | 5.1 s, 4.5 GiB | crash |
+| grin2p1 192 | **225 s**, at the VRAM cap | 7.1 s, 5.6 GiB | crash |
+| tensor3d 256, grin2p1 256 | init fails (status 2) | init fails (status 2) | crash |
+
+**A's compact axis symbols save 1.08 GiB on GRIN 160 (19 %).** That is
+about six full-grid buffers of 200 MiB each, as expected from dropping the
+wt/kx/ky/t/x/y meshes.
+
+At GRIN 192, `main` needs more VRAM than is free. WDDM then pages its buffers
+into shared system memory, and the solve runs 32× slower. A+B still fits and
+scales normally: 7.1 s against 5.1 s at 160, for a 1.44× larger grid.
+
+So on this 8 GB laptop, A turns the largest practical GRIN grid from
+"pages, minutes" into "fits, seconds". This is the "enables something `main`
+cannot do" clause of the port threshold, in addition to the speedup.
+
+tensor3d has no potential grid and fewer buffers, so it fits on both at 192.
+
+**C cannot run tensor mode at all.** The CUDA build dies inside
+`nlolib_propagate` with Windows error 0xC0000006 on every tensor case
+(tensor3d at 64 and 256, grin2p1 at 64, 160, 192 and 256).
+
+This is not a memory limit: it happens at 64 as well. Before dying it allocates
+up to 4.7 GiB at GRIN 192, which is still below main's demand at that size.
+
+This was not debugged. The 1-D cases run, so the failure is in the branch's
+CUDA tensor path.
 
 ## Phase 0: snapshot build (Gate 0: passed)
 
@@ -229,12 +391,165 @@ option plumbing that C needs, and D needs both A's lowering and C.
   kernel; mode coupling needs slice-wise kernel application, which the fused
   plan does not provide.
 
-## Resume checklist (follow-up)
+## Phase 4: decision
 
-1. Rebuild nothing: `dist-main/` (this worktree) and `dist-vk|cuda|nvrtc/` (snapshot worktree) hold the variant DLLs. Put CUDA 13.0 `bin/x64` on `PATH`; use `C:/Users/Wenzel/miniconda3/envs/nlo_dev/python.exe`.
-2. Finish the fixed-step matrix for the 2-D/3-D cases (all variants): `bash benchmarks/assessment/run_matrix.sh benchmarks/results/assessment/fixed2/rows.jsonl benchmarks/results/assessment/fixed2/fields 3 10 fixed "tensor3d:64 grin2p1:64 tensor3d:128 grin2p1:128" main main_ts main_cpu snap_interp snap_fused snap_jit snap_jit_fused cuda nvrtc_jit` (grin2p1 128 is ~7 s per run on main plus Python list conversion; budget ~1 h).
-3. Adaptive correctness (step history): same script, mode `adaptive`, warm-up 0, runs 1, cases `kerr1d:4096 raman1d:4096 expr1d:16384 tensor3d:64 grin2p1:64`; then `compare_fields.py <fields> main`.
-4. Memory headroom for C: `tensor3d:192 grin2p1:192 tensor3d:256 grin2p1:256` with `main snap_jit_fused cuda nvrtc_jit` (1 warm-up, 3 runs); record what fails to allocate.
-5. Rerun the noisy 1-D cells (IQR > 20 % of median) before quoting them.
-6. Decide the correctness reading for kerr1d (strict 1e-10 vs "within main's CPU/GPU disagreement"), then write Phase 4: decision table plus ordered porting plan (expected: B profiling → A → B fused plan; C/D archived or optional).
-7. Cleanup when done: snapshot worktree `.claude/worktrees/assess-tasks-snapshot` (branch `assess/tasks-snapshot`, never push). Leave `nlolib.worktrees/tasks` alone until the decision is final.
+Every verdict uses the pre-registered thresholds. "≥ 20 % faster" means
+t ≤ 0.8 · t_main, which is a speedup of ×1.25 or more. For the kerr1d
+correctness reading, see the correctness section above.
+
+| Feature | Speed vs main (fixed step) | ≥ 20 % on | Correct | Runtime deps | Verdict |
+|---|---|---|---|---|---|
+| **A** Vulkan JIT | ×1.11–1.72 alone; ×1.16–1.90 with B | 5 cases alone (kerr1d 4096 and 65536, expr1d, grin2p1 64 and 128); 7 with B | yes, ≤ 1e-14 everywhere and bit-identical on kerr1d | none new (glslang is already static in `main` for VkFFT) | **Port**, under the conditions below |
+| **B** fused step plan | ×0.96–1.12 alone; +4–12 % on top of A | 0 alone | yes on well-resolved cases; kerr1d 5e-8 is inside `main`'s 1.2e-6 CPU vs GPU spread | none | **Port, second, after A** (judgment call, 10–20 % band; reasons below) |
+| B profiling half | — | — | — | none | **Do not port**; `main`'s phase-tagged timestamps and host timers (`b1be44c`) cover the need at a fraction of the size |
+| **C** CUDA backend | ×0.80–1.43 (first pass); slower than A+B on Vulkan on every 1-D case (level on raman1d 4096) | 1 case (kerr1d 65536, noisy baseline) | 1-D: about `main`'s CPU vs GPU spread on kerr1d. **Tensor mode: crashes** (0xC0000006) at every size | cuFFT 284 MB, hard-linked | **Archive** |
+| **D** NVRTC JIT | ≈ A+B on Vulkan (×0.94–2.06) | 5 cases (first pass), but no gain over A+B | as C | C's, plus NVRTC 95 MB | **Archive** with C |
+
+Reasons:
+
+- **A clears every bar**, and Gate 1 shows why it works. GRIN spends half its
+  solve time in the interpreted nonlinearity, and there A gives ×1.7.
+
+  Separately, its compact axis symbols cut tensor-mode VRAM by about 19 %. That
+  keeps GRIN 192 resident on an 8 GB card, where `main` pages and is 32×
+  slower: it enables a grid `main` cannot run usefully.
+
+  Its one
+  material regression is the 230–330 ms extra init per `propagate`. That
+  makes small 1-D problems slower end to end, so removing it is a condition of
+  the port, not an optional follow-up.
+- **B is a judgment call that comes out port.** It adds 4–12 % over A,
+  growing with grid size: ×1.10–1.12 on the largest 1-D, 2-D and 3-D grids.
+  The fused RK kernels are small, self-contained and backend-neutral, and the
+  CPU fallbacks already exist. Against that:
+  - B's commit carries the async-flush race that breaks adaptive stepping (see
+    above).
+  - It is entangled with the CUDA options struct.
+  - It changes round-off.
+
+  Porting only the RK-algebra kernels and the step plan coefficients, not the
+  whole commit, leaves the race and the CUDA struct behind. The round-off
+  change stays, and it is accepted under the correctness reading above. If
+  that port runs over its budget (see
+  step 5), drop B: A alone delivers 70–95 % of the combined A+B time saving.
+- **C is not faster than what A+B delivers on the Vulkan path already in
+  release**, and it hard-links 375 MB of NVIDIA runtime. CI has no NVIDIA
+  runner, and it doubles the backend test matrix.
+- **C also fails correctness outright**: the CUDA build crashes on every
+  tensor-mode case, from 64 up. So headroom cannot rescue it.
+- **D only exists on top of C**, and equals A+B on Vulkan.
+- Archiving C and D means keeping `assess/tasks-snapshot` (or a tag on it)
+  and the saved patch as the record. `nlolib.worktrees/tasks` can then be
+  retired; that is the owner's call, and this assessment did not touch it.
+
+## Porting plan (A, then B)
+
+Each step is a separate small PR against current `main` (`95894a8` at the time
+of writing). Each passes targeted `ctest` cases and leaves `main` releasable.
+
+Code moves by hand from the snapshot onto current `main`, with identifiers
+renamed by `benchmarks/assessment/rename_map.py`. No merge of the branch: 48
+files conflict.
+
+None of the steps changes the C, Python, MATLAB or Julia public API.
+
+1. **Land the assessment instrumentation** (`b1be44c`: phase-tagged Vulkan
+   timestamps behind `NLO_GPU_TIMESTAMPS=1`, plus host init/solve timers) and
+   the harness under `benchmarks/assessment/`.
+   - Purpose: every later step is measured with the same tool and baseline.
+   - Before landing: run `main`'s own `ctest` on the instrumented build. This
+     was not done during the assessment.
+   - Size: about 300 lines.
+2. **Operator-program lowering to a value DAG**, CPU only: from
+   `operator_program_compile.c` / `operator_program.h` in `9c73bb0`.
+   - Content: interned values, symbol masks, `lowered_hash`, and a
+     `jit_eligible` flag.
+   - No GPU code and no behaviour change; the interpreter still executes.
+   - Tests: a new core test that lowers every runtime-operator example
+     expression and checks eligibility and hash stability.
+3. **Vulkan JIT** (`vk_operator_jit.c`, `operator_program_jit.h`,
+   `nlo_complex_math.glslinc`), with the interpreter as fallback.
+   - Port changes against the branch:
+     - Embed the GLSL include sources at build time, the way `main` embeds
+       SPIR-V (`vk_shader_blobs.h`). The branch reads them at runtime from
+       the build-time source path (`nlo_vk_shader_paths.h.in`, gone on
+       `main`), so installed wheels and toolboxes would silently fall back to
+       the interpreter.
+     - Link `main`'s resolved glslang target (`cmake/ResolveGlslang.cmake`),
+       not the Vulkan SDK static libraries.
+     - Add a **process-wide SPIR-V / pipeline cache keyed by `lowered_hash`**,
+       which removes the per-`propagate` recompile. Acceptance: warm init
+       within 50 ms of `main`'s.
+     - Keep an env/option switch to force the interpreter, for debugging.
+   - Tests:
+     - JIT vs interpreter on each example expression, fixed step,
+       ≤ 1e-12 relative L2.
+     - A run from a relocated install (wheel smoke test) that asserts the JIT
+       path was taken.
+     - Adaptive step-history equality with the interpreter on the
+       well-resolved cases.
+   - Acceptance: rerun this assessment's fixed2/rerun1d matrix; expect
+     ×1.25–1.9 on the 2-D/3-D cases and expr1d.
+4. **Compact axis symbols for tensor mode** (`state.h`
+   `tensor_compact_axis_symbols`, plus accessor fallbacks).
+   - When JIT is active, kernels read the 1-D wt/kx/ky/t/x/y axes, which
+     drops six full-grid buffers.
+   - Separate PR, because it changes memory layout assumptions.
+   - Tests: `test_state_alloc` with the JIT on and off in tensor mode, and
+     the headroom probe.
+5. **B: fused RK-algebra kernels and the step plan**, ported without the rest
+   of `92cfa0f`.
+   - Port:
+     - the `complex_affine_comb2/3/4_real`, `axpy_inplace_real`,
+       `embedded_error_pair_real` and `lerp` shaders, with their CPU fallbacks
+       in `vector_backend.c`;
+     - the `gpu_step_plan` coefficients;
+     - the fused RK4 and ERK4(3) paths in `rk4_kernel.c`.
+   - Leave out:
+     - the `cuda` options sub-struct and any CUDA or multi-GPU fields;
+     - the asynchronous `simulation_phase_flush`. If it is wanted later, every
+       host readback must wait on the fence first.
+     - the branch's perf-profile expansion.
+   - Tests:
+     - fused vs unfused ≤ 1e-12 on the well-resolved cases;
+     - kerr1d within `main`'s CPU vs GPU spread;
+     - adaptive step-history equality with the unfused path on every case.
+       This test would have caught the async-flush race.
+   - Budget: if the port grows past about 800 lines, or needs public-API
+     changes, stop and keep A alone.
+
+Order rationale:
+
+- Steps 2–3 deliver 70–95 % of the measured A+B saving, and each is independently
+  revertible.
+- Step 4 is the memory win and depends on 3.
+- Step 5 depends on 3 for the temporal fused path. Its tensor and Raman fused
+  paths do not need 3, but the gain there is small.
+- Then update the `TODO.md` item "chain together operations into single GPU
+  kernels" and the README if any env switch becomes public.
+
+## Not covered
+
+- C and D were not measured on the 2-D/3-D, adaptive or headroom cases after
+  the scope narrowed to A and B. Their verdicts rest on the 1-D first pass and
+  the dependency cost.
+- Multi-GPU / NCCL was not tested: there is only one NVIDIA device.
+- The Linux and macOS builds of A were not tried. glslang is cross-platform
+  and already used by `main` on every platform.
+- `main`'s own `ctest` suite was not run on the instrumented build. Run it in
+  porting step 1.
+- Adaptive runs are a single sample each. Their timings are indicative, and
+  their step histories are deterministic.
+
+## State on disk
+
+- This branch: the doc, `benchmarks/assessment/` (harness), and
+  `docs/assessment-data/` (raw rows and correctness CSVs).
+  `benchmarks/results/assessment/` (fields, logs) is local only.
+- Snapshot worktree `.claude/worktrees/assess-tasks-snapshot`, on branch
+  `assess/tasks-snapshot` (local; never push), holding the
+  `dist-vk|cuda|nvrtc/` variant DLLs. Keep it until porting step 3 has
+  landed, as the source for the hand port. Then remove the worktree and keep
+  the branch, or tag it, as the archive of C and D.
+- `nlolib.worktrees/tasks` was not touched. Retiring it is the owner's
+  decision, now that the saved patch and the snapshot branch hold its work.
