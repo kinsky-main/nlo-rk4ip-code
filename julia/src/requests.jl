@@ -11,6 +11,8 @@ struct NormalizedPropagateRequest
     chunk_records::Int
     cap_policy::Int
     log_final_output_field_to_db::Bool
+    record_mode::Cint
+    raw_strides::NTuple{3, Int}
     return_records::Bool
     capture_step_history::Bool
     step_history_capacity::Int
@@ -49,7 +51,11 @@ function from_config(::PropagateRequestBuilder, config, input_field;
                      sqlite_max_bytes::Integer = 0,
                      chunk_records::Integer = 0,
                      cap_policy::Integer = STORAGE_DB_CAP_POLICY_STOP_WRITES,
-                     log_final_output_field_to_db::Bool = false,
+                     log_final_output_field_to_db::Bool = true,
+                     record_mode = STORAGE_RECORD_MODE_REDUCED,
+                     raw_stride_t::Integer = 1,
+                     raw_stride_x::Integer = 1,
+                     raw_stride_y::Integer = 1,
                      return_records::Bool = true,
                      capture_step_history::Bool = false,
                      step_history_capacity::Integer = (capture_step_history ? 200000 : 0),
@@ -79,6 +85,8 @@ function from_config(::PropagateRequestBuilder, config, input_field;
         Int(chunk_records),
         Int(cap_policy),
         Bool(log_final_output_field_to_db),
+        record_mode_value(record_mode),
+        (Int(raw_stride_t), Int(raw_stride_x), Int(raw_stride_y)),
         Bool(return_records),
         Bool(capture_step_history),
         Int(step_history_capacity),
@@ -178,7 +186,9 @@ function from_pulse(::PropagateRequestBuilder, pulse, linear_operator = "gvd", n
         Int(get(options, :sqlite_max_bytes, 0)),
         Int(get(options, :chunk_records, 0)),
         Int(get(options, :cap_policy, STORAGE_DB_CAP_POLICY_STOP_WRITES)),
-        Bool(get(options, :log_final_output_field_to_db, false)),
+        Bool(get(options, :log_final_output_field_to_db, true)),
+        record_mode_value(get(options, :record_mode, STORAGE_RECORD_MODE_REDUCED)),
+        (Int(get(options, :raw_stride_t, 1)), Int(get(options, :raw_stride_x, 1)), Int(get(options, :raw_stride_y, 1))),
         Bool(get(options, :return_records, true)),
         capture_step_history,
         step_history_capacity,

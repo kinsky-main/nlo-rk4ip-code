@@ -240,6 +240,8 @@ def _storage_result_to_meta(storage_result: NloStorageResult) -> dict[str, objec
         "chunks_written": int(storage_result.chunks_written),
         "db_size_bytes": int(storage_result.db_size_bytes),
         "truncated": bool(storage_result.truncated),
+        "key": bytes(storage_result.key).split(b"\0", 1)[0].decode("ascii", errors="replace"),
+        "merged": bool(storage_result.merged),
     }
 
 

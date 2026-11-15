@@ -63,6 +63,63 @@ function _build_low_level_result(request::NormalizedPropagateRequest,
     return PropagationResult(records, z_axis, final, meta)
 end
 
+_request_storage_options(request::NormalizedPropagateRequest) = storage_options(
+    sqlite_path = request.sqlite_path,
+    run_id = request.run_id,
+    sqlite_max_bytes = request.sqlite_max_bytes,
+    chunk_records = request.chunk_records,
+    cap_policy = request.cap_policy,
+    log_final_output_field_to_db = request.log_final_output_field_to_db,
+    record_mode = request.record_mode,
+    raw_stride_t = request.raw_strides[1],
+    raw_stride_x = request.raw_strides[2],
+    raw_stride_y = request.raw_strides[3],
+)
+
+"""
+    run_key(request::NormalizedPropagateRequest) -> String
+
+Run key (16 lowercase hex digits) under which `execute(request)` stores the run.
+"""
+function run_key(request::NormalizedPropagateRequest)
+    sim_ref = Ref(request.sim_cfg)
+    phys_ref = Ref(request.phys_cfg)
+    input_field = ComplexF64.(request.input_seq)
+    input_storage = reinterpret(NLOComplex, input_field)
+    input_ptr = Base.unsafe_convert(Ptr{NLOComplex}, input_storage)
+    explicit_record_z = request.explicit_record_z
+    storage_prepared = _request_storage_options(request)
+    storage_ref = Ref(_raw(storage_prepared))
+    options_ref = Ref(PropagateOptions(
+        Csize_t(request.num_records),
+        request.num_records == 1 ? PROPAGATE_OUTPUT_FINAL_ONLY : PROPAGATE_OUTPUT_DENSE,
+        Cint(request.return_records),
+        C_NULL,
+        Base.unsafe_convert(Ptr{StorageOptions}, storage_ref),
+        explicit_record_z === nothing ? C_NULL : pointer(explicit_record_z),
+        Csize_t(explicit_record_z === nothing ? 0 : length(explicit_record_z)),
+        C_NULL,
+        C_NULL,
+    ))
+    key = zeros(UInt8, STORAGE_KEY_MAX)
+    keepalive = (request.keepalive, input_field, explicit_record_z, _keepalive(storage_prepared))
+    status = GC.@preserve keepalive sim_ref phys_ref storage_ref options_ref key begin
+        ccall(
+            _sym(:nlolib_storage_run_key),
+            Cint,
+            (Ptr{SimulationConfig}, Ptr{PhysicsConfig}, Csize_t, Ptr{NLOComplex}, Ref{PropagateOptions}, Ptr{UInt8}),
+            Base.unsafe_convert(Ptr{SimulationConfig}, sim_ref),
+            Base.unsafe_convert(Ptr{PhysicsConfig}, phys_ref),
+            Csize_t(length(input_field)),
+            input_ptr,
+            options_ref,
+            pointer(key),
+        )
+    end
+    _check_status(status, "nlolib_storage_run_key")
+    return String(key[1:STORAGE_KEY_MAX - 1])
+end
+
 function execute(request::NormalizedPropagateRequest)
     request.sqlite_path !== nothing && !storage_is_available() &&
         throw(ArgumentError("SQLite storage is not available in this nlolib build"))
@@ -80,14 +137,7 @@ function execute(request::NormalizedPropagateRequest)
     output_records = raw_output === nothing ? zeros(ComplexF64, length(input_field), 0) : reinterpret(ComplexF64, raw_output)
 
     explicit_record_z = request.explicit_record_z
-    storage_prepared = request.sqlite_path === nothing ? nothing : storage_options(
-        sqlite_path = request.sqlite_path,
-        run_id = request.run_id,
-        sqlite_max_bytes = request.sqlite_max_bytes,
-        chunk_records = request.chunk_records,
-        cap_policy = request.cap_policy,
-        log_final_output_field_to_db = request.log_final_output_field_to_db,
-    )
+    storage_prepared = request.sqlite_path === nothing ? nothing : _request_storage_options(request)
     storage_ref = storage_prepared === nothing ? nothing : Ref(_raw(storage_prepared))
     step_events = request.capture_step_history && request.step_history_capacity > 0 ?
         Vector{StepEvent}(undef, request.step_history_capacity) : nothing
@@ -164,5 +214,9 @@ function execute(request::NormalizedPropagateRequest)
     )
     callback_error !== nothing && throw(callback_error)
     status == NLOLIB_STATUS_ABORTED && throw(PropagationAbortedError(result))
+    if request.sqlite_path !== nothing && storage_result_ref[].merged == 0
+        @warn "nlolib stored the run but could not merge it into the shared database; " *
+              "its staging file is kept. Merge it later with storage_recover_staging." sqlite_path = request.sqlite_path key = _decode_c_chars(storage_result_ref[].key)
+    end
     return result
 end

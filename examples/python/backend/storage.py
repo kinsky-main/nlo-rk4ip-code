@@ -263,13 +263,17 @@ class ExampleRunDB:
         chunk_records: int = 0,
         sqlite_max_bytes: int = 0,
         log_final_output_field_to_db: bool = False,
+        record_mode: str = "raw",
     ) -> dict[str, Any]:
+        # Replots reload the raw records, so the examples store them (record_mode="raw");
+        # nlolib's default is reduced maps only.
         return {
             "sqlite_path": str(self.db_path),
             "run_id": self.make_run_id(example_name, run_group, case_key),
             "chunk_records": int(chunk_records),
             "sqlite_max_bytes": int(sqlite_max_bytes),
             "log_final_output_field_to_db": bool(log_final_output_field_to_db),
+            "record_mode": record_mode,
         }
 
     @staticmethod

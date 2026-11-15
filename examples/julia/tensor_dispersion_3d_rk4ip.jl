@@ -162,6 +162,7 @@ function main(argv = ARGS)
             rtol = 1e-7,
             exec_options = exec,
             sqlite_path = storage.sqlite_path,
+            record_mode = storage.record_mode,
             run_id = storage.run_id,
             chunk_records = storage.chunk_records,
         )

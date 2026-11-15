@@ -799,13 +799,17 @@ Query before a large tensor run and clamp `records` to
 
 ## SQLite Storage
 
-Storage streams records to a database instead of holding them all in memory. It
-is only present when the library was built with SQLite support — check
-`api.storage_is_available()` first, or you get `nlolib:storageUnavailable`.
+Storage writes the run to a shared run database instead of holding it all in
+memory. It is only present when the library was built with SQLite support —
+check `api.storage_is_available()` first, or you get `nlolib:storageUnavailable`.
+The run streams into a `staging` folder next to `sqlite_path` and is merged into
+it when it completes; by default the database keeps per-record power, spectrum
+and fluence maps and the final field, not the raw records. The layout is in
+[Run Database Layout](nlolib_run_database.md).
 
 ```matlab
 storage = struct();
-storage.sqlite_path = 'run.sqlite';    % required
+storage.sqlite_path = 'X:\store\nlolib\nlolib.sqlite';  % required: the shared database
 storage.run_id      = 'sweep-01';
 storage.chunk_records = uint64(64);
 storage.return_records = false;        % stream only, keep memory flat
@@ -826,11 +830,16 @@ disp(result.meta.storage_result);
 | `sqlite_max_bytes` | database size cap, `0` for unlimited |
 | `chunk_records` | records per write batch |
 | `cap_policy` | `0` stop writes at the cap, `1` fail the run |
-| `log_final_output_field_to_db` | also persist the final field |
+| `log_final_output_field_to_db` | persist the final field (default `true`) |
+| `record_mode` | `'reduced'` (default: maps only), `'raw'` or `'reduced_and_raw'` |
+| `raw_stride_t`, `raw_stride_x`, `raw_stride_y` | keep every n-th sample in raw records (default 1) |
 | `return_records` | `false` skips the in-memory record buffer entirely |
 
 `result.meta.storage_result` reports `run_id`, `records_captured`,
-`records_spilled`, `chunks_written`, `db_size_bytes`, and `truncated`. With
+`records_spilled`, `chunks_written`, `db_size_bytes`, `truncated`, the run `key`,
+and `merged` (false when the run could not take the database lock in time; it
+then stays in the staging folder and `api.storage_recover_staging(path)` merges
+it later). `api.storage_has_run(path, key)` asks whether a key is stored. With
 `return_records = false`, `result.records` is empty by design — read the data
 back from the database.
 

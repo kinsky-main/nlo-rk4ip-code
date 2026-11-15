@@ -18,6 +18,8 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/io/propagate_log.c
   ${CMAKE_CURRENT_LIST_DIR}/io/log_sink.c
   ${CMAKE_CURRENT_LIST_DIR}/io/snapshot_store.c
+  ${CMAKE_CURRENT_LIST_DIR}/io/run_store.c
+  ${CMAKE_CURRENT_LIST_DIR}/io/sha256.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/perf_profile.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/rk4_debug.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/state_debug.c
@@ -47,6 +49,24 @@ if(ENABLE_VKFFT)
 endif()
 
 target_include_directories(nlolib PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+
+# Revision recorded in the `git_commit` column of stored runs, refreshed on every build.
+set(NLOLIB_GIT_REVISION_DIR "${CMAKE_BINARY_DIR}/generated_revision" CACHE INTERNAL "")
+add_custom_target(nlolib_git_revision
+  COMMAND ${CMAKE_COMMAND}
+          -DOUTPUT=${NLOLIB_GIT_REVISION_DIR}/nlolib_git_revision.h
+          -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DVERSION=${PROJECT_VERSION}
+          -P ${CMAKE_SOURCE_DIR}/cmake/write_git_revision.cmake
+  BYPRODUCTS ${NLOLIB_GIT_REVISION_DIR}/nlolib_git_revision.h
+  COMMENT "Recording the nlolib git revision"
+)
+add_dependencies(nlolib nlolib_git_revision)
+target_include_directories(nlolib PRIVATE ${NLOLIB_GIT_REVISION_DIR})
+target_compile_definitions(nlolib PRIVATE
+  NLOLIB_HAVE_GIT_REVISION=1
+  NLOLIB_VERSION_STRING="${PROJECT_VERSION}"
+)
 
 if(WIN32)
   target_compile_definitions(nlolib PRIVATE NLOLIB_EXPORTS)

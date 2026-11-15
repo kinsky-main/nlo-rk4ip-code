@@ -73,6 +73,7 @@ def _run(args: argparse.Namespace) -> None:
             t_eval=t_eval,
             sqlite_path=storage_kwargs["sqlite_path"],
             run_id=storage_kwargs["run_id"],
+            record_mode=storage_kwargs["record_mode"],
             chunk_records=storage_kwargs["chunk_records"],
             sqlite_max_bytes=storage_kwargs["sqlite_max_bytes"],
             return_records=False,

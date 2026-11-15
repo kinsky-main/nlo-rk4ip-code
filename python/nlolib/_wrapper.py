@@ -207,6 +207,37 @@ def storage_is_available() -> bool:
     return _api().storage_is_available()
 
 
+def storage_run_key(
+    pulse: PulseSpec,
+    linear_operator: OperatorSpec,
+    nonlinear_operator: OperatorSpec,
+    **kwargs: Any,
+) -> str:
+    """
+    Run key under which ``propagate`` with the same arguments stores the run.
+
+    Callable operators are translated to runtime expressions exactly as in
+    ``propagate``, so the key covers the translated expressions and their
+    captured constants.
+    """
+    _enforce_callable_operator("linear_operator", linear_operator)
+    _enforce_callable_operator("nonlinear_operator", nonlinear_operator)
+    options = _normalize_solver_aliases(kwargs)
+    options.pop("dense_output", None)
+    options.pop("events", None)
+    return _api().storage_run_key(pulse, linear_operator, nonlinear_operator, **options)
+
+
+def storage_has_run(sqlite_path: str, key: str) -> bool:
+    """Whether the shared run database has a ``runs`` row for ``key``."""
+    return _api().storage_has_run(sqlite_path, key)
+
+
+def storage_recover_staging(sqlite_path: str, discard_incomplete: bool = False, min_age_seconds: float = 86400.0):
+    """Merge or discard leftover staging files of a shared run database."""
+    return _api().storage_recover_staging(sqlite_path, discard_incomplete, min_age_seconds)
+
+
 def perf_profile_set_enabled(enabled: bool = True) -> None:
     _api().perf_profile_set_enabled(enabled=enabled)
 

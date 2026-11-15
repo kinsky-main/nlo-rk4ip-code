@@ -197,6 +197,8 @@ function _storage_result_to_meta(storage_result::StorageResult)
         "chunks_written" => Int(storage_result.chunks_written),
         "db_size_bytes" => Int(storage_result.db_size_bytes),
         "truncated" => Bool(storage_result.truncated != 0),
+        "key" => _decode_c_chars(storage_result.key),
+        "merged" => Bool(storage_result.merged != 0),
     )
 end
 

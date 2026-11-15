@@ -10,6 +10,7 @@ Full rendered documentation is available at
 
 - Rendered docs home: `docs/index.md`
 - Runtime operator mathematics: `docs/runtime_operators.md`
+- Stored runs and the run database layout: `docs/nlolib_run_database.md`
 - Build and install guide: `docs/build_and_install.md`
 - Python binding guide: `python/README.md`
 - MATLAB binding guide: `matlab/README.md`
@@ -90,6 +91,24 @@ cmake --build build --target docs --config Release
 Generated output:
 
 - `build/docs/html/index.html`
+
+## Stored Runs
+
+Passing `sqlite_path` (C `storage_options`, or the `sqlite_path` keyword of the
+bindings) stores the run in a shared run database, normally
+`<store>/nlolib/nlolib.sqlite`. Each run streams into
+`<store>/nlolib/staging/` and is merged into the shared file under a lock file
+when it completes, so many machines can write to one database on a network
+share. Every stored run gets a row in the table `runs`, following the
+ModelStore run index contract (kind `nlolib`), and by default keeps per-record
+power, spectrum and fluence maps plus the final field; raw records are opt-in
+with `record_mode` (`reduced`, `raw`, `reduced_and_raw`) and `raw_stride_t/x/y`.
+In-memory results of `propagate` are unchanged.
+
+`storage_run_key` returns the key a run will be stored under, so a script can
+skip runs with `storage_has_run`; `storage_recover_staging` merges or discards
+staging files left by interrupted runs. Tables, blob encoding, axes, units and
+the lock protocol are specified in `docs/nlolib_run_database.md`.
 
 ## Bindings
 

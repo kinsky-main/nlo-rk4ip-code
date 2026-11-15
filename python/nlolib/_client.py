@@ -217,6 +217,57 @@ class NLolib:
             raise RuntimeError(f"nlolib_query_runtime_limits failed with status={status}")
         return out
 
+    def storage_run_key(self, primary: Any, *args: Any, **kwargs: Any) -> str:
+        """
+        Run key (16 lowercase hex digits) under which ``propagate`` with the same
+        arguments stores the run. It covers the physics and the stored output,
+        not the execution backend.
+        """
+        if isinstance(primary, (PreparedSimConfig, NloSimulationConfig)):
+            request = self._request_builder.from_config(primary, *args, **kwargs)
+        else:
+            request = self._request_builder.from_pulse(primary, *args, **kwargs)
+        return self._executor.run_key(request)
+
+    def storage_has_run(self, sqlite_path: str, key: str) -> bool:
+        """Whether the shared run database at ``sqlite_path`` has a ``runs`` row for ``key``."""
+        if not bool(getattr(self.lib, "_has_run_store", False)):
+            raise RuntimeError("nlolib_storage_has_run is unavailable in the loaded nlolib build")
+        present = ctypes.c_int(0)
+        status = int(self.lib.nlolib_storage_has_run(sqlite_path.encode("utf-8"), key.encode("ascii"), ctypes.byref(present)))
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_storage_has_run failed with status={status}")
+        return bool(present.value)
+
+    def storage_recover_staging(
+        self,
+        sqlite_path: str,
+        discard_incomplete: bool = False,
+        min_age_seconds: float = 86400.0,
+    ) -> dict[str, int]:
+        """
+        Merge complete leftover staging files of ``sqlite_path`` and, with
+        ``discard_incomplete``, delete incomplete ones older than ``min_age_seconds``.
+        """
+        if not bool(getattr(self.lib, "_has_run_store", False)):
+            raise RuntimeError("nlolib_storage_recover_staging is unavailable in the loaded nlolib build")
+        merged = ctypes.c_size_t(0)
+        discarded = ctypes.c_size_t(0)
+        skipped = ctypes.c_size_t(0)
+        status = int(
+            self.lib.nlolib_storage_recover_staging(
+                sqlite_path.encode("utf-8"),
+                int(bool(discard_incomplete)),
+                float(min_age_seconds),
+                ctypes.byref(merged),
+                ctypes.byref(discarded),
+                ctypes.byref(skipped),
+            )
+        )
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_storage_recover_staging failed with status={status}")
+        return {"merged": int(merged.value), "discarded": int(discarded.value), "skipped": int(skipped.value)}
+
     def propagate(self, primary: Any, *args: Any, **kwargs: Any) -> PropagationResult:
         """
         Unified propagation entrypoint.

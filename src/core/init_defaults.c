@@ -37,7 +37,12 @@ storage_options storage_options_default(void)
     options.sqlite_max_bytes = 0u;
     options.chunk_records = 0u;
     options.cap_policy = STORAGE_DB_CAP_POLICY_STOP_WRITES;
-    options.log_final_output_field_to_db = 0;
+    options.log_final_output_field_to_db = 1;
+    options.record_mode = STORAGE_RECORD_MODE_REDUCED;
+    options.raw_stride_t = 1u;
+    options.raw_stride_x = 1u;
+    options.raw_stride_y = 1u;
+    options.binding = NULL;
     return options;
 }
 

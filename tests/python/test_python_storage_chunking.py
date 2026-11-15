@@ -55,6 +55,8 @@ def _base_case(api: NLolib, db_path: Path) -> None:
         num_records,
         sqlite_path=str(db_path),
         chunk_records=4,
+        record_mode="raw",
+        log_final_output_field_to_db=False,
         return_records=False,
     )
     storage = result_obj.meta.get("storage_result", {})
@@ -72,6 +74,35 @@ def _base_case(api: NLolib, db_path: Path) -> None:
         assert cur.execute("SELECT COUNT(*) FROM io_record_chunks").fetchone()[0] == int(storage.get("chunks_written", 0))
         if _table_exists(cur, "io_final_output_fields"):
             assert cur.execute("SELECT COUNT(*) FROM io_final_output_fields").fetchone()[0] == 0
+
+
+def _reduced_default_case(api: NLolib, db_path: Path) -> None:
+    """Default storage keeps reduced maps and the final field, not raw records."""
+    n = 64
+    cfg = prepare_sim_config(
+        n,
+        propagation_distance=0.1,
+        starting_step_size=0.01,
+        max_step_size=0.02,
+        min_step_size=1e-4,
+        error_tolerance=1e-6,
+        pulse_period=1.0,
+        delta_time=1.0 / n,
+        frequency_grid=[complex(i, 0.0) for i in range(n)],
+    )
+    field0 = [complex(math.exp(-(((i - (n / 2.0)) / 10.0) ** 2)), 0.0) for i in range(n)]
+    result_obj = api.propagate(cfg, field0, 7, sqlite_path=str(db_path), chunk_records=3, return_records=False)
+    storage = result_obj.meta.get("storage_result", {})
+    assert int(storage.get("records_spilled", 0)) == 7
+    assert int(storage.get("chunks_written", -1)) == 0
+    assert storage.get("merged") is True
+    with sqlite3.connect(db_path) as con:
+        cur = con.cursor()
+        assert cur.execute("SELECT COUNT(*) FROM io_record_chunks").fetchone()[0] == 0
+        assert cur.execute("SELECT COUNT(*) FROM io_record_maps").fetchone()[0] == 7
+        assert cur.execute("SELECT length(power), length(spectrum) FROM io_record_maps LIMIT 1").fetchone() == (n * 8, n * 8)
+        assert cur.execute("SELECT COUNT(*) FROM io_final_output_fields").fetchone()[0] == 1
+        assert cur.execute("SELECT kind FROM runs WHERE key=?", (storage["key"],)).fetchone() == ("nlolib",)
 
 
 def _cap_case(api: NLolib, db_path: Path) -> None:
@@ -96,6 +127,7 @@ def _cap_case(api: NLolib, db_path: Path) -> None:
         sqlite_path=str(db_path),
         chunk_records=2,
         sqlite_max_bytes=1024,
+        record_mode="raw",
         return_records=False,
     )
     storage = result_obj.meta.get("storage_result", {})
@@ -188,6 +220,7 @@ def _simulate_storage_facade_case(api: NLolib, db_path: Path) -> None:
         records=6,
         sqlite_path=str(db_path),
         chunk_records=3,
+        record_mode="raw",
         return_records=False,
     )
 
@@ -228,6 +261,8 @@ def _dense_output_guard_case() -> None:
         chunk_records=0,
         cap_policy=0,
         log_final_output_field_to_db=False,
+        record_mode=0,
+        raw_strides=(1, 1, 1),
         return_records=True,
         capture_step_history=False,
         step_history_capacity=0,
@@ -345,6 +380,7 @@ def main() -> None:
     final_output_db = tmp / "final_output.db"
     facade_db = tmp / "facade.db"
     _base_case(api, base_db)
+    _reduced_default_case(api, tmp / "reduced.db")
     _cap_case(api, cap_db)
     _legacy_ntmax_exceed_case(api, ntmax_db)
     _final_output_logging_case(api, final_output_db)

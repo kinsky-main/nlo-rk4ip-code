@@ -9,6 +9,7 @@ entrypoints:
 - [Runtime Operator Mathematics](runtime_operators.md)
 - [Build and Install](build_and_install.md)
 - [API Reference Guide](api_reference.md)
+- [Run Database Layout](nlolib_run_database.md)
 - [Python Binding Guide](../python/README.md)
 - [MATLAB Binding Guide](../matlab/README.md)
 - [MATLAB User Guide](matlab_user_guide.md)

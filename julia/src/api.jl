@@ -41,12 +41,14 @@ function _num_time_samples(output::AbstractMatrix)
     return size(output, 1)
 end
 
-function _decode_run_id(chars::NTuple{STORAGE_RUN_ID_MAX, Cchar})
+function _decode_c_chars(chars::NTuple{N, Cchar}) where {N}
     bytes = UInt8[UInt8(Int(c) & 0xff) for c in chars]
     stop = findfirst(==(0x00), bytes)
     data = stop === nothing ? bytes : bytes[1:stop - 1]
     return String(data)
 end
+
+_decode_run_id(chars::NTuple{STORAGE_RUN_ID_MAX, Cchar}) = _decode_c_chars(chars)
 
 function physics_config(;
     linear_factor_expr::Union{Nothing, AbstractString} = nothing,
@@ -94,22 +96,48 @@ function physics_config(;
     return PreparedValue(value, keepalive)
 end
 
+"""
+    record_mode_value(mode) -> Cint
+
+Map a record mode given as `STORAGE_RECORD_MODE_*`, or as `:reduced`, `:raw`,
+`:reduced_and_raw` (symbol or string), to its C value.
+"""
+function record_mode_value(mode)
+    mode isa Integer && return Cint(mode)
+    name = lowercase(replace(String(mode), "+" => "_and_"))
+    name == "reduced" && return STORAGE_RECORD_MODE_REDUCED
+    name == "raw" && return STORAGE_RECORD_MODE_RAW
+    name == "reduced_and_raw" && return STORAGE_RECORD_MODE_REDUCED_AND_RAW
+    throw(ArgumentError("record_mode must be :reduced, :raw or :reduced_and_raw, got $(repr(mode))"))
+end
+
 function storage_options(;
-    sqlite_path::AbstractString,
+    sqlite_path::Union{Nothing, AbstractString},
     run_id::Union{Nothing, AbstractString} = nothing,
     sqlite_max_bytes::Integer = 0,
     chunk_records::Integer = 0,
     cap_policy::Integer = STORAGE_DB_CAP_POLICY_STOP_WRITES,
-    log_final_output_field_to_db::Bool = false
+    log_final_output_field_to_db::Bool = true,
+    record_mode = STORAGE_RECORD_MODE_REDUCED,
+    raw_stride_t::Integer = 1,
+    raw_stride_x::Integer = 1,
+    raw_stride_y::Integer = 1,
+    binding::AbstractString = "julia"
 )
-    keepalive = (sqlite_path, run_id)
+    binding_text = String(binding)
+    keepalive = (sqlite_path, run_id, binding_text)
     value = StorageOptions(
         _string_ptr(sqlite_path),
         _string_ptr(run_id),
         Csize_t(sqlite_max_bytes),
         Csize_t(chunk_records),
         Cint(cap_policy),
-        Cint(log_final_output_field_to_db)
+        Cint(log_final_output_field_to_db),
+        record_mode_value(record_mode),
+        Csize_t(raw_stride_t),
+        Csize_t(raw_stride_x),
+        Csize_t(raw_stride_y),
+        _string_ptr(binding_text)
     )
     return PreparedValue(value, keepalive)
 end

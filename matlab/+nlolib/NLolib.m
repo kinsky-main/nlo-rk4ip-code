@@ -666,6 +666,41 @@ classdef NLolib < handle
             tf = logical(calllib(obj.LIBNAME, 'nlolib_storage_is_available'));
         end
 
+        function tf = storage_has_run(obj, sqlitePath, key)
+            %STORAGE_HAS_RUN True when the shared run database has a runs row for KEY.
+            %   KEY is the 16-hex-digit run key, e.g. result.meta.storage_result.key.
+            present = libpointer('int32Ptr', int32(0));
+            status = calllib(obj.LIBNAME, 'nlolib_storage_has_run', ...
+                             char(string(sqlitePath)), char(string(key)), present);
+            if status ~= 0
+                error('nlolib:storageHasRunFailed', 'nlolib_storage_has_run failed with status=%d', status);
+            end
+            tf = present.Value ~= 0;
+        end
+
+        function out = storage_recover_staging(obj, sqlitePath, discardIncomplete, minAgeSeconds)
+            %STORAGE_RECOVER_STAGING Merge or discard leftover staging files of a run database.
+            %   Complete staging files are merged; with DISCARDINCOMPLETE, incomplete
+            %   ones older than MINAGESECONDS (default 86400) are deleted.
+            if nargin < 3 || isempty(discardIncomplete)
+                discardIncomplete = false;
+            end
+            if nargin < 4 || isempty(minAgeSeconds)
+                minAgeSeconds = 86400;
+            end
+            merged = libpointer('uint64Ptr', uint64(0));
+            discarded = libpointer('uint64Ptr', uint64(0));
+            skipped = libpointer('uint64Ptr', uint64(0));
+            status = calllib(obj.LIBNAME, 'nlolib_storage_recover_staging', ...
+                             char(string(sqlitePath)), int32(logical(discardIncomplete)), ...
+                             double(minAgeSeconds), merged, discarded, skipped);
+            if status ~= 0
+                error('nlolib:storageRecoverFailed', 'nlolib_storage_recover_staging failed with status=%d', status);
+            end
+            out = struct('merged', double(merged.Value), 'discarded', double(discarded.Value), ...
+                         'skipped', double(skipped.Value));
+        end
+
         function set_log_file(obj, path, append)
             %SET_LOG_FILE Configure optional runtime file logging.
             if nargin < 3
@@ -1626,7 +1661,34 @@ classdef NLolib < handle
             opts.cap_policy = int32(getfield_safe(storage, 'cap_policy', 0));
             opts.log_final_output_field_to_db = int32(logical(getfield_safe(storage, ...
                                                                               'log_final_output_field_to_db', ...
-                                                                              false)));
+                                                                              true)));
+            opts.record_mode = nlolib.NLolib.record_mode_value(getfield_safe(storage, 'record_mode', 0));
+            opts.raw_stride_t = uint64(getfield_safe(storage, 'raw_stride_t', 1));
+            opts.raw_stride_x = uint64(getfield_safe(storage, 'raw_stride_x', 1));
+            opts.raw_stride_y = uint64(getfield_safe(storage, 'raw_stride_y', 1));
+            bindingName = 'matlab';
+            bindingPtr = libpointer('cstring', bindingName);
+            keepalive{end + 1} = bindingPtr;
+            opts.binding = bindingPtr;
+        end
+
+        function value = record_mode_value(mode)
+            %RECORD_MODE_VALUE Map 'reduced'/'raw'/'reduced_and_raw' or an int to storage_record_mode.
+            if isnumeric(mode)
+                value = int32(mode);
+                return;
+            end
+            switch lower(strrep(char(string(mode)), '+', '_and_'))
+                case 'reduced'
+                    value = nlolib.constants.STORAGE_RECORD_MODE_REDUCED;
+                case 'raw'
+                    value = nlolib.constants.STORAGE_RECORD_MODE_RAW;
+                case 'reduced_and_raw'
+                    value = nlolib.constants.STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+                otherwise
+                    error('nlolib:invalidStorageOptions', ...
+                          'storage.record_mode must be ''reduced'', ''raw'' or ''reduced_and_raw''');
+            end
         end
 
         function out = to_storage_result_struct(storageResultRaw)
@@ -1643,6 +1705,18 @@ classdef NLolib < handle
             out.chunks_written = double(storageResultRaw.chunks_written);
             out.db_size_bytes = double(storageResultRaw.db_size_bytes);
             out.truncated = logical(storageResultRaw.truncated);
+            keyRaw = char(storageResultRaw.key(:).');
+            nul = find(keyRaw == char(0), 1);
+            if ~isempty(nul)
+                keyRaw = keyRaw(1:(nul - 1));
+            end
+            out.key = string(keyRaw);
+            out.merged = logical(storageResultRaw.merged);
+            if ~out.merged && strlength(out.key) > 0
+                warning('nlolib:storageNotMerged', ...
+                        ['Run %s is stored in a staging file but not merged into the shared ' ...
+                         'database; merge it later with storage_recover_staging.'], out.key);
+            end
         end
 
         function s = zeroed_libstruct(typeName, fieldNames)

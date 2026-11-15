@@ -46,6 +46,13 @@
 #endif
 
 /**
+ * @brief Size (including terminator) of a stored run key: 16 lowercase hex digits.
+ */
+#ifndef STORAGE_KEY_MAX
+#define STORAGE_KEY_MAX 17u
+#endif
+
+/**
  * @brief Propagation solver controls along the z dimension.
  */
 typedef struct {
@@ -272,7 +279,41 @@ typedef enum {
 
 /**
  * @ingroup c_api
- * @brief Snapshot persistence controls for SQLite-backed output chunking.
+ * @brief What the database keeps for each record of a stored run.
+ *
+ * The record layout is documented in docs/nlolib_run_database.md.
+ */
+typedef enum {
+    /** Per-record power, spectrum and fluence maps (table io_record_maps). Default. */
+    STORAGE_RECORD_MODE_REDUCED = 0,
+    /** Raw per-record states (table io_record_chunks), downsampled by the raw strides. */
+    STORAGE_RECORD_MODE_RAW = 1,
+    /** Both the reduced maps and the raw states. */
+    STORAGE_RECORD_MODE_REDUCED_AND_RAW = 2
+} storage_record_mode;
+
+/**
+ * @ingroup c_api
+ * @brief Snapshot persistence controls for SQLite-backed run storage.
+ *
+ * @c sqlite_path names the shared run database (for a store,
+ * `<store>/nlolib/nlolib.sqlite`). A run streams into a staging database in
+ * `<dir of sqlite_path>/staging/` and is merged into @c sqlite_path under a
+ * lock file once it completes; an aborted or failed run never touches it.
+ *
+ * @param sqlite_path UTF-8 path of the shared run database.
+ * @param run_id Optional data-table run id; NULL or empty uses the run key.
+ * @param sqlite_max_bytes Staging database size cap in bytes (0: 50 GiB).
+ * @param chunk_records Records per raw chunk and per write transaction (0: 16).
+ * @param cap_policy Behaviour when @c sqlite_max_bytes is reached.
+ * @param log_final_output_field_to_db Nonzero stores the final field
+ *        (io_final_output_fields). storage_options_default() and the bindings enable it.
+ * @param record_mode @ref storage_record_mode; zero selects reduced maps.
+ * @param raw_stride_t Keep every n-th time sample in raw records (0 or 1: all).
+ * @param raw_stride_x Keep every n-th x sample in raw records (0 or 1: all).
+ * @param raw_stride_y Keep every n-th y sample in raw records (0 or 1: all).
+ * @param binding Name of the binding that made the run, recorded in the
+ *        `nlolib_binding` column (NULL: "c").
  */
 typedef struct {
     const char* sqlite_path;
@@ -281,11 +322,21 @@ typedef struct {
     size_t chunk_records;
     storage_db_cap_policy cap_policy;
     int log_final_output_field_to_db;
+    storage_record_mode record_mode;
+    size_t raw_stride_t;
+    size_t raw_stride_x;
+    size_t raw_stride_y;
+    const char* binding;
 } storage_options;
 
 /**
  * @ingroup c_api
  * @brief Summary of snapshot capture/storage results after a run.
+ *
+ * @param key Run key (16 lowercase hex digits) of the stored run.
+ * @param merged Nonzero when the run was merged into the shared database;
+ *        zero leaves a complete staging file to merge later with
+ *        nlolib_storage_recover_staging().
  */
 typedef struct {
     char run_id[STORAGE_RUN_ID_MAX];
@@ -294,7 +345,36 @@ typedef struct {
     size_t chunks_written;
     size_t db_size_bytes;
     int truncated;
+    char key[STORAGE_KEY_MAX];
+    int merged;
 } storage_result;
+
+/**
+ * @ingroup c_api
+ * @brief Shape and grid of a run stored in a run database.
+ *
+ * Filled by nlolib_storage_read_run_layout(). Axis definitions and units are
+ * documented in docs/nlolib_run_database.md.
+ */
+typedef struct {
+    char run_id[STORAGE_RUN_ID_MAX];
+    storage_record_mode record_mode;
+    size_t nt;
+    size_t nx;
+    size_t ny;
+    size_t num_records;
+    size_t raw_nt;
+    size_t raw_nx;
+    size_t raw_ny;
+    size_t raw_records;
+    size_t raw_stride_t;
+    size_t raw_stride_x;
+    size_t raw_stride_y;
+    double delta_time;
+    double delta_x;
+    double delta_y;
+    int has_final_field;
+} storage_run_layout;
 
 /**
  * @ingroup c_api

@@ -366,6 +366,7 @@ function main(argv = ARGS)
             rtol = 1e-6,
             exec_options = exec,
             sqlite_path = storage_nonlinear.sqlite_path,
+            record_mode = storage_nonlinear.record_mode,
             run_id = storage_nonlinear.run_id,
             chunk_records = storage_nonlinear.chunk_records,
         )
@@ -381,6 +382,7 @@ function main(argv = ARGS)
             rtol = 1e-6,
             exec_options = exec,
             sqlite_path = storage_linear.sqlite_path,
+            record_mode = storage_linear.record_mode,
             run_id = storage_linear.run_id,
             chunk_records = storage_linear.chunk_records,
         )

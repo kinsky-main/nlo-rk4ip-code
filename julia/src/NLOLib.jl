@@ -11,6 +11,7 @@ include("config.jl")
 include("requests.jl")
 include("executor.jl")
 include("client.jl")
+include("store.jl")
 
 export NLOComplex
 export PropagationParams
@@ -26,6 +27,8 @@ export ExecutionOptions
 export RuntimeLimits
 export StorageOptions
 export StorageResult
+export StorageRunLayout
+export StoredRun
 export StepEvent
 export CProgressInfo
 export PreparedValue
@@ -45,6 +48,11 @@ export default_storage_options
 export load
 export loaded_library_path
 export storage_is_available
+export storage_run_key
+export storage_has_run
+export storage_recover_staging
+export read_stored_run
+export record_mode_value
 export query_runtime_limits
 export propagate!
 export propagate
@@ -53,6 +61,7 @@ export final_record
 export tensor_record_view
 export NT_MAX
 export STORAGE_RUN_ID_MAX
+export STORAGE_KEY_MAX
 export TENSOR_LAYOUT_XYT_T_FAST
 export NONLINEAR_MODEL_EXPR
 export NONLINEAR_MODEL_KERR_RAMAN
@@ -64,6 +73,9 @@ export FFT_BACKEND_FFTW
 export FFT_BACKEND_VKFFT
 export STORAGE_DB_CAP_POLICY_STOP_WRITES
 export STORAGE_DB_CAP_POLICY_FAIL
+export STORAGE_RECORD_MODE_REDUCED
+export STORAGE_RECORD_MODE_RAW
+export STORAGE_RECORD_MODE_REDUCED_AND_RAW
 export PROPAGATE_OUTPUT_DENSE
 export PROPAGATE_OUTPUT_FINAL_ONLY
 export NLOLIB_STATUS_OK

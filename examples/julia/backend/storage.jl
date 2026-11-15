@@ -181,13 +181,17 @@ function storage_kwargs(db::ExampleRunDB;
                         case_key::AbstractString,
                         chunk_records::Integer = 0,
                         sqlite_max_bytes::Integer = 0,
-                        log_final_output_field_to_db::Bool = false)
+                        log_final_output_field_to_db::Bool = false,
+                        record_mode = :raw)
+    # Replots reload the raw records, so the examples store them (record_mode = :raw);
+    # nlolib's default is reduced maps only.
     return (
         sqlite_path = db.db_path,
         run_id = make_run_id(example_name, run_group, case_key),
         chunk_records = Int(chunk_records),
         sqlite_max_bytes = Int(sqlite_max_bytes),
         log_final_output_field_to_db = Bool(log_final_output_field_to_db),
+        record_mode = record_mode,
     )
 end
 

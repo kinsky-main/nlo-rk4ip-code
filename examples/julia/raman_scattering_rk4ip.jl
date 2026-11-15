@@ -151,6 +151,7 @@ function main(argv = ARGS)
             OperatorSpec(expr = "i*gamma*A*I", params = Dict("gamma" => gamma));
             base_kwargs...,
             sqlite_path = storage_kerr.sqlite_path,
+            record_mode = storage_kerr.record_mode,
             run_id = storage_kerr.run_id,
             chunk_records = storage_kerr.chunk_records,
         )
@@ -174,6 +175,7 @@ function main(argv = ARGS)
             raman_tau2 = tau2,
             shock_omega0 = shock_omega0,
             sqlite_path = storage_raman.sqlite_path,
+            record_mode = storage_raman.record_mode,
             run_id = storage_raman.run_id,
             chunk_records = storage_raman.chunk_records,
         )

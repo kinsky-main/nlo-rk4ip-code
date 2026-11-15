@@ -217,6 +217,7 @@ class NloExampleRunner:
         sqlite_max_bytes: int = 0,
         chunk_records: int = 0,
         log_final_output_field_to_db: bool = False,
+        record_mode: str = "reduced",
     ) -> tuple[np.ndarray, np.ndarray]:
         if num_records <= 0:
             raise ValueError("num_records must be positive.")
@@ -276,6 +277,7 @@ class NloExampleRunner:
             "sqlite_max_bytes": int(sqlite_max_bytes),
             "chunk_records": int(chunk_records),
             "log_final_output_field_to_db": bool(log_final_output_field_to_db),
+            "record_mode": record_mode,
         }
         kwargs.update(self._runtime_overrides(runtime_cfg))
         try:
@@ -318,6 +320,7 @@ class NloExampleRunner:
         sqlite_max_bytes: int = 0,
         chunk_records: int = 0,
         log_final_output_field_to_db: bool = False,
+        record_mode: str = "reduced",
     ) -> tuple[np.ndarray, np.ndarray]:
         if num_records <= 0:
             raise ValueError("num_records must be positive.")
@@ -391,6 +394,7 @@ class NloExampleRunner:
             "sqlite_max_bytes": int(sqlite_max_bytes),
             "chunk_records": int(chunk_records),
             "log_final_output_field_to_db": bool(log_final_output_field_to_db),
+            "record_mode": record_mode,
         }
         kwargs.update(self._runtime_overrides(runtime))
         result = self.api.propagate(

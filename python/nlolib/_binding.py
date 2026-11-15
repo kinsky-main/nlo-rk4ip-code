@@ -14,6 +14,7 @@ NT_MAX = ctypes.c_size_t(-1).value  # Unbounded sentinel; prefer query_runtime_l
 LEGACY_NT_MAX = 1 << 20
 RUNTIME_OPERATOR_CONSTANTS_MAX = 16
 STORAGE_RUN_ID_MAX = 64
+STORAGE_KEY_MAX = 17
 
 VECTOR_BACKEND_CPU = 0
 VECTOR_BACKEND_VULKAN = 1
@@ -48,6 +49,9 @@ PROGRESS_EVENT_FINISH = 2
 
 STORAGE_DB_CAP_POLICY_STOP_WRITES = 0
 STORAGE_DB_CAP_POLICY_FAIL = 1
+STORAGE_RECORD_MODE_REDUCED = 0
+STORAGE_RECORD_MODE_RAW = 1
+STORAGE_RECORD_MODE_REDUCED_AND_RAW = 2
 PROPAGATE_OUTPUT_DENSE = 0
 PROPAGATE_OUTPUT_FINAL_ONLY = 1
 
@@ -209,6 +213,11 @@ class NloStorageOptions(ctypes.Structure):
         ("chunk_records", ctypes.c_size_t),
         ("cap_policy", ctypes.c_int),
         ("log_final_output_field_to_db", ctypes.c_int),
+        ("record_mode", ctypes.c_int),
+        ("raw_stride_t", ctypes.c_size_t),
+        ("raw_stride_x", ctypes.c_size_t),
+        ("raw_stride_y", ctypes.c_size_t),
+        ("binding", ctypes.c_char_p),
     ]
 
 
@@ -220,6 +229,30 @@ class NloStorageResult(ctypes.Structure):
         ("chunks_written", ctypes.c_size_t),
         ("db_size_bytes", ctypes.c_size_t),
         ("truncated", ctypes.c_int),
+        ("key", ctypes.c_char * STORAGE_KEY_MAX),
+        ("merged", ctypes.c_int),
+    ]
+
+
+class NloStorageRunLayout(ctypes.Structure):
+    _fields_ = [
+        ("run_id", ctypes.c_char * STORAGE_RUN_ID_MAX),
+        ("record_mode", ctypes.c_int),
+        ("nt", ctypes.c_size_t),
+        ("nx", ctypes.c_size_t),
+        ("ny", ctypes.c_size_t),
+        ("num_records", ctypes.c_size_t),
+        ("raw_nt", ctypes.c_size_t),
+        ("raw_nx", ctypes.c_size_t),
+        ("raw_ny", ctypes.c_size_t),
+        ("raw_records", ctypes.c_size_t),
+        ("raw_stride_t", ctypes.c_size_t),
+        ("raw_stride_x", ctypes.c_size_t),
+        ("raw_stride_y", ctypes.c_size_t),
+        ("delta_time", ctypes.c_double),
+        ("delta_x", ctypes.c_double),
+        ("delta_y", ctypes.c_double),
+        ("has_final_field", ctypes.c_int),
     ]
 
 
@@ -378,6 +411,46 @@ def load(path: Path | None= None) -> ctypes.CDLL:
         lib._has_storage_is_available = False # pyright: ignore[reportAttributeAccessIssue]
 
     try:
+        lib.nlolib_storage_run_key.argtypes = [
+            ctypes.POINTER(NloSimulationConfig),
+            ctypes.POINTER(NloPhysicsConfig),
+            ctypes.c_size_t,
+            ctypes.POINTER(NloComplex),
+            ctypes.POINTER(NloPropagateOptions),
+            ctypes.c_char_p,
+        ]
+        lib.nlolib_storage_run_key.restype = ctypes.c_int
+        lib.nlolib_storage_has_run.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_int)]
+        lib.nlolib_storage_has_run.restype = ctypes.c_int
+        lib.nlolib_storage_recover_staging.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.nlolib_storage_recover_staging.restype = ctypes.c_int
+        lib.nlolib_storage_read_run_layout.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.POINTER(NloStorageRunLayout),
+        ]
+        lib.nlolib_storage_read_run_layout.restype = ctypes.c_int
+        lib.nlolib_storage_read_run_array.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.nlolib_storage_read_run_array.restype = ctypes.c_int
+        lib._has_run_store = True # pyright: ignore[reportAttributeAccessIssue]
+    except AttributeError:
+        lib._has_run_store = False # pyright: ignore[reportAttributeAccessIssue]
+
+    try:
         lib.nlolib_set_log_file.argtypes = [ctypes.c_char_p, ctypes.c_int]
         lib.nlolib_set_log_file.restype = ctypes.c_int
         lib._has_set_log_file = True # pyright: ignore[reportAttributeAccessIssue]
@@ -482,26 +555,64 @@ def default_execution_options(
     return options
 
 
+def record_mode_value(mode: int | str) -> int:
+    """
+    Map a record mode (``STORAGE_RECORD_MODE_*`` or ``"reduced"``, ``"raw"``,
+    ``"reduced_and_raw"``) to its C value.
+    """
+    if isinstance(mode, int):
+        return int(mode)
+    name = str(mode).lower().replace("+", "_and_")
+    values = {
+        "reduced": STORAGE_RECORD_MODE_REDUCED,
+        "raw": STORAGE_RECORD_MODE_RAW,
+        "reduced_and_raw": STORAGE_RECORD_MODE_REDUCED_AND_RAW,
+    }
+    if name not in values:
+        raise ValueError(f"record_mode must be 'reduced', 'raw' or 'reduced_and_raw', got {mode!r}")
+    return values[name]
+
+
 def default_storage_options(
     *,
-    sqlite_path: str,
+    sqlite_path: str | None,
     run_id: str | None = None,
     sqlite_max_bytes: int = 0,
     chunk_records: int = 0,
     cap_policy: int = STORAGE_DB_CAP_POLICY_STOP_WRITES,
-    log_final_output_field_to_db: bool = False,
+    log_final_output_field_to_db: bool = True,
+    record_mode: int | str = STORAGE_RECORD_MODE_REDUCED,
+    raw_stride_t: int = 1,
+    raw_stride_x: int = 1,
+    raw_stride_y: int = 1,
+    binding: str = "python",
+    require_path: bool = True,
 ) -> tuple[NloStorageOptions, list[bytes]]:
     """
     Build storage options and return keepalive byte buffers for ctypes strings.
+
+    ``sqlite_path`` names the shared run database (``<store>/nlolib/nlolib.sqlite``);
+    runs stream to ``<dir>/staging/`` and are merged when complete.
+    ``record_mode`` selects reduced maps (default), raw records, or both.
     """
     opts = NloStorageOptions()
     keepalive: list[bytes] = []
 
-    if not sqlite_path:
+    if sqlite_path:
+        path_b = sqlite_path.encode("utf-8")
+        keepalive.append(path_b)
+        opts.sqlite_path = ctypes.c_char_p(path_b)
+    elif require_path:
         raise ValueError("sqlite_path must be a non-empty string")
-    path_b = sqlite_path.encode("utf-8")
-    keepalive.append(path_b)
-    opts.sqlite_path = ctypes.c_char_p(path_b)
+    else:
+        opts.sqlite_path = None
+    binding_b = str(binding).encode("utf-8")
+    keepalive.append(binding_b)
+    opts.binding = ctypes.c_char_p(binding_b)
+    opts.record_mode = record_mode_value(record_mode)
+    opts.raw_stride_t = int(raw_stride_t)
+    opts.raw_stride_x = int(raw_stride_x)
+    opts.raw_stride_y = int(raw_stride_y)
 
     if run_id is not None and run_id != "":
         run_b = run_id.encode("utf-8")

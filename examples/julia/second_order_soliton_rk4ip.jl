@@ -167,6 +167,7 @@ function main(argv = ARGS)
             capture_step_history = true,
             step_history_capacity = 200000,
             sqlite_path = storage.sqlite_path,
+            record_mode = storage.record_mode,
             run_id = storage.run_id,
             chunk_records = storage.chunk_records,
             sqlite_max_bytes = storage.sqlite_max_bytes,

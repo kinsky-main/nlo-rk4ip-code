@@ -1,5 +1,6 @@
 const RUNTIME_OPERATOR_CONSTANTS_MAX = 16
 const STORAGE_RUN_ID_MAX = 64
+const STORAGE_KEY_MAX = 17
 # Unbounded sentinel for the time-sample count; prefer query_runtime_limits.
 const NT_MAX = typemax(UInt64)
 
@@ -18,6 +19,10 @@ const FFT_BACKEND_VKFFT = Cint(2)
 
 const STORAGE_DB_CAP_POLICY_STOP_WRITES = Cint(0)
 const STORAGE_DB_CAP_POLICY_FAIL = Cint(1)
+
+const STORAGE_RECORD_MODE_REDUCED = Cint(0)
+const STORAGE_RECORD_MODE_RAW = Cint(1)
+const STORAGE_RECORD_MODE_REDUCED_AND_RAW = Cint(2)
 
 const PROPAGATE_OUTPUT_DENSE = Cint(0)
 const PROPAGATE_OUTPUT_FINAL_ONLY = Cint(1)
@@ -150,6 +155,11 @@ struct StorageOptions
     chunk_records::Csize_t
     cap_policy::Cint
     log_final_output_field_to_db::Cint
+    record_mode::Cint
+    raw_stride_t::Csize_t
+    raw_stride_x::Csize_t
+    raw_stride_y::Csize_t
+    binding::Cstring
 end
 
 struct StorageResult
@@ -159,6 +169,28 @@ struct StorageResult
     chunks_written::Csize_t
     db_size_bytes::Csize_t
     truncated::Cint
+    key::NTuple{STORAGE_KEY_MAX, Cchar}
+    merged::Cint
+end
+
+struct StorageRunLayout
+    run_id::NTuple{STORAGE_RUN_ID_MAX, Cchar}
+    record_mode::Cint
+    nt::Csize_t
+    nx::Csize_t
+    ny::Csize_t
+    num_records::Csize_t
+    raw_nt::Csize_t
+    raw_nx::Csize_t
+    raw_ny::Csize_t
+    raw_records::Csize_t
+    raw_stride_t::Csize_t
+    raw_stride_x::Csize_t
+    raw_stride_y::Csize_t
+    delta_time::Cdouble
+    delta_x::Cdouble
+    delta_y::Cdouble
+    has_final_field::Cint
 end
 
 struct StepEvent
@@ -227,8 +259,10 @@ SimulationConfig() = SimulationConfig(PropagationParams(), Tensor3DDesc(), TimeG
 VulkanBackendConfig() = VulkanBackendConfig(C_NULL, C_NULL, C_NULL, 0, C_NULL, 0, 0)
 ExecutionOptions() = ExecutionOptions(VECTOR_BACKEND_AUTO, FFT_BACKEND_AUTO, 0.70, 0, 0, VulkanBackendConfig())
 RuntimeLimits() = RuntimeLimits(0, 0, 0, 0, 0, 0)
-StorageOptions() = StorageOptions(C_NULL, C_NULL, 0, 0, STORAGE_DB_CAP_POLICY_STOP_WRITES, 0)
-StorageResult() = StorageResult(_zero_chars(Val(STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0)
+StorageOptions() = StorageOptions(C_NULL, C_NULL, 0, 0, STORAGE_DB_CAP_POLICY_STOP_WRITES, 1,
+                                  STORAGE_RECORD_MODE_REDUCED, 1, 1, 1, C_NULL)
+StorageResult() = StorageResult(_zero_chars(Val(STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0, _zero_chars(Val(STORAGE_KEY_MAX)), 0)
+StorageRunLayout() = StorageRunLayout(_zero_chars(Val(STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0.0, 0.0, 0.0, 0)
 StepEvent() = StepEvent(0, 0.0, 0.0, 0.0, 0.0)
 
 default_execution_options(; backend_type::Integer = VECTOR_BACKEND_AUTO,

@@ -42,6 +42,9 @@ runtime = nlolib.RuntimeOperators(
 - `nlolib.propagate`
 - `nlolib.query_runtime_limits`
 - `nlolib.translate_callable`
+- `nlolib.storage_run_key`, `nlolib.storage_has_run`, `nlolib.storage_recover_staging` --
+  run keys and the shared run database (`sqlite_path=...`, `record_mode=...`);
+  layout in `docs/nlolib_run_database.md`
 - `nlolib.__version__` -- the project version, from the installed distribution
   metadata or, in a source checkout, from `pyproject.toml`
 

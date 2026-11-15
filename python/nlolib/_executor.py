@@ -18,6 +18,7 @@ from ._binding import (
     NloPropagateOutput,
     NloStepEvent,
     NloStorageResult,
+    STORAGE_KEY_MAX,
     complex_array_to_list,
     default_storage_options,
     make_complex_array,
@@ -36,10 +37,61 @@ _DENSE_OUTPUT_MAX_BYTES = 2 * 1024 * 1024 * 1024
 _COMPLEX_BYTES = ctypes.sizeof(NloComplex)
 
 
+def _request_storage_options(request: _NormalizedPropagateRequest):
+    return default_storage_options(
+        sqlite_path=request.sqlite_path,
+        run_id=request.run_id,
+        sqlite_max_bytes=request.sqlite_max_bytes,
+        chunk_records=request.chunk_records,
+        cap_policy=request.cap_policy,
+        log_final_output_field_to_db=request.log_final_output_field_to_db,
+        record_mode=request.record_mode,
+        raw_stride_t=request.raw_strides[0],
+        raw_stride_x=request.raw_strides[1],
+        raw_stride_y=request.raw_strides[2],
+        require_path=False,
+    )
+
+
 class PropagationExecutor:
     def __init__(self, lib: ctypes.CDLL, storage_is_available) -> None:
         self.lib = lib
         self._storage_is_available = storage_is_available
+
+    def run_key(self, request: _NormalizedPropagateRequest) -> str:
+        """Run key (16 lowercase hex digits) under which ``execute(request)`` stores the run."""
+        if not bool(getattr(self.lib, "_has_run_store", False)):
+            raise RuntimeError("nlolib_storage_run_key is unavailable in the loaded nlolib build")
+        storage_opts, storage_keepalive = _request_storage_options(request)
+        in_arr = make_complex_array(request.input_seq)
+        explicit = request.explicit_record_z
+        explicit_arr = (ctypes.c_double * len(explicit))(*[float(v) for v in explicit]) if explicit else None
+        options = (
+            self.lib.nlolib_propagate_options_default()
+            if bool(getattr(self.lib, "_has_propagate_defaults", False))
+            else NloPropagateOptions()
+        )
+        options.num_recorded_samples = request.num_records
+        options.output_mode = PROPAGATE_OUTPUT_FINAL_ONLY if request.num_records == 1 else PROPAGATE_OUTPUT_DENSE
+        options.return_records = int(bool(request.return_records))
+        options.storage_options = ctypes.pointer(storage_opts)
+        options.explicit_record_z = ctypes.cast(explicit_arr, ctypes.POINTER(ctypes.c_double)) if explicit_arr else None
+        options.explicit_record_z_count = len(explicit) if explicit else 0
+        key = ctypes.create_string_buffer(STORAGE_KEY_MAX)
+        status = int(
+            self.lib.nlolib_storage_run_key(
+                ctypes.pointer(request.sim_cfg),
+                ctypes.pointer(request.phys_cfg),
+                len(request.input_seq),
+                ctypes.cast(in_arr, ctypes.POINTER(NloComplex)),
+                ctypes.pointer(options),
+                key,
+            )
+        )
+        _ = storage_keepalive
+        if status != NLOLIB_STATUS_OK:
+            raise RuntimeError(f"nlolib_storage_run_key failed with status={status}")
+        return key.value.decode("ascii")
 
     def execute(self, request: _NormalizedPropagateRequest) -> PropagationResult:
         if request.sqlite_path is not None and not self._storage_is_available():
@@ -72,14 +124,7 @@ class PropagationExecutor:
         storage_opts = None
         storage_keepalive: list[bytes] = []
         if request.sqlite_path is not None:
-            storage_opts, storage_keepalive = default_storage_options(
-                sqlite_path=request.sqlite_path,
-                run_id=request.run_id,
-                sqlite_max_bytes=request.sqlite_max_bytes,
-                chunk_records=request.chunk_records,
-                cap_policy=request.cap_policy,
-                log_final_output_field_to_db=request.log_final_output_field_to_db,
-            )
+            storage_opts, storage_keepalive = _request_storage_options(request)
         _ = storage_keepalive
         if request.explicit_record_z is not None:
             distance = float(request.sim_cfg.propagation.propagation_distance)

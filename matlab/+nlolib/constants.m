@@ -26,6 +26,8 @@ classdef constants
         NT_MAX = intmax('uint64')
         % Maximum length of a storage run identifier, in bytes.
         STORAGE_RUN_ID_MAX = uint64(64)
+        % Length of a stored run key (16 hex digits) plus terminator, in bytes.
+        STORAGE_KEY_MAX = uint64(17)
 
         %% Vector backend selection (execution_options.backend_type)
         VECTOR_BACKEND_CPU = int32(0)
@@ -50,6 +52,14 @@ classdef constants
         %% Behaviour when the SQLite store hits its size cap
         STORAGE_DB_CAP_POLICY_STOP_WRITES = int32(0)
         STORAGE_DB_CAP_POLICY_FAIL = int32(1)
+
+        %% What the run database keeps per record (storage.record_mode)
+        % Power, spectrum and fluence maps (default).
+        STORAGE_RECORD_MODE_REDUCED = int32(0)
+        % Raw states, downsampled by storage.raw_stride_t/x/y.
+        STORAGE_RECORD_MODE_RAW = int32(1)
+        % Both maps and raw states.
+        STORAGE_RECORD_MODE_REDUCED_AND_RAW = int32(2)
 
         %% Record selection (propagate_output mode)
         PROPAGATE_OUTPUT_DENSE = int32(0)

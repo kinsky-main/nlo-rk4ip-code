@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from ._binding import (
     STORAGE_DB_CAP_POLICY_STOP_WRITES,
+    STORAGE_RECORD_MODE_REDUCED,
+    record_mode_value,
     NloExecutionOptions,
     NloPhysicsConfig,
     NloSimulationConfig,
@@ -38,6 +40,8 @@ class _NormalizedPropagateRequest:
     chunk_records: int
     cap_policy: int
     log_final_output_field_to_db: bool
+    record_mode: int
+    raw_strides: tuple[int, int, int]
     return_records: bool
     capture_step_history: bool
     step_history_capacity: int
@@ -82,7 +86,13 @@ class PropagateRequestBuilder:
         sqlite_max_bytes = int(kwargs.pop("sqlite_max_bytes", 0))
         chunk_records = int(kwargs.pop("chunk_records", 0))
         cap_policy = int(kwargs.pop("cap_policy", STORAGE_DB_CAP_POLICY_STOP_WRITES))
-        log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
+        log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", True))
+        record_mode = record_mode_value(kwargs.pop("record_mode", STORAGE_RECORD_MODE_REDUCED))
+        raw_strides = (
+            int(kwargs.pop("raw_stride_t", 1)),
+            int(kwargs.pop("raw_stride_x", 1)),
+            int(kwargs.pop("raw_stride_y", 1)),
+        )
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
@@ -131,6 +141,8 @@ class PropagateRequestBuilder:
             chunk_records=chunk_records,
             cap_policy=cap_policy,
             log_final_output_field_to_db=log_final_output_field_to_db,
+            record_mode=record_mode,
+            raw_strides=raw_strides,
             return_records=return_records,
             capture_step_history=capture_step_history,
             step_history_capacity=step_history_capacity,
@@ -185,7 +197,13 @@ class PropagateRequestBuilder:
         sqlite_max_bytes = int(kwargs.pop("sqlite_max_bytes", 0))
         chunk_records = int(kwargs.pop("chunk_records", 0))
         cap_policy = int(kwargs.pop("cap_policy", STORAGE_DB_CAP_POLICY_STOP_WRITES))
-        log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", False))
+        log_final_output_field_to_db = bool(kwargs.pop("log_final_output_field_to_db", True))
+        record_mode = record_mode_value(kwargs.pop("record_mode", STORAGE_RECORD_MODE_REDUCED))
+        raw_strides = (
+            int(kwargs.pop("raw_stride_t", 1)),
+            int(kwargs.pop("raw_stride_x", 1)),
+            int(kwargs.pop("raw_stride_y", 1)),
+        )
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
@@ -365,6 +383,8 @@ class PropagateRequestBuilder:
             chunk_records=chunk_records,
             cap_policy=cap_policy,
             log_final_output_field_to_db=log_final_output_field_to_db,
+            record_mode=record_mode,
+            raw_strides=raw_strides,
             return_records=return_records,
             capture_step_history=capture_step_history,
             step_history_capacity=step_history_capacity,

@@ -74,6 +74,22 @@ NLOLib.load()
 - `NLOLib.query_runtime_limits`
 - `NLOLib.propagate`
 - `NLOLib.propagate!`
+- `NLOLib.storage_run_key`, `NLOLib.storage_has_run`, `NLOLib.storage_recover_staging`
+- `NLOLib.read_stored_run`
+
+## Stored Runs
+
+```julia
+db = joinpath(store, "nlolib", "nlolib.sqlite")
+kw = (propagation_distance = 0.3, records = 64, sqlite_path = db)
+key = storage_run_key(pulse, linear, nonlinear; kw...)
+storage_has_run(db, key) || NLOLib.propagate(pulse, linear, nonlinear; kw...)
+run = read_stored_run(db, key)   # run.z, run.t, run.omega, run.power[t, r], run.spectrum[ω, r], ...
+```
+
+Stored runs keep reduced maps and the final field by default; pass
+`record_mode = :reduced_and_raw` (and `raw_stride_t/x/y`) to keep raw records
+too. The database layout is in `docs/nlolib_run_database.md`.
 
 ## Related Reference
 

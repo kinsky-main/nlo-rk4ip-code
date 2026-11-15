@@ -82,6 +82,10 @@ add_test(NAME test_python_tensor_backend_scaling_cleanup
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_tensor_backend_scaling_cleanup.py"
 )
 
+add_test(NAME test_python_run_store
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_run_store.py"
+)
+
 set(_NLOLIB_TEST_PATH "$ENV{PATH}")
 string(REPLACE ";" "\\;" _NLOLIB_TEST_PATH "${_NLOLIB_TEST_PATH}")
 
@@ -134,5 +138,9 @@ set_tests_properties(test_python_second_order_soliton_plot_cleanup PROPERTIES
 )
 
 set_tests_properties(test_python_tensor_backend_scaling_cleanup PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
+)
+
+set_tests_properties(test_python_run_store PROPERTIES
   ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
 )

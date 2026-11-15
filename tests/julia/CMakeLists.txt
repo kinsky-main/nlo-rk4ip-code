@@ -25,3 +25,12 @@ set_tests_properties(test_julia_api_smoke PROPERTIES
 set_tests_properties(test_julia_example_soliton PROPERTIES
   ENVIRONMENT "NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
 )
+
+add_test(NAME test_julia_store_grin
+  COMMAND "${Julia_EXECUTABLE}" "--project=${CMAKE_SOURCE_DIR}/examples/julia"
+          "-e"
+          "using Pkg; Pkg.instantiate(); include(raw\"${CMAKE_SOURCE_DIR}/tests/julia/test_store_grin.jl\")"
+)
+set_tests_properties(test_julia_store_grin PROPERTIES
+  ENVIRONMENT "NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
+)

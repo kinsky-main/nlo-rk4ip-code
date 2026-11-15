@@ -93,6 +93,7 @@ def _run(args: argparse.Namespace) -> float:
             exec_options=exec_options,
             sqlite_path=storage_kwargs["sqlite_path"],
             run_id=storage_kwargs["run_id"],
+            record_mode=storage_kwargs["record_mode"],
             chunk_records=storage_kwargs["chunk_records"],
             sqlite_max_bytes=storage_kwargs["sqlite_max_bytes"],
             log_final_output_field_to_db=storage_kwargs["log_final_output_field_to_db"],
