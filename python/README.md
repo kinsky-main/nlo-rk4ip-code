@@ -42,6 +42,8 @@ runtime = nlolib.RuntimeOperators(
 - `nlolib.propagate`
 - `nlolib.query_runtime_limits`
 - `nlolib.translate_callable`
+- `nlolib.__version__` -- the project version, from the installed distribution
+  metadata or, in a source checkout, from `pyproject.toml`
 
 ## Build-Tree Usage
 
