@@ -3,6 +3,23 @@
 The Julia package exposes the native wrapper through the exported `NLOLib`
 module.
 
+## Install
+
+```julia
+using Pkg
+Pkg.add("NLOLib")
+```
+
+The native library and its runtime dependencies arrive as a Julia artifact, so
+nothing is compiled on install and no Vulkan SDK is needed. On Linux the Vulkan
+loader (`libvulkan.so.1`) must be present because it is a plain shared-library
+dependency; on Windows it is delay-loaded and optional. Without a Vulkan driver
+the CPU backend runs unchanged.
+
+`NLOLib.load()` resolves the library from an explicit path, then
+`ENV["NLOLIB_LIBRARY"]`, then the installed artifact, then a build tree. Release
+and registration details are in `../docs/release_julia.md`.
+
 ## Minimal Math-to-API Example
 
 This example uses the quadratic GLSE mapping
