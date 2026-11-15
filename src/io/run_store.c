@@ -38,11 +38,22 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/vfs.h>
+#elif defined(__APPLE__)
+#include <sys/mount.h>
+#include <sys/param.h>
+#endif
 #endif
 
 #if defined(HAVE_SQLITE3)
 #include <sqlite3.h>
 #endif
+
+/* Writer lock next to the shared database. Not "<db>.lock": SQLite's unix-dotfile VFS uses that name. */
+#define RUN_STORE_LOCK_SUFFIX ".writer-lock"
+/* Header state the last merge committed, used to detect a stale view on the next writer's host. */
+#define RUN_STORE_STATE_SUFFIX ".writer-state"
 
 // MARK: Run key
 
@@ -597,6 +608,53 @@ static int rs_file_age_seconds(const char* path, double* out_age)
     return 0;
 }
 
+/* Rename that replaces an existing target (used for the state sidecar only). */
+static int rs_rename_replace(const char* from, const char* to)
+{
+#if defined(_WIN32)
+    wchar_t* wf = rs_wide(from);
+    wchar_t* wt = rs_wide(to);
+    const int ok = (wf != NULL && wt != NULL) ? (MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING) != 0) : 0;
+    free(wf);
+    free(wt);
+    return ok ? 0 : -1;
+#else
+    return rename(from, to);
+#endif
+}
+
+/* 1 when @p dir is on a network file system (SMB/CIFS or NFS), 0 when local or unknown. */
+static int rs_is_network_dir(const char* dir)
+{
+#if defined(_WIN32)
+    if ((dir[0] == '\\' || dir[0] == '/') && (dir[1] == '\\' || dir[1] == '/')) {
+        return 1;
+    }
+    if (dir[0] != '\0' && dir[1] == ':') {
+        wchar_t root[4] = {(wchar_t)dir[0], L':', L'\\', 0};
+        return GetDriveTypeW(root) == DRIVE_REMOTE;
+    }
+    return 0;
+#elif defined(__linux__)
+    struct statfs st;
+    if (statfs(dir, &st) != 0) {
+        return 0;
+    }
+    const unsigned long type = (unsigned long)st.f_type;
+    return type == 0xFF534D42ul /* CIFS */ || type == 0xFE534D42ul /* SMB2 */ ||
+           type == 0x517Bul /* SMB */ || type == 0x6969ul /* NFS */;
+#elif defined(__APPLE__)
+    struct statfs st;
+    if (statfs(dir, &st) != 0) {
+        return 0;
+    }
+    return strcmp(st.f_fstypename, "smbfs") == 0 || strcmp(st.f_fstypename, "nfs") == 0;
+#else
+    (void)dir;
+    return 0;
+#endif
+}
+
 typedef int (*rs_dir_visit)(const char* name, void* user);
 
 static int rs_list_dir(const char* dir, rs_dir_visit visit, void* user)
@@ -640,6 +698,29 @@ static int rs_list_dir(const char* dir, rs_dir_visit visit, void* user)
     closedir(d);
     return 0;
 #endif
+}
+
+typedef struct {
+    const char* prefix;
+    int found;
+} prefix_search;
+
+static int prefix_visit(const char* name, void* user)
+{
+    prefix_search* search = (prefix_search*)user;
+    if (strncmp(name, search->prefix, strlen(search->prefix)) == 0) {
+        search->found = 1;
+        return 1;
+    }
+    return 0;
+}
+
+/* 1 when @p dir has a file whose name starts with @p prefix. */
+static int staging_has_prefix(const char* dir, const char* prefix)
+{
+    prefix_search search = {prefix, 0};
+    (void)rs_list_dir(dir, prefix_visit, &search);
+    return search.found;
 }
 
 void run_store_utc_now(char out_text[32])
@@ -756,6 +837,17 @@ static double env_seconds(const char* name, double fallback)
     char* end = NULL;
     const double value = strtod(text, &end);
     return (end != text && value > 0.0) ? value : fallback;
+}
+
+static double env_seconds_allow_zero(const char* name, double fallback)
+{
+    const char* text = getenv(name);
+    if (text == NULL || text[0] == '\0') {
+        return fallback;
+    }
+    char* end = NULL;
+    const double value = strtod(text, &end);
+    return (end != text && value >= 0.0) ? value : fallback;
 }
 
 static double lock_timeout_seconds(void)
@@ -886,7 +978,7 @@ static void lock_break_stale(const run_lock* self, const char* observed)
 static run_store_status lock_acquire(run_lock* lock, const char* shared_path)
 {
     memset(lock, 0, sizeof(*lock));
-    if (snprintf(lock->path, sizeof(lock->path), "%s.lock", shared_path) >= (int)sizeof(lock->path)) {
+    if (snprintf(lock->path, sizeof(lock->path), "%s" RUN_STORE_LOCK_SUFFIX, shared_path) >= (int)sizeof(lock->path)) {
         return RUN_STORE_ERROR;
     }
     rs_hostname(lock->host, sizeof(lock->host));
@@ -967,11 +1059,30 @@ static int db_exec(sqlite3* db, const char* sql)
     return 0;
 }
 
+const char* run_store_sqlite_vfs(void)
+{
+    const char* env = getenv("NLOLIB_STORE_VFS");
+    if (env != NULL && env[0] != '\0') {
+        return (strcmp(env, "default") == 0) ? NULL : env;
+    }
+#if defined(_WIN32)
+    return NULL;
+#else
+    return "unix-none";
+#endif
+}
+
+/* Readers use SQLite's default VFS (read locks work on SMB); writers use run_store_sqlite_vfs(). */
 static int db_open(const char* path, int readonly, sqlite3** out_db)
 {
     *out_db = NULL;
     const int flags = readonly ? SQLITE_OPEN_READONLY : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
-    if (sqlite3_open_v2(path, out_db, flags, NULL) != SQLITE_OK) {
+    const char* vfs = readonly ? NULL : run_store_sqlite_vfs();
+    if (vfs != NULL && sqlite3_vfs_find(vfs) == NULL) {
+        log_emit(LOG_LEVEL_ERROR, "[nlolib][store] SQLite VFS '%s' is not available", vfs);
+        return -1;
+    }
+    if (sqlite3_open_v2(path, out_db, flags, vfs) != SQLITE_OK) {
         if (*out_db != NULL) {
             sqlite3_close(*out_db);
             *out_db = NULL;
@@ -1205,8 +1316,64 @@ static int delete_run(sqlite3* db, const char* key, const char* run_id)
     return rc;
 }
 
+/* 1 when the file's header says WAL (read/write versions 2), 0 otherwise or when unreadable. */
+static int file_is_wal(const char* path)
+{
+#if defined(_WIN32)
+    wchar_t* w = rs_wide(path);
+    FILE* f = (w != NULL) ? _wfopen(w, L"rb") : NULL;
+    free(w);
+#else
+    FILE* f = fopen(path, "rb");
+#endif
+    if (f == NULL) {
+        return 0;
+    }
+    unsigned char h[20];
+    const size_t n = fread(h, 1u, sizeof(h), f);
+    fclose(f);
+    return n == sizeof(h) && memcmp(h, "SQLite format 3", 16) == 0 && (h[18] == 2u || h[19] == 2u);
+}
+
+/*
+ * Databases written by older nlolib releases used WAL. Switching them needs
+ * SQLite's own locking and shared memory, so it is done once with the default
+ * VFS; on a Linux SMB mount that cannot commit, and the file has to be
+ * converted once on Windows or a local disk.
+ */
+static int convert_from_wal(const char* path)
+{
+    if (!file_is_wal(path)) {
+        return 0;
+    }
+    sqlite3* db = NULL;
+    char mode[32] = {0};
+    int rc = -1;
+    if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE, NULL) == SQLITE_OK) {
+        sqlite3_busy_timeout(db, 60000);
+        if (db_text_query(db, "PRAGMA journal_mode=DELETE;", NULL, mode, sizeof(mode)) == 0 &&
+            sqlite3_stricmp(mode, "delete") == 0) {
+            rc = 0;
+        }
+    }
+    sqlite3_close(db);
+    if (rc != 0) {
+        log_emit(LOG_LEVEL_ERROR,
+                 "[nlolib][store] %s is a WAL database and could not be switched to the rollback journal "
+                 "here; run `PRAGMA journal_mode=DELETE;` on it once from Windows or a local disk",
+                 path);
+    } else {
+        log_emit(LOG_LEVEL_INFO, "[nlolib][store] switched %s from WAL to the rollback journal", path);
+    }
+    return rc;
+}
+
 static int open_shared(const char* shared_path, sqlite3** out_db)
 {
+    if (convert_from_wal(shared_path) != 0) {
+        *out_db = NULL;
+        return -1;
+    }
     if (db_open(shared_path, 0, out_db) != 0) {
         log_emit(LOG_LEVEL_ERROR, "[nlolib][store] cannot open shared database %s", shared_path);
         return -1;
@@ -1227,102 +1394,402 @@ static int open_shared(const char* shared_path, sqlite3** out_db)
     return 0;
 }
 
-/* Raw chunks above this size are copied in transactions of their own before the final one. */
-#define RUN_STORE_MERGE_BATCH_BYTES (32ll * 1024ll * 1024ll)
+/* Upper bound on the payload bytes one merge transaction writes (NLOLIB_STORE_MERGE_BATCH_BYTES). */
+#define RUN_STORE_MERGE_BATCH_BYTES (16ll * 1024ll * 1024ll)
 
+static sqlite3_int64 merge_batch_bytes(void)
+{
+    const double value = env_seconds("NLOLIB_STORE_MERGE_BATCH_BYTES", (double)RUN_STORE_MERGE_BATCH_BYTES);
+    return (value >= 1.0) ? (sqlite3_int64)value : RUN_STORE_MERGE_BATCH_BYTES;
+}
+
+typedef struct {
+    sqlite3* db;
+    run_lock* lock;
+    const char* run_id;
+    int in_txn;
+    sqlite3_int64 txn_bytes;
+    sqlite3_int64 budget;
+    unsigned commits;
+} merge_txn;
+
+static int merge_begin(merge_txn* m)
+{
+    if (m->in_txn) {
+        return 0;
+    }
+    if (db_exec(m->db, "BEGIN IMMEDIATE;") != 0) {
+        return -1;
+    }
+    m->in_txn = 1;
+    m->txn_bytes = 0;
+    return 0;
+}
+
+/* Commit the open transaction, checking that the lock is still ours first. */
+static int merge_commit(merge_txn* m)
+{
+    if (!m->in_txn) {
+        return 0;
+    }
+    if (!lock_owned(m->lock)) {
+        log_emit(LOG_LEVEL_ERROR, "[nlolib][store] lost lock %s before commit; merge rolled back", m->lock->path);
+        return -1;
+    }
+    if (db_exec(m->db, "COMMIT;") != 0) {
+        return -1;
+    }
+    m->in_txn = 0;
+    m->commits += 1u;
+    const char* crash = getenv("NLOLIB_STORE_TEST_CRASH_AFTER_COMMITS");
+    if (crash != NULL && crash[0] != '\0' && (unsigned)strtoul(crash, NULL, 10) == m->commits) {
+        /* Test hook: die like a killed writer between two merge transactions. */
+        _exit(77);
+    }
+    return lock_refresh(m->lock);
+}
+
+/*
+ * Copy the rows of stg.<table> for the run in index order, splitting them over
+ * transactions so that none writes much more than the batch budget.
+ */
+static int merge_table_batched(merge_txn* m, const char* table, const char* index_col, const char* bytes_expr)
+{
+    if (!db_table_exists(m->db, "stg", table)) {
+        return 0;
+    }
+    char sql[512];
+    (void)snprintf(sql, sizeof(sql), "SELECT \"%s\", %s FROM stg.\"%s\" WHERE run_id=?1 ORDER BY \"%s\";",
+                   index_col, bytes_expr, table, index_col);
+    char where[256];
+    (void)snprintf(where, sizeof(where), "run_id=?1 AND \"%s\" BETWEEN ?2 AND ?3", index_col);
+    sqlite3_stmt* list = NULL;
+    if (sqlite3_prepare_v2(m->db, sql, -1, &list, NULL) != SQLITE_OK) {
+        return -1;
+    }
+    sqlite3_bind_text(list, 1, m->run_id, -1, SQLITE_TRANSIENT);
+
+    /* Collect (index, bytes) first: the list statement must not stay open across commits. */
+    size_t count = 0u;
+    size_t cap = 0u;
+    sqlite3_int64* idx = NULL;
+    sqlite3_int64* bytes = NULL;
+    int rc = 0;
+    while (sqlite3_step(list) == SQLITE_ROW) {
+        if (count == cap) {
+            cap = (cap == 0u) ? 64u : 2u * cap;
+            sqlite3_int64* ni = (sqlite3_int64*)realloc(idx, cap * sizeof(*idx));
+            sqlite3_int64* nb = (sqlite3_int64*)realloc(bytes, cap * sizeof(*bytes));
+            if (ni == NULL || nb == NULL) {
+                free(ni != NULL ? ni : idx);
+                free(nb != NULL ? nb : bytes);
+                sqlite3_finalize(list);
+                return -1;
+            }
+            idx = ni;
+            bytes = nb;
+        }
+        idx[count] = sqlite3_column_int64(list, 0);
+        bytes[count] = sqlite3_column_int64(list, 1);
+        count += 1u;
+    }
+    sqlite3_finalize(list);
+
+    size_t first = 0u;
+    while (rc == 0 && first < count) {
+        if (merge_begin(m) != 0) {
+            rc = -1;
+            break;
+        }
+        size_t last = first;
+        sqlite3_int64 batch = bytes[first];
+        while (last + 1u < count && m->txn_bytes + batch + bytes[last + 1u] <= m->budget) {
+            last += 1u;
+            batch += bytes[last];
+        }
+        if (m->txn_bytes > 0 && m->txn_bytes + batch > m->budget) {
+            /* Start this batch in a fresh transaction. */
+            rc = merge_commit(m);
+            continue;
+        }
+        rc = copy_rows(m->db, table, "INSERT", where, m->run_id, idx[first], idx[last]);
+        m->txn_bytes += batch;
+        first = last + 1u;
+        if (rc == 0 && m->txn_bytes >= m->budget) {
+            rc = merge_commit(m);
+        }
+    }
+    free(idx);
+    free(bytes);
+    return rc;
+}
+
+static long long stg_count(sqlite3* db, const char* schema, const char* table, const char* run_id)
+{
+    if (!db_table_exists(db, schema, table)) {
+        return 0;
+    }
+    char sql[256];
+    (void)snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM \"%s\".\"%s\" WHERE run_id=?1;", schema, table);
+    sqlite3_stmt* stmt = NULL;
+    long long n = -1;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, run_id, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            n = sqlite3_column_int64(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+    return n;
+}
+
+/*
+ * Merge in transactions of bounded size:
+ *   1. delete any earlier run with this key (its `runs` row first) and copy the run's metadata;
+ *   2. raw chunks, then record maps, each split by the batch budget;
+ *   3. the final field and the `runs` row, in the last transaction.
+ * An interrupted merge leaves data without a `runs` row; merging the same
+ * staging file again starts over from step 1, and nlolib_storage_recover_staging
+ * deletes such data when its staging file is gone.
+ */
 static run_store_status merge_locked(sqlite3* db, run_lock* lock, const char* key, const char* run_id)
 {
-    if (db_exec(db, "BEGIN IMMEDIATE;") != 0) {
-        return RUN_STORE_ERROR;
-    }
-    int ok = delete_run(db, key, run_id) == 0 &&
+    merge_txn m;
+    memset(&m, 0, sizeof(m));
+    m.db = db;
+    m.lock = lock;
+    m.run_id = run_id;
+    m.budget = merge_batch_bytes();
+
+    int ok = merge_begin(&m) == 0 &&
+             delete_run(db, key, run_id) == 0 &&
              copy_rows(db, "io_system_config", "INSERT OR IGNORE",
                        "system_hash IN (SELECT system_hash FROM stg.io_runs WHERE run_id=?1)", run_id, 0, 0) == 0 &&
              copy_rows(db, "io_sim_config", "INSERT OR IGNORE",
                        "config_hash IN (SELECT config_hash FROM stg.io_runs WHERE run_id=?1)", run_id, 0, 0) == 0 &&
              copy_rows(db, "io_runs", "INSERT", "run_id=?1", run_id, 0, 0) == 0 &&
              copy_rows(db, "io_record_layout", "INSERT", "run_id=?1", run_id, 0, 0) == 0;
+    ok = ok &&
+         merge_table_batched(&m, "io_record_chunks", "chunk_index", "length(payload)") == 0 &&
+         merge_table_batched(&m, "io_record_maps", "record_index",
+                             "length(power)+length(spectrum)+length(fluence_x)+length(fluence_y)") == 0;
 
-    sqlite3_int64 raw_bytes = 0;
-    if (ok) {
+    sqlite3_int64 final_bytes = 0;
+    if (ok && db_table_exists(db, "stg", "io_final_output_fields")) {
         sqlite3_stmt* stmt = NULL;
-        if (sqlite3_prepare_v2(db,
-                               "SELECT COALESCE(SUM(length(payload)),0) FROM stg.io_record_chunks WHERE run_id=?1;",
+        if (sqlite3_prepare_v2(db, "SELECT COALESCE(SUM(length(payload)),0) FROM stg.io_final_output_fields WHERE run_id=?1;",
                                -1, &stmt, NULL) == SQLITE_OK) {
             sqlite3_bind_text(stmt, 1, run_id, -1, SQLITE_TRANSIENT);
             if (sqlite3_step(stmt) == SQLITE_ROW) {
-                raw_bytes = sqlite3_column_int64(stmt, 0);
+                final_bytes = sqlite3_column_int64(stmt, 0);
             }
             sqlite3_finalize(stmt);
         }
     }
-
-    if (ok && raw_bytes > RUN_STORE_MERGE_BATCH_BYTES) {
-        /* Large raw payloads: commit what we have, then copy chunks in bounded transactions. */
-        ok = db_exec(db, "COMMIT;") == 0;
-        sqlite3_stmt* list = NULL;
-        if (ok && sqlite3_prepare_v2(db,
-                                     "SELECT chunk_index, length(payload) FROM stg.io_record_chunks "
-                                     "WHERE run_id=?1 ORDER BY chunk_index;",
-                                     -1, &list, NULL) != SQLITE_OK) {
-            ok = 0;
-        }
-        if (ok) {
-            sqlite3_bind_text(list, 1, run_id, -1, SQLITE_TRANSIENT);
-            sqlite3_int64 lo = -1;
-            sqlite3_int64 hi = -1;
-            sqlite3_int64 batch = 0;
-            int rc = SQLITE_ROW;
-            while (ok) {
-                rc = sqlite3_step(list);
-                const int have = (rc == SQLITE_ROW);
-                if (have) {
-                    const sqlite3_int64 idx = sqlite3_column_int64(list, 0);
-                    if (lo < 0) {
-                        lo = idx;
-                    }
-                    hi = idx;
-                    batch += sqlite3_column_int64(list, 1);
-                }
-                if ((!have || batch >= RUN_STORE_MERGE_BATCH_BYTES) && lo >= 0) {
-                    ok = lock_refresh(lock) == 0 &&
-                         db_exec(db, "BEGIN IMMEDIATE;") == 0 &&
-                         copy_rows(db, "io_record_chunks", "INSERT",
-                                   "run_id=?1 AND chunk_index BETWEEN ?2 AND ?3", run_id, lo, hi) == 0 &&
-                         db_exec(db, "COMMIT;") == 0;
-                    lo = -1;
-                    batch = 0;
-                }
-                if (!have) {
-                    break;
-                }
-            }
-            sqlite3_finalize(list);
-            ok = ok && (rc == SQLITE_DONE);
-        }
-        ok = ok && lock_refresh(lock) == 0 && db_exec(db, "BEGIN IMMEDIATE;") == 0;
-        if (!ok) {
-            (void)sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
-            return RUN_STORE_ERROR;
-        }
-    } else if (ok) {
-        ok = copy_rows(db, "io_record_chunks", "INSERT", "run_id=?1", run_id, 0, 0) == 0;
+    if (ok && m.in_txn && m.txn_bytes > 0 && m.txn_bytes + final_bytes > m.budget) {
+        ok = merge_commit(&m) == 0;
     }
-
     ok = ok &&
-         copy_rows(db, "io_record_maps", "INSERT", "run_id=?1", run_id, 0, 0) == 0 &&
+         merge_begin(&m) == 0 &&
          copy_rows(db, "io_final_output_fields", "INSERT", "run_id=?1", run_id, 0, 0) == 0 &&
          merge_runs_columns(db) == 0 &&
-         copy_rows(db, "runs", "INSERT", "key=(SELECT key FROM stg.io_runs WHERE run_id=?1)", run_id, 0, 0) == 0;
-    if (ok && !lock_owned(lock)) {
-        log_emit(LOG_LEVEL_ERROR, "[nlolib][store] lost lock %s before commit; merge rolled back", lock->path);
-        ok = 0;
-    }
-    if (!ok || db_exec(db, "COMMIT;") != 0) {
-        (void)sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+         copy_rows(db, "runs", "INSERT", "key=(SELECT key FROM stg.io_runs WHERE run_id=?1)", run_id, 0, 0) == 0 &&
+         merge_commit(&m) == 0;
+    if (!ok) {
+        if (m.in_txn) {
+            (void)sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+        }
         return RUN_STORE_ERROR;
     }
+    if (m.commits > 1u) {
+        log_emit(LOG_LEVEL_INFO, "[nlolib][store] merged run %s in %u transactions", key, m.commits);
+    }
     return RUN_STORE_OK;
+}
+
+// MARK: Fresh view of the shared database
+
+/* Fields of the 100-byte SQLite header that change on every commit. */
+typedef struct {
+    int exists;
+    unsigned long change_counter;
+    unsigned long page_count;
+    unsigned long page_size;
+    unsigned long version_valid_for;
+    long long file_bytes;
+} db_header;
+
+static unsigned long be32(const unsigned char* p)
+{
+    return ((unsigned long)p[0] << 24) | ((unsigned long)p[1] << 16) | ((unsigned long)p[2] << 8) | (unsigned long)p[3];
+}
+
+/* Read the header with a fresh open of the file (not through SQLite's cache). */
+static int read_db_header(const char* path, db_header* out)
+{
+    memset(out, 0, sizeof(*out));
+#if defined(_WIN32)
+    wchar_t* w = rs_wide(path);
+    FILE* f = (w != NULL) ? _wfopen(w, L"rb") : NULL;
+    free(w);
+#else
+    FILE* f = fopen(path, "rb");
+#endif
+    if (f == NULL) {
+        return 0;
+    }
+    unsigned char h[100];
+    const size_t n = fread(h, 1u, sizeof(h), f);
+    long long size = 0;
+    if (fseek(f, 0, SEEK_END) == 0) {
+#if defined(_WIN32)
+        size = (long long)_ftelli64(f);
+#else
+        size = (long long)ftello(f);
+#endif
+    }
+    fclose(f);
+    out->exists = 1;
+    out->file_bytes = size;
+    if (n < sizeof(h)) {
+        return (n == 0u) ? 0 : -1;
+    }
+    if (memcmp(h, "SQLite format 3", 16) != 0) {
+        return -1;
+    }
+    const unsigned long raw_page = ((unsigned long)h[16] << 8) | (unsigned long)h[17];
+    out->page_size = (raw_page == 1u) ? 65536u : raw_page;
+    out->change_counter = be32(h + 24);
+    out->page_count = be32(h + 28);
+    out->version_valid_for = be32(h + 92);
+    return 0;
+}
+
+/* A header is self-consistent when its page count is current and matches the file size. */
+static int header_consistent(const db_header* h)
+{
+    if (!h->exists || h->file_bytes == 0) {
+        return 1;
+    }
+    return h->version_valid_for == h->change_counter &&
+           (long long)h->page_count * (long long)h->page_size == h->file_bytes;
+}
+
+static void state_path_of(const char* shared_path, char* out, size_t cap)
+{
+    (void)snprintf(out, cap, "%s" RUN_STORE_STATE_SUFFIX, shared_path);
+}
+
+/* Change counter recorded by the last merge (0 when there is no state file). */
+static unsigned long read_state_counter(const char* shared_path, int* out_found)
+{
+    char path[RUN_STORE_PATH_MAX];
+    state_path_of(shared_path, path, sizeof(path));
+    char content[512];
+    char value[32];
+    *out_found = 0;
+    if (rs_read_small(path, content, sizeof(content)) < 0 || lock_field(content, "counter", value, sizeof(value)) != 0) {
+        return 0u;
+    }
+    *out_found = 1;
+    return strtoul(value, NULL, 10);
+}
+
+static void write_state(const char* shared_path, const run_lock* lock, const db_header* h, const char* key)
+{
+    char path[RUN_STORE_PATH_MAX];
+    char tmp[RUN_STORE_PATH_MAX + 32];
+    state_path_of(shared_path, path, sizeof(path));
+    (void)snprintf(tmp, sizeof(tmp), "%s.tmp-%s", path, lock->token);
+    char now[32];
+    run_store_utc_now(now);
+    char content[512];
+    (void)snprintf(content, sizeof(content),
+                   "nlolib-state 1\ncounter=%lu\npages=%lu\npage_size=%lu\nbytes=%lld\nhost=%s\nupdated=%s\nkey=%s\n",
+                   h->change_counter, h->page_count, h->page_size, h->file_bytes, lock->host, now, key);
+    if (rs_create_exclusive(tmp, content) == 0 && rs_rename_replace(tmp, path) != 0) {
+        (void)rs_unlink(tmp);
+    }
+}
+
+static double settle_seconds(const char* shared_path)
+{
+    char dir[RUN_STORE_PATH_MAX];
+    rs_dirname(shared_path, dir, sizeof(dir));
+    return env_seconds_allow_zero("NLOLIB_STORE_SETTLE_S", rs_is_network_dir(dir) ? 2.5 : 0.0);
+}
+
+/*
+ * After taking the lock, wait until this host sees the state the previous
+ * writer committed: first the settle time (longer than the mount's attribute
+ * and close caches), then until the file header is self-consistent and its
+ * change counter has reached the one the previous merge recorded.
+ */
+static run_store_status await_fresh_view(const char* shared_path)
+{
+    const double settle = settle_seconds(shared_path);
+    if (settle > 0.0) {
+        rs_sleep_ms((unsigned)(settle * 1000.0));
+    }
+    char journal[RUN_STORE_PATH_MAX + 16];
+    (void)snprintf(journal, sizeof(journal), "%s-journal", shared_path);
+    db_header jh;
+    (void)read_db_header(journal, &jh);
+    if (jh.exists && jh.file_bytes > 0) {
+        /*
+         * A writer died during a commit and left a hot journal. We hold the
+         * writer lock, so no commit is in progress: let SQLite roll it back,
+         * then check the restored file as usual.
+         */
+        log_emit(LOG_LEVEL_WARN, "[nlolib][store] rolling back the hot journal of %s", shared_path);
+        sqlite3* db = NULL;
+        if (db_open(shared_path, 0, &db) == 0) {
+            (void)db_exec(db, "SELECT COUNT(*) FROM sqlite_master;");
+            sqlite3_close(db);
+        }
+    }
+    const double deadline = rs_monotonic_seconds() + 10.0 + 4.0 * settle;
+    for (;;) {
+        db_header h;
+        int found = 0;
+        const unsigned long recorded = read_state_counter(shared_path, &found);
+        const int read_ok = read_db_header(shared_path, &h) == 0;
+        const int fresh = read_ok && header_consistent(&h) &&
+                          (!found || !h.exists || h.change_counter >= recorded);
+        if (fresh) {
+            return RUN_STORE_OK;
+        }
+        if (rs_monotonic_seconds() >= deadline) {
+            log_emit(LOG_LEVEL_ERROR,
+                     "[nlolib][store] %s still looks stale or inconsistent on this host "
+                     "(header counter %lu, recorded %lu, %lld bytes for %lu pages of %lu); not writing",
+                     shared_path, h.change_counter, recorded, h.file_bytes, h.page_count, h.page_size);
+            return RUN_STORE_ERROR;
+        }
+        rs_sleep_ms(250u);
+    }
+}
+
+/* Re-read the merged run with a new connection: header consistent, `runs` row and row counts present. */
+static int verify_merge(const char* shared_path, const char* key, const char* run_id,
+                        long long maps, long long chunks, long long finals)
+{
+    db_header h;
+    if (read_db_header(shared_path, &h) != 0 || !header_consistent(&h)) {
+        return -1;
+    }
+    sqlite3* db = NULL;
+    if (db_open(shared_path, 0, &db) != 0) {
+        return -1;
+    }
+    char found[STORAGE_KEY_MAX] = {0};
+    int ok = db_text_query(db, "SELECT key FROM runs WHERE key=?1;", key, found, sizeof(found)) == 0 &&
+             stg_count(db, "main", "io_record_maps", run_id) == maps &&
+             stg_count(db, "main", "io_record_chunks", run_id) == chunks &&
+             stg_count(db, "main", "io_final_output_fields", run_id) == finals &&
+             stg_count(db, "main", "io_record_layout", run_id) == 1;
+    sqlite3_close(db);
+    return ok ? 0 : -1;
 }
 
 /* Inspect a staging database: key and run id of its complete run, if any. */
@@ -1369,26 +1836,55 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
     if (lock_status != RUN_STORE_OK) {
         return lock_status;
     }
-
-    sqlite3* db = NULL;
-    run_store_status status = RUN_STORE_ERROR;
-    if (open_shared(shared_path, &db) == 0) {
-        sqlite3_stmt* attach = NULL;
-        if (sqlite3_prepare_v2(db, "ATTACH DATABASE ?1 AS stg;", -1, &attach, NULL) == SQLITE_OK) {
-            sqlite3_bind_text(attach, 1, staging_path, -1, SQLITE_TRANSIENT);
-            const int attached = (sqlite3_step(attach) == SQLITE_DONE);
-            sqlite3_finalize(attach);
-            if (attached) {
-                status = merge_locked(db, &lock, key, run_id);
-                (void)sqlite3_exec(db, "DETACH DATABASE stg;", NULL, NULL, NULL);
-            }
+    /* Another writer may have merged this file while we waited: staging files are only deleted under the lock. */
+    if (!rs_file_exists(staging_path) || staging_inspect(staging_path, key, run_id) != RUN_STORE_OK) {
+        lock_release(&lock);
+        int present = 0;
+        if (run_store_has_key(shared_path, key, &present) == RUN_STORE_OK && present) {
+            log_emit(LOG_LEVEL_INFO, "[nlolib][store] run %s was already merged into %s", key, shared_path);
+            return RUN_STORE_OK;
         }
-        sqlite3_close(db);
+        return RUN_STORE_ERROR;
+    }
+
+    run_store_status status = await_fresh_view(shared_path);
+    sqlite3* db = NULL;
+    long long maps = -1;
+    long long chunks = -1;
+    long long finals = -1;
+    if (status == RUN_STORE_OK) {
+        status = RUN_STORE_ERROR;
+        if (open_shared(shared_path, &db) == 0) {
+            sqlite3_stmt* attach = NULL;
+            if (sqlite3_prepare_v2(db, "ATTACH DATABASE ?1 AS stg;", -1, &attach, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(attach, 1, staging_path, -1, SQLITE_TRANSIENT);
+                const int attached = (sqlite3_step(attach) == SQLITE_DONE);
+                sqlite3_finalize(attach);
+                if (attached) {
+                    maps = stg_count(db, "stg", "io_record_maps", run_id);
+                    chunks = stg_count(db, "stg", "io_record_chunks", run_id);
+                    finals = stg_count(db, "stg", "io_final_output_fields", run_id);
+                    status = merge_locked(db, &lock, key, run_id);
+                    (void)sqlite3_exec(db, "DETACH DATABASE stg;", NULL, NULL, NULL);
+                }
+            }
+            sqlite3_close(db);
+        }
+    }
+    if (status == RUN_STORE_OK && verify_merge(shared_path, key, run_id, maps, chunks, finals) != 0) {
+        log_emit(LOG_LEVEL_ERROR, "[nlolib][store] run %s did not read back from %s after the merge", key, shared_path);
+        status = RUN_STORE_ERROR;
+    }
+    if (status == RUN_STORE_OK) {
+        db_header h;
+        if (read_db_header(shared_path, &h) == 0) {
+            write_state(shared_path, &lock, &h, key);
+        }
+        run_store_discard(staging_path);
     }
     lock_release(&lock);
 
     if (status == RUN_STORE_OK) {
-        run_store_discard(staging_path);
         log_emit(LOG_LEVEL_INFO, "[nlolib][store] merged run %s into %s", key, shared_path);
     } else {
         log_emit(LOG_LEVEL_ERROR,
@@ -1397,6 +1893,64 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
                  shared_path);
     }
     return status;
+}
+
+/*
+ * Under the lock, delete data of interrupted merges: io_runs rows with a key
+ * but no `runs` row whose staging file no longer exists. Rows without a key
+ * were written before run keys existed and are kept.
+ */
+static size_t discard_orphans(const char* shared_path, const char* staging_dir, const char* stem)
+{
+    if (!rs_file_exists(shared_path)) {
+        return 0u;
+    }
+    run_lock lock;
+    if (lock_acquire(&lock, shared_path) != RUN_STORE_OK) {
+        return 0u;
+    }
+    size_t removed = 0u;
+    sqlite3* db = NULL;
+    if (await_fresh_view(shared_path) == RUN_STORE_OK && open_shared(shared_path, &db) == 0) {
+        sqlite3_stmt* stmt = NULL;
+        char keys[64][STORAGE_KEY_MAX];
+        char ids[64][STORAGE_RUN_ID_MAX];
+        size_t n = 0u;
+        if (sqlite3_prepare_v2(db,
+                               "SELECT key, run_id FROM io_runs WHERE key IS NOT NULL "
+                               "AND key NOT IN (SELECT key FROM runs) LIMIT 64;",
+                               -1, &stmt, NULL) == SQLITE_OK) {
+            while (n < 64u && sqlite3_step(stmt) == SQLITE_ROW) {
+                (void)snprintf(keys[n], STORAGE_KEY_MAX, "%s", (const char*)sqlite3_column_text(stmt, 0));
+                (void)snprintf(ids[n], STORAGE_RUN_ID_MAX, "%s", (const char*)sqlite3_column_text(stmt, 1));
+                n += 1u;
+            }
+            sqlite3_finalize(stmt);
+        }
+        for (size_t i = 0u; i < n; ++i) {
+            char pattern[RUN_STORE_PATH_MAX];
+            (void)snprintf(pattern, sizeof(pattern), "%.255s.%s.", stem, keys[i]);
+            if (staging_has_prefix(staging_dir, pattern)) {
+                continue;
+            }
+            if (db_exec(db, "BEGIN IMMEDIATE;") == 0 && delete_run(db, keys[i], ids[i]) == 0 &&
+                lock_owned(&lock) && db_exec(db, "COMMIT;") == 0) {
+                removed += 1u;
+                log_emit(LOG_LEVEL_INFO, "[nlolib][store] removed data of interrupted merge %s", keys[i]);
+            } else {
+                (void)sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+            }
+        }
+        sqlite3_close(db);
+        if (removed > 0u) {
+            db_header h;
+            if (read_db_header(shared_path, &h) == 0) {
+                write_state(shared_path, &lock, &h, "-");
+            }
+        }
+    }
+    lock_release(&lock);
+    return removed;
 }
 
 typedef struct {
@@ -1487,13 +2041,14 @@ static void recover_one(recover_ctx* ctx, const char* name)
         return;
     }
     const int same_host = (strcmp(host, ctx->host) == 0);
-    if (same_host && pid != rs_pid() && rs_pid_alive(pid) != 0) {
-        ctx->skipped += 1u;
-        return;
-    }
     char key[STORAGE_KEY_MAX];
     char run_id[STORAGE_RUN_ID_MAX];
     const run_store_status inspect = staging_inspect(path, key, run_id);
+    /* Complete files are merged whoever wrote them; incomplete ones of live local processes are runs in progress. */
+    if (inspect != RUN_STORE_OK && same_host && pid != rs_pid() && rs_pid_alive(pid) != 0) {
+        ctx->skipped += 1u;
+        return;
+    }
     if (inspect == RUN_STORE_OK) {
         const run_store_status merged = run_store_merge(path, ctx->shared_path);
         if (merged == RUN_STORE_OK) {
@@ -1547,6 +2102,9 @@ run_store_status run_store_recover(
         recover_one(&ctx, list.names[i]);
     }
     free(list.names);
+    if (discard_incomplete) {
+        ctx.discarded += discard_orphans(shared_path, ctx.staging_dir, ctx.stem);
+    }
     if (out_merged != NULL) {
         *out_merged = ctx.merged;
     }

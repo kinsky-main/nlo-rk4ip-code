@@ -449,7 +449,7 @@ static void test_basic_run(const char* root)
     staging_dir(db_path, sdir, sizeof(sdir));
     CHECK(count_files(sdir, ".sqlite") == 0u, "staging file left behind");
     char lock[1100];
-    (void)snprintf(lock, sizeof(lock), "%s.lock", db_path);
+    (void)snprintf(lock, sizeof(lock), "%s.writer-lock", db_path);
     CHECK(access(lock, F_OK) != 0, "lock file left behind");
 
     check_runs_contract(db_path);
@@ -838,7 +838,7 @@ static void test_killed_and_aborted_writer(const char* root)
 static void write_lock(const char* db_path, const char* host, unsigned long pid)
 {
     char lock[1100];
-    (void)snprintf(lock, sizeof(lock), "%s.lock", db_path);
+    (void)snprintf(lock, sizeof(lock), "%s.writer-lock", db_path);
     FILE* f = fopen(lock, "wb");
     fprintf(f, "nlolib-lock 1\nhost=%s\npid=%lu\ncreated=2026-01-01T00:00:00.000\nupdated=x\nbeat=0\ntoken=feedfeedfeedfeed\n",
             host, pid);
@@ -862,7 +862,7 @@ static void test_locks(const char* root)
     char db_path[1024];
     make_store(root, db_path, sizeof(db_path));
     char lock[1100];
-    (void)snprintf(lock, sizeof(lock), "%s.lock", db_path);
+    (void)snprintf(lock, sizeof(lock), "%s.writer-lock", db_path);
     char sdir[1024];
     staging_dir(db_path, sdir, sizeof(sdir));
     char host[128];
@@ -972,10 +972,269 @@ static void test_old_database(const char* root)
     check_runs_contract(db_path);
 }
 
+
+static const char* g_merge_tool = NULL;
+
+static long long count_where_key(const char* db_path, const char* table, const char* key)
+{
+    sqlite3* db = open_ro(db_path);
+    if (db == NULL) {
+        return -1;
+    }
+    char sql[256];
+    (void)snprintf(sql, sizeof(sql),
+                   "SELECT COUNT(*) FROM %s WHERE run_id IN (SELECT run_id FROM io_runs WHERE key='%s');", table, key);
+    const long long n = sql_int(db, sql);
+    sqlite3_close(db);
+    return n;
+}
+
+/* Other SQLite VFS choices still produce a valid shared database. */
+static void test_vfs_choices(const char* root)
+{
+    static const char* vfs[] = {"unix-dotfile", "unix", "default"};
+    (void)mkdir(root, 0775);
+    for (size_t i = 0u; i < sizeof(vfs) / sizeof(vfs[0]); ++i) {
+        char sub[1100];
+        path_join(sub, sizeof(sub), root, vfs[i]);
+        char db_path[1024];
+        make_store(sub, db_path, sizeof(db_path));
+        setenv("NLOLIB_STORE_VFS", vfs[i], 1);
+        run_case rc;
+        case_init_1d(&rc, 64u, 1.0, 4u, db_path);
+        storage_result result;
+        CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.merged == 1, "vfs %s", vfs[i]);
+        case_free(&rc);
+        unsetenv("NLOLIB_STORE_VFS");
+        check_runs_contract(db_path);
+    }
+}
+
+/* defer_merge leaves the complete run in staging/; the merge tool merges it. */
+static void test_deferred_merge(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    char sdir[1024];
+    staging_dir(db_path, sdir, sizeof(sdir));
+    run_case rc;
+    case_init_1d(&rc, 64u, 1.0, 4u, db_path);
+    rc.storage.defer_merge = 1;
+    storage_result result;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK, "deferred run");
+    CHECK(result.merged == 0 && result.deferred == 1, "deferred flags %d %d", result.merged, result.deferred);
+    int present = 1;
+    CHECK(nlolib_storage_has_run(db_path, result.key, &present) == NLOLIB_STATUS_OK && present == 0, "deferred run merged");
+    CHECK(count_files(sdir, ".sqlite") == 1u, "deferred staging file missing");
+    char key1[STORAGE_KEY_MAX];
+    (void)snprintf(key1, sizeof(key1), "%s", result.key);
+
+    /* The environment variable defers too. */
+    rc.storage.defer_merge = 0;
+    rc.field[1].re += 0.5;
+    setenv("NLOLIB_STORE_DEFER_MERGE", "1", 1);
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.deferred == 1, "env deferred run");
+    unsetenv("NLOLIB_STORE_DEFER_MERGE");
+    CHECK(count_files(sdir, ".sqlite") == 2u, "env deferred staging file missing");
+    case_free(&rc);
+
+    if (g_merge_tool != NULL) {
+        char store[1024];
+        (void)snprintf(store, sizeof(store), "%s", root);
+        char cmd[3000];
+        (void)snprintf(cmd, sizeof(cmd), "'%s' -q '%s'", g_merge_tool, store);
+        CHECK(system(cmd) == 0, "merge tool failed: %s", cmd);
+    } else {
+        size_t merged = 0u;
+        CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL) == NLOLIB_STATUS_OK && merged == 2u,
+              "recover merged %zu", merged);
+    }
+    CHECK(nlolib_storage_has_run(db_path, key1, &present) == NLOLIB_STATUS_OK && present == 1, "first deferred run not merged");
+    CHECK(nlolib_storage_has_run(db_path, result.key, &present) == NLOLIB_STATUS_OK && present == 1, "second deferred run not merged");
+    CHECK(count_files(sdir, ".sqlite") == 0u, "staging left after the merge tool");
+    check_runs_contract(db_path);
+}
+
+/* A merge split over many small transactions, a writer killed between two of them, and the clean-up. */
+static void test_batched_and_interrupted_merge(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    char sdir[1024];
+    staging_dir(db_path, sdir, sizeof(sdir));
+
+    setenv("NLOLIB_STORE_MERGE_BATCH_BYTES", "3000", 1);
+    run_case rc;
+    case_init_1d(&rc, 128u, 1.0, 12u, db_path);
+    rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+    rc.storage.chunk_records = 2u;
+    storage_result result;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.merged == 1, "batched merge");
+    CHECK(count_where_key(db_path, "io_record_maps", result.key) == 12, "batched maps");
+    CHECK(count_where_key(db_path, "io_record_chunks", result.key) == 6, "batched chunks");
+    check_runs_contract(db_path);
+
+    /* Writer killed after the second merge transaction. */
+    rc.field[2].re += 0.5;
+    char key[STORAGE_KEY_MAX];
+    CHECK(nlolib_storage_run_key(&rc.sim, &rc.phys, rc.n, rc.field, &rc.options, key) == NLOLIB_STATUS_OK, "key");
+    pid_t pid = fork();
+    if (pid == 0) {
+        setenv("NLOLIB_STORE_TEST_CRASH_AFTER_COMMITS", "2", 1);
+        (void)case_run(&rc, NULL, 0u, NULL);
+        _exit(3);
+    }
+    int status = 0;
+    (void)waitpid(pid, &status, 0);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 77, "writer did not die mid-merge (status %d)", status);
+    int present = 1;
+    CHECK(nlolib_storage_has_run(db_path, key, &present) == NLOLIB_STATUS_OK && present == 0, "interrupted merge has a runs row");
+    CHECK(count_where_key(db_path, "io_record_layout", key) == 1, "interrupted merge left no partial data");
+    CHECK(count_files(sdir, ".sqlite") == 1u, "interrupted merge lost its staging file");
+    check_runs_contract(db_path);
+
+    /* Resume: merging the staging file again starts over and completes. */
+    size_t merged = 0u;
+    size_t discarded = 0u;
+    CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL) == NLOLIB_STATUS_OK && merged == 1u,
+          "resume merged %zu", merged);
+    CHECK(nlolib_storage_has_run(db_path, key, &present) == NLOLIB_STATUS_OK && present == 1, "resumed run missing");
+    CHECK(count_where_key(db_path, "io_record_maps", key) == 12, "resumed maps");
+    CHECK(count_where_key(db_path, "io_record_chunks", key) == 6, "resumed chunks");
+
+    /* Discard: interrupted again, staging file lost, recovery removes the partial data. */
+    rc.field[3].re += 0.5;
+    CHECK(nlolib_storage_run_key(&rc.sim, &rc.phys, rc.n, rc.field, &rc.options, key) == NLOLIB_STATUS_OK, "key");
+    pid = fork();
+    if (pid == 0) {
+        setenv("NLOLIB_STORE_TEST_CRASH_AFTER_COMMITS", "2", 1);
+        (void)case_run(&rc, NULL, 0u, NULL);
+        _exit(3);
+    }
+    (void)waitpid(pid, &status, 0);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 77, "second writer did not die mid-merge");
+    char cmd[1200];
+    (void)snprintf(cmd, sizeof(cmd), "rm -f '%s'/*.sqlite", sdir);
+    CHECK(system(cmd) == 0, "rm staging");
+    CHECK(count_where_key(db_path, "io_record_layout", key) == 1, "partial data before discard");
+    CHECK(nlolib_storage_recover_staging(db_path, 1, 0.0, &merged, &discarded, NULL) == NLOLIB_STATUS_OK && discarded == 1u,
+          "orphan discard %zu", discarded);
+    CHECK(count_where_key(db_path, "io_record_layout", key) == 0, "orphaned partial data kept");
+    sqlite3* db = open_ro(db_path);
+    char q[256];
+    (void)snprintf(q, sizeof(q), "SELECT COUNT(*) FROM io_runs WHERE key='%s';", key);
+    CHECK(sql_int(db, q) == 0, "orphaned io_runs row kept");
+    CHECK(sql_int(db, "SELECT COUNT(*) FROM runs;") == 2, "runs rows after clean-up");
+    sqlite3_close(db);
+    unsetenv("NLOLIB_STORE_MERGE_BATCH_BYTES");
+    case_free(&rc);
+    check_runs_contract(db_path);
+}
+
+/* A writer that sees an older database than the last merge recorded refuses to write. */
+static void test_stale_view_guard(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    run_case rc;
+    case_init_1d(&rc, 64u, 1.0, 4u, db_path);
+    storage_result result;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.merged == 1, "first run");
+
+    char state[1100];
+    (void)snprintf(state, sizeof(state), "%s.writer-state", db_path);
+    char content[512];
+    FILE* f = fopen(state, "rb");
+    size_t n = (f != NULL) ? fread(content, 1u, sizeof(content) - 1u, f) : 0u;
+    if (f != NULL) {
+        fclose(f);
+    }
+    content[n] = '\0';
+    const char* at = strstr(content, "\ncounter=");
+    CHECK(at != NULL, "state file has no counter: %s", content);
+    unsigned long counter = (at != NULL) ? strtoul(at + 9, NULL, 10) : 0u;
+    /* The recorded counter must be the database's current one. */
+    FILE* dbf = fopen(db_path, "rb");
+    unsigned char h[100] = {0};
+    if (dbf != NULL) {
+        CHECK(fread(h, 1u, sizeof(h), dbf) == sizeof(h), "read header");
+        fclose(dbf);
+    }
+    const unsigned long actual = ((unsigned long)h[24] << 24) | ((unsigned long)h[25] << 16) |
+                                 ((unsigned long)h[26] << 8) | (unsigned long)h[27];
+    CHECK(counter == actual, "state counter %lu != header %lu", counter, actual);
+
+    /* Pretend a later merge (by another host) committed more than this host can see. */
+    f = fopen(state, "wb");
+    fprintf(f, "nlolib-state 1\ncounter=%lu\nhost=other\n", actual + 5u);
+    fclose(f);
+    unsigned long long before = 0u;
+    long before_size = 0;
+    file_digest(db_path, &before, &before_size);
+    rc.field[0].re += 0.5;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.merged == 0, "wrote on a stale view");
+    unsigned long long after = 0u;
+    long after_size = 0;
+    file_digest(db_path, &after, &after_size);
+    CHECK(before == after, "stale-view writer changed the database");
+    unlink(state);
+    size_t merged = 0u;
+    CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL) == NLOLIB_STATUS_OK && merged == 1u,
+          "merge after the view caught up");
+    case_free(&rc);
+    check_runs_contract(db_path);
+}
+
+/* A writer killed inside a commit leaves a hot journal; the next merge rolls it back and proceeds. */
+static void test_hot_journal(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    run_case rc;
+    case_init_1d(&rc, 64u, 1.0, 4u, db_path);
+    storage_result result;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.merged == 1, "first run");
+    char first_key[STORAGE_KEY_MAX];
+    (void)snprintf(first_key, sizeof(first_key), "%s", result.key);
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        sqlite3* db = NULL;
+        if (sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READWRITE, "unix-none") != SQLITE_OK) {
+            _exit(2);
+        }
+        /* A tiny cache makes SQLite spill changed pages into the file before the commit. */
+        sqlite3_exec(db, "PRAGMA cache_size=2; BEGIN; CREATE TABLE junk(x BLOB);"
+                         "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<400) "
+                         "INSERT INTO junk SELECT randomblob(4000) FROM n;"
+                         "DELETE FROM io_record_maps;", NULL, NULL, NULL);
+        _exit(0); /* dies inside the transaction */
+    }
+    int status = 0;
+    (void)waitpid(pid, &status, 0);
+    char journal[1100];
+    (void)snprintf(journal, sizeof(journal), "%s-journal", db_path);
+    struct stat st;
+    CHECK(stat(journal, &st) == 0 && st.st_size > 0, "no hot journal was left");
+
+    rc.field[0].re += 0.5;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.merged == 1, "merge after hot journal");
+    CHECK(stat(journal, &st) != 0 || st.st_size == 0, "hot journal not rolled back");
+    sqlite3* db = open_ro(db_path);
+    CHECK(sql_int(db, "SELECT COUNT(*) FROM sqlite_master WHERE name='junk';") == 0, "rolled-back table present");
+    CHECK(sql_int(db, "SELECT COUNT(*) FROM io_record_maps;") == 8, "maps lost by the rollback");
+    sqlite3_close(db);
+    int present = 0;
+    CHECK(nlolib_storage_has_run(db_path, first_key, &present) == NLOLIB_STATUS_OK && present == 1, "first run lost");
+    case_free(&rc);
+    check_runs_contract(db_path);
+}
+
 int main(int argc, char** argv)
 {
     char root[1024];
     const char* base = (argc > 1) ? argv[1] : ".";
+    g_merge_tool = (argc > 2) ? argv[2] : NULL;
     (void)snprintf(root, sizeof(root), "%s/test_run_store_%ld", base, (long)getpid());
     (void)mkdir(root, 0775);
     (void)nlolib_set_log_level(NLOLIB_LOG_LEVEL_WARN);
@@ -991,6 +1250,11 @@ int main(int argc, char** argv)
         {"killed", test_killed_and_aborted_writer},
         {"locks", test_locks},
         {"old_database", test_old_database},
+        {"vfs_choices", test_vfs_choices},
+        {"deferred_merge", test_deferred_merge},
+        {"batched_interrupted_merge", test_batched_and_interrupted_merge},
+        {"stale_view_guard", test_stale_view_guard},
+        {"hot_journal", test_hot_journal},
     };
     for (size_t i = 0u; i < sizeof(tests) / sizeof(tests[0]); ++i) {
         path_join(sub, sizeof(sub), root, tests[i].name);

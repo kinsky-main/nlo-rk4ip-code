@@ -35,12 +35,13 @@ later).
 |---|---|
 | `<store>/nlolib/nlolib.sqlite` | The shared run database: every stored Nlolib run. This is the `sqlite_path` given to Nlolib. |
 | `<store>/nlolib/staging/` | Per-run staging databases of runs in progress (see [writing](#how-nlolib-writes-the-file)). Never read these as run databases. |
-| `<store>/nlolib/nlolib.sqlite.lock` | Lock file held by the writer that is merging a run. |
-| `<store>/nlolib/nlolib.sqlite.lock.break` | Short-lived file held while a stale lock is removed. |
-| `<store>/nlolib/nlolib.sqlite-journal` | SQLite's rollback journal, present only during a write transaction. |
+| `<store>/nlolib/nlolib.sqlite.writer-lock` | Lock file held by the writer that is merging into the shared database. |
+| `<store>/nlolib/nlolib.sqlite.writer-lock.break` | Short-lived file held while a stale writer lock is removed. |
+| `<store>/nlolib/nlolib.sqlite.writer-state` | Header state (change counter, size) the last merge committed; lets the next writer detect a stale view. |
+| `<store>/nlolib/nlolib.sqlite-journal` | SQLite's rollback journal, present only during a write transaction (a *hot* journal after a writer died mid-commit; the next merge rolls it back). |
 
 Any `sqlite_path` works the same way: the staging folder is `staging/` next to
-it and the lock is `<sqlite_path>.lock`.
+it and the lock is `<sqlite_path>.writer-lock`.
 
 The database uses SQLite's rollback journal (`journal_mode=DELETE`), never WAL,
 so it can be read on a network share. Open it read-only (`mode=ro`), set a busy
@@ -123,7 +124,7 @@ CREATE TABLE runs (
 | `key` | 16 lowercase hex digits, see [the run key](#the-run-key). |
 | `kind` | `nlolib` |
 | `file` | `<parent folder>/<file name>` of the shared database, e.g. `nlolib/nlolib.sqlite` (ModelStore rewrites it on sync). |
-| `created_at` | UTC time the run finished, `YYYY-MM-DDTHH:MM:SS.sss`. |
+| `created_at` | UTC time the run finished, written as `strftime('%Y-%m-%dT%H:%M:%f', 'now')`, i.e. `YYYY-MM-DDTHH:MM:SS.sss`. |
 | `git_commit` | Commit of the Nlolib build (40 hex digits, `-dirty` appended if the build tree had uncommitted changes to tracked files), or `nlolib-<version>` for a build without a repository. |
 | `julia_version` | Always NULL. The binding is in `nlolib_binding`. |
 
@@ -313,25 +314,84 @@ committed in batches of `chunk_records`. When the run completes, the last data,
 the layout and the `runs` row are written in one transaction; the staging file
 then holds one complete run.
 
-**Merge.** Nlolib then takes the lock, opens the shared database with a 60 s busy
-timeout in rollback-journal mode, attaches the staging file, and in one
-`BEGIN IMMEDIATE` transaction deletes any earlier run with the same key (its
-`runs` row and data), copies the new run's rows and writes its `runs` row. Raw
-chunks totalling more than 32 MiB are copied first in transactions of at most
-that size (no `runs` row yet), so readers are never locked out for long. After
-the commit it releases the lock and deletes the staging file. A row in `runs`
-therefore never appears before all of its data.
+**Merging at the end, or later.** By default the process that ran the
+simulation merges its staging file into the shared database right away. With
+`storage_options.defer_merge` (`defer_merge = true` in the bindings) or the
+environment variable `NLOLIB_STORE_DEFER_MERGE=1`, it leaves the complete file
+in `staging/` and reports `deferred = 1`; a designated host merges such files
+later with `nlolib_storage_recover_staging`, the `nlolib_store_merge` tool, or
+`NLOLib.storage_recover_staging`:
 
-**Interrupted runs.** A run that is aborted (progress callback), fails, or whose
-process is killed never touches the shared database. An aborted or failed run
-deletes its staging file; a killed one leaves an incomplete staging file (no
-`runs` row). A run that completes but cannot get the lock in time (default
-600 s) keeps its complete staging file and reports `merged = 0`.
-`nlolib_storage_recover_staging` merges complete leftovers and, on request,
-deletes incomplete ones older than a given age; it never touches files of live
-processes on the same host.
+```
+nlolib_store_merge [--discard-incomplete] [--min-age SECONDS] [--watch SECONDS] <store-folder | db.sqlite>...
+```
 
-**Lock protocol.** The lock file `<sqlite_path>.lock` is created with an
+A store folder means `<folder>/nlolib/nlolib.sqlite`; `--watch 60` repeats every
+minute. Both arrangements work at once: complete staging files are merged by
+whoever gets to them first, under the lock, and a file merged by one writer is
+gone (deleted under the lock) when the next one looks.
+
+**SQLite locking.** SQLite's default Unix locking cannot commit on a Linux SMB
+(CIFS) mount: the mount turns SQLite's byte-range locks into SMB locks, and SMB
+refuses the read-to-write upgrade SQLite uses to commit, so every write ends in
+`SQLITE_BUSY`. Nlolib therefore writes staging and shared databases on Linux and
+macOS with SQLite's `unix-none` VFS (no SQLite locks), and on Windows with
+SQLite's native locking. Writers are serialised by Nlolib's own writer lock
+file, the only lock that Linux and Windows writers both see. `unix-none` was
+chosen over `unix-dotfile` because a dotfile lock left by a crashed writer
+blocks every later writer, while `unix-none` lets the next writer roll back a
+hot journal on open. The VFS can be chosen with `NLOLIB_STORE_VFS` (`unix-none`,
+`unix-dotfile`, `unix`, … or `default` for SQLite's own choice). Readers,
+including Nlolib's own `has_run` and read functions, open the file read-only
+with SQLite's default VFS, whose read locks work on the share.
+
+Because writers on Linux take no SQLite locks, a reader may meet a commit in
+progress and get `SQLITE_BUSY` or "database disk image is malformed" for a
+moment; read in one short transaction and retry. ModelStore does.
+
+**Merge.** Nlolib takes the writer lock and then makes sure it sees the latest
+committed state:
+
+1. On a network file system (SMB/CIFS or NFS, detected from the mount) it first
+   waits 2.5 s, longer than the mounts' attribute and close caches (`actimeo=1`,
+   `closetimeo=1`). `NLOLIB_STORE_SETTLE_S` overrides the wait.
+2. It reads the file header with a fresh open and waits (up to 10 s plus four
+   times the settle time) until the header is self-consistent (page count
+   current and matching the file size) and its change counter has reached the
+   one recorded in `<sqlite_path>.writer-state` by the previous merge. If not,
+   it writes nothing and keeps the staging file.
+
+It then opens the shared database (rollback journal, 60 s busy timeout,
+`synchronous=FULL`), attaches the staging file and merges in transactions of at
+most 16 MiB of payload each (`NLOLIB_STORE_MERGE_BATCH_BYTES` overrides):
+
+1. delete any earlier run with the same key (its `runs` row first, then its
+   data) and copy the run's metadata and layout;
+2. raw chunks, then record maps, split by size;
+3. the final field and the `runs` row, in the last transaction.
+
+A small run is one transaction. Before each commit the writer checks that the
+lock file still holds its token, and it refreshes the lock after each commit.
+After the last commit it re-opens the database and checks that the header is
+consistent, the `runs` row exists and the row counts match the staging file;
+only then does it record the new header in `.writer-state`, delete the staging
+file and release the lock. A row in `runs` therefore never appears before all
+of its data.
+
+**Interrupted runs and merges.** A run that is aborted (progress callback) or
+fails never touches the shared database and deletes its staging file. A killed
+run leaves an incomplete staging file (no `runs` row). A merge interrupted
+between its transactions leaves the run's data without a `runs` row (invisible
+to readers) and its complete staging file in place: merging that file again
+starts over from step 1. If that staging file is gone, recovery with
+`discard_incomplete` (`--discard-incomplete`) deletes the partial data: rows of
+`io_runs` with a key but no `runs` row and no staging file. A run that
+completes but cannot get the lock in time (default 600 s) keeps its complete
+staging file and reports `merged = 0`. Recovery never deletes incomplete
+staging files of live processes on the same host, nor any incomplete file
+younger than `min_age_seconds`.
+
+**Lock protocol.** The lock file `<sqlite_path>.writer-lock` is created with an
 exclusive create (`O_CREAT | O_EXCL`), which SMB 3 performs atomically on the
 server, and holds text lines:
 
@@ -345,8 +405,8 @@ beat=<counter>
 token=<16 hex digits>
 ```
 
-The holder rewrites it (incrementing `beat`) between merge transactions and
-checks before its final commit that the file still holds its token, rolling back
+The holder rewrites it (incrementing `beat`) after each merge transaction and
+checks before each commit that the file still holds its token, rolling back
 otherwise. A waiting writer treats the lock as stale when its host is the
 writer's own and that process no longer exists, or when the file's content has
 not changed for the stale age (default 120 s) as measured on the waiter's own
@@ -355,16 +415,23 @@ a waiter first creates `<lock>.break` exclusively, re-reads the lock, and only
 if it still holds exactly the content judged stale renames it to a unique name,
 checks the renamed content once more (handing a fresh lock back if it caught
 one), deletes it and removes `.break`. Writers poll every 0.1–0.3 s. The
-timeout and stale age can be changed with the environment variables
-`NLOLIB_STORE_LOCK_TIMEOUT_S` and `NLOLIB_STORE_LOCK_STALE_S`.
+timeout and stale age can be changed with `NLOLIB_STORE_LOCK_TIMEOUT_S` and
+`NLOLIB_STORE_LOCK_STALE_S`.
 
-SQLite's own locks still guard every transaction, so even a writer that lost its
-lock while paused for longer than the stale age commits atomically; the lock
-file keeps merges from interleaving and avoids long `SQLITE_BUSY` waits.
+**One host.** The index contract asks that a run database's writers stay on one
+host, because a host can read stale pages for a moment after another host
+commits. The settle wait, the header check and the post-merge verification
+make a writer on a second host refuse to build on a view it can detect as
+stale, but they cannot rule out every stale page; with `defer_merge` on the
+computing hosts and `nlolib_store_merge` on one designated host, all writes to
+the shared database come from that host.
 
 **Older files.** Opening an existing file migrates it: missing tables are
-created, missing columns are added (`PRAGMA table_info` is inspected), and a
-WAL-mode file is switched to the rollback journal. Existing rows are kept.
+created, missing columns are added (`PRAGMA table_info` is inspected). A WAL
+file written by an older Nlolib is switched to the rollback journal once with
+SQLite's default VFS; on a Linux SMB mount that cannot commit, so such a file
+must be converted once (`PRAGMA journal_mode=DELETE;`) from Windows or a local
+disk. Existing rows are kept.
 
 ## The run key
 
@@ -402,8 +469,10 @@ translated expressions and constants, so no caller-supplied label is needed.
 | `storage_options.record_mode`, `raw_stride_t/x/y`, `binding` | `record_mode`, `raw_stride_t/x/y` keywords | same keywords | `storage.record_mode`, `storage.raw_stride_*` |
 | `nlolib_storage_run_key` | `storage_run_key` | `storage_run_key` | (via `calllib`) |
 | `nlolib_storage_has_run` | `storage_has_run` | `storage_has_run` | `api.storage_has_run` |
-| `nlolib_storage_recover_staging` | `storage_recover_staging` | `storage_recover_staging` | `api.storage_recover_staging` |
+| `nlolib_storage_recover_staging`, tool `nlolib_store_merge` | `storage_recover_staging` | `storage_recover_staging` | `api.storage_recover_staging` |
+| `storage_options.defer_merge` | `defer_merge` keyword | `defer_merge` keyword | `storage.defer_merge` |
 | `nlolib_storage_read_run_layout`, `nlolib_storage_read_run_array` | `read_stored_run` | (via ctypes) | (via `calllib`) |
 
-`storage_result.key` and `storage_result.merged` report the stored key and
-whether the run reached the shared database.
+`storage_result.key`, `storage_result.merged` and `storage_result.deferred`
+report the stored key, whether the run reached the shared database, and whether
+its merge was left to a later `nlolib_store_merge`.

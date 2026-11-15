@@ -388,8 +388,10 @@ NLOLIB_API nlolib_status nlolib_storage_has_run(const char* sqlite_path, const c
  * Scans `<dir of sqlite_path>/staging/` for this database's staging files.
  * Complete files (with a `runs` row) are merged under the lock and removed.
  * Incomplete files are removed when @p discard_incomplete is nonzero and the
- * file is at least @p min_age_seconds old. Files of live processes on this
- * host are always skipped.
+ * file is at least @p min_age_seconds old; incomplete files of live processes
+ * on this host are always kept. With @p discard_incomplete, the data of
+ * interrupted merges whose staging file is gone (io_runs rows with a key but no
+ * `runs` row) is deleted too and counted in @p out_discarded.
  *
  * @param sqlite_path UTF-8 path of the shared run database.
  * @param discard_incomplete Nonzero deletes incomplete staging files.

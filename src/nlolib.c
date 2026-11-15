@@ -20,6 +20,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #if defined(NLOLIB_HAVE_GIT_REVISION)
@@ -190,6 +191,15 @@ typedef struct {
     char path[RUN_STORE_PATH_MAX];
     char run_id[STORAGE_RUN_ID_MAX];
 } staging_run;
+
+static int staging_merge_deferred(const storage_options* options)
+{
+    const char* env = getenv("NLOLIB_STORE_DEFER_MERGE");
+    if (env != NULL && env[0] != '\0' && strcmp(env, "0") != 0) {
+        return 1;
+    }
+    return options->defer_merge != 0;
+}
 
 static void staging_discard(staging_run* staging)
 {
@@ -745,6 +755,14 @@ NLOLIB_API nlolib_status nlolib_propagate(
         if (progress_aborted != 0) {
             /* An interrupted run never reaches the shared database. */
             staging_discard(&staging);
+        } else if (staging_merge_deferred(&staging.options)) {
+            /* Left complete in staging/ for a designated host to merge. */
+            stored.deferred = 1;
+            log_emit(LOG_LEVEL_INFO,
+                     "[nlolib][store] run %s left in %s for a later merge into %s",
+                     stored.key,
+                     staging.path,
+                     staging.shared_path);
         } else {
             stored.merged = (run_store_merge(staging.path, staging.shared_path) == RUN_STORE_OK) ? 1 : 0;
             if (!stored.merged) {

@@ -144,7 +144,7 @@ if(UNIX)
   add_executable(test_core_run_store ${CMAKE_CURRENT_LIST_DIR}/test_run_store.c)
   target_link_libraries(test_core_run_store PRIVATE nlolib sqlite3 m)
   add_test(NAME test_core_run_store
-    COMMAND test_core_run_store "${CMAKE_CURRENT_BINARY_DIR}"
+    COMMAND test_core_run_store "${CMAKE_CURRENT_BINARY_DIR}" "$<TARGET_FILE:nlolib_store_merge>"
   )
   set_tests_properties(test_core_run_store PROPERTIES TIMEOUT 600)
 endif()
