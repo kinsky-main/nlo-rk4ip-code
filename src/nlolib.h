@@ -338,6 +338,120 @@ NLOLIB_API nlolib_status nlolib_propagate(
 NLOLIB_API int nlolib_storage_is_available(void);
 
 /**
+ * @ingroup c_api
+ * @brief Compute the run key under which nlolib_propagate() would store a run.
+ *
+ * The key is 16 lowercase hex digits: the start of a SHA-256 over a canonical
+ * text beginning with `kind=nlolib` that covers grids and steps, propagation
+ * distance, solver tolerances and step bounds, every operator expression and
+ * constant, the nonlinear model and Raman settings, digests of the input
+ * field, the potential grid and any other caller-supplied grid, and the
+ * record specification (record count or explicit z schedule, record mode,
+ * raw strides, final-field flag). Execution backend and device settings are
+ * not part of it, so the same run on CPU and Vulkan has one key.
+ *
+ * @param simulation_config Simulation configuration, as passed to nlolib_propagate().
+ * @param physics_config Physics configuration, as passed to nlolib_propagate().
+ * @param num_time_samples Total number of input field samples.
+ * @param input_field Input field buffer.
+ * @param options Propagation options including storage_options (NULL: defaults).
+ * @param out_key Destination of at least @ref STORAGE_KEY_MAX bytes; receives
+ *        the NUL-terminated key.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_storage_run_key(
+    const simulation_config* simulation_config,
+    const physics_config* physics_config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    const propagate_options* options,
+    char* out_key
+);
+
+/**
+ * @ingroup c_api
+ * @brief Ask whether a shared run database already holds a run.
+ *
+ * Opens @p sqlite_path read-only. A missing file holds no runs.
+ *
+ * @param sqlite_path UTF-8 path of the shared run database.
+ * @param key Run key from nlolib_storage_run_key().
+ * @param out_present Receives 1 when a `runs` row with @p key exists, else 0.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_storage_has_run(const char* sqlite_path, const char* key, int* out_present);
+
+/**
+ * @ingroup c_api
+ * @brief Merge or discard staging databases left by interrupted or unmerged runs.
+ *
+ * Scans `<dir of sqlite_path>/staging/` for this database's staging files.
+ * Complete files (with a `runs` row) are merged under the lock and removed.
+ * Incomplete files are removed when @p discard_incomplete is nonzero and the
+ * file is at least @p min_age_seconds old. Files of live processes on this
+ * host are always skipped.
+ *
+ * @param sqlite_path UTF-8 path of the shared run database.
+ * @param discard_incomplete Nonzero deletes incomplete staging files.
+ * @param min_age_seconds Minimum file age before an incomplete file is deleted.
+ * @param out_merged Optional count of merged files.
+ * @param out_discarded Optional count of deleted files.
+ * @param out_skipped Optional count of files left in place.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_storage_recover_staging(
+    const char* sqlite_path,
+    int discard_incomplete,
+    double min_age_seconds,
+    size_t* out_merged,
+    size_t* out_discarded,
+    size_t* out_skipped
+);
+
+/**
+ * @ingroup c_api
+ * @brief Read the grid and record counts of a stored run.
+ *
+ * @param sqlite_path UTF-8 path of a run database (shared or staging).
+ * @param key Run key.
+ * @param out_layout Destination layout.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_storage_read_run_layout(
+    const char* sqlite_path,
+    const char* key,
+    storage_run_layout* out_layout
+);
+
+/**
+ * @ingroup c_api
+ * @brief Read one stored array of a run as float64 values.
+ *
+ * @p name is one of `z`, `t`, `omega`, `x`, `y` (axes), `power`, `spectrum`
+ * (num_records x nt, record-major), `fluence_x` (num_records x nx),
+ * `fluence_y` (num_records x ny), `final_field` (nt*nx*ny complex values as
+ * interleaved re, im) or `raw` (raw_records x raw_nt*raw_nx*raw_ny complex
+ * values as interleaved re, im). Layout and units: docs/nlolib_run_database.md.
+ *
+ * @param sqlite_path UTF-8 path of a run database.
+ * @param key Run key.
+ * @param name Array name.
+ * @param out_values Destination, or NULL to query the size.
+ * @param capacity Capacity of @p out_values in doubles.
+ * @param out_count Receives the number of doubles in the array; nothing is
+ *        copied when it exceeds @p capacity.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_storage_read_run_array(
+    const char* sqlite_path,
+    const char* key,
+    const char* name,
+    double* out_values,
+    size_t capacity,
+    size_t* out_count
+);
+
+/**
  * @brief Configure optional runtime log file output.
  *
  * @param path_utf8 UTF-8 path to output log file.

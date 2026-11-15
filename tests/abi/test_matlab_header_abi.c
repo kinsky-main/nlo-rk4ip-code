@@ -50,6 +50,8 @@
 #define storage_db_cap_policy        mirror_storage_db_cap_policy
 #define storage_options              mirror_storage_options
 #define storage_result               mirror_storage_result
+#define storage_record_mode          mirror_storage_record_mode
+#define storage_run_layout           mirror_storage_run_layout
 #define step_event                   mirror_step_event
 #define propagate_output_mode        mirror_propagate_output_mode
 #define propagate_options            mirror_propagate_options
@@ -82,6 +84,9 @@
 #define PROGRESS_EVENT_FINISH              mirror_PROGRESS_EVENT_FINISH
 #define STORAGE_DB_CAP_POLICY_STOP_WRITES  mirror_STORAGE_DB_CAP_POLICY_STOP_WRITES
 #define STORAGE_DB_CAP_POLICY_FAIL         mirror_STORAGE_DB_CAP_POLICY_FAIL
+#define STORAGE_RECORD_MODE_REDUCED        mirror_STORAGE_RECORD_MODE_REDUCED
+#define STORAGE_RECORD_MODE_RAW            mirror_STORAGE_RECORD_MODE_RAW
+#define STORAGE_RECORD_MODE_REDUCED_AND_RAW mirror_STORAGE_RECORD_MODE_REDUCED_AND_RAW
 #define PROPAGATE_OUTPUT_DENSE             mirror_PROPAGATE_OUTPUT_DENSE
 #define PROPAGATE_OUTPUT_FINAL_ONLY        mirror_PROPAGATE_OUTPUT_FINAL_ONLY
 
@@ -93,6 +98,11 @@
 #define nlolib_perf_profile_reset       mirror_nlolib_perf_profile_reset
 #define nlolib_perf_profile_read        mirror_nlolib_perf_profile_read
 #define nlolib_storage_is_available     mirror_nlolib_storage_is_available
+#define nlolib_storage_run_key          mirror_nlolib_storage_run_key
+#define nlolib_storage_has_run          mirror_nlolib_storage_has_run
+#define nlolib_storage_recover_staging  mirror_nlolib_storage_recover_staging
+#define nlolib_storage_read_run_layout  mirror_nlolib_storage_read_run_layout
+#define nlolib_storage_read_run_array   mirror_nlolib_storage_read_run_array
 #define nlolib_set_log_file             mirror_nlolib_set_log_file
 #define nlolib_set_log_buffer           mirror_nlolib_set_log_buffer
 #define nlolib_clear_log_buffer         mirror_nlolib_clear_log_buffer
@@ -134,6 +144,8 @@
 #undef storage_db_cap_policy
 #undef storage_options
 #undef storage_result
+#undef storage_record_mode
+#undef storage_run_layout
 #undef step_event
 #undef propagate_output_mode
 #undef propagate_options
@@ -165,6 +177,9 @@
 #undef PROGRESS_EVENT_FINISH
 #undef STORAGE_DB_CAP_POLICY_STOP_WRITES
 #undef STORAGE_DB_CAP_POLICY_FAIL
+#undef STORAGE_RECORD_MODE_REDUCED
+#undef STORAGE_RECORD_MODE_RAW
+#undef STORAGE_RECORD_MODE_REDUCED_AND_RAW
 #undef PROPAGATE_OUTPUT_DENSE
 #undef PROPAGATE_OUTPUT_FINAL_ONLY
 
@@ -175,6 +190,11 @@
 #undef nlolib_perf_profile_reset
 #undef nlolib_perf_profile_read
 #undef nlolib_storage_is_available
+#undef nlolib_storage_run_key
+#undef nlolib_storage_has_run
+#undef nlolib_storage_recover_staging
+#undef nlolib_storage_read_run_layout
+#undef nlolib_storage_read_run_array
 #undef nlolib_set_log_file
 #undef nlolib_set_log_buffer
 #undef nlolib_clear_log_buffer
@@ -192,6 +212,7 @@
 #undef NT_MAX
 #undef RUNTIME_OPERATOR_CONSTANTS_MAX
 #undef STORAGE_RUN_ID_MAX
+#undef STORAGE_KEY_MAX
 
 #include "nlolib.h"
 
@@ -346,6 +367,11 @@ ASSERT_OFFSET(storage_options, sqlite_max_bytes);
 ASSERT_OFFSET(storage_options, chunk_records);
 ASSERT_OFFSET(storage_options, cap_policy);
 ASSERT_OFFSET(storage_options, log_final_output_field_to_db);
+ASSERT_OFFSET(storage_options, record_mode);
+ASSERT_OFFSET(storage_options, raw_stride_t);
+ASSERT_OFFSET(storage_options, raw_stride_x);
+ASSERT_OFFSET(storage_options, raw_stride_y);
+ASSERT_OFFSET(storage_options, binding);
 
 ASSERT_SIZE(storage_result);
 ASSERT_OFFSET(storage_result, run_id);
@@ -354,6 +380,27 @@ ASSERT_OFFSET(storage_result, records_spilled);
 ASSERT_OFFSET(storage_result, chunks_written);
 ASSERT_OFFSET(storage_result, db_size_bytes);
 ASSERT_OFFSET(storage_result, truncated);
+ASSERT_OFFSET(storage_result, key);
+ASSERT_OFFSET(storage_result, merged);
+
+ASSERT_SIZE(storage_run_layout);
+ASSERT_OFFSET(storage_run_layout, run_id);
+ASSERT_OFFSET(storage_run_layout, record_mode);
+ASSERT_OFFSET(storage_run_layout, nt);
+ASSERT_OFFSET(storage_run_layout, nx);
+ASSERT_OFFSET(storage_run_layout, ny);
+ASSERT_OFFSET(storage_run_layout, num_records);
+ASSERT_OFFSET(storage_run_layout, raw_nt);
+ASSERT_OFFSET(storage_run_layout, raw_nx);
+ASSERT_OFFSET(storage_run_layout, raw_ny);
+ASSERT_OFFSET(storage_run_layout, raw_records);
+ASSERT_OFFSET(storage_run_layout, raw_stride_t);
+ASSERT_OFFSET(storage_run_layout, raw_stride_x);
+ASSERT_OFFSET(storage_run_layout, raw_stride_y);
+ASSERT_OFFSET(storage_run_layout, delta_time);
+ASSERT_OFFSET(storage_run_layout, delta_x);
+ASSERT_OFFSET(storage_run_layout, delta_y);
+ASSERT_OFFSET(storage_run_layout, has_final_field);
 
 ASSERT_SIZE(step_event);
 ASSERT_OFFSET(step_event, step_index);
@@ -399,6 +446,9 @@ STATIC_ASSERT(sizeof(((mirror_propagate_output *)0)->output_records) ==
 STATIC_ASSERT(sizeof(((mirror_storage_result *)0)->run_id) ==
                   sizeof(((storage_result *)0)->run_id),
               "nlolib_matlab.h: STORAGE_RUN_ID_MAX drift");
+STATIC_ASSERT(sizeof(((mirror_storage_result *)0)->key) ==
+                  sizeof(((storage_result *)0)->key),
+              "nlolib_matlab.h: STORAGE_KEY_MAX drift");
 STATIC_ASSERT(sizeof(((mirror_runtime_operator_params *)0)->constants) ==
                   sizeof(((runtime_operator_params *)0)->constants),
               "nlolib_matlab.h: RUNTIME_OPERATOR_CONSTANTS_MAX drift");

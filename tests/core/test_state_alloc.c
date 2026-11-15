@@ -51,14 +51,17 @@ static void test_remove_db_files(void)
 {
     /* The precision keeps the sidecar names provably within their buffer. */
     const int stem_max = (int)(sizeof(g_test_db_paths[0]) - 1u);
+    static const char* const suffixes[] = {"-wal", "-shm", "-journal", ".writer-state", ".writer-lock"};
     for (size_t i = 0u; i < g_test_db_path_count; ++i) {
-        char sidecar[sizeof(g_test_db_paths[0]) + 8u];
+        char sidecar[sizeof(g_test_db_paths[0]) + 16u];
         (void)remove(g_test_db_paths[i]);
-        (void)snprintf(sidecar, sizeof(sidecar), "%.*s-wal", stem_max, g_test_db_paths[i]);
-        (void)remove(sidecar);
-        (void)snprintf(sidecar, sizeof(sidecar), "%.*s-shm", stem_max, g_test_db_paths[i]);
-        (void)remove(sidecar);
+        for (size_t s = 0u; s < sizeof(suffixes) / sizeof(suffixes[0]); ++s) {
+            (void)snprintf(sidecar, sizeof(sidecar), "%.*s%s", stem_max, g_test_db_paths[i], suffixes[s]);
+            (void)remove(sidecar);
+        }
     }
+    /* The run store's staging folder next to the databases; removed only if empty. */
+    (void)remove("staging");
 }
 
 /* A database path unique to this process, removed again when it exits. */
@@ -709,6 +712,7 @@ static void test_snapshot_store_dense_readback(void)
     storage_options.sqlite_path = db_path;
     storage_options.run_id = "test-snapshot-readback";
     storage_options.chunk_records = 2u;
+    storage_options.record_mode = STORAGE_RECORD_MODE_RAW;
 
     snapshot_store_open_params open_params;
     open_params.config = config;
@@ -939,6 +943,7 @@ static void test_storage_only_propagate_without_dense_output(void)
     storage_options.sqlite_path = db_path;
     storage_options.run_id = "test-storage-only-propagate";
     storage_options.chunk_records = 2u;
+    storage_options.record_mode = STORAGE_RECORD_MODE_RAW;
 
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
     propagate_options options = nlolib_propagate_options_default();

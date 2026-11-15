@@ -29,6 +29,34 @@ typedef struct {
 } snapshot_store_open_params;
 
 /**
+ * @brief Identity and provenance of a completed run, written to its `runs` row.
+ */
+typedef struct {
+    const char* key;
+    const char* index_file;
+    const char* git_commit;
+    const char* binding;
+    const char* version;
+    const char* backend;
+    const char* input_sha256;
+    const char* potential_sha256;
+} snapshot_store_finalize_params;
+
+struct sqlite3;
+
+/**
+ * @brief Create or migrate every table of a run database on an open connection.
+ *
+ * Creates the io_* data tables, the record-map tables and the contract
+ * `runs` table, and adds columns missing from databases written by older
+ * versions (inspected with `PRAGMA table_info`).
+ *
+ * @param db Open SQLite connection.
+ * @return int 0 on success.
+ */
+int snapshot_store_ensure_schema(struct sqlite3* db);
+
+/**
  * @brief Open and initialize a snapshot store.
  *
  * Returns NULL when storage is disabled or initialization fails.
@@ -69,6 +97,30 @@ snapshot_store_status snapshot_store_write_final_output_field(
     const nlo_complex* field,
     size_t num_time_samples
 );
+
+/**
+ * @brief Set the z position of every record (explicit schedule or uniform spacing).
+ *
+ * @param store Snapshot store handle.
+ * @param explicit_record_z Explicit record positions, or NULL for uniform spacing over [0, z_end].
+ * @param explicit_record_z_count Entries in @p explicit_record_z.
+ */
+void snapshot_store_set_record_schedule(
+    snapshot_store* store,
+    const double* explicit_record_z,
+    size_t explicit_record_z_count
+);
+
+/**
+ * @brief Write the last data, the record layout and the `runs` row in one transaction.
+ *
+ * After this call the store's database holds a complete run.
+ *
+ * @param store Snapshot store handle.
+ * @param params Run identity and provenance.
+ * @return snapshot_store_status Write status.
+ */
+snapshot_store_status snapshot_store_finalize(snapshot_store* store, const snapshot_store_finalize_params* params);
 
 /**
  * @brief Flush any pending chunk to persistent storage.

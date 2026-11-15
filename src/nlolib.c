@@ -12,13 +12,25 @@
 #include "core/sim_dimensions_internal.h"
 #include "io/log_sink.h"
 #include "io/propagate_log.h"
+#include "io/run_store.h"
 #include "io/snapshot_store.h"
 #include "numerics/rk4_kernel.h"
 #include "utility/perf_profile.h"
 #include <float.h>
 #include <math.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
+
+#if defined(NLOLIB_HAVE_GIT_REVISION)
+#include "nlolib_git_revision.h"
+#endif
+#ifndef NLOLIB_VERSION_STRING
+#define NLOLIB_VERSION_STRING "unknown"
+#endif
+#ifndef NLOLIB_GIT_COMMIT
+#define NLOLIB_GIT_COMMIT "nlolib-" NLOLIB_VERSION_STRING
+#endif
 
 static nlolib_status propagate_fail(const char* stage, nlolib_status status)
 {
@@ -167,6 +179,98 @@ static int storage_enabled(const storage_options* storage_options)
 static int storage_log_final_output_enabled(const storage_options* storage_options)
 {
     return (storage_options != NULL && storage_options->log_final_output_field_to_db != 0);
+}
+
+/* A stored run streams into a staging database and is merged into the shared one at the end. */
+typedef struct {
+    int active;
+    storage_options options;
+    run_store_key_info key_info;
+    char shared_path[RUN_STORE_PATH_MAX];
+    char path[RUN_STORE_PATH_MAX];
+    char run_id[STORAGE_RUN_ID_MAX];
+} staging_run;
+
+static void staging_discard(staging_run* staging)
+{
+    if (staging->active) {
+        run_store_discard(staging->path);
+        staging->active = 0;
+    }
+}
+
+static int staging_begin(
+    staging_run* staging,
+    const sim_config* config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    size_t num_recorded_samples,
+    const propagate_options* options
+)
+{
+    memset(staging, 0, sizeof(*staging));
+    if (!storage_enabled(options->storage_options)) {
+        return 0;
+    }
+    staging->options = *options->storage_options;
+    if (strlen(staging->options.sqlite_path) >= sizeof(staging->shared_path) ||
+        run_store_compute_key(config,
+                                  num_time_samples,
+                                  input_field,
+                                  num_recorded_samples,
+                                  options->explicit_record_z,
+                                  options->explicit_record_z_count,
+                                  &staging->options,
+                                  &staging->key_info) != 0) {
+        return -1;
+    }
+    (void)snprintf(staging->shared_path, sizeof(staging->shared_path), "%s", staging->options.sqlite_path);
+    if (run_store_make_staging_path(staging->shared_path,
+                                        staging->key_info.key,
+                                        staging->path,
+                                        sizeof(staging->path)) != 0) {
+        log_emit(LOG_LEVEL_ERROR,
+                 "[nlolib][store] cannot create the staging folder next to %s",
+                 staging->shared_path);
+        return -1;
+    }
+    if (staging->options.run_id == NULL || staging->options.run_id[0] == '\0') {
+        (void)snprintf(staging->run_id, sizeof(staging->run_id), "%s", staging->key_info.key);
+        staging->options.run_id = staging->run_id;
+    }
+    staging->options.sqlite_path = staging->path;
+    staging->active = 1;
+    return 0;
+}
+
+static int staging_finalize(staging_run* staging, const simulation_state* state)
+{
+    char index_file[RUN_STORE_PATH_MAX];
+    run_store_index_file(staging->shared_path, index_file, sizeof(index_file));
+    const vector_backend_type used = vector_backend_get_type(state->backend);
+    snapshot_store_finalize_params params;
+    memset(&params, 0, sizeof(params));
+    params.key = staging->key_info.key;
+    params.index_file = index_file;
+    params.git_commit = NLOLIB_GIT_COMMIT;
+    params.binding = staging->options.binding;
+    params.version = NLOLIB_VERSION_STRING;
+    params.backend = (used == VECTOR_BACKEND_VULKAN) ? "vulkan" : "cpu";
+    params.input_sha256 = staging->key_info.input_sha256;
+    params.potential_sha256 = staging->key_info.potential_sha256;
+    return (snapshot_store_finalize(state->snapshot_store, &params) == SNAPSHOT_STORE_STATUS_ERROR) ? -1 : 0;
+}
+
+static nlolib_status propagate_fail_state(
+    simulation_state* state,
+    staging_run* staging,
+    const char* stage,
+    nlolib_status status
+)
+{
+    free_simulation_state(state);
+    staging_discard(staging);
+    return propagate_fail(stage, status);
 }
 
 static int validate_explicit_record_schedule(
@@ -458,6 +562,16 @@ NLOLIB_API nlolib_status nlolib_propagate(
         (local_options.exec_options != NULL)
             ? *local_options.exec_options
             : execution_options_default(VECTOR_BACKEND_AUTO);
+    staging_run staging;
+    if (staging_begin(&staging,
+                      config,
+                      num_time_samples,
+                      input_field,
+                      num_recorded_samples,
+                      &local_options) != 0) {
+        return propagate_fail("storage.staging", NLOLIB_STATUS_ALLOCATION_FAILED);
+    }
+
     simulation_state* state = NULL;
     allocation_info allocation_info = {0};
     const double assess_init_start_ms = perf_profile_now_ms();
@@ -467,7 +581,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                                      num_time_samples,
                                                      num_recorded_samples,
                                                      &local_exec_options,
-                                                     local_options.storage_options,
+                                                     &staging.options,
                                                      &allocation_info,
                                                      &state)
             : init_simulation_state(config,
@@ -477,9 +591,15 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                         &allocation_info,
                                         &state);
     if (init_status != 0 || state == NULL) {
+        staging_discard(&staging);
         return propagate_fail("init_simulation_state", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
     perf_profile_add_host_slot(PERF_HOST_SLOT_INIT_MS, perf_profile_now_ms() - assess_init_start_ms);
+    if (state->snapshot_store != NULL) {
+        snapshot_store_set_record_schedule(state->snapshot_store,
+                                               local_options.explicit_record_z,
+                                               local_options.explicit_record_z_count);
+    }
     state->output_records = local_output.output_records;
     state->output_record_capacity = local_output.output_record_capacity;
     state->explicit_record_z = local_options.explicit_record_z;
@@ -495,8 +615,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                          &mem_info);
 
     if (simulation_state_upload_initial_field(state, input_field) != VEC_STATUS_OK) {
-        free_simulation_state(state);
-        return propagate_fail("upload_initial_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+        return propagate_fail_state(state, &staging, "upload_initial_field", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
 
     state->step_event_buffer = local_output.output_step_events;
@@ -514,8 +633,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
     (void)log_set_progress_callback(NULL, NULL);
 
     if (state->snapshot_status != VEC_STATUS_OK) {
-        free_simulation_state(state);
-        return propagate_fail("snapshot_capture", NLOLIB_STATUS_ALLOCATION_FAILED);
+        return propagate_fail_state(state, &staging, "snapshot_capture", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
 
     size_t records_available = num_recorded_samples;
@@ -545,13 +663,11 @@ NLOLIB_API nlolib_status nlolib_propagate(
             final_record = state->snapshot_scratch_record;
         }
         if (final_record == NULL) {
-            free_simulation_state(state);
-            return propagate_fail("storage.final_record_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
+            return propagate_fail_state(state, &staging, "storage.final_record_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
 
         if (simulation_state_download_current_field(state, final_record) != VEC_STATUS_OK) {
-            free_simulation_state(state);
-            return propagate_fail("storage.download_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+            return propagate_fail_state(state, &staging, "storage.download_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
         final_output_field_cached = final_record;
         final_downloaded = (final_record == local_output.output_records) ? 1 : 0;
@@ -562,12 +678,10 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                             final_record,
                                             state->num_time_samples);
         if (write_status == SNAPSHOT_STORE_STATUS_ERROR) {
-            free_simulation_state(state);
-            return propagate_fail("storage.write_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+            return propagate_fail_state(state, &staging, "storage.write_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
         if (snapshot_store_flush(state->snapshot_store) == SNAPSHOT_STORE_STATUS_ERROR) {
-            free_simulation_state(state);
-            return propagate_fail("storage.flush_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+            return propagate_fail_state(state, &staging, "storage.flush_final_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
         snapshot_store_get_result(state->snapshot_store, &state->snapshot_result);
     }
@@ -577,8 +691,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
         num_recorded_samples == 1u) {
         if (!final_downloaded &&
             simulation_state_download_current_field(state, local_output.output_records) != VEC_STATUS_OK) {
-            free_simulation_state(state);
-            return propagate_fail("download_current_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+            return propagate_fail_state(state, &staging, "download_current_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
         final_output_field_cached = local_output.output_records;
     } else if (local_options.return_records != 0 && local_output.output_records != NULL) {
@@ -596,12 +709,10 @@ NLOLIB_API nlolib_status nlolib_propagate(
         if (final_output_field == NULL) {
             final_output_scratch = state->snapshot_scratch_record;
             if (final_output_scratch == NULL) {
-                free_simulation_state(state);
-                return propagate_fail("storage.final_output_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
+                return propagate_fail_state(state, &staging, "storage.final_output_buffer", NLOLIB_STATUS_ALLOCATION_FAILED);
             }
             if (simulation_state_download_current_field(state, final_output_scratch) != VEC_STATUS_OK) {
-                free_simulation_state(state);
-                return propagate_fail("storage.download_output_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+                return propagate_fail_state(state, &staging, "storage.download_output_field", NLOLIB_STATUS_ALLOCATION_FAILED);
             }
             final_output_field = final_output_scratch;
         }
@@ -610,17 +721,16 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                                         final_output_field,
                                                         state->num_time_samples) ==
             SNAPSHOT_STORE_STATUS_ERROR) {
-            free_simulation_state(state);
-            return propagate_fail("storage.write_output_field", NLOLIB_STATUS_ALLOCATION_FAILED);
+            return propagate_fail_state(state, &staging, "storage.write_output_field", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
     }
 
-    if (local_output.storage_result != NULL) {
-        if (state->snapshot_store != NULL) {
-            snapshot_store_get_result(state->snapshot_store, local_output.storage_result);
-        } else {
-            *local_output.storage_result = (storage_result){0};
+    storage_result stored = {0};
+    if (state->snapshot_store != NULL) {
+        if (progress_aborted == 0 && staging_finalize(&staging, state) != 0) {
+            return propagate_fail_state(state, &staging, "storage.finalize", NLOLIB_STATUS_ALLOCATION_FAILED);
         }
+        snapshot_store_get_result(state->snapshot_store, &stored);
     }
 
     const size_t step_events_written = state->step_events_written;
@@ -630,6 +740,26 @@ NLOLIB_API nlolib_status nlolib_propagate(
         records_written_actual = records_available;
     }
     free_simulation_state(state);
+
+    if (staging.active) {
+        if (progress_aborted != 0) {
+            /* An interrupted run never reaches the shared database. */
+            staging_discard(&staging);
+        } else {
+            stored.merged = (run_store_merge(staging.path, staging.shared_path) == RUN_STORE_OK) ? 1 : 0;
+            if (!stored.merged) {
+                log_emit(LOG_LEVEL_WARN,
+                         "[nlolib][store] run %s is complete in %s but not merged into %s; "
+                         "merge it later with nlolib_storage_recover_staging().",
+                         stored.key,
+                         staging.path,
+                         staging.shared_path);
+            }
+        }
+    }
+    if (local_output.storage_result != NULL) {
+        *local_output.storage_result = stored;
+    }
     if (local_output.records_written != NULL) {
         *local_output.records_written = records_written_actual;
     }
@@ -699,4 +829,131 @@ NLOLIB_API nlolib_status nlolib_set_progress_options(
 NLOLIB_API nlolib_status nlolib_set_progress_stream(int stream_mode)
 {
     return map_log_status(log_set_progress_stream(stream_mode));
+}
+
+static nlolib_status map_store_status(run_store_status status)
+{
+    switch (status) {
+        case RUN_STORE_OK:
+            return NLOLIB_STATUS_OK;
+        case RUN_STORE_LOCK_TIMEOUT:
+        case RUN_STORE_INCOMPLETE:
+        case RUN_STORE_ERROR:
+        default:
+            return snapshot_store_is_available() ? NLOLIB_STATUS_ALLOCATION_FAILED : NLOLIB_STATUS_NOT_IMPLEMENTED;
+    }
+}
+
+static int is_run_key(const char* key)
+{
+    if (key == NULL || strlen(key) != 16u) {
+        return 0;
+    }
+    for (size_t i = 0u; i < 16u; ++i) {
+        const char c = key[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+NLOLIB_API nlolib_status nlolib_storage_run_key(
+    const simulation_config* simulation_config,
+    const physics_config* physics_config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    const propagate_options* options,
+    char* out_key
+)
+{
+    if (simulation_config == NULL || input_field == NULL || out_key == NULL || num_time_samples == 0u) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    out_key[0] = '\0';
+    const sim_config merged = merge_simulation_and_physics(simulation_config, physics_config);
+    const propagate_options local_options =
+        (options != NULL) ? *options : nlolib_propagate_options_default();
+    size_t num_recorded_samples = local_options.num_recorded_samples;
+    if (local_options.output_mode == PROPAGATE_OUTPUT_FINAL_ONLY) {
+        num_recorded_samples = 1u;
+    }
+    if (local_options.explicit_record_z != NULL && local_options.explicit_record_z_count > 0u) {
+        num_recorded_samples = local_options.explicit_record_z_count;
+    }
+    num_recorded_samples = resolve_effective_record_count(&merged, num_recorded_samples);
+    if (num_recorded_samples == 0u) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    run_store_key_info info;
+    if (run_store_compute_key(&merged,
+                                  num_time_samples,
+                                  input_field,
+                                  num_recorded_samples,
+                                  local_options.explicit_record_z,
+                                  local_options.explicit_record_z_count,
+                                  local_options.storage_options,
+                                  &info) != 0) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    memcpy(out_key, info.key, STORAGE_KEY_MAX);
+    return NLOLIB_STATUS_OK;
+}
+
+NLOLIB_API nlolib_status nlolib_storage_has_run(const char* sqlite_path, const char* key, int* out_present)
+{
+    if (out_present != NULL) {
+        *out_present = 0;
+    }
+    if (sqlite_path == NULL || sqlite_path[0] == '\0' || out_present == NULL || !is_run_key(key)) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    return map_store_status(run_store_has_key(sqlite_path, key, out_present));
+}
+
+NLOLIB_API nlolib_status nlolib_storage_recover_staging(
+    const char* sqlite_path,
+    int discard_incomplete,
+    double min_age_seconds,
+    size_t* out_merged,
+    size_t* out_discarded,
+    size_t* out_skipped
+)
+{
+    if (sqlite_path == NULL || sqlite_path[0] == '\0') {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    return map_store_status(run_store_recover(sqlite_path,
+                                                  discard_incomplete,
+                                                  min_age_seconds,
+                                                  out_merged,
+                                                  out_discarded,
+                                                  out_skipped));
+}
+
+NLOLIB_API nlolib_status nlolib_storage_read_run_layout(
+    const char* sqlite_path,
+    const char* key,
+    storage_run_layout* out_layout
+)
+{
+    if (sqlite_path == NULL || out_layout == NULL || !is_run_key(key)) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    return map_store_status(run_store_read_layout(sqlite_path, key, out_layout));
+}
+
+NLOLIB_API nlolib_status nlolib_storage_read_run_array(
+    const char* sqlite_path,
+    const char* key,
+    const char* name,
+    double* out_values,
+    size_t capacity,
+    size_t* out_count
+)
+{
+    if (sqlite_path == NULL || name == NULL || out_count == NULL || !is_run_key(key)) {
+        return NLOLIB_STATUS_INVALID_ARGUMENT;
+    }
+    return map_store_status(run_store_read_array(sqlite_path, key, name, out_values, capacity, out_count));
 }

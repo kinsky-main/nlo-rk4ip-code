@@ -18,6 +18,8 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/io/propagate_log.c
   ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
   ${CMAKE_SOURCE_DIR}/src/io/snapshot_store.c
+  ${CMAKE_SOURCE_DIR}/src/io/run_store.c
+  ${CMAKE_SOURCE_DIR}/src/io/sha256.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
   ${CMAKE_SOURCE_DIR}/src/utility/rk4_debug.c
   ${CMAKE_SOURCE_DIR}/src/utility/state_debug.c
@@ -135,3 +137,14 @@ if(UNIX)
 endif()
 
 add_test(NAME test_core_operator_lowering COMMAND test_core_operator_lowering)
+
+# Stored runs: staging, locked merge into a shared database, the ModelStore
+# contract `runs` row and reduced record maps. Uses fork/kill, so POSIX only.
+if(UNIX)
+  add_executable(test_core_run_store ${CMAKE_CURRENT_LIST_DIR}/test_run_store.c)
+  target_link_libraries(test_core_run_store PRIVATE nlolib sqlite3 m)
+  add_test(NAME test_core_run_store
+    COMMAND test_core_run_store "${CMAKE_CURRENT_BINARY_DIR}"
+  )
+  set_tests_properties(test_core_run_store PROPERTIES TIMEOUT 600)
+endif()

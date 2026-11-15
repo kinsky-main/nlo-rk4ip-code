@@ -1,11 +1,15 @@
 /**
  * @file snapshot_store.c
- * @brief SQLite-backed chunked snapshot storage.
+ * @brief SQLite-backed run storage: reduced record maps, raw chunks and the `runs` row.
+ *
+ * The table layout is documented in docs/nlolib_run_database.md.
  */
 
 #include "io/snapshot_store.h"
 #include "io/log_sink.h"
+#include "core/sim_dimensions_internal.h"
 #include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +18,8 @@
 
 #if defined(HAVE_SQLITE3)
 #include <sqlite3.h>
+#include <fftw3.h>
+#include "io/run_store.h"
 
 #ifndef STORAGE_DEFAULT_DB_MAX_BYTES
 #define STORAGE_DEFAULT_DB_MAX_BYTES (50ull * 1024ull * 1024ull * 1024ull)
@@ -27,15 +33,20 @@
 #define STORAGE_DB_SIZE_SAFETY_BYTES (1ull << 20)
 #endif
 
+#define SNAPSHOT_TWO_PI 6.283185307179586476925286766559
+
 struct snapshot_store {
     sqlite3* db;
     sqlite3_stmt* insert_chunk_stmt;
     sqlite3_stmt* update_run_stmt;
     sqlite3_stmt* upsert_final_output_stmt;
+    sqlite3_stmt* insert_map_stmt;
     sqlite3_stmt* page_count_stmt;
     sqlite3_stmt* page_size_stmt;
+    const sim_config* config;
     nlo_complex* chunk_buffer;
     size_t num_time_samples;
+    size_t num_recorded_samples;
     size_t chunk_records;
     size_t chunk_fill;
     size_t chunk_start_record;
@@ -43,6 +54,37 @@ struct snapshot_store {
     size_t max_bytes;
     storage_db_cap_policy cap_policy;
     int accept_writes;
+    int in_txn;
+    size_t records_in_txn;
+
+    storage_record_mode record_mode;
+    int store_maps;
+    int store_raw;
+    int store_final_field;
+    size_t nt;
+    size_t nx;
+    size_t ny;
+    double dt;
+    double dx;
+    double dy;
+    size_t stride_t;
+    size_t stride_x;
+    size_t stride_y;
+    size_t raw_nt;
+    size_t raw_nx;
+    size_t raw_ny;
+    size_t raw_samples;
+    size_t raw_records;
+    size_t records_seen;
+    double* record_z;
+    double* map_power;
+    double* map_spectrum;
+    double* map_fluence_x;
+    double* map_fluence_y;
+    fftw_complex* fft_in;
+    fftw_complex* fft_out;
+    fftw_plan fft_plan;
+
     storage_result result;
 };
 
@@ -196,6 +238,7 @@ static int prepare(sqlite3* db, const char* sql, sqlite3_stmt** out_stmt)
     }
     *out_stmt = NULL;
     if (sqlite3_prepare_v2(db, sql, -1, out_stmt, NULL) != SQLITE_OK) {
+        log_emit(LOG_LEVEL_ERROR, "[nlolib][io] sqlite prepare error: %s", sqlite3_errmsg(db));
         return -1;
     }
     return 0;
@@ -207,12 +250,47 @@ static int bind_text(sqlite3_stmt* stmt, int index, const char* text)
     return (sqlite3_bind_text(stmt, index, safe, -1, SQLITE_TRANSIENT) == SQLITE_OK) ? 0 : -1;
 }
 
+static int bind_doubles(sqlite3_stmt* stmt, int index, const double* values, size_t count)
+{
+    const size_t bytes = count * sizeof(double);
+    if (bytes > (size_t)INT_MAX) {
+        return -1;
+    }
+    if (count == 0u) {
+        return (sqlite3_bind_zeroblob(stmt, index, 0) == SQLITE_OK) ? 0 : -1;
+    }
+    return (sqlite3_bind_blob(stmt, index, values, (int)bytes, SQLITE_TRANSIENT) == SQLITE_OK) ? 0 : -1;
+}
+
 static int step_done(sqlite3_stmt* stmt)
 {
     const int rc = sqlite3_step(stmt);
     sqlite3_reset(stmt);
     sqlite3_clear_bindings(stmt);
     return (rc == SQLITE_DONE) ? 0 : -1;
+}
+
+static int store_txn_begin(snapshot_store* store)
+{
+    if (store->in_txn) {
+        return 0;
+    }
+    if (sqlite_exec(store->db, "BEGIN;") != 0) {
+        return -1;
+    }
+    store->in_txn = 1;
+    store->records_in_txn = 0u;
+    return 0;
+}
+
+static int store_txn_commit(snapshot_store* store)
+{
+    if (!store->in_txn) {
+        return 0;
+    }
+    store->in_txn = 0;
+    store->records_in_txn = 0u;
+    return sqlite_exec(store->db, "COMMIT;");
 }
 
 static int query_db_size(sqlite3_stmt* page_count_stmt, sqlite3_stmt* page_size_stmt, size_t* out_size)
@@ -290,7 +368,7 @@ static snapshot_store_status store_flush_chunk(snapshot_store* store)
     }
 
     size_t payload_bytes = 0u;
-    if (checked_mul_size_t(store->chunk_fill, store->num_time_samples, &payload_bytes) != 0 ||
+    if (checked_mul_size_t(store->chunk_fill, store->raw_samples, &payload_bytes) != 0 ||
         checked_mul_size_t(payload_bytes, sizeof(nlo_complex), &payload_bytes) != 0 ||
         payload_bytes > (size_t)INT_MAX) {
         return SNAPSHOT_STORE_STATUS_ERROR;
@@ -318,6 +396,9 @@ static snapshot_store_status store_flush_chunk(snapshot_store* store)
         }
     }
 
+    if (store_txn_begin(store) != 0) {
+        return SNAPSHOT_STORE_STATUS_ERROR;
+    }
     if (bind_text(store->insert_chunk_stmt, 1, store->result.run_id) != 0) {
         return SNAPSHOT_STORE_STATUS_ERROR;
     }
@@ -341,6 +422,7 @@ static snapshot_store_status store_flush_chunk(snapshot_store* store)
         return SNAPSHOT_STORE_STATUS_ERROR;
     }
 
+    store->raw_records += store->chunk_fill;
     store->result.records_spilled += store->chunk_fill;
     store->result.chunks_written += 1u;
     store->chunk_index += 1u;
@@ -364,12 +446,95 @@ static snapshot_store_status store_flush_chunk(snapshot_store* store)
     return SNAPSHOT_STORE_STATUS_OK;
 }
 
-static int store_initialize_schema(sqlite3* db)
+// MARK: Schema
+
+static const char* k_runs_param_columns[][2] = {
+    {"nlolib_version", "TEXT"},
+    {"nlolib_binding", "TEXT"},
+    {"nlolib_backend", "TEXT"},
+    {"nlolib_run_id", "TEXT"},
+    {"nlolib_nt", "INTEGER"},
+    {"nlolib_nx", "INTEGER"},
+    {"nlolib_ny", "INTEGER"},
+    {"nlolib_dt", "REAL"},
+    {"nlolib_dx", "REAL"},
+    {"nlolib_dy", "REAL"},
+    {"nlolib_z_end", "REAL"},
+    {"nlolib_h_start", "REAL"},
+    {"nlolib_h_min", "REAL"},
+    {"nlolib_h_max", "REAL"},
+    {"nlolib_tol", "REAL"},
+    {"nlolib_linear_factor_expr", "TEXT"},
+    {"nlolib_linear_expr", "TEXT"},
+    {"nlolib_potential_expr", "TEXT"},
+    {"nlolib_dispersion_factor_expr", "TEXT"},
+    {"nlolib_dispersion_expr", "TEXT"},
+    {"nlolib_nonlinear_expr", "TEXT"},
+    {"nlolib_constants", "TEXT"},
+    {"nlolib_nonlinear_model", "TEXT"},
+    {"nlolib_gamma", "REAL"},
+    {"nlolib_raman_fraction", "REAL"},
+    {"nlolib_raman_tau1", "REAL"},
+    {"nlolib_raman_tau2", "REAL"},
+    {"nlolib_shock_omega0", "REAL"},
+    {"nlolib_input_sha256", "TEXT"},
+    {"nlolib_potential_sha256", "TEXT"},
+    {"nlolib_num_records", "INTEGER"},
+    {"nlolib_records_written", "INTEGER"},
+    {"nlolib_record_mode", "TEXT"},
+    {"nlolib_raw_stride_t", "INTEGER"},
+    {"nlolib_raw_stride_x", "INTEGER"},
+    {"nlolib_raw_stride_y", "INTEGER"},
+    {"nlolib_final_field", "INTEGER"},
+    {"nlolib_truncated", "INTEGER"}
+};
+
+#define RUNS_PARAM_COUNT (sizeof(k_runs_param_columns) / sizeof(k_runs_param_columns[0]))
+
+static int table_has_column(sqlite3* db, const char* table, const char* column, int* out_has)
+{
+    char sql[128];
+    (void)snprintf(sql, sizeof(sql), "PRAGMA table_info(%s);", table);
+    sqlite3_stmt* stmt = NULL;
+    if (prepare(db, sql, &stmt) != 0) {
+        return -1;
+    }
+    *out_has = 0;
+    for (;;) {
+        const int rc = sqlite3_step(stmt);
+        if (rc == SQLITE_DONE) {
+            break;
+        }
+        if (rc != SQLITE_ROW) {
+            sqlite3_finalize(stmt);
+            return -1;
+        }
+        const char* col_name = (const char*)sqlite3_column_text(stmt, 1);
+        if (col_name != NULL && sqlite3_stricmp(col_name, column) == 0) {
+            *out_has = 1;
+        }
+    }
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int ensure_column(sqlite3* db, const char* table, const char* column, const char* decl)
+{
+    int has = 0;
+    if (table_has_column(db, table, column, &has) != 0) {
+        return -1;
+    }
+    if (has) {
+        return 0;
+    }
+    char sql[256];
+    (void)snprintf(sql, sizeof(sql), "ALTER TABLE %s ADD COLUMN \"%s\" %s;", table, column, decl);
+    return sqlite_exec(db, sql);
+}
+
+int snapshot_store_ensure_schema(struct sqlite3* db)
 {
     static const char* schema_sql =
-        "PRAGMA journal_mode=WAL;"
-        "PRAGMA synchronous=NORMAL;"
-        "PRAGMA foreign_keys=ON;"
         "CREATE TABLE IF NOT EXISTS io_system_config ("
         "  system_hash TEXT PRIMARY KEY,"
         "  backend_type INTEGER NOT NULL,"
@@ -415,6 +580,7 @@ static int store_initialize_schema(sqlite3* db)
         "  db_size_bytes INTEGER NOT NULL DEFAULT 0,"
         "  truncated INTEGER NOT NULL DEFAULT 0,"
         "  created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  key TEXT,"
         "  FOREIGN KEY(system_hash) REFERENCES io_system_config(system_hash),"
         "  FOREIGN KEY(config_hash) REFERENCES io_sim_config(config_hash)"
         ");"
@@ -434,59 +600,63 @@ static int store_initialize_schema(sqlite3* db)
         "  payload BLOB NOT NULL,"
         "  created_utc TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
         "  FOREIGN KEY(run_id) REFERENCES io_runs(run_id) ON DELETE CASCADE"
+        ");"
+        "CREATE TABLE IF NOT EXISTS io_record_layout ("
+        "  run_id TEXT PRIMARY KEY,"
+        "  record_mode TEXT NOT NULL,"
+        "  nt INTEGER NOT NULL,"
+        "  nx INTEGER NOT NULL,"
+        "  ny INTEGER NOT NULL,"
+        "  dt REAL NOT NULL,"
+        "  dx REAL NOT NULL,"
+        "  dy REAL NOT NULL,"
+        "  num_records INTEGER NOT NULL DEFAULT 0,"
+        "  raw_stride_t INTEGER NOT NULL,"
+        "  raw_stride_x INTEGER NOT NULL,"
+        "  raw_stride_y INTEGER NOT NULL,"
+        "  raw_nt INTEGER NOT NULL,"
+        "  raw_nx INTEGER NOT NULL,"
+        "  raw_ny INTEGER NOT NULL,"
+        "  raw_records INTEGER NOT NULL DEFAULT 0,"
+        "  record_z BLOB NOT NULL,"
+        "  t_axis BLOB NOT NULL,"
+        "  omega_axis BLOB NOT NULL,"
+        "  x_axis BLOB NOT NULL,"
+        "  y_axis BLOB NOT NULL,"
+        "  FOREIGN KEY(run_id) REFERENCES io_runs(run_id) ON DELETE CASCADE"
+        ");"
+        "CREATE TABLE IF NOT EXISTS io_record_maps ("
+        "  run_id TEXT NOT NULL,"
+        "  record_index INTEGER NOT NULL,"
+        "  z REAL NOT NULL,"
+        "  power BLOB NOT NULL,"
+        "  spectrum BLOB NOT NULL,"
+        "  fluence_x BLOB NOT NULL,"
+        "  fluence_y BLOB NOT NULL,"
+        "  PRIMARY KEY(run_id, record_index),"
+        "  FOREIGN KEY(run_id) REFERENCES io_runs(run_id) ON DELETE CASCADE"
+        ");"
+        "CREATE TABLE IF NOT EXISTS runs ("
+        "    key TEXT PRIMARY KEY,"
+        "    kind TEXT NOT NULL,"
+        "    file TEXT NOT NULL,"
+        "    created_at TEXT,"
+        "    git_commit TEXT,"
+        "    julia_version TEXT"
         ");";
 
-    if (sqlite_exec(db, schema_sql) != 0) {
+    if (db == NULL || sqlite_exec(db, schema_sql) != 0) {
         return -1;
     }
 
-    sqlite3_stmt* pragma_stmt = NULL;
-    if (prepare(db, "PRAGMA table_info(io_sim_config);", &pragma_stmt) != 0) {
+    /* Columns added after the first schema version; older files get them on open. */
+    if (ensure_column(db, "io_sim_config", "linear_factor_expr", "TEXT") != 0 ||
+        ensure_column(db, "io_sim_config", "linear_expr", "TEXT") != 0 ||
+        ensure_column(db, "io_sim_config", "potential_expr", "TEXT") != 0 ||
+        ensure_column(db, "io_runs", "key", "TEXT") != 0) {
         return -1;
     }
-
-    int has_linear_factor_expr = 0;
-    int has_linear_expr = 0;
-    int has_potential_expr = 0;
-    for (;;) {
-        const int rc = sqlite3_step(pragma_stmt);
-        if (rc == SQLITE_DONE) {
-            break;
-        }
-        if (rc != SQLITE_ROW) {
-            sqlite3_finalize(pragma_stmt);
-            return -1;
-        }
-
-        const unsigned char* raw_name = sqlite3_column_text(pragma_stmt, 1);
-        const char* col_name = (const char*)raw_name;
-        if (col_name == NULL) {
-            continue;
-        }
-        if (strcmp(col_name, "linear_factor_expr") == 0) {
-            has_linear_factor_expr = 1;
-        } else if (strcmp(col_name, "linear_expr") == 0) {
-            has_linear_expr = 1;
-        } else if (strcmp(col_name, "potential_expr") == 0) {
-            has_potential_expr = 1;
-        }
-    }
-    sqlite3_finalize(pragma_stmt);
-
-    if (!has_linear_factor_expr &&
-        sqlite_exec(db, "ALTER TABLE io_sim_config ADD COLUMN linear_factor_expr TEXT;") != 0) {
-        return -1;
-    }
-    if (!has_linear_expr &&
-        sqlite_exec(db, "ALTER TABLE io_sim_config ADD COLUMN linear_expr TEXT;") != 0) {
-        return -1;
-    }
-    if (!has_potential_expr &&
-        sqlite_exec(db, "ALTER TABLE io_sim_config ADD COLUMN potential_expr TEXT;") != 0) {
-        return -1;
-    }
-
-    return 0;
+    return sqlite_exec(db, "CREATE INDEX IF NOT EXISTS io_runs_key ON io_runs(key);");
 }
 
 static int store_insert_metadata(
@@ -593,13 +763,159 @@ static int store_insert_metadata(
     return 0;
 }
 
+static const char* record_mode_name(storage_record_mode mode)
+{
+    switch (mode) {
+        case STORAGE_RECORD_MODE_RAW:
+            return "raw";
+        case STORAGE_RECORD_MODE_REDUCED_AND_RAW:
+            return "reduced+raw";
+        case STORAGE_RECORD_MODE_REDUCED:
+        default:
+            return "reduced";
+    }
+}
+
+/* Axes as the solver defines them: centered t, x, y and the angular frequency in ascending order. */
+static int store_insert_layout(snapshot_store* store)
+{
+    const size_t n_axes = store->nt + store->nt + store->nx + store->ny;
+    double* axes = (double*)calloc(n_axes, sizeof(double));
+    if (axes == NULL) {
+        return -1;
+    }
+    double* t_axis = axes;
+    double* omega_axis = t_axis + store->nt;
+    double* x_axis = omega_axis + store->nt;
+    double* y_axis = x_axis + store->nx;
+    const double t_center = 0.5 * (double)(store->nt - 1u);
+    const double omega_step = SNAPSHOT_TWO_PI / ((double)store->nt * store->dt);
+    const size_t negatives = store->nt / 2u;
+    for (size_t i = 0u; i < store->nt; ++i) {
+        t_axis[i] = ((double)i - t_center) * store->dt;
+        omega_axis[i] = ((double)i - (double)negatives) * omega_step;
+    }
+    for (size_t i = 0u; i < store->nx; ++i) {
+        x_axis[i] = ((double)i - 0.5 * (double)(store->nx - 1u)) * store->dx;
+    }
+    for (size_t i = 0u; i < store->ny; ++i) {
+        y_axis[i] = ((double)i - 0.5 * (double)(store->ny - 1u)) * store->dy;
+    }
+
+    sqlite3_stmt* stmt = NULL;
+    int rc = prepare(store->db,
+                     "INSERT OR REPLACE INTO io_record_layout("
+                     "run_id, record_mode, nt, nx, ny, dt, dx, dy, num_records, "
+                     "raw_stride_t, raw_stride_x, raw_stride_y, raw_nt, raw_nx, raw_ny, raw_records, "
+                     "record_z, t_axis, omega_axis, x_axis, y_axis"
+                     ") VALUES(?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,0,zeroblob(0),?,?,?,?);",
+                     &stmt);
+    if (rc == 0) {
+        const int raw = store->store_raw;
+        rc = (bind_text(stmt, 1, store->result.run_id) != 0 ||
+              bind_text(stmt, 2, record_mode_name(store->record_mode)) != 0 ||
+              sqlite3_bind_int64(stmt, 3, (sqlite3_int64)store->nt) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 4, (sqlite3_int64)store->nx) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 5, (sqlite3_int64)store->ny) != SQLITE_OK ||
+              sqlite3_bind_double(stmt, 6, store->dt) != SQLITE_OK ||
+              sqlite3_bind_double(stmt, 7, store->dx) != SQLITE_OK ||
+              sqlite3_bind_double(stmt, 8, store->dy) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 9, (sqlite3_int64)store->stride_t) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 10, (sqlite3_int64)store->stride_x) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 11, (sqlite3_int64)store->stride_y) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 12, (sqlite3_int64)(raw ? store->raw_nt : 0u)) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 13, (sqlite3_int64)(raw ? store->raw_nx : 0u)) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 14, (sqlite3_int64)(raw ? store->raw_ny : 0u)) != SQLITE_OK ||
+              bind_doubles(stmt, 15, t_axis, store->nt) != 0 ||
+              bind_doubles(stmt, 16, omega_axis, store->nt) != 0 ||
+              bind_doubles(stmt, 17, x_axis, store->nx) != 0 ||
+              bind_doubles(stmt, 18, y_axis, store->ny) != 0 ||
+              step_done(stmt) != 0) ? -1 : 0;
+        sqlite3_finalize(stmt);
+    }
+    free(axes);
+    return rc;
+}
+
+// MARK: Reduced maps
+
+static void store_compute_maps(snapshot_store* store, const nlo_complex* record)
+{
+    const size_t nt = store->nt;
+    const size_t nx = store->nx;
+    const size_t ny = store->ny;
+    memset(store->map_power, 0, nt * sizeof(double));
+    memset(store->map_spectrum, 0, nt * sizeof(double));
+    memset(store->map_fluence_x, 0, nx * sizeof(double));
+    memset(store->map_fluence_y, 0, ny * sizeof(double));
+
+    for (size_t x = 0u; x < nx; ++x) {
+        for (size_t y = 0u; y < ny; ++y) {
+            const nlo_complex* line = record + ((x * ny) + y) * nt;
+            double line_sum = 0.0;
+            for (size_t t = 0u; t < nt; ++t) {
+                const double intensity = (line[t].re * line[t].re) + (line[t].im * line[t].im);
+                store->map_power[t] += intensity;
+                line_sum += intensity;
+            }
+            store->map_fluence_x[x] += line_sum;
+            store->map_fluence_y[y] += line_sum;
+        }
+    }
+
+    /* Unnormalised forward DFT along t of every (x, y) line, the solver's own transform. */
+    fftw_execute_dft(store->fft_plan, (fftw_complex*)(void*)record, store->fft_out);
+    const size_t shift = nt - (nt / 2u);
+    const size_t lines = nx * ny;
+    for (size_t l = 0u; l < lines; ++l) {
+        const fftw_complex* spectrum = store->fft_out + l * nt;
+        for (size_t j = 0u; j < nt; ++j) {
+            const size_t k = (j + shift) % nt;
+            store->map_spectrum[j] += (spectrum[k][0] * spectrum[k][0]) + (spectrum[k][1] * spectrum[k][1]);
+        }
+    }
+}
+
+static double store_record_z(const snapshot_store* store, size_t record_index)
+{
+    return (store->record_z != NULL && record_index < store->num_recorded_samples)
+               ? store->record_z[record_index]
+               : 0.0;
+}
+
+void snapshot_store_set_record_schedule(
+    snapshot_store* store,
+    const double* explicit_record_z,
+    size_t explicit_record_z_count
+)
+{
+    if (store == NULL || store->record_z == NULL) {
+        return;
+    }
+    const double z_end = (store->config != NULL) ? store->config->propagation.propagation_distance : 0.0;
+    const size_t n = store->num_recorded_samples;
+    for (size_t i = 0u; i < n; ++i) {
+        if (explicit_record_z != NULL && explicit_record_z_count > 0u) {
+            store->record_z[i] = (i < explicit_record_z_count) ? explicit_record_z[i] : z_end;
+        } else if (n == 1u) {
+            store->record_z[i] = z_end;
+        } else {
+            store->record_z[i] = z_end * ((double)i / (double)(n - 1u));
+        }
+    }
+}
+
+// MARK: Open / write
+
 snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
 {
-    if (params == NULL || params->storage_options == NULL || params->storage_options->sqlite_path == NULL) {
+    if (params == NULL || params->storage_options == NULL || params->storage_options->sqlite_path == NULL ||
+        params->config == NULL) {
         return NULL;
     }
 
-    if (params->storage_options->sqlite_path[0] == '\0') {
+    const storage_options* options = params->storage_options;
+    if (options->sqlite_path[0] == '\0') {
         return NULL;
     }
 
@@ -608,10 +924,12 @@ snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
         return NULL;
     }
 
+    store->config = params->config;
     store->num_time_samples = params->num_time_samples;
+    store->num_recorded_samples = params->num_recorded_samples;
     store->chunk_records =
-        (params->storage_options->chunk_records > 0u)
-            ? params->storage_options->chunk_records
+        (options->chunk_records > 0u)
+            ? options->chunk_records
             : STORAGE_DEFAULT_CHUNK_RECORDS;
     if (store->chunk_records > params->num_recorded_samples) {
         store->chunk_records = params->num_recorded_samples;
@@ -621,39 +939,110 @@ snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
     }
 
     store->max_bytes =
-        (params->storage_options->sqlite_max_bytes > 0u)
-            ? params->storage_options->sqlite_max_bytes
+        (options->sqlite_max_bytes > 0u)
+            ? options->sqlite_max_bytes
             : (size_t)STORAGE_DEFAULT_DB_MAX_BYTES;
-    store->cap_policy = params->storage_options->cap_policy;
+    store->cap_policy = options->cap_policy;
     store->accept_writes = 1;
 
-    make_run_id(store->result.run_id, params->storage_options->run_id);
+    store->record_mode = options->record_mode;
+    if (store->record_mode != STORAGE_RECORD_MODE_RAW &&
+        store->record_mode != STORAGE_RECORD_MODE_REDUCED_AND_RAW) {
+        store->record_mode = STORAGE_RECORD_MODE_REDUCED;
+    }
+    store->store_maps = (store->record_mode != STORAGE_RECORD_MODE_RAW);
+    store->store_raw = (store->record_mode != STORAGE_RECORD_MODE_REDUCED);
+    store->store_final_field = (options->log_final_output_field_to_db != 0);
 
-    size_t chunk_elements = 0u;
-    if (checked_mul_size_t(store->chunk_records, store->num_time_samples, &chunk_elements) != 0) {
+    int explicit_nd = 0;
+    if (resolve_sim_dimensions_internal(params->config,
+                                            params->num_time_samples,
+                                            &store->nt,
+                                            &store->nx,
+                                            &store->ny,
+                                            &explicit_nd) != 0 ||
+        store->nt == 0u || store->nx == 0u || store->ny == 0u ||
+        store->nt * store->nx * store->ny != params->num_time_samples) {
+        free(store);
+        return NULL;
+    }
+    store->dt = (params->config->time.delta_time > 0.0)
+                    ? params->config->time.delta_time
+                    : ((params->config->time.pulse_period > 0.0)
+                           ? params->config->time.pulse_period / (double)store->nt
+                           : 1.0);
+    store->dx = (params->config->spatial.delta_x > 0.0) ? params->config->spatial.delta_x : 1.0;
+    store->dy = (params->config->spatial.delta_y > 0.0) ? params->config->spatial.delta_y : 1.0;
+    store->stride_t = (options->raw_stride_t > 1u) ? options->raw_stride_t : 1u;
+    store->stride_x = (options->raw_stride_x > 1u) ? options->raw_stride_x : 1u;
+    store->stride_y = (options->raw_stride_y > 1u) ? options->raw_stride_y : 1u;
+    store->raw_nt = (store->nt + store->stride_t - 1u) / store->stride_t;
+    store->raw_nx = (store->nx + store->stride_x - 1u) / store->stride_x;
+    store->raw_ny = (store->ny + store->stride_y - 1u) / store->stride_y;
+    store->raw_samples = store->raw_nt * store->raw_nx * store->raw_ny;
+
+    make_run_id(store->result.run_id, options->run_id);
+
+    store->record_z = (double*)calloc(store->num_recorded_samples, sizeof(double));
+    if (store->record_z == NULL) {
         snapshot_store_close(store);
         return NULL;
     }
-    store->chunk_buffer = (nlo_complex*)calloc(chunk_elements, sizeof(nlo_complex));
-    if (store->chunk_buffer == NULL) {
-        snapshot_store_close(store);
-        return NULL;
+    snapshot_store_set_record_schedule(store, NULL, 0u);
+
+    if (store->store_raw) {
+        size_t chunk_elements = 0u;
+        if (checked_mul_size_t(store->chunk_records, store->raw_samples, &chunk_elements) != 0) {
+            snapshot_store_close(store);
+            return NULL;
+        }
+        store->chunk_buffer = (nlo_complex*)calloc(chunk_elements, sizeof(nlo_complex));
+        if (store->chunk_buffer == NULL) {
+            snapshot_store_close(store);
+            return NULL;
+        }
     }
 
-    if (sqlite3_open_v2(params->storage_options->sqlite_path,
+    if (store->store_maps) {
+        store->map_power = (double*)calloc(2u * store->nt + store->nx + store->ny, sizeof(double));
+        store->fft_in = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * store->num_time_samples);
+        store->fft_out = (fftw_complex*)fftw_malloc(sizeof(fftw_complex) * store->num_time_samples);
+        if (store->map_power == NULL || store->fft_in == NULL || store->fft_out == NULL) {
+            snapshot_store_close(store);
+            return NULL;
+        }
+        store->map_spectrum = store->map_power + store->nt;
+        store->map_fluence_x = store->map_spectrum + store->nt;
+        store->map_fluence_y = store->map_fluence_x + store->nx;
+        const int n = (int)store->nt;
+        store->fft_plan = fftw_plan_many_dft(1, &n, (int)(store->nx * store->ny),
+                                             store->fft_in, NULL, 1, n,
+                                             store->fft_out, NULL, 1, n,
+                                             FFTW_FORWARD, FFTW_ESTIMATE | FFTW_UNALIGNED);
+        if (store->fft_plan == NULL) {
+            snapshot_store_close(store);
+            return NULL;
+        }
+    }
+
+    if (sqlite3_open_v2(options->sqlite_path,
                         &store->db,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
                         NULL) != SQLITE_OK) {
         snapshot_store_close(store);
         return NULL;
     }
+    sqlite3_busy_timeout(store->db, 60000);
 
-    if (store_initialize_schema(store->db) != 0 ||
+    /* Rollback journal only: WAL needs shared memory that network shares do not provide. */
+    if (sqlite_exec(store->db, "PRAGMA journal_mode=DELETE; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;") != 0 ||
+        snapshot_store_ensure_schema(store->db) != 0 ||
         store_insert_metadata(store,
                                   params->config,
                                   params->exec_options,
                                   params->num_time_samples,
                                   params->num_recorded_samples) != 0 ||
+        store_insert_layout(store) != 0 ||
         prepare(store->db,
                     "INSERT INTO io_record_chunks(run_id, chunk_index, record_start, record_count, payload)"
                     " VALUES(?,?,?,?,?);",
@@ -669,6 +1058,10 @@ snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
                     "num_time_samples=excluded.num_time_samples, "
                     "payload=excluded.payload;",
                     &store->upsert_final_output_stmt) != 0 ||
+        prepare(store->db,
+                    "INSERT OR REPLACE INTO io_record_maps(run_id, record_index, z, power, spectrum, fluence_x, fluence_y) "
+                    "VALUES(?,?,?,?,?,?,?);",
+                    &store->insert_map_stmt) != 0 ||
         prepare(store->db, "PRAGMA page_count;", &store->page_count_stmt) != 0 ||
         prepare(store->db, "PRAGMA page_size;", &store->page_size_stmt) != 0) {
         snapshot_store_close(store);
@@ -678,6 +1071,39 @@ snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
     (void)query_db_size(store->page_count_stmt, store->page_size_stmt, &store->result.db_size_bytes);
     (void)store_update_run(store);
     return store;
+}
+
+static void store_downsample_raw(snapshot_store* store, const nlo_complex* record, nlo_complex* dst)
+{
+    size_t out = 0u;
+    for (size_t x = 0u; x < store->nx; x += store->stride_x) {
+        for (size_t y = 0u; y < store->ny; y += store->stride_y) {
+            const nlo_complex* line = record + ((x * store->ny) + y) * store->nt;
+            for (size_t t = 0u; t < store->nt; t += store->stride_t) {
+                dst[out++] = line[t];
+            }
+        }
+    }
+}
+
+static snapshot_store_status store_write_map(snapshot_store* store, size_t record_index, const nlo_complex* record)
+{
+    store_compute_maps(store, record);
+    if (store_txn_begin(store) != 0 ||
+        bind_text(store->insert_map_stmt, 1, store->result.run_id) != 0 ||
+        sqlite3_bind_int64(store->insert_map_stmt, 2, (sqlite3_int64)record_index) != SQLITE_OK ||
+        sqlite3_bind_double(store->insert_map_stmt, 3, store_record_z(store, record_index)) != SQLITE_OK ||
+        bind_doubles(store->insert_map_stmt, 4, store->map_power, store->nt) != 0 ||
+        bind_doubles(store->insert_map_stmt, 5, store->map_spectrum, store->nt) != 0 ||
+        bind_doubles(store->insert_map_stmt, 6, store->map_fluence_x, store->nx) != 0 ||
+        bind_doubles(store->insert_map_stmt, 7, store->map_fluence_y, store->ny) != 0 ||
+        step_done(store->insert_map_stmt) != 0) {
+        return SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    if (!store->store_raw) {
+        store->result.records_spilled += 1u;
+    }
+    return SNAPSHOT_STORE_STATUS_OK;
 }
 
 snapshot_store_status snapshot_store_write_record(
@@ -691,23 +1117,38 @@ snapshot_store_status snapshot_store_write_record(
         return SNAPSHOT_STORE_STATUS_ERROR;
     }
 
-    if (store->chunk_fill == 0u) {
-        store->chunk_start_record = record_index;
+    if (record_index + 1u > store->records_seen) {
+        store->records_seen = record_index + 1u;
     }
-
-    const size_t dst_index = store->chunk_fill * store->num_time_samples;
-    memcpy(store->chunk_buffer + dst_index,
-           record,
-           store->num_time_samples * sizeof(nlo_complex));
-
-    store->chunk_fill += 1u;
     store->result.records_captured += 1u;
 
-    if (store->chunk_fill >= store->chunk_records) {
-        return store_flush_chunk(store);
+    snapshot_store_status status = SNAPSHOT_STORE_STATUS_OK;
+    if (store->store_maps) {
+        status = store_write_map(store, record_index, record);
+        if (status == SNAPSHOT_STORE_STATUS_ERROR) {
+            return status;
+        }
     }
 
-    return SNAPSHOT_STORE_STATUS_OK;
+    if (store->store_raw) {
+        if (store->chunk_fill == 0u) {
+            store->chunk_start_record = record_index;
+        }
+        store_downsample_raw(store, record, store->chunk_buffer + store->chunk_fill * store->raw_samples);
+        store->chunk_fill += 1u;
+        if (store->chunk_fill >= store->chunk_records) {
+            status = store_flush_chunk(store);
+            if (status == SNAPSHOT_STORE_STATUS_ERROR) {
+                return status;
+            }
+        }
+    }
+
+    store->records_in_txn += 1u;
+    if (store->records_in_txn >= store->chunk_records && store_txn_commit(store) != 0) {
+        return SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    return status;
 }
 
 snapshot_store_status snapshot_store_write_final_output_field(
@@ -760,11 +1201,233 @@ snapshot_store_status snapshot_store_flush(snapshot_store* store)
         return status;
     }
 
-    if (store_update_run(store) != 0) {
+    if (store_update_run(store) != 0 || store_txn_commit(store) != 0) {
         return SNAPSHOT_STORE_STATUS_ERROR;
     }
 
     return status;
+}
+
+// MARK: Finalize
+
+typedef struct {
+    const char* name;
+    int type; /* SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_TEXT or SQLITE_NULL */
+    sqlite3_int64 i64;
+    double f64;
+    const char* text;
+} runs_value;
+
+static void set_i64(runs_value* v, sqlite3_int64 value)
+{
+    v->type = SQLITE_INTEGER;
+    v->i64 = value;
+}
+
+static void set_f64(runs_value* v, double value)
+{
+    v->type = isfinite(value) ? SQLITE_FLOAT : SQLITE_NULL;
+    v->f64 = value;
+}
+
+static void set_text(runs_value* v, const char* text)
+{
+    v->type = (text != NULL && text[0] != '\0') ? SQLITE_TEXT : SQLITE_NULL;
+    v->text = text;
+}
+
+/* JSON array of the runtime constants, formatted locale-independently. */
+static void format_constants(const runtime_operator_params* rt, char* out, size_t cap)
+{
+    size_t used = 0u;
+    out[used++] = '[';
+    const size_t count = (rt->num_constants <= RUNTIME_OPERATOR_CONSTANTS_MAX) ? rt->num_constants
+                                                                               : RUNTIME_OPERATOR_CONSTANTS_MAX;
+    for (size_t i = 0u; i < count && used + 32u < cap; ++i) {
+        char number[40];
+        if (isfinite(rt->constants[i])) {
+            (void)snprintf(number, sizeof(number), "%.17g", rt->constants[i]);
+            for (char* c = number; *c != '\0'; ++c) {
+                if (*c == ',') {
+                    *c = '.';
+                }
+            }
+        } else {
+            (void)snprintf(number, sizeof(number), "null");
+        }
+        used += (size_t)snprintf(out + used, cap - used, "%s%s", (i > 0u) ? "," : "", number);
+    }
+    (void)snprintf(out + used, cap - used, "]");
+}
+
+static int store_insert_runs_row(snapshot_store* store, const snapshot_store_finalize_params* params)
+{
+    const sim_config* cfg = store->config;
+    const runtime_operator_params* rt = &cfg->runtime;
+    const int raman = (rt->nonlinear_model == NONLINEAR_MODEL_KERR_RAMAN);
+    char constants[RUNTIME_OPERATOR_CONSTANTS_MAX * 26u + 8u];
+    format_constants(rt, constants, sizeof(constants));
+
+    runs_value values[RUNS_PARAM_COUNT];
+    memset(values, 0, sizeof(values));
+    for (size_t i = 0u; i < RUNS_PARAM_COUNT; ++i) {
+        values[i].name = k_runs_param_columns[i][0];
+        values[i].type = SQLITE_NULL;
+    }
+    size_t i = 0u;
+    set_text(&values[i++], params->version);
+    set_text(&values[i++], (params->binding != NULL && params->binding[0] != '\0') ? params->binding : "c");
+    set_text(&values[i++], params->backend);
+    set_text(&values[i++], store->result.run_id);
+    set_i64(&values[i++], (sqlite3_int64)store->nt);
+    set_i64(&values[i++], (sqlite3_int64)store->nx);
+    set_i64(&values[i++], (sqlite3_int64)store->ny);
+    set_f64(&values[i++], store->dt);
+    if (store->nx > 1u) {
+        set_f64(&values[i], store->dx);
+    }
+    i += 1u;
+    if (store->ny > 1u) {
+        set_f64(&values[i], store->dy);
+    }
+    i += 1u;
+    set_f64(&values[i++], cfg->propagation.propagation_distance);
+    set_f64(&values[i++], cfg->propagation.starting_step_size);
+    set_f64(&values[i++], cfg->propagation.min_step_size);
+    set_f64(&values[i++], cfg->propagation.max_step_size);
+    set_f64(&values[i++], cfg->propagation.error_tolerance);
+    set_text(&values[i++], rt->linear_factor_expr);
+    set_text(&values[i++], rt->linear_expr);
+    set_text(&values[i++], rt->potential_expr);
+    set_text(&values[i++], rt->dispersion_factor_expr);
+    set_text(&values[i++], rt->dispersion_expr);
+    set_text(&values[i++], rt->nonlinear_expr);
+    set_text(&values[i++], constants);
+    set_text(&values[i++], raman ? "kerr_raman" : "expr");
+    if (raman) {
+        set_f64(&values[i], rt->nonlinear_gamma);
+        set_f64(&values[i + 1u], rt->raman_fraction);
+        set_f64(&values[i + 2u], rt->raman_tau1);
+        set_f64(&values[i + 3u], rt->raman_tau2);
+        set_f64(&values[i + 4u], rt->shock_omega0);
+    }
+    i += 5u;
+    set_text(&values[i++], params->input_sha256);
+    set_text(&values[i++], params->potential_sha256);
+    set_i64(&values[i++], (sqlite3_int64)store->num_recorded_samples);
+    set_i64(&values[i++], (sqlite3_int64)store->records_seen);
+    set_text(&values[i++], record_mode_name(store->record_mode));
+    if (store->store_raw) {
+        set_i64(&values[i], (sqlite3_int64)store->stride_t);
+        set_i64(&values[i + 1u], (sqlite3_int64)store->stride_x);
+        set_i64(&values[i + 2u], (sqlite3_int64)store->stride_y);
+    }
+    i += 3u;
+    set_i64(&values[i++], store->store_final_field ? 1 : 0);
+    set_i64(&values[i++], store->result.truncated ? 1 : 0);
+    if (i != RUNS_PARAM_COUNT) {
+        return -1;
+    }
+
+    for (size_t c = 0u; c < RUNS_PARAM_COUNT; ++c) {
+        if (ensure_column(store->db, "runs", k_runs_param_columns[c][0], k_runs_param_columns[c][1]) != 0) {
+            return -1;
+        }
+    }
+
+    char sql[4096];
+    size_t used = (size_t)snprintf(sql, sizeof(sql),
+                                   "INSERT OR REPLACE INTO runs(key, kind, file, created_at, git_commit, julia_version");
+    for (size_t c = 0u; c < RUNS_PARAM_COUNT; ++c) {
+        used += (size_t)snprintf(sql + used, sizeof(sql) - used, ", %s", k_runs_param_columns[c][0]);
+    }
+    used += (size_t)snprintf(sql + used, sizeof(sql) - used, ") VALUES(?, 'nlolib', ?, ?, ?, NULL");
+    for (size_t c = 0u; c < RUNS_PARAM_COUNT; ++c) {
+        used += (size_t)snprintf(sql + used, sizeof(sql) - used, ", ?");
+    }
+    (void)snprintf(sql + used, sizeof(sql) - used, ");");
+
+    char created_at[32];
+    run_store_utc_now(created_at);
+    sqlite3_stmt* stmt = NULL;
+    if (prepare(store->db, sql, &stmt) != 0) {
+        return -1;
+    }
+    int rc = (bind_text(stmt, 1, params->key) != 0 ||
+              bind_text(stmt, 2, params->index_file) != 0 ||
+              bind_text(stmt, 3, created_at) != 0 ||
+              bind_text(stmt, 4, params->git_commit) != 0) ? -1 : 0;
+    for (size_t c = 0u; rc == 0 && c < RUNS_PARAM_COUNT; ++c) {
+        const int idx = (int)c + 5;
+        switch (values[c].type) {
+            case SQLITE_INTEGER:
+                rc = (sqlite3_bind_int64(stmt, idx, values[c].i64) == SQLITE_OK) ? 0 : -1;
+                break;
+            case SQLITE_FLOAT:
+                rc = (sqlite3_bind_double(stmt, idx, values[c].f64) == SQLITE_OK) ? 0 : -1;
+                break;
+            case SQLITE_TEXT:
+                rc = bind_text(stmt, idx, values[c].text);
+                break;
+            default:
+                rc = (sqlite3_bind_null(stmt, idx) == SQLITE_OK) ? 0 : -1;
+                break;
+        }
+    }
+    if (rc == 0) {
+        rc = step_done(stmt);
+    }
+    sqlite3_finalize(stmt);
+    return rc;
+}
+
+snapshot_store_status snapshot_store_finalize(snapshot_store* store, const snapshot_store_finalize_params* params)
+{
+    if (store == NULL || store->db == NULL || params == NULL || params->key == NULL ||
+        strlen(params->key) != 16u || params->index_file == NULL) {
+        return SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    if (store_txn_begin(store) != 0) {
+        return SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    const snapshot_store_status chunk_status = store_flush_chunk(store);
+    if (chunk_status == SNAPSHOT_STORE_STATUS_ERROR || store_update_run(store) != 0) {
+        return SNAPSHOT_STORE_STATUS_ERROR;
+    }
+
+    sqlite3_stmt* stmt = NULL;
+    int rc = prepare(store->db, "UPDATE io_runs SET key=? WHERE run_id=?;", &stmt);
+    if (rc == 0) {
+        rc = (bind_text(stmt, 1, params->key) != 0 || bind_text(stmt, 2, store->result.run_id) != 0 ||
+              step_done(stmt) != 0) ? -1 : 0;
+        sqlite3_finalize(stmt);
+    }
+    if (rc == 0) {
+        rc = prepare(store->db,
+                     "UPDATE io_record_layout SET num_records=?, raw_records=?, record_z=? WHERE run_id=?;",
+                     &stmt);
+    }
+    if (rc == 0) {
+        rc = (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)store->records_seen) != SQLITE_OK ||
+              sqlite3_bind_int64(stmt, 2, (sqlite3_int64)store->raw_records) != SQLITE_OK ||
+              bind_doubles(stmt, 3, store->record_z, store->records_seen) != 0 ||
+              bind_text(stmt, 4, store->result.run_id) != 0 ||
+              step_done(stmt) != 0) ? -1 : 0;
+        sqlite3_finalize(stmt);
+    }
+    if (rc == 0) {
+        rc = store_insert_runs_row(store, params);
+    }
+    if (rc != 0) {
+        (void)sqlite3_exec(store->db, "ROLLBACK;", NULL, NULL, NULL);
+        store->in_txn = 0;
+        return SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    if (store_txn_commit(store) != 0) {
+        return SNAPSHOT_STORE_STATUS_ERROR;
+    }
+    (void)snprintf(store->result.key, sizeof(store->result.key), "%s", params->key);
+    return chunk_status;
 }
 
 snapshot_store_status snapshot_store_read_all_records(
@@ -777,7 +1440,8 @@ snapshot_store_status snapshot_store_read_all_records(
     if (store == NULL ||
         out_records == NULL ||
         num_recorded_samples == 0u ||
-        num_time_samples != store->num_time_samples ||
+        num_time_samples != store->raw_samples ||
+        !store->store_raw ||
         store->db == NULL) {
         return SNAPSHOT_STORE_STATUS_ERROR;
     }
@@ -903,32 +1567,41 @@ void snapshot_store_close(snapshot_store* store)
 
     if (store->db != NULL) {
         (void)snapshot_store_flush(store);
+        if (store->in_txn) {
+            (void)sqlite3_exec(store->db, "COMMIT;", NULL, NULL, NULL);
+            store->in_txn = 0;
+        }
     }
-    if (store->insert_chunk_stmt != NULL) {
-        sqlite3_finalize(store->insert_chunk_stmt);
-        store->insert_chunk_stmt = NULL;
-    }
-    if (store->update_run_stmt != NULL) {
-        sqlite3_finalize(store->update_run_stmt);
-        store->update_run_stmt = NULL;
-    }
-    if (store->upsert_final_output_stmt != NULL) {
-        sqlite3_finalize(store->upsert_final_output_stmt);
-        store->upsert_final_output_stmt = NULL;
-    }
-    if (store->page_count_stmt != NULL) {
-        sqlite3_finalize(store->page_count_stmt);
-        store->page_count_stmt = NULL;
-    }
-    if (store->page_size_stmt != NULL) {
-        sqlite3_finalize(store->page_size_stmt);
-        store->page_size_stmt = NULL;
+    sqlite3_stmt** stmts[] = {
+        &store->insert_chunk_stmt,
+        &store->update_run_stmt,
+        &store->upsert_final_output_stmt,
+        &store->insert_map_stmt,
+        &store->page_count_stmt,
+        &store->page_size_stmt
+    };
+    for (size_t i = 0u; i < sizeof(stmts) / sizeof(stmts[0]); ++i) {
+        if (*stmts[i] != NULL) {
+            sqlite3_finalize(*stmts[i]);
+            *stmts[i] = NULL;
+        }
     }
     if (store->db != NULL) {
         sqlite3_close(store->db);
         store->db = NULL;
     }
 
+    if (store->fft_plan != NULL) {
+        fftw_destroy_plan(store->fft_plan);
+    }
+    if (store->fft_in != NULL) {
+        fftw_free(store->fft_in);
+    }
+    if (store->fft_out != NULL) {
+        fftw_free(store->fft_out);
+    }
+    free(store->map_power);
+    free(store->record_z);
     free(store->chunk_buffer);
     free(store);
 }
@@ -944,10 +1617,34 @@ struct snapshot_store {
     int unused;
 };
 
+int snapshot_store_ensure_schema(struct sqlite3* db)
+{
+    (void)db;
+    return -1;
+}
+
 snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
 {
     (void)params;
     return NULL;
+}
+
+void snapshot_store_set_record_schedule(
+    snapshot_store* store,
+    const double* explicit_record_z,
+    size_t explicit_record_z_count
+)
+{
+    (void)store;
+    (void)explicit_record_z;
+    (void)explicit_record_z_count;
+}
+
+snapshot_store_status snapshot_store_finalize(snapshot_store* store, const snapshot_store_finalize_params* params)
+{
+    (void)store;
+    (void)params;
+    return SNAPSHOT_STORE_STATUS_ERROR;
 }
 
 snapshot_store_status snapshot_store_write_record(

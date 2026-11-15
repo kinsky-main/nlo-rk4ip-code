@@ -10,6 +10,7 @@ entrypoints:
 - [Build and Install](build_and_install.md)
 - [Vulkan Backend Behaviour](gpu_backend.md)
 - [API Reference Guide](api_reference.md)
+- [Run Database Layout](nlolib_run_database.md)
 - [Python Binding Guide](../python/docs/guide.md)
 - [MATLAB Binding Guide](../matlab/docs/binding_guide.md)
 - [MATLAB User Guide](../matlab/docs/user_guide.md)
@@ -101,6 +102,7 @@ D=i\left(\beta_{2,s}\omega_t^2+\beta_t(k_x^2+k_y^2)\right)
 
 ## Binding Guides
 
+- [Run Database Layout](nlolib_run_database.md)
 - [Python Binding Guide](../python/docs/guide.md)
 - [MATLAB Binding Guide](../matlab/docs/binding_guide.md) and
   [MATLAB User Guide](../matlab/docs/user_guide.md)

@@ -61,6 +61,8 @@
 #define RUNTIME_OPERATOR_CONSTANTS_MAX 16
 /** @brief Maximum persisted run-id length (including terminator). */
 #define STORAGE_RUN_ID_MAX 64
+/** @brief Stored run-key length (16 hex digits plus terminator). */
+#define STORAGE_KEY_MAX 17
 
 /* -------------------------------------------------------------------
  * nlo_complex
@@ -459,7 +461,17 @@ typedef enum
 } storage_db_cap_policy;
 
 /**
- * @brief SQLite snapshot storage controls.
+ * @brief What the run database keeps for each record.
+ */
+typedef enum
+{
+    STORAGE_RECORD_MODE_REDUCED = 0,
+    STORAGE_RECORD_MODE_RAW = 1,
+    STORAGE_RECORD_MODE_REDUCED_AND_RAW = 2
+} storage_record_mode;
+
+/**
+ * @brief SQLite run storage controls.
  */
 typedef struct
 {
@@ -469,6 +481,11 @@ typedef struct
     size_t chunk_records;
     storage_db_cap_policy cap_policy;
     int log_final_output_field_to_db;
+    storage_record_mode record_mode;
+    size_t raw_stride_t;
+    size_t raw_stride_x;
+    size_t raw_stride_y;
+    const char *binding;
 } storage_options;
 
 /**
@@ -482,7 +499,33 @@ typedef struct
     size_t chunks_written;
     size_t db_size_bytes;
     int truncated;
+    char key[STORAGE_KEY_MAX];
+    int merged;
 } storage_result;
+
+/**
+ * @brief Shape and grid of a run stored in a run database.
+ */
+typedef struct
+{
+    char run_id[STORAGE_RUN_ID_MAX];
+    storage_record_mode record_mode;
+    size_t nt;
+    size_t nx;
+    size_t ny;
+    size_t num_records;
+    size_t raw_nt;
+    size_t raw_nx;
+    size_t raw_ny;
+    size_t raw_records;
+    size_t raw_stride_t;
+    size_t raw_stride_x;
+    size_t raw_stride_y;
+    double delta_time;
+    double delta_x;
+    double delta_y;
+    int has_final_field;
+} storage_run_layout;
 
 /**
  * @brief Per-step adaptive solver telemetry for accepted RK4 steps.
@@ -598,6 +641,62 @@ nlolib_status nlolib_perf_profile_read(nlo_perf_profile_snapshot *out_snapshot);
  * See `nlolib.h` for full return-value semantics.
  */
 int nlolib_storage_is_available(void);
+
+/**
+ * @brief Compute the run key under which a run would be stored.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_storage_run_key(
+    const simulation_config *simulation_config,
+    const physics_config *physics_config,
+    size_t num_time_samples,
+    const nlo_complex *input_field,
+    const propagate_options *options,
+    char *out_key);
+
+/**
+ * @brief Ask whether a shared run database already holds a run key.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_storage_has_run(const char *sqlite_path, const char *key, int *out_present);
+
+/**
+ * @brief Merge or discard leftover staging databases.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_storage_recover_staging(
+    const char *sqlite_path,
+    int discard_incomplete,
+    double min_age_seconds,
+    size_t *out_merged,
+    size_t *out_discarded,
+    size_t *out_skipped);
+
+/**
+ * @brief Read the grid and record counts of a stored run.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_storage_read_run_layout(
+    const char *sqlite_path,
+    const char *key,
+    storage_run_layout *out_layout);
+
+/**
+ * @brief Read one stored array of a run as float64 values.
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_storage_read_run_array(
+    const char *sqlite_path,
+    const char *key,
+    const char *name,
+    double *out_values,
+    size_t capacity,
+    size_t *out_count);
 
 /**
  * @brief Configure optional runtime log file output.
