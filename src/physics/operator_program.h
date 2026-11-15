@@ -103,6 +103,9 @@ typedef struct {
     uint32_t symbol_mask;
 } operator_value;
 
+/** Backend-owned compiled kernel for one lowered program (Vulkan JIT). */
+typedef struct vk_operator_jit_entry vk_operator_jit_entry;
+
 typedef struct {
     int active;
     operator_program_context context;
@@ -116,6 +119,10 @@ typedef struct {
     uint32_t active_symbol_mask;
     uint64_t lowered_hash;
     operator_value values[OPERATOR_PROGRAM_MAX_VALUES];
+    /* Vulkan JIT state, set by operator_program_prepare_jit. */
+    int vk_jit_active;
+    int vk_jit_warning_emitted;
+    vk_operator_jit_entry* vk_jit_entry;
 } operator_program;
 
 typedef struct {

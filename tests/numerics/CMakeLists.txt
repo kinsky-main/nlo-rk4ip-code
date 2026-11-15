@@ -112,3 +112,27 @@ if(ENABLE_VULKAN_BACKEND)
 
   add_test(NAME test_nlo_vector_backend_vulkan COMMAND test_nlo_vector_backend_vulkan)
 endif()
+
+if(ENABLE_VULKAN_BACKEND)
+  add_executable(test_operator_jit_vulkan
+    ${CMAKE_CURRENT_LIST_DIR}/test_operator_jit_vulkan.c
+    ${vector_backend_test_sources}
+    ${CMAKE_SOURCE_DIR}/src/numerics/math_ops.c
+    ${CMAKE_SOURCE_DIR}/src/physics/operator_program_compile.c
+    ${CMAKE_SOURCE_DIR}/src/physics/operator_program_execute.c
+  )
+  target_include_directories(test_operator_jit_vulkan PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/src/generated
+  )
+  target_link_libraries(test_operator_jit_vulkan PRIVATE Vulkan::Vulkan)
+  target_compile_definitions(test_operator_jit_vulkan PRIVATE
+    ENABLE_VULKAN_BACKEND=1
+    ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
+  )
+  nlolib_use_embedded_spirv(test_operator_jit_vulkan)
+  if(UNIX)
+    target_link_libraries(test_operator_jit_vulkan PRIVATE m)
+  endif()
+  add_test(NAME test_operator_jit_vulkan COMMAND test_operator_jit_vulkan)
+endif()
