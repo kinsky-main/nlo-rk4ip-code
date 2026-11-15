@@ -343,7 +343,10 @@ typedef struct {
 } simulation_working_vectors;
 
 /**
- * @brief Init-only scratch buffers used to construct tensor axes and meshes.
+ * @brief Tensor axis buffers used to build the meshes at init.
+ *
+ * With compact axis symbols they are kept for the whole run instead, and JIT
+ * kernels read them in place of the full-grid meshes.
  */
 typedef struct {
     vec_buffer* wt_axis_vec;
@@ -369,6 +372,9 @@ typedef struct {
     size_t ny;
     int tensor_layout;
     int tensor_mode_active;
+    /** Nonzero when every tensor operator program runs as a JIT kernel, so
+     *  the six full-grid meshes are not allocated and the 1-D axes are used. */
+    int tensor_compact_axis_symbols;
     size_t num_time_samples;
     size_t num_points_xy;
     size_t num_recorded_samples;
@@ -565,8 +571,8 @@ vec_status simulation_state_flush_snapshots(simulation_state* state);
 /**
  * @brief Resolve the operator-visible frequency grid for the active state.
  *
- * Tensor mode uses wt mesh storage directly; temporal mode uses the
- * dedicated frequency grid vector.
+ * Tensor mode uses the wt mesh, or the compact wt axis when the meshes are
+ * not allocated; temporal mode uses the dedicated frequency grid vector.
  *
  * @param state Active simulation state.
  * @return const vec_buffer* Frequency-domain grid buffer, or NULL.
@@ -579,7 +585,58 @@ static inline const vec_buffer* state_operator_frequency_grid(const simulation_s
     if (state->frequency_grid_vec != NULL) {
         return state->frequency_grid_vec;
     }
-    return state->working_vectors.wt_mesh_vec;
+    return (state->working_vectors.wt_mesh_vec != NULL) ? state->working_vectors.wt_mesh_vec
+                                                        : state->init_vectors.wt_axis_vec;
+}
+
+/**
+ * @brief Resolve the operator-visible tensor coordinate grids.
+ *
+ * Each returns the full-grid mesh when allocated, otherwise the compact 1-D
+ * axis (length nt, nx or ny), which only JIT kernels can index.
+ *
+ * @param state Active tensor-mode simulation state (not NULL).
+ * @return const vec_buffer* Mesh or axis buffer, or NULL.
+ */
+static inline const vec_buffer* state_operator_wt_grid(const simulation_state* state)
+{
+    return (state->working_vectors.wt_mesh_vec != NULL) ? state->working_vectors.wt_mesh_vec
+                                                        : state->init_vectors.wt_axis_vec;
+}
+
+/** @copydoc state_operator_wt_grid */
+static inline const vec_buffer* state_operator_kx_grid(const simulation_state* state)
+{
+    return (state->working_vectors.kx_mesh_vec != NULL) ? state->working_vectors.kx_mesh_vec
+                                                        : state->init_vectors.kx_axis_vec;
+}
+
+/** @copydoc state_operator_wt_grid */
+static inline const vec_buffer* state_operator_ky_grid(const simulation_state* state)
+{
+    return (state->working_vectors.ky_mesh_vec != NULL) ? state->working_vectors.ky_mesh_vec
+                                                        : state->init_vectors.ky_axis_vec;
+}
+
+/** @copydoc state_operator_wt_grid */
+static inline const vec_buffer* state_operator_t_grid(const simulation_state* state)
+{
+    return (state->working_vectors.t_mesh_vec != NULL) ? state->working_vectors.t_mesh_vec
+                                                       : state->init_vectors.t_axis_vec;
+}
+
+/** @copydoc state_operator_wt_grid */
+static inline const vec_buffer* state_operator_x_grid(const simulation_state* state)
+{
+    return (state->working_vectors.x_mesh_vec != NULL) ? state->working_vectors.x_mesh_vec
+                                                       : state->init_vectors.x_axis_vec;
+}
+
+/** @copydoc state_operator_wt_grid */
+static inline const vec_buffer* state_operator_y_grid(const simulation_state* state)
+{
+    return (state->working_vectors.y_mesh_vec != NULL) ? state->working_vectors.y_mesh_vec
+                                                       : state->init_vectors.y_axis_vec;
 }
 
 /**

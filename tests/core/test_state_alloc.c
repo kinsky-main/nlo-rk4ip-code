@@ -495,6 +495,145 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
 #endif
 }
 
+/* Not assert(): Release builds define NDEBUG. */
+#define STATE_CHECK(cond)                                                     \
+    do {                                                                      \
+        if (!(cond)) {                                                        \
+            fprintf(stderr, "%s:%d: STATE_CHECK(%s) failed\n", __FILE__, __LINE__, #cond); \
+            exit(1);                                                          \
+        }                                                                     \
+    } while (0)
+
+#if ENABLE_VULKAN_BACKEND
+static void set_operator_jit_env(const char* value)
+{
+#if defined(_WIN32)
+    STATE_CHECK(_putenv_s("NLO_OPERATOR_JIT", value) == 0);
+#else
+    STATE_CHECK(setenv("NLO_OPERATOR_JIT", value, 1) == 0);
+#endif
+}
+
+/* Build a small tensor state (nx != ny, so x/y mix-ups show) and download its
+ * potential and linear factor, which init evaluates from the coordinate grids. */
+static simulation_state* create_compact_axis_test_state(
+    const char* jit_env,
+    nlo_complex* out_potential,
+    nlo_complex* out_linear_factor,
+    size_t total
+)
+{
+    set_operator_jit_env(jit_env);
+    sim_config* config = create_sim_config(total);
+    STATE_CHECK(config != NULL);
+    config->tensor.nt = 8u;
+    config->tensor.nx = 4u;
+    config->tensor.ny = 3u;
+    config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
+    config->time.delta_time = 0.25;
+    config->spatial.delta_x = 0.5;
+    config->spatial.delta_y = 0.7;
+    config->runtime.linear_factor_expr = "i*(c0*(wt*wt) + c1*(kx*kx) + c2*(ky*ky))";
+    config->runtime.linear_expr = "exp(h*D)";
+    config->runtime.potential_expr = "c3*x + y*y + 0.1*t";
+    config->runtime.num_constants = 4u;
+    config->runtime.constants[0] = 0.08;
+    config->runtime.constants[1] = -0.2;
+    config->runtime.constants[2] = 0.3;
+    config->runtime.constants[3] = 1.7;
+
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_VULKAN);
+    simulation_state* state = NULL;
+    STATE_CHECK(init_simulation_state(config, total, 2u, &exec_options, NULL, &state) == 0);
+    STATE_CHECK(state != NULL);
+    STATE_CHECK(vec_download(state->backend,
+                             state->working_vectors.potential_vec,
+                             out_potential,
+                             total * sizeof(nlo_complex)) == VEC_STATUS_OK);
+    STATE_CHECK(vec_download(state->backend,
+                             state->working_vectors.dispersion_factor_vec,
+                             out_linear_factor,
+                             total * sizeof(nlo_complex)) == VEC_STATUS_OK);
+    free_sim_config(config);
+    return state;
+}
+
+static double max_abs_diff(const nlo_complex* a, const nlo_complex* b, size_t n)
+{
+    double diff = 0.0;
+    for (size_t i = 0u; i < n; ++i) {
+        diff = fmax(diff, hypot(RE(a[i]) - RE(b[i]), IM(a[i]) - IM(b[i])));
+    }
+    return diff;
+}
+#endif
+
+static void test_tensor_mode_compact_axis_symbols_vulkan(void)
+{
+#if !ENABLE_VULKAN_BACKEND
+    printf("test_tensor_mode_compact_axis_symbols_vulkan: skipped (Vulkan disabled at build).\n");
+    return;
+#else
+    vector_backend* probe = vector_backend_create_vulkan(NULL);
+    if (probe == NULL) {
+        printf("test_tensor_mode_compact_axis_symbols_vulkan: skipped (Vulkan unavailable).\n");
+        return;
+    }
+    vector_backend_destroy(probe);
+
+    enum { TOTAL = 8 * 4 * 3 };
+    static nlo_complex mesh_potential[TOTAL];
+    static nlo_complex mesh_factor[TOTAL];
+    static nlo_complex compact_potential[TOTAL];
+    static nlo_complex compact_factor[TOTAL];
+
+    /* Interpreter: full-grid meshes, as on main. */
+    simulation_state* mesh_state =
+        create_compact_axis_test_state("0", mesh_potential, mesh_factor, TOTAL);
+    STATE_CHECK(!mesh_state->tensor_compact_axis_symbols);
+    STATE_CHECK(mesh_state->working_vectors.wt_mesh_vec != NULL);
+    STATE_CHECK(mesh_state->working_vectors.y_mesh_vec != NULL);
+    STATE_CHECK(mesh_state->init_vectors.wt_axis_vec == NULL);
+    free_simulation_state(mesh_state);
+
+    /* JIT: no meshes, the 1-D axes stay alive for the kernels. */
+    simulation_state* compact_state =
+        create_compact_axis_test_state("1", compact_potential, compact_factor, TOTAL);
+    STATE_CHECK(compact_state->tensor_compact_axis_symbols);
+    STATE_CHECK(compact_state->potential_operator_program.vk_jit_active);
+    STATE_CHECK(compact_state->linear_factor_operator_program.vk_jit_active);
+    STATE_CHECK(compact_state->linear_operator_program.vk_jit_active);
+    STATE_CHECK(compact_state->nonlinear_operator_program.vk_jit_active);
+    STATE_CHECK(compact_state->working_vectors.wt_mesh_vec == NULL);
+    STATE_CHECK(compact_state->working_vectors.kx_mesh_vec == NULL);
+    STATE_CHECK(compact_state->working_vectors.ky_mesh_vec == NULL);
+    STATE_CHECK(compact_state->working_vectors.t_mesh_vec == NULL);
+    STATE_CHECK(compact_state->working_vectors.x_mesh_vec == NULL);
+    STATE_CHECK(compact_state->working_vectors.y_mesh_vec == NULL);
+    STATE_CHECK(compact_state->init_vectors.wt_axis_vec != NULL);
+    STATE_CHECK(compact_state->init_vectors.kx_axis_vec != NULL);
+    STATE_CHECK(compact_state->init_vectors.ky_axis_vec != NULL);
+    STATE_CHECK(compact_state->init_vectors.t_axis_vec != NULL);
+    STATE_CHECK(compact_state->init_vectors.x_axis_vec != NULL);
+    STATE_CHECK(compact_state->init_vectors.y_axis_vec != NULL);
+    free_simulation_state(compact_state);
+
+    const double potential_diff = max_abs_diff(compact_potential, mesh_potential, TOTAL);
+    const double factor_diff = max_abs_diff(compact_factor, mesh_factor, TOTAL);
+    printf("test_tensor_mode_compact_axis_symbols_vulkan: potential diff %.2e, linear factor diff %.2e\n",
+           potential_diff,
+           factor_diff);
+    STATE_CHECK(potential_diff <= 1e-12);
+    STATE_CHECK(factor_diff <= 1e-12);
+    /* The potential must actually vary along x and y for the check to mean anything. */
+    STATE_CHECK(fabs(RE(mesh_potential[8]) - RE(mesh_potential[0])) > 0.1);
+    STATE_CHECK(fabs(RE(mesh_potential[3 * 8]) - RE(mesh_potential[0])) > 0.1);
+
+    set_operator_jit_env("1");
+    printf("test_tensor_mode_compact_axis_symbols_vulkan: JIT drops the six tensor meshes.\n");
+#endif
+}
+
 static void test_snapshot_store_dense_readback(void)
 {
     if (!snapshot_store_is_available()) {
@@ -678,6 +817,7 @@ int main(void)
     test_frequency_grid_preserved_when_valid();
     test_tensor_mode_frequency_mesh_generation();
     test_tensor_mode_linear_factor_literal_power_vulkan();
+    test_tensor_mode_compact_axis_symbols_vulkan();
     test_snapshot_store_dense_readback();
     test_dense_output_safety_cap_rejects_before_init();
     test_storage_only_propagate_without_dense_output();
