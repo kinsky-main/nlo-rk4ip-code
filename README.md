@@ -21,10 +21,7 @@ Full rendered documentation is available at
 ### Windows
 
 ```powershell
-cmake -S . -B build `
-  -DINSTALL_GIT_HOOKS=OFF `
-  -DBUMP_PATCH_ON_BUILD=OFF
-
+cmake -S . -B build
 cmake --build build --config Debug
 ctest --test-dir build --build-config Debug --output-on-failure
 ```
@@ -32,10 +29,7 @@ ctest --test-dir build --build-config Debug --output-on-failure
 ### Linux
 
 ```bash
-cmake -S . -B build \
-  -DINSTALL_GIT_HOOKS=OFF \
-  -DBUMP_PATCH_ON_BUILD=OFF
-
+cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
