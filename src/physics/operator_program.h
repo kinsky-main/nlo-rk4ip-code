@@ -6,6 +6,7 @@
 
 #include "backend/vector_backend.h"
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,6 +19,13 @@ extern "C" {
 #ifndef OPERATOR_PROGRAM_MAX_STACK_SLOTS
 #define OPERATOR_PROGRAM_MAX_STACK_SLOTS 8u
 #endif
+
+#ifndef OPERATOR_PROGRAM_MAX_VALUES
+#define OPERATOR_PROGRAM_MAX_VALUES OPERATOR_PROGRAM_MAX_INSTRUCTIONS
+#endif
+
+/** Sentinel for an unused operand slot in an operator_value. */
+#define OPERATOR_VALUE_INVALID UINT16_MAX
 
 typedef enum {
     OPERATOR_CONTEXT_DISPERSION_FACTOR = 0,
@@ -61,12 +69,53 @@ typedef struct {
     nlo_complex literal;
 } operator_instruction;
 
+/** Bit per input symbol, used to record which inputs a lowered value reads. */
+typedef enum {
+    OPERATOR_SYMBOL_MASK_NONE = 0u,
+    OPERATOR_SYMBOL_MASK_W = (1u << 0),
+    OPERATOR_SYMBOL_MASK_A = (1u << 1),
+    OPERATOR_SYMBOL_MASK_I = (1u << 2),
+    OPERATOR_SYMBOL_MASK_D = (1u << 3),
+    OPERATOR_SYMBOL_MASK_V = (1u << 4),
+    OPERATOR_SYMBOL_MASK_H = (1u << 5),
+    OPERATOR_SYMBOL_MASK_WT = (1u << 6),
+    OPERATOR_SYMBOL_MASK_KX = (1u << 7),
+    OPERATOR_SYMBOL_MASK_KY = (1u << 8),
+    OPERATOR_SYMBOL_MASK_T = (1u << 9),
+    OPERATOR_SYMBOL_MASK_X = (1u << 10),
+    OPERATOR_SYMBOL_MASK_Y = (1u << 11)
+} operator_symbol_mask;
+
+/**
+ * @brief One node of a program lowered to a value DAG.
+ *
+ * Leaves are `OPERATOR_OP_PUSH_LITERAL` (value in @c literal) or a
+ * `OPERATOR_OP_PUSH_SYMBOL_*` opcode. Unary nodes read @c left (and
+ * @c literal for `OPERATOR_OP_POW_REAL_LITERAL`); binary nodes compute
+ * `left op right`. Operands always index earlier values, so the array is in
+ * evaluation order. Unused operands are `OPERATOR_VALUE_INVALID`.
+ */
+typedef struct {
+    operator_opcode opcode;
+    uint16_t left;
+    uint16_t right;
+    nlo_complex literal;
+    uint32_t symbol_mask;
+} operator_value;
+
 typedef struct {
     int active;
     operator_program_context context;
     size_t instruction_count;
     size_t required_stack_slots;
     operator_instruction instructions[OPERATOR_PROGRAM_MAX_INSTRUCTIONS];
+    /* Lowered form, filled by operator_program_compile when jit_eligible. */
+    int jit_eligible;
+    size_t value_count;
+    size_t root_value;
+    uint32_t active_symbol_mask;
+    uint64_t lowered_hash;
+    operator_value values[OPERATOR_PROGRAM_MAX_VALUES];
 } operator_program;
 
 typedef struct {
@@ -85,6 +134,11 @@ typedef struct {
 
 /**
  * @brief Compile an operator expression into an internal instruction program.
+ *
+ * On success the program is also lowered to a value DAG (`values`) with
+ * constant folding and common-subexpression sharing. `jit_eligible` is 1 when
+ * lowering succeeded; otherwise only the instruction stream is valid and the
+ * program still executes through the interpreter.
  *
  * @param expression Null-terminated expression string.
  * @param context Allowed symbol set for the program.
