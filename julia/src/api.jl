@@ -122,7 +122,8 @@ function storage_options(;
     raw_stride_t::Integer = 1,
     raw_stride_x::Integer = 1,
     raw_stride_y::Integer = 1,
-    binding::AbstractString = "julia"
+    binding::AbstractString = "julia",
+    defer_merge::Bool = false
 )
     binding_text = String(binding)
     keepalive = (sqlite_path, run_id, binding_text)
@@ -137,7 +138,8 @@ function storage_options(;
         Csize_t(raw_stride_t),
         Csize_t(raw_stride_x),
         Csize_t(raw_stride_y),
-        _string_ptr(binding_text)
+        _string_ptr(binding_text),
+        Cint(defer_merge)
     )
     return PreparedValue(value, keepalive)
 end

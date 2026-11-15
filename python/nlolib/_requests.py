@@ -42,6 +42,7 @@ class _NormalizedPropagateRequest:
     log_final_output_field_to_db: bool
     record_mode: int
     raw_strides: tuple[int, int, int]
+    defer_merge: bool
     return_records: bool
     capture_step_history: bool
     step_history_capacity: int
@@ -93,6 +94,7 @@ class PropagateRequestBuilder:
             int(kwargs.pop("raw_stride_x", 1)),
             int(kwargs.pop("raw_stride_y", 1)),
         )
+        defer_merge = bool(kwargs.pop("defer_merge", False))
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
@@ -143,6 +145,7 @@ class PropagateRequestBuilder:
             log_final_output_field_to_db=log_final_output_field_to_db,
             record_mode=record_mode,
             raw_strides=raw_strides,
+            defer_merge=defer_merge,
             return_records=return_records,
             capture_step_history=capture_step_history,
             step_history_capacity=step_history_capacity,
@@ -204,6 +207,7 @@ class PropagateRequestBuilder:
             int(kwargs.pop("raw_stride_x", 1)),
             int(kwargs.pop("raw_stride_y", 1)),
         )
+        defer_merge = bool(kwargs.pop("defer_merge", False))
         return_records = bool(kwargs.pop("return_records", True))
         capture_step_history = bool(kwargs.pop("capture_step_history", False))
         step_history_capacity = int(kwargs.pop("step_history_capacity", (200000 if capture_step_history else 0)))
@@ -385,6 +389,7 @@ class PropagateRequestBuilder:
             log_final_output_field_to_db=log_final_output_field_to_db,
             record_mode=record_mode,
             raw_strides=raw_strides,
+            defer_merge=defer_merge,
             return_records=return_records,
             capture_step_history=capture_step_history,
             step_history_capacity=step_history_capacity,

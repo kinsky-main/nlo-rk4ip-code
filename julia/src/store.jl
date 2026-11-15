@@ -49,7 +49,9 @@ end
 Merge the complete staging files left next to `sqlite_path` (runs that finished
 but could not take the lock) and, with `discard_incomplete = true`, delete
 incomplete ones (runs that crashed or were killed) older than `min_age_seconds`.
-Files of live processes on this machine are never touched. Returns
+Incomplete files of live processes on this machine are kept; with
+`discard_incomplete`, data of interrupted merges whose staging file is gone is
+deleted too. Returns
 `(merged, discarded, skipped)`.
 """
 function storage_recover_staging(sqlite_path::AbstractString; discard_incomplete::Bool = false,

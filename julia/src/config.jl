@@ -199,6 +199,7 @@ function _storage_result_to_meta(storage_result::StorageResult)
         "truncated" => Bool(storage_result.truncated != 0),
         "key" => _decode_c_chars(storage_result.key),
         "merged" => Bool(storage_result.merged != 0),
+        "deferred" => Bool(storage_result.deferred != 0),
     )
 end
 

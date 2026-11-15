@@ -1666,6 +1666,7 @@ classdef NLolib < handle
             opts.raw_stride_t = uint64(getfield_safe(storage, 'raw_stride_t', 1));
             opts.raw_stride_x = uint64(getfield_safe(storage, 'raw_stride_x', 1));
             opts.raw_stride_y = uint64(getfield_safe(storage, 'raw_stride_y', 1));
+            opts.defer_merge = int32(logical(getfield_safe(storage, 'defer_merge', false)));
             bindingName = 'matlab';
             bindingPtr = libpointer('cstring', bindingName);
             keepalive{end + 1} = bindingPtr;
@@ -1712,7 +1713,8 @@ classdef NLolib < handle
             end
             out.key = string(keyRaw);
             out.merged = logical(storageResultRaw.merged);
-            if ~out.merged && strlength(out.key) > 0
+            out.deferred = logical(storageResultRaw.deferred);
+            if ~out.merged && ~out.deferred && strlength(out.key) > 0
                 warning('nlolib:storageNotMerged', ...
                         ['Run %s is stored in a staging file but not merged into the shared ' ...
                          'database; merge it later with storage_recover_staging.'], out.key);

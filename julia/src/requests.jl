@@ -13,6 +13,7 @@ struct NormalizedPropagateRequest
     log_final_output_field_to_db::Bool
     record_mode::Cint
     raw_strides::NTuple{3, Int}
+    defer_merge::Bool
     return_records::Bool
     capture_step_history::Bool
     step_history_capacity::Int
@@ -56,6 +57,7 @@ function from_config(::PropagateRequestBuilder, config, input_field;
                      raw_stride_t::Integer = 1,
                      raw_stride_x::Integer = 1,
                      raw_stride_y::Integer = 1,
+                     defer_merge::Bool = false,
                      return_records::Bool = true,
                      capture_step_history::Bool = false,
                      step_history_capacity::Integer = (capture_step_history ? 200000 : 0),
@@ -87,6 +89,7 @@ function from_config(::PropagateRequestBuilder, config, input_field;
         Bool(log_final_output_field_to_db),
         record_mode_value(record_mode),
         (Int(raw_stride_t), Int(raw_stride_x), Int(raw_stride_y)),
+        Bool(defer_merge),
         Bool(return_records),
         Bool(capture_step_history),
         Int(step_history_capacity),
@@ -189,6 +192,7 @@ function from_pulse(::PropagateRequestBuilder, pulse, linear_operator = "gvd", n
         Bool(get(options, :log_final_output_field_to_db, true)),
         record_mode_value(get(options, :record_mode, STORAGE_RECORD_MODE_REDUCED)),
         (Int(get(options, :raw_stride_t, 1)), Int(get(options, :raw_stride_x, 1)), Int(get(options, :raw_stride_y, 1))),
+        Bool(get(options, :defer_merge, false)),
         Bool(get(options, :return_records, true)),
         capture_step_history,
         step_history_capacity,

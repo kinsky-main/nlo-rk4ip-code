@@ -164,5 +164,20 @@ end
         @test key == storage_run_key(pulse, linear, "kerr"; kwargs...)
     end
 
+    @testset "deferred merge" begin
+        t_axis = centered_time_grid(128, dt)
+        pulse = PulseSpec(samples = temporal_envelope(t_axis; temporal_width = temporal_width, beta2 = beta2,
+                                                      gamma = gamma_nonlinear, soliton_order = 1.0),
+                          delta_time = dt)
+        kwargs = (propagation_distance = 0.2, records = 4, exec_options = exec, sqlite_path = db_path,
+                  defer_merge = true)
+        result = NLOLib.propagate(pulse, "gvd", "kerr"; kwargs...)
+        stored = result.meta["storage_result"]
+        @test stored["deferred"] && !stored["merged"]
+        @test !storage_has_run(db_path, stored["key"])
+        @test storage_recover_staging(db_path).merged == 1
+        @test storage_has_run(db_path, stored["key"])
+    end
+
     check_runs_contract(db_path)
 end

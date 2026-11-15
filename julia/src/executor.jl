@@ -74,6 +74,7 @@ _request_storage_options(request::NormalizedPropagateRequest) = storage_options(
     raw_stride_t = request.raw_strides[1],
     raw_stride_x = request.raw_strides[2],
     raw_stride_y = request.raw_strides[3],
+    defer_merge = request.defer_merge,
 )
 
 """
@@ -214,7 +215,7 @@ function execute(request::NormalizedPropagateRequest)
     )
     callback_error !== nothing && throw(callback_error)
     status == NLOLIB_STATUS_ABORTED && throw(PropagationAbortedError(result))
-    if request.sqlite_path !== nothing && storage_result_ref[].merged == 0
+    if request.sqlite_path !== nothing && storage_result_ref[].merged == 0 && storage_result_ref[].deferred == 0
         @warn "nlolib stored the run but could not merge it into the shared database; " *
               "its staging file is kept. Merge it later with storage_recover_staging." sqlite_path = request.sqlite_path key = _decode_c_chars(storage_result_ref[].key)
     end

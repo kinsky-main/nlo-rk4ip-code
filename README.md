@@ -107,8 +107,19 @@ In-memory results of `propagate` are unchanged.
 
 `storage_run_key` returns the key a run will be stored under, so a script can
 skip runs with `storage_has_run`; `storage_recover_staging` merges or discards
-staging files left by interrupted runs. Tables, blob encoding, axes, units and
-the lock protocol are specified in `docs/nlolib_run_database.md`.
+staging files left by interrupted runs. With `defer_merge` (or
+`NLOLIB_STORE_DEFER_MERGE=1`) a run leaves its finished staging file for one
+designated host to merge with the `nlolib_store_merge` tool built next to the
+library:
+
+```bash
+nlolib_store_merge --watch 60 /path/to/store
+```
+
+On Linux and macOS, run databases are written with SQLite's `unix-none` VFS
+under Nlolib's own writer lock, because SQLite's Unix locking cannot commit on
+SMB mounts (`NLOLIB_STORE_VFS` overrides). Tables, blob encoding, axes, units
+and the lock protocol are specified in `docs/nlolib_run_database.md`.
 
 ## Bindings
 

@@ -370,6 +370,7 @@ ASSERT_OFFSET(storage_options, raw_stride_t);
 ASSERT_OFFSET(storage_options, raw_stride_x);
 ASSERT_OFFSET(storage_options, raw_stride_y);
 ASSERT_OFFSET(storage_options, binding);
+ASSERT_OFFSET(storage_options, defer_merge);
 
 ASSERT_SIZE(storage_result);
 ASSERT_OFFSET(storage_result, run_id);
@@ -380,6 +381,7 @@ ASSERT_OFFSET(storage_result, db_size_bytes);
 ASSERT_OFFSET(storage_result, truncated);
 ASSERT_OFFSET(storage_result, key);
 ASSERT_OFFSET(storage_result, merged);
+ASSERT_OFFSET(storage_result, deferred);
 
 ASSERT_SIZE(storage_run_layout);
 ASSERT_OFFSET(storage_run_layout, run_id);

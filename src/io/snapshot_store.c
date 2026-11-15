@@ -1025,10 +1025,11 @@ snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
         }
     }
 
+    /* Staging files live on the share too: write them with the run store's VFS (see run_store_sqlite_vfs). */
     if (sqlite3_open_v2(options->sqlite_path,
                         &store->db,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-                        NULL) != SQLITE_OK) {
+                        run_store_sqlite_vfs()) != SQLITE_OK) {
         snapshot_store_close(store);
         return NULL;
     }
@@ -1341,24 +1342,22 @@ static int store_insert_runs_row(snapshot_store* store, const snapshot_store_fin
     for (size_t c = 0u; c < RUNS_PARAM_COUNT; ++c) {
         used += (size_t)snprintf(sql + used, sizeof(sql) - used, ", %s", k_runs_param_columns[c][0]);
     }
-    used += (size_t)snprintf(sql + used, sizeof(sql) - used, ") VALUES(?, 'nlolib', ?, ?, ?, NULL");
+    used += (size_t)snprintf(sql + used, sizeof(sql) - used,
+                             ") VALUES(?, 'nlolib', ?, strftime('%%Y-%%m-%%dT%%H:%%M:%%f', 'now'), ?, NULL");
     for (size_t c = 0u; c < RUNS_PARAM_COUNT; ++c) {
         used += (size_t)snprintf(sql + used, sizeof(sql) - used, ", ?");
     }
     (void)snprintf(sql + used, sizeof(sql) - used, ");");
 
-    char created_at[32];
-    run_store_utc_now(created_at);
     sqlite3_stmt* stmt = NULL;
     if (prepare(store->db, sql, &stmt) != 0) {
         return -1;
     }
     int rc = (bind_text(stmt, 1, params->key) != 0 ||
               bind_text(stmt, 2, params->index_file) != 0 ||
-              bind_text(stmt, 3, created_at) != 0 ||
-              bind_text(stmt, 4, params->git_commit) != 0) ? -1 : 0;
+              bind_text(stmt, 3, params->git_commit) != 0) ? -1 : 0;
     for (size_t c = 0u; rc == 0 && c < RUNS_PARAM_COUNT; ++c) {
-        const int idx = (int)c + 5;
+        const int idx = (int)c + 4;
         switch (values[c].type) {
             case SQLITE_INTEGER:
                 rc = (sqlite3_bind_int64(stmt, idx, values[c].i64) == SQLITE_OK) ? 0 : -1;

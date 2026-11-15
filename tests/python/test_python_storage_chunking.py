@@ -263,6 +263,7 @@ def _dense_output_guard_case() -> None:
         log_final_output_field_to_db=False,
         record_mode=0,
         raw_strides=(1, 1, 1),
+        defer_merge=False,
         return_records=True,
         capture_step_history=False,
         step_history_capacity=0,

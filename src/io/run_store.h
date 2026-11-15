@@ -102,7 +102,8 @@ void run_store_discard(const char* staging_path);
 /**
  * @brief Merge complete and optionally discard incomplete leftover staging files.
  *
- * Staging files whose writer is a live process on this host are skipped.
+ * Incomplete staging files whose writer is a live process on this host are kept;
+ * complete ones are merged whoever wrote them.
  *
  * @param shared_path Shared run database path.
  * @param discard_incomplete Nonzero deletes staging files without a `runs` row.
@@ -139,6 +140,18 @@ run_store_status run_store_read_array(
     size_t capacity,
     size_t* out_count
 );
+
+/**
+ * @brief SQLite VFS used to write staging and shared databases, or NULL for SQLite's default.
+ *
+ * Default: "unix-none" on POSIX systems, SQLite's native VFS on Windows.
+ * SQLite's default Unix locking cannot commit on Linux SMB/CIFS mounts (SMB
+ * refuses the read-to-write lock upgrade), so POSIX writers take no SQLite
+ * locks and rely on the run store's own writer lock file. Override with the
+ * environment variable NLOLIB_STORE_VFS (a VFS name such as "unix",
+ * "unix-dotfile", "unix-none", or "default").
+ */
+const char* run_store_sqlite_vfs(void);
 
 /**
  * @brief Lock-protocol tuning for tests: timeout to wait for the lock and the

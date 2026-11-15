@@ -160,6 +160,7 @@ struct StorageOptions
     raw_stride_x::Csize_t
     raw_stride_y::Csize_t
     binding::Cstring
+    defer_merge::Cint
 end
 
 struct StorageResult
@@ -171,6 +172,7 @@ struct StorageResult
     truncated::Cint
     key::NTuple{STORAGE_KEY_MAX, Cchar}
     merged::Cint
+    deferred::Cint
 end
 
 struct StorageRunLayout
@@ -260,8 +262,8 @@ VulkanBackendConfig() = VulkanBackendConfig(C_NULL, C_NULL, C_NULL, 0, C_NULL, 0
 ExecutionOptions() = ExecutionOptions(VECTOR_BACKEND_AUTO, FFT_BACKEND_AUTO, 0.70, 0, 0, VulkanBackendConfig())
 RuntimeLimits() = RuntimeLimits(0, 0, 0, 0, 0, 0)
 StorageOptions() = StorageOptions(C_NULL, C_NULL, 0, 0, STORAGE_DB_CAP_POLICY_STOP_WRITES, 1,
-                                  STORAGE_RECORD_MODE_REDUCED, 1, 1, 1, C_NULL)
-StorageResult() = StorageResult(_zero_chars(Val(STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0, _zero_chars(Val(STORAGE_KEY_MAX)), 0)
+                                  STORAGE_RECORD_MODE_REDUCED, 1, 1, 1, C_NULL, 0)
+StorageResult() = StorageResult(_zero_chars(Val(STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0, _zero_chars(Val(STORAGE_KEY_MAX)), 0, 0)
 StorageRunLayout() = StorageRunLayout(_zero_chars(Val(STORAGE_RUN_ID_MAX)), 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0.0, 0.0, 0.0, 0)
 StepEvent() = StepEvent(0, 0.0, 0.0, 0.0, 0.0)
 

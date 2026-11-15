@@ -242,6 +242,7 @@ def _storage_result_to_meta(storage_result: NloStorageResult) -> dict[str, objec
         "truncated": bool(storage_result.truncated),
         "key": bytes(storage_result.key).split(b"\0", 1)[0].decode("ascii", errors="replace"),
         "merged": bool(storage_result.merged),
+        "deferred": bool(storage_result.deferred),
     }
 
 

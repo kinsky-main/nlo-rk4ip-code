@@ -484,6 +484,7 @@ typedef struct
     size_t raw_stride_x;
     size_t raw_stride_y;
     const char *binding;
+    int defer_merge;
 } storage_options;
 
 /**
@@ -499,6 +500,7 @@ typedef struct
     int truncated;
     char key[STORAGE_KEY_MAX];
     int merged;
+    int deferred;
 } storage_result;
 
 /**

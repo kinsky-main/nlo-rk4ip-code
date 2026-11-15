@@ -49,6 +49,7 @@ def _request_storage_options(request: _NormalizedPropagateRequest):
         raw_stride_t=request.raw_strides[0],
         raw_stride_x=request.raw_strides[1],
         raw_stride_y=request.raw_strides[2],
+        defer_merge=request.defer_merge,
         require_path=False,
     )
 

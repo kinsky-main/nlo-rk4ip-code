@@ -43,6 +43,7 @@ storage_options storage_options_default(void)
     options.raw_stride_x = 1u;
     options.raw_stride_y = 1u;
     options.binding = NULL;
+    options.defer_merge = 0;
     return options;
 }
 

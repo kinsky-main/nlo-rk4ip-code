@@ -33,6 +33,14 @@ def main() -> None:
     assert nlolib.storage_has_run(db, key)
     assert nlolib.storage_recover_staging(db) == {"merged": 0, "discarded": 0, "skipped": 0}
 
+    deferred_kwargs = dict(kwargs, propagation_distance=0.2, defer_merge=True)
+    deferred = nlolib.propagate(pulse, linear, nonlinear, **deferred_kwargs)
+    dstored = deferred.meta["storage_result"]
+    assert dstored["deferred"] and not dstored["merged"], dstored
+    assert not nlolib.storage_has_run(db, dstored["key"])
+    assert nlolib.storage_recover_staging(db)["merged"] == 1
+    assert nlolib.storage_has_run(db, dstored["key"])
+
     con = sqlite3.connect(db)
     try:
         info = con.execute("PRAGMA table_info(runs)").fetchall()
@@ -46,13 +54,13 @@ def main() -> None:
         ]
         params = [c[1] for c in info[6:]]
         assert params and all(p.startswith("nlolib_") and p == p.lower() for p in params)
-        row = con.execute("SELECT key, kind, file, created_at, julia_version, nlolib_binding FROM runs").fetchone()
+        row = con.execute("SELECT key, kind, file, created_at, julia_version, nlolib_binding FROM runs WHERE key=?", (key,)).fetchone()
         assert row[0] == key and row[1] == "nlolib" and row[2] == "nlolib/nlolib.sqlite"
         assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{3})?", row[3]), row[3]
         assert row[4] is None and row[5] == "python"
-        types = con.execute("SELECT " + ", ".join(f'typeof("{p}")' for p in params) + " FROM runs").fetchone()
-        assert "blob" not in types
-        assert con.execute("SELECT COUNT(*) FROM io_record_maps").fetchone()[0] == 5
+        for types in con.execute("SELECT " + ", ".join(f'typeof("{p}")' for p in params) + " FROM runs"):
+            assert "blob" not in types
+        assert con.execute("SELECT COUNT(*) FROM io_record_maps").fetchone()[0] == 10
         assert con.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
     finally:
         con.close()

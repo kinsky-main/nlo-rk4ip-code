@@ -218,6 +218,7 @@ class NloStorageOptions(ctypes.Structure):
         ("raw_stride_x", ctypes.c_size_t),
         ("raw_stride_y", ctypes.c_size_t),
         ("binding", ctypes.c_char_p),
+        ("defer_merge", ctypes.c_int),
     ]
 
 
@@ -231,6 +232,7 @@ class NloStorageResult(ctypes.Structure):
         ("truncated", ctypes.c_int),
         ("key", ctypes.c_char * STORAGE_KEY_MAX),
         ("merged", ctypes.c_int),
+        ("deferred", ctypes.c_int),
     ]
 
 
@@ -586,6 +588,7 @@ def default_storage_options(
     raw_stride_x: int = 1,
     raw_stride_y: int = 1,
     binding: str = "python",
+    defer_merge: bool = False,
     require_path: bool = True,
 ) -> tuple[NloStorageOptions, list[bytes]]:
     """
@@ -613,6 +616,7 @@ def default_storage_options(
     opts.raw_stride_t = int(raw_stride_t)
     opts.raw_stride_x = int(raw_stride_x)
     opts.raw_stride_y = int(raw_stride_y)
+    opts.defer_merge = int(bool(defer_merge))
 
     if run_id is not None and run_id != "":
         run_b = run_id.encode("utf-8")

@@ -314,6 +314,10 @@ typedef enum {
  * @param raw_stride_y Keep every n-th y sample in raw records (0 or 1: all).
  * @param binding Name of the binding that made the run, recorded in the
  *        `nlolib_binding` column (NULL: "c").
+ * @param defer_merge Nonzero leaves the completed staging file in `staging/`
+ *        instead of merging it, for a designated host to merge later with
+ *        nlolib_storage_recover_staging() or the `nlolib_store_merge` tool. The
+ *        environment variable NLOLIB_STORE_DEFER_MERGE=1 has the same effect.
  */
 typedef struct {
     const char* sqlite_path;
@@ -327,6 +331,7 @@ typedef struct {
     size_t raw_stride_x;
     size_t raw_stride_y;
     const char* binding;
+    int defer_merge;
 } storage_options;
 
 /**
@@ -337,6 +342,7 @@ typedef struct {
  * @param merged Nonzero when the run was merged into the shared database;
  *        zero leaves a complete staging file to merge later with
  *        nlolib_storage_recover_staging().
+ * @param deferred Nonzero when the merge was deferred on purpose (defer_merge).
  */
 typedef struct {
     char run_id[STORAGE_RUN_ID_MAX];
@@ -347,6 +353,7 @@ typedef struct {
     int truncated;
     char key[STORAGE_KEY_MAX];
     int merged;
+    int deferred;
 } storage_result;
 
 /**
