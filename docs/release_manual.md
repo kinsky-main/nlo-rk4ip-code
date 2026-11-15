@@ -2,13 +2,19 @@
 
 This document describes manual package publication for Python wheels and MATLAB toolbox bundles.
 
+The Julia package is not released by hand: it is built, tested and published by
+`.github/workflows/release-julia.yml` on a bare version tag, and the one manual
+step is committing the generated `julia/Artifacts.toml` before registering. See
+`docs/release_julia.md`.
+
 Version policy for distribution builds:
 
 - Nothing bumps the version automatically. `check_versions.py --bump` is the
   one deliberate step, and it rewrites `CMakeLists.txt` with every copy of it.
 - No release script writes a version. The copies agree at every commit, which
-  the `test_version_copies_match` CTest case enforces, so a wheel and a toolbox
-  built from the same commit carry the same version without a sync step.
+  the `test_version_copies_match` CTest case enforces, so a wheel, a toolbox
+  and a Julia artifact built from the same commit carry the same version
+  without a sync step.
 
 ## Prerequisites
 
@@ -59,3 +65,17 @@ Upload these files to the corresponding GitHub Release.
 
 Note: the release scripts configure CMake with `SQLITE_USE_FETCHCONTENT=ON`,
 which statically links SQLite into `nlolib` and avoids external SQLite runtime DLL dependencies.
+
+## Julia Package Publication
+
+See `docs/release_julia.md`. In short: push the bare version tag, let
+`release-julia` build and publish the per-platform artifact tarballs, reproduce
+the generated `Artifacts.toml` locally with
+
+```bash
+julia julia/tools/bind_artifacts.jl --version <version> --download \
+    --toml julia/Artifacts.toml x86_64-linux-gnu x86_64-w64-mingw32
+```
+
+commit it, and then register that commit with a `@JuliaRegistrator register
+subdir=julia` comment.

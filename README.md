@@ -14,6 +14,7 @@ Full rendered documentation is available at
 - Python binding guide: `python/README.md`
 - MATLAB binding guide: `matlab/README.md`
 - Julia binding guide: `julia/README.md`
+- Julia release and registration guide: `docs/release_julia.md`
 
 ## Quick Start
 
@@ -78,11 +79,16 @@ Generated output:
 
 The PyPI/package readme remains `python/README_PYPI.md`.
 
+The Julia package installs from the General registry with `] add NLOLib`, which
+downloads a prebuilt artifact instead of compiling anything; a built checkout
+also works through the `julia_stage` target. Both paths, the release flow and
+registration are in `docs/release_julia.md`.
+
 ## Python Releases
 
 Wheels are published to PyPI by `.github/workflows/release-pypi.yml` when a
-bare version tag (`1.16.0`, no `v`) is pushed. One wheel per platform, Linux
-and Windows x86-64, each smoke-tested on a clean runner before anything is
+bare version tag (no `v` prefix) is pushed. One wheel per platform, Linux and
+Windows x86-64, each smoke-tested on a clean runner before anything is
 uploaded. Run the workflow manually for a dry run that builds and checks the
 wheels but publishes nothing.
 
