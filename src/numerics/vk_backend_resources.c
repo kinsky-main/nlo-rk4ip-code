@@ -775,6 +775,9 @@ void vk_backend_shutdown(vector_backend* backend)
     backend->vk.physical_device = VK_NULL_HANDLE;
     backend->vk.owns_device = false;
 
+    /* Never taken today: the auto path borrows the process-wide instance and
+       explicit configs supply their own, so no backend owns an instance.  The
+       guard stays as the ownership contract for any future owning caller. */
     if (backend->vk.owns_instance && backend->vk.instance != VK_NULL_HANDLE) {
         vkDestroyInstance(backend->vk.instance, NULL);
     }
