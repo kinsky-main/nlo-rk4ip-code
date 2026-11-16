@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -1242,6 +1243,46 @@ static void test_run_id_conflict(const char* root)
     check_runs_contract(db_path);
 }
 
+/*
+ * A staging write that fails at the OS level during the run (here a file
+ * size limit, EFBIG) fails the run, and the log names the SQLite result and OS error behind it,
+ * not only the propagate stage.
+ */
+static void test_write_failure_logged(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    pid_t pid = fork();
+    if (pid == 0) {
+        signal(SIGXFSZ, SIG_IGN);
+        /* Room for the schema and a few records, not for 32 raw records of 16 KiB. */
+        struct rlimit limit = {256u * 1024u, 256u * 1024u};
+        (void)setrlimit(RLIMIT_FSIZE, &limit);
+        (void)nlolib_set_log_buffer(1u << 16);
+        run_case rc;
+        case_init_1d(&rc, 1024u, 1.0, 32u, db_path);
+        rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+        const nlolib_status status = case_run(&rc, NULL, 0u, NULL);
+        char text[1u << 16];
+        size_t written = 0u;
+        (void)nlolib_read_log_buffer(text, sizeof(text), &written, 0);
+        text[(written < sizeof(text)) ? written : sizeof(text) - 1u] = '\0';
+        char errno_line[64];
+        (void)snprintf(errno_line, sizeof(errno_line), "os errno: %d", EFBIG);
+        const int named = strstr(text, "sqlite ") != NULL && strstr(text, errno_line) != NULL &&
+                          strstr(text, "stage: snapshot_capture") != NULL;
+        if (!named) {
+            fprintf(stderr, "log without the cause:\n%s\n", text);
+        }
+        _exit(status == NLOLIB_STATUS_OK ? 2 : (named ? 0 : 3));
+    }
+    int status = 0;
+    (void)waitpid(pid, &status, 0);
+    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0,
+          "failed staging write: exit %d (2: run succeeded, 3: log does not name the OS error)",
+          WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+}
+
 /* A merge split over many small transactions, a writer killed between two of them, and the clean-up. */
 static void test_batched_and_interrupted_merge(const char* root)
 {
@@ -2056,6 +2097,7 @@ int main(int argc, char** argv)
         {"deferred_merge", test_deferred_merge},
         {"recovery_pass_settles_once", test_recovery_pass_settles_once},
         {"run_id_conflict", test_run_id_conflict},
+        {"write_failure_logged", test_write_failure_logged},
         {"batched_interrupted_merge", test_batched_and_interrupted_merge},
         {"stale_view_guard", test_stale_view_guard},
         {"hot_journal", test_hot_journal},

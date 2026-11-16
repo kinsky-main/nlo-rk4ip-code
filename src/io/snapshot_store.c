@@ -214,18 +214,33 @@ static void make_run_id(char out_run_id[STORAGE_RUN_ID_MAX], const char* explici
     (void)snprintf(out_run_id, STORAGE_RUN_ID_MAX, "run-%llx-%llx", now, serial);
 }
 
+/*
+ * Log a failed SQLite call on @p db with its extended result code and the OS
+ * error behind it, so that an I/O failure on a share (a short write, a failed
+ * fsync or journal delete) is reported as such rather than only as the
+ * propagate stage that hit it.
+ */
+static void log_sqlite_failure(sqlite3* db, const char* what, int rc)
+{
+    log_emit(LOG_LEVEL_ERROR,
+             "[nlolib][io] sqlite %s failed:\n"
+             "  - file: %s\n"
+             "  - result: %d (%s)\n"
+             "  - detail: %s\n"
+             "  - os errno: %d",
+             what,
+             (db != NULL && sqlite3_db_filename(db, "main") != NULL) ? sqlite3_db_filename(db, "main") : "?",
+             (db != NULL) ? sqlite3_extended_errcode(db) : rc,
+             sqlite3_errstr((db != NULL) ? sqlite3_extended_errcode(db) : rc),
+             (db != NULL) ? sqlite3_errmsg(db) : sqlite3_errstr(rc),
+             (db != NULL) ? sqlite3_system_errno(db) : 0);
+}
+
 static int sqlite_exec(sqlite3* db, const char* sql)
 {
-    char* err = NULL;
-    const int rc = sqlite3_exec(db, sql, NULL, NULL, &err);
+    const int rc = sqlite3_exec(db, sql, NULL, NULL, NULL);
     if (rc != SQLITE_OK) {
-        if (err != NULL) {
-            log_emit(LOG_LEVEL_ERROR,
-                         "[nlolib][io] sqlite exec error:\n"
-                         "  - detail: %s",
-                         err);
-        }
-        sqlite3_free(err);
+        log_sqlite_failure(db, "exec", rc);
         return -1;
     }
     return 0;
@@ -265,6 +280,9 @@ static int bind_doubles(sqlite3_stmt* stmt, int index, const double* values, siz
 static int step_done(sqlite3_stmt* stmt)
 {
     const int rc = sqlite3_step(stmt);
+    if (rc != SQLITE_DONE) {
+        log_sqlite_failure(sqlite3_db_handle(stmt), "write", rc);
+    }
     sqlite3_reset(stmt);
     sqlite3_clear_bindings(stmt);
     return (rc == SQLITE_DONE) ? 0 : -1;
@@ -1030,6 +1048,7 @@ snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
                         &store->db,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
                         run_store_sqlite_vfs()) != SQLITE_OK) {
+        log_sqlite_failure(store->db, "open", SQLITE_CANTOPEN);
         snapshot_store_close(store);
         return NULL;
     }
