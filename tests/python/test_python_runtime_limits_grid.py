@@ -125,10 +125,38 @@ def test_propagate_still_works_after_a_limits_query() -> None:
     assert len(result.records) == records
 
 
+def test_storage_ceiling_is_not_a_memory_figure() -> None:
+    """The streaming ceiling must not move with the grid, or with host memory.
+
+    max_num_recorded_samples_in_memory describes in-memory recording, where
+    every record stays resident. A run streaming to the snapshot store keeps
+    only a ring window resident, so its ceiling is
+    max_num_recorded_samples_with_storage -- a precision ceiling. If that one
+    ever started tracking memory, a streaming run would be told it can record
+    far less than it can.
+    """
+    api = nlolib.NLolib()
+    opts = nlolib.default_execution_options(nlolib.NLO_VECTOR_BACKEND_CPU)
+    caps = [
+        int(api.query_runtime_limits(_config(n), opts)
+            .max_num_recorded_samples_with_storage)
+        for n in (N, 16 * N)
+    ]
+    assert caps[0] == caps[1], f"storage ceiling moved with the grid: {caps}"
+
+    in_memory = int(api.query_runtime_limits(_config(N), opts)
+                    .max_num_recorded_samples_in_memory)
+    assert caps[0] > in_memory, (
+        "the storage ceiling is no higher than the in-memory capacity, so "
+        "streaming would be constrained by host memory it does not use"
+    )
+
+
 def main() -> None:
     test_grid_dependent_limits_are_populated()
     test_in_memory_capacity_shrinks_as_records_grow()
     test_limits_scale_with_the_grid()
+    test_storage_ceiling_is_not_a_memory_figure()
     test_query_does_not_mutate_the_callers_config()
     test_propagate_still_works_after_a_limits_query()
     print("test_python_runtime_limits_grid: grid-dependent runtime limits populated.")

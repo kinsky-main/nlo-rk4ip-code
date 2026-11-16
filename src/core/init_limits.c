@@ -236,11 +236,19 @@ int query_runtime_limits_internal(
     size_t runtime_limit = max_samples_by_element_size;
     const size_t host_available = apply_memory_headroom(query_available_system_memory_bytes());
 
-    /* Records accumulate in host memory, one field snapshot each, so the
-     * in-memory capacity is what host memory is left over after the working set
-     * divided by the size of a record. It used to be set to
-     * max_num_recorded_samples_with_storage, which made the two fields equal and
-     * the in-memory one say nothing: the documented
+    /* In-memory recording keeps every record resident, one field snapshot each,
+     * so its capacity is the host memory left after the working set divided by
+     * the size of a record. This figure describes that mode only. A run
+     * streaming to the snapshot store keeps a ring window of
+     * `record_ring_target` records resident instead of all of them, so its
+     * ceiling is max_num_recorded_samples_with_storage -- a precision ceiling,
+     * not a memory one -- and this field does not apply to it. Neither field is
+     * enforced from here: propagate validates the requested record count
+     * against the storage ceiling alone, so a streaming run is never clamped
+     * by this.
+     *
+     * It used to be assigned max_num_recorded_samples_with_storage, which made
+     * the two fields equal and this one say nothing: the documented
      * min(wanted, max_num_recorded_samples_in_memory) could never reduce
      * anything. Zero still means "not derivable", which is the case when the
      * config does not state its sample count. */
