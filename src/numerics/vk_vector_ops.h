@@ -214,6 +214,24 @@ vec_status vk_op_complex_add_inplace(
 );
 
 /**
+ * @brief Vulkan real-coefficient linear combination of 2 to 4 vectors.
+ *
+ * @param backend Vulkan backend handle.
+ * @param dst Destination vector; may alias a source.
+ * @param term_count Number of terms, 2 to 4.
+ * @param srcs Source vectors.
+ * @param coeffs Real coefficients.
+ * @return vec_status Operation status.
+ */
+vec_status vk_op_complex_affine_comb_real(
+    vector_backend* backend,
+    vec_buffer* dst,
+    size_t term_count,
+    const vec_buffer* const* srcs,
+    const double* coeffs
+);
+
+/**
  * @brief Apply element-wise complex exponential in place.
  *
  * @param backend Backend handle.

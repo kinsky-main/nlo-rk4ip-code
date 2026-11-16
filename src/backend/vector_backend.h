@@ -441,6 +441,27 @@ vec_status vec_complex_real_pow_inplace(
 vec_status vec_complex_add_inplace(vector_backend* backend, vec_buffer* dst, const vec_buffer* src);
 
 /**
+ * @brief Real-coefficient linear combination: @p dst[i] = sum_k coeffs[k] * srcs[k][i].
+ *
+ * One kernel replaces a copy/scale/add chain in the RK step. @p dst may alias
+ * any source.
+ *
+ * @param backend Backend handle.
+ * @param dst Destination vector.
+ * @param term_count Number of terms, 2 to 4.
+ * @param srcs @p term_count source vectors, each the length of @p dst.
+ * @param coeffs @p term_count real coefficients.
+ * @return vec_status Operation status.
+ */
+vec_status vec_complex_affine_comb_real(
+    vector_backend* backend,
+    vec_buffer* dst,
+    size_t term_count,
+    const vec_buffer* const* srcs,
+    const double* coeffs
+);
+
+/**
  * @brief Apply element-wise complex exponential in place.
  *
  * @param backend Backend handle.

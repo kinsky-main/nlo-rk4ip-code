@@ -165,6 +165,29 @@ static void prepare_operator_program_jit(
     program->vk_jit_warning_emitted = 1;
 }
 
+/* Programs that read coordinate grids must all be JIT kernels, which index the
+ * 1-D axes directly; the interpreter needs the full-grid meshes. */
+static int state_can_use_compact_axis_symbols(const simulation_state* state)
+{
+    if (!state->tensor_mode_active ||
+        vector_backend_get_type(state->backend) != VECTOR_BACKEND_VULKAN) {
+        return 0;
+    }
+
+    const operator_program* programs[] = {
+        &state->linear_factor_operator_program,
+        &state->linear_operator_program,
+        &state->nonlinear_operator_program,
+        (state->config->spatial.potential_grid == NULL) ? &state->potential_operator_program : NULL
+    };
+    for (size_t i = 0u; i < sizeof(programs) / sizeof(programs[0]); ++i) {
+        if (programs[i] != NULL && programs[i]->active && !programs[i]->vk_jit_active) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static void warn_legacy_nonlinear_expression(
     const char* nonlinear_expr,
     const operator_program* nonlinear_program
@@ -939,6 +962,120 @@ simulation_state* create_simulation_state_with_storage(
         state_debug_log_backend_memory_stage(state, "raman_vectors_allocated");
     }
 
+    /* Compile and JIT the operator programs before the tensor buffers: when every
+     * program runs as a JIT kernel, the six full-grid meshes are not needed. */
+    vec_status status = VEC_STATUS_OK;
+    double resolved_runtime_constants[RUNTIME_OPERATOR_CONSTANTS_MAX];
+    const double* runtime_constants = resolved_runtime_constants;
+    size_t runtime_constant_count = resolve_runtime_constants(&config->runtime,
+                                                                  resolved_runtime_constants);
+    if (runtime_constant_count == 0u ||
+        runtime_constant_count > RUNTIME_OPERATOR_CONSTANTS_MAX) {
+        state_debug_log_failure("resolve_runtime_constants", VEC_STATUS_INVALID_ARGUMENT);
+        free_simulation_state(state);
+        return NULL;
+    }
+
+    const char* linear_factor_expr = resolve_operator_expr(config->runtime.linear_factor_expr,
+                                                               resolve_operator_expr(
+                                                                   config->runtime.dispersion_factor_expr,
+                                                                   DEFAULT_LINEAR_FACTOR_EXPR));
+    const char* linear_expr = resolve_operator_expr(config->runtime.linear_expr,
+                                                        resolve_operator_expr(
+                                                            config->runtime.dispersion_expr,
+                                                            DEFAULT_LINEAR_EXPR));
+    const char* potential_expr = resolve_operator_expr(config->runtime.potential_expr,
+                                                           DEFAULT_POTENTIAL_EXPR);
+    const char* dispersion_factor_expr = resolve_operator_expr(config->runtime.dispersion_factor_expr,
+                                                                   DEFAULT_DISPERSION_FACTOR_EXPR);
+    const char* dispersion_expr = resolve_operator_expr(config->runtime.dispersion_expr,
+                                                            DEFAULT_DISPERSION_EXPR);
+    const char* nonlinear_expr = resolve_operator_expr(config->runtime.nonlinear_expr,
+                                                           DEFAULT_NONLINEAR_EXPR);
+
+    if (state->tensor_mode_active) {
+        status = operator_program_compile(potential_expr,
+                                              OPERATOR_CONTEXT_POTENTIAL,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->potential_operator_program);
+        if (status != VEC_STATUS_OK) {
+            state_debug_log_failure("compile_potential_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = operator_program_compile(linear_factor_expr,
+                                              OPERATOR_CONTEXT_LINEAR_FACTOR,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->linear_factor_operator_program);
+        if (status != VEC_STATUS_OK) {
+            state_debug_log_failure("compile_linear_factor_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = operator_program_compile(linear_expr,
+                                              OPERATOR_CONTEXT_LINEAR,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->linear_operator_program);
+        if (status != VEC_STATUS_OK) {
+            state_debug_log_failure("compile_linear_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+    } else {
+        status = operator_program_compile(dispersion_factor_expr,
+                                              OPERATOR_CONTEXT_DISPERSION_FACTOR,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->dispersion_factor_operator_program);
+        if (status != VEC_STATUS_OK) {
+            state_debug_log_failure("compile_dispersion_factor_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+
+        status = operator_program_compile(dispersion_expr,
+                                              OPERATOR_CONTEXT_DISPERSION,
+                                              runtime_constant_count,
+                                              runtime_constants,
+                                              &state->dispersion_operator_program);
+        if (status != VEC_STATUS_OK) {
+            state_debug_log_failure("compile_dispersion_program", status);
+            free_simulation_state(state);
+            return NULL;
+        }
+    }
+
+    status = operator_program_compile(nonlinear_expr,
+                                          OPERATOR_CONTEXT_NONLINEAR,
+                                          runtime_constant_count,
+                                          runtime_constants,
+                                          &state->nonlinear_operator_program);
+    if (status != VEC_STATUS_OK) {
+        state_debug_log_failure("compile_nonlinear_program", status);
+        free_simulation_state(state);
+        return NULL;
+    }
+    warn_legacy_nonlinear_expression(nonlinear_expr, &state->nonlinear_operator_program);
+
+    if (state->tensor_mode_active) {
+        prepare_operator_program_jit(state, &state->potential_operator_program, "potential_expr");
+        prepare_operator_program_jit(state, &state->linear_factor_operator_program, "linear_factor_expr");
+        prepare_operator_program_jit(state, &state->linear_operator_program, "linear_expr");
+    } else {
+        prepare_operator_program_jit(state,
+                                     &state->dispersion_factor_operator_program,
+                                     "dispersion_factor_expr");
+        prepare_operator_program_jit(state, &state->dispersion_operator_program, "dispersion_expr");
+    }
+    prepare_operator_program_jit(state, &state->nonlinear_operator_program, "nonlinear_expr");
+
+    state->tensor_compact_axis_symbols = state_can_use_compact_axis_symbols(state);
+
     if (state->tensor_mode_active) {
         if (create_complex_vec(state->backend, state->nt, &state->init_vectors.wt_axis_vec) != VEC_STATUS_OK ||
             create_complex_vec(state->backend, state->nx, &state->init_vectors.kx_axis_vec) != VEC_STATUS_OK ||
@@ -946,12 +1083,13 @@ simulation_state* create_simulation_state_with_storage(
             create_complex_vec(state->backend, state->nt, &state->init_vectors.t_axis_vec) != VEC_STATUS_OK ||
             create_complex_vec(state->backend, state->nx, &state->init_vectors.x_axis_vec) != VEC_STATUS_OK ||
             create_complex_vec(state->backend, state->ny, &state->init_vectors.y_axis_vec) != VEC_STATUS_OK ||
-            create_complex_vec(state->backend, num_time_samples, &state->working_vectors.wt_mesh_vec) != VEC_STATUS_OK ||
-            create_complex_vec(state->backend, num_time_samples, &state->working_vectors.kx_mesh_vec) != VEC_STATUS_OK ||
-            create_complex_vec(state->backend, num_time_samples, &state->working_vectors.ky_mesh_vec) != VEC_STATUS_OK ||
-            create_complex_vec(state->backend, num_time_samples, &state->working_vectors.t_mesh_vec) != VEC_STATUS_OK ||
-            create_complex_vec(state->backend, num_time_samples, &state->working_vectors.x_mesh_vec) != VEC_STATUS_OK ||
-            create_complex_vec(state->backend, num_time_samples, &state->working_vectors.y_mesh_vec) != VEC_STATUS_OK) {
+            (!state->tensor_compact_axis_symbols &&
+             (create_complex_vec(state->backend, num_time_samples, &state->working_vectors.wt_mesh_vec) != VEC_STATUS_OK ||
+              create_complex_vec(state->backend, num_time_samples, &state->working_vectors.kx_mesh_vec) != VEC_STATUS_OK ||
+              create_complex_vec(state->backend, num_time_samples, &state->working_vectors.ky_mesh_vec) != VEC_STATUS_OK ||
+              create_complex_vec(state->backend, num_time_samples, &state->working_vectors.t_mesh_vec) != VEC_STATUS_OK ||
+              create_complex_vec(state->backend, num_time_samples, &state->working_vectors.x_mesh_vec) != VEC_STATUS_OK ||
+              create_complex_vec(state->backend, num_time_samples, &state->working_vectors.y_mesh_vec) != VEC_STATUS_OK))) {
             state_debug_log_failure("allocate_tensor_mesh_vectors", VEC_STATUS_ALLOCATION_FAILED);
             free_simulation_state(state);
             return NULL;
@@ -959,7 +1097,7 @@ simulation_state* create_simulation_state_with_storage(
         state_debug_log_backend_memory_stage(state, "tensor_vectors_allocated");
     }
 
-    vec_status status = vec_complex_fill(state->backend, state->current_field_vec, make(0.0, 0.0));
+    status = vec_complex_fill(state->backend, state->current_field_vec, make(0.0, 0.0));
     if (status != VEC_STATUS_OK) {
         state_debug_log_failure("clear_current_field", status);
         free_simulation_state(state);
@@ -1039,59 +1177,62 @@ simulation_state* create_simulation_state_with_storage(
             return NULL;
         }
 
-        status = vec_complex_mesh_from_axis_tfast(state->backend,
-                                                      state->working_vectors.wt_mesh_vec,
-                                                      state->init_vectors.wt_axis_vec,
-                                                      state->nt,
-                                                      state->ny,
-                                                      VEC_MESH_AXIS_T);
-        if (status == VEC_STATUS_OK) {
+        /* Compact axis symbols keep the axes and skip the meshes. */
+        if (!state->tensor_compact_axis_symbols) {
             status = vec_complex_mesh_from_axis_tfast(state->backend,
-                                                          state->working_vectors.kx_mesh_vec,
-                                                          state->init_vectors.kx_axis_vec,
-                                                          state->nt,
-                                                          state->ny,
-                                                          VEC_MESH_AXIS_X);
-        }
-        if (status == VEC_STATUS_OK) {
-            status = vec_complex_mesh_from_axis_tfast(state->backend,
-                                                          state->working_vectors.ky_mesh_vec,
-                                                          state->init_vectors.ky_axis_vec,
-                                                          state->nt,
-                                                          state->ny,
-                                                          VEC_MESH_AXIS_Y);
-        }
-        if (status == VEC_STATUS_OK) {
-            status = vec_complex_mesh_from_axis_tfast(state->backend,
-                                                          state->working_vectors.t_mesh_vec,
-                                                          state->init_vectors.t_axis_vec,
+                                                          state->working_vectors.wt_mesh_vec,
+                                                          state->init_vectors.wt_axis_vec,
                                                           state->nt,
                                                           state->ny,
                                                           VEC_MESH_AXIS_T);
-        }
-        if (status == VEC_STATUS_OK) {
-            status = vec_complex_mesh_from_axis_tfast(state->backend,
-                                                          state->working_vectors.x_mesh_vec,
-                                                          state->init_vectors.x_axis_vec,
-                                                          state->nt,
-                                                          state->ny,
-                                                          VEC_MESH_AXIS_X);
-        }
-        if (status == VEC_STATUS_OK) {
-            status = vec_complex_mesh_from_axis_tfast(state->backend,
-                                                          state->working_vectors.y_mesh_vec,
-                                                          state->init_vectors.y_axis_vec,
-                                                          state->nt,
-                                                          state->ny,
-                                                          VEC_MESH_AXIS_Y);
-        }
-        if (status != VEC_STATUS_OK) {
-            state_debug_log_failure("prepare_tensor_mesh_axes", status);
-            free_simulation_state(state);
-            return NULL;
-        }
+            if (status == VEC_STATUS_OK) {
+                status = vec_complex_mesh_from_axis_tfast(state->backend,
+                                                              state->working_vectors.kx_mesh_vec,
+                                                              state->init_vectors.kx_axis_vec,
+                                                              state->nt,
+                                                              state->ny,
+                                                              VEC_MESH_AXIS_X);
+            }
+            if (status == VEC_STATUS_OK) {
+                status = vec_complex_mesh_from_axis_tfast(state->backend,
+                                                              state->working_vectors.ky_mesh_vec,
+                                                              state->init_vectors.ky_axis_vec,
+                                                              state->nt,
+                                                              state->ny,
+                                                              VEC_MESH_AXIS_Y);
+            }
+            if (status == VEC_STATUS_OK) {
+                status = vec_complex_mesh_from_axis_tfast(state->backend,
+                                                              state->working_vectors.t_mesh_vec,
+                                                              state->init_vectors.t_axis_vec,
+                                                              state->nt,
+                                                              state->ny,
+                                                              VEC_MESH_AXIS_T);
+            }
+            if (status == VEC_STATUS_OK) {
+                status = vec_complex_mesh_from_axis_tfast(state->backend,
+                                                              state->working_vectors.x_mesh_vec,
+                                                              state->init_vectors.x_axis_vec,
+                                                              state->nt,
+                                                              state->ny,
+                                                              VEC_MESH_AXIS_X);
+            }
+            if (status == VEC_STATUS_OK) {
+                status = vec_complex_mesh_from_axis_tfast(state->backend,
+                                                              state->working_vectors.y_mesh_vec,
+                                                              state->init_vectors.y_axis_vec,
+                                                              state->nt,
+                                                              state->ny,
+                                                              VEC_MESH_AXIS_Y);
+            }
+            if (status != VEC_STATUS_OK) {
+                state_debug_log_failure("prepare_tensor_mesh_axes", status);
+                free_simulation_state(state);
+                return NULL;
+            }
 
-        release_init_vectors(state);
+            release_init_vectors(state);
+        }
     } else if (explicit_nd != 0) {
         nlo_complex* temporal_line = (nlo_complex*)malloc(state->nt * sizeof(nlo_complex));
         nlo_complex* temporal_volume = (nlo_complex*)malloc(num_time_samples * sizeof(nlo_complex));
@@ -1225,114 +1366,6 @@ simulation_state* create_simulation_state_with_storage(
         }
     }
 
-    double resolved_runtime_constants[RUNTIME_OPERATOR_CONSTANTS_MAX];
-    const double* runtime_constants = resolved_runtime_constants;
-    size_t runtime_constant_count = resolve_runtime_constants(&config->runtime,
-                                                                  resolved_runtime_constants);
-    if (runtime_constant_count == 0u ||
-        runtime_constant_count > RUNTIME_OPERATOR_CONSTANTS_MAX) {
-        state_debug_log_failure("resolve_runtime_constants", VEC_STATUS_INVALID_ARGUMENT);
-        free_simulation_state(state);
-        return NULL;
-    }
-
-    const char* linear_factor_expr = resolve_operator_expr(config->runtime.linear_factor_expr,
-                                                               resolve_operator_expr(
-                                                                   config->runtime.dispersion_factor_expr,
-                                                                   DEFAULT_LINEAR_FACTOR_EXPR));
-    const char* linear_expr = resolve_operator_expr(config->runtime.linear_expr,
-                                                        resolve_operator_expr(
-                                                            config->runtime.dispersion_expr,
-                                                            DEFAULT_LINEAR_EXPR));
-    const char* potential_expr = resolve_operator_expr(config->runtime.potential_expr,
-                                                           DEFAULT_POTENTIAL_EXPR);
-    const char* dispersion_factor_expr = resolve_operator_expr(config->runtime.dispersion_factor_expr,
-                                                                   DEFAULT_DISPERSION_FACTOR_EXPR);
-    const char* dispersion_expr = resolve_operator_expr(config->runtime.dispersion_expr,
-                                                            DEFAULT_DISPERSION_EXPR);
-    const char* nonlinear_expr = resolve_operator_expr(config->runtime.nonlinear_expr,
-                                                           DEFAULT_NONLINEAR_EXPR);
-
-    if (state->tensor_mode_active) {
-        status = operator_program_compile(potential_expr,
-                                              OPERATOR_CONTEXT_POTENTIAL,
-                                              runtime_constant_count,
-                                              runtime_constants,
-                                              &state->potential_operator_program);
-        if (status != VEC_STATUS_OK) {
-            state_debug_log_failure("compile_potential_program", status);
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        status = operator_program_compile(linear_factor_expr,
-                                              OPERATOR_CONTEXT_LINEAR_FACTOR,
-                                              runtime_constant_count,
-                                              runtime_constants,
-                                              &state->linear_factor_operator_program);
-        if (status != VEC_STATUS_OK) {
-            state_debug_log_failure("compile_linear_factor_program", status);
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        status = operator_program_compile(linear_expr,
-                                              OPERATOR_CONTEXT_LINEAR,
-                                              runtime_constant_count,
-                                              runtime_constants,
-                                              &state->linear_operator_program);
-        if (status != VEC_STATUS_OK) {
-            state_debug_log_failure("compile_linear_program", status);
-            free_simulation_state(state);
-            return NULL;
-        }
-    } else {
-        status = operator_program_compile(dispersion_factor_expr,
-                                              OPERATOR_CONTEXT_DISPERSION_FACTOR,
-                                              runtime_constant_count,
-                                              runtime_constants,
-                                              &state->dispersion_factor_operator_program);
-        if (status != VEC_STATUS_OK) {
-            state_debug_log_failure("compile_dispersion_factor_program", status);
-            free_simulation_state(state);
-            return NULL;
-        }
-
-        status = operator_program_compile(dispersion_expr,
-                                              OPERATOR_CONTEXT_DISPERSION,
-                                              runtime_constant_count,
-                                              runtime_constants,
-                                              &state->dispersion_operator_program);
-        if (status != VEC_STATUS_OK) {
-            state_debug_log_failure("compile_dispersion_program", status);
-            free_simulation_state(state);
-            return NULL;
-        }
-    }
-
-    status = operator_program_compile(nonlinear_expr,
-                                          OPERATOR_CONTEXT_NONLINEAR,
-                                          runtime_constant_count,
-                                          runtime_constants,
-                                          &state->nonlinear_operator_program);
-    if (status != VEC_STATUS_OK) {
-        state_debug_log_failure("compile_nonlinear_program", status);
-        free_simulation_state(state);
-        return NULL;
-    }
-    warn_legacy_nonlinear_expression(nonlinear_expr, &state->nonlinear_operator_program);
-
-    if (state->tensor_mode_active) {
-        prepare_operator_program_jit(state, &state->potential_operator_program, "potential_expr");
-        prepare_operator_program_jit(state, &state->linear_factor_operator_program, "linear_factor_expr");
-        prepare_operator_program_jit(state, &state->linear_operator_program, "linear_expr");
-    } else {
-        prepare_operator_program_jit(state,
-                                     &state->dispersion_factor_operator_program,
-                                     "dispersion_factor_expr");
-        prepare_operator_program_jit(state, &state->dispersion_operator_program, "dispersion_expr");
-    }
-    prepare_operator_program_jit(state, &state->nonlinear_operator_program, "nonlinear_expr");
 
     size_t required_stack_slots = state->nonlinear_operator_program.required_stack_slots;
     if (state->tensor_mode_active) {
@@ -1377,12 +1410,12 @@ simulation_state* create_simulation_state_with_storage(
         if (config->spatial.potential_grid == NULL) {
             const operator_eval_context potential_eval_ctx = {
                 .frequency_grid = state_operator_frequency_grid(state),
-                .wt_grid = state->working_vectors.wt_mesh_vec,
-                .kx_grid = state->working_vectors.kx_mesh_vec,
-                .ky_grid = state->working_vectors.ky_mesh_vec,
-                .t_grid = state->working_vectors.t_mesh_vec,
-                .x_grid = state->working_vectors.x_mesh_vec,
-                .y_grid = state->working_vectors.y_mesh_vec,
+                .wt_grid = state_operator_wt_grid(state),
+                .kx_grid = state_operator_kx_grid(state),
+                .ky_grid = state_operator_ky_grid(state),
+                .t_grid = state_operator_t_grid(state),
+                .x_grid = state_operator_x_grid(state),
+                .y_grid = state_operator_y_grid(state),
                 .field = state->current_field_vec,
                 .dispersion_factor = NULL,
                 .potential = NULL,
@@ -1403,12 +1436,12 @@ simulation_state* create_simulation_state_with_storage(
 
         const operator_eval_context linear_factor_eval_ctx = {
             .frequency_grid = state_operator_frequency_grid(state),
-            .wt_grid = state->working_vectors.wt_mesh_vec,
-            .kx_grid = state->working_vectors.kx_mesh_vec,
-            .ky_grid = state->working_vectors.ky_mesh_vec,
-            .t_grid = state->working_vectors.t_mesh_vec,
-            .x_grid = state->working_vectors.x_mesh_vec,
-            .y_grid = state->working_vectors.y_mesh_vec,
+            .wt_grid = state_operator_wt_grid(state),
+            .kx_grid = state_operator_kx_grid(state),
+            .ky_grid = state_operator_ky_grid(state),
+            .t_grid = state_operator_t_grid(state),
+            .x_grid = state_operator_x_grid(state),
+            .y_grid = state_operator_y_grid(state),
             .field = state->current_field_vec,
             .dispersion_factor = NULL,
             .potential = state->working_vectors.potential_vec,

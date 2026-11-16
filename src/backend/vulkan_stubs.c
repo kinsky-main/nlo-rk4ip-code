@@ -211,6 +211,22 @@ vec_status vk_op_complex_add_inplace(
     return vk_unavailable_status();
 }
 
+vec_status vk_op_complex_affine_comb_real(
+    vector_backend* backend,
+    vec_buffer* dst,
+    size_t term_count,
+    const vec_buffer* const* srcs,
+    const double* coeffs
+)
+{
+    (void)backend;
+    (void)dst;
+    (void)term_count;
+    (void)srcs;
+    (void)coeffs;
+    return vk_unavailable_status();
+}
+
 vec_status vk_op_complex_exp_inplace(vector_backend* backend, vec_buffer* dst)
 {
     (void)backend;

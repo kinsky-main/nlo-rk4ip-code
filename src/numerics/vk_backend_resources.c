@@ -407,7 +407,8 @@ static vec_status vk_create_kernels(vector_backend* backend)
         &nlo_spirv_complex_axis_centered_from_delta,
         &nlo_spirv_complex_mesh_from_axis_tfast_t,
         &nlo_spirv_complex_mesh_from_axis_tfast_y,
-        &nlo_spirv_complex_mesh_from_axis_tfast_x
+        &nlo_spirv_complex_mesh_from_axis_tfast_x,
+        &nlo_spirv_complex_affine_comb_real
     };
 
     for (size_t i = 0u; i < (size_t)VK_KERNEL_COUNT; ++i) {

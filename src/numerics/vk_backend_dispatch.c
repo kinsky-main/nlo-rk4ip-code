@@ -4,6 +4,7 @@
  */
 
 #include "numerics/vk_backend_internal.h"
+#include "numerics/vk_vector_ops.h"
 #include "utility/perf_profile.h"
 #include <limits.h>
 #include <math.h>
@@ -267,6 +268,111 @@ static vec_status vk_reserve_descriptor_sets_for_reduction(
     return (required_sets <= available_sets)
                ? VEC_STATUS_OK
                : VEC_STATUS_BACKEND_UNAVAILABLE;
+}
+
+vec_status vk_op_complex_affine_comb_real(
+    vector_backend* backend,
+    vec_buffer* dst,
+    size_t term_count,
+    const vec_buffer* const* srcs,
+    const double* coeffs
+)
+{
+    const size_t elem_size = sizeof(nlo_complex);
+    const size_t max_chunk_elems = vk_max_chunk_elements(backend, elem_size);
+    if (max_chunk_elems == 0u) {
+        return VEC_STATUS_BACKEND_UNAVAILABLE;
+    }
+
+    size_t offset_elems = 0u;
+    while (offset_elems < dst->length) {
+        size_t chunk_elems = dst->length - offset_elems;
+        if (chunk_elems > max_chunk_elems) {
+            chunk_elems = max_chunk_elems;
+        }
+        const VkDeviceSize byte_offset = (VkDeviceSize)(offset_elems * elem_size);
+        const VkDeviceSize chunk_bytes = (VkDeviceSize)(chunk_elems * elem_size);
+
+        VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+        vec_status status = vk_acquire_descriptor_set(backend, &descriptor_set);
+        if (status != VEC_STATUS_OK) {
+            return status;
+        }
+
+        /* Bindings 0..4: dst, then the sources; unused trailing slots repeat the last. */
+        VkDescriptorBufferInfo infos[5];
+        VkWriteDescriptorSet writes[5] = {0};
+        for (uint32_t i = 0u; i < 5u; ++i) {
+            const size_t src_index = (i == 0u) ? 0u : ((i - 1u < term_count) ? i - 1u : term_count - 1u);
+            infos[i].buffer = (i == 0u) ? dst->vk_buffer : srcs[src_index]->vk_buffer;
+            infos[i].offset = byte_offset;
+            infos[i].range = chunk_bytes;
+            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[i].dstSet = descriptor_set;
+            writes[i].dstBinding = i;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[i].descriptorCount = 1u;
+            writes[i].pBufferInfo = &infos[i];
+        }
+        vkUpdateDescriptorSets(backend->vk.device, 5u, writes, 0u, NULL);
+
+        status = vk_begin_commands(backend);
+        if (status != VEC_STATUS_OK) {
+            return status;
+        }
+
+        VkCommandBuffer cmd = backend->vk.command_buffer;
+        for (uint32_t i = 0u; i <= (uint32_t)term_count; ++i) {
+            vk_cmd_transfer_to_compute(cmd, infos[i].buffer, byte_offset, chunk_bytes);
+            vk_cmd_compute_to_compute(cmd, infos[i].buffer, byte_offset, chunk_bytes);
+        }
+
+        vkCmdBindPipeline(cmd,
+                          VK_PIPELINE_BIND_POINT_COMPUTE,
+                          backend->vk.kernels[VK_KERNEL_COMPLEX_AFFINE_COMB_REAL].pipeline);
+        vkCmdBindDescriptorSets(cmd,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                backend->vk.pipeline_layout,
+                                0u,
+                                1u,
+                                &descriptor_set,
+                                0u,
+                                NULL);
+
+        vk_push_constants push = {
+            .count = (uint32_t)chunk_elems,
+            .pad = (uint32_t)term_count,
+            .scalar0 = coeffs[0],
+            .scalar1 = coeffs[1],
+            .scalar2 = (term_count > 2u) ? coeffs[2] : 0.0,
+            .scalar3 = (term_count > 3u) ? coeffs[3] : 0.0
+        };
+        vkCmdPushConstants(cmd,
+                           backend->vk.pipeline_layout,
+                           VK_SHADER_STAGE_COMPUTE_BIT,
+                           0u,
+                           (uint32_t)sizeof(push),
+                           &push);
+
+        const uint32_t groups =
+            (uint32_t)((chunk_elems + (size_t)VK_LOCAL_SIZE_X - 1u) / (size_t)VK_LOCAL_SIZE_X);
+        vkCmdDispatch(cmd, groups, 1u, 1u);
+
+        vk_cmd_compute_to_compute(cmd, dst->vk_buffer, byte_offset, chunk_bytes);
+        vk_cmd_compute_to_transfer(cmd, dst->vk_buffer, byte_offset, chunk_bytes);
+
+        status = vk_submit_commands(backend);
+        if (status != VEC_STATUS_OK) {
+            return status;
+        }
+        perf_profile_add_gpu_dispatch(1u,
+                                      (uint64_t)term_count + 1u,
+                                      ((uint64_t)term_count + 1u) * (uint64_t)chunk_bytes);
+
+        offset_elems += chunk_elems;
+    }
+
+    return VEC_STATUS_OK;
 }
 
 vec_status vk_dispatch_complex_relative_error(

@@ -63,6 +63,7 @@ function(configure_vulkan_backend target target_source_dir target_binary_dir)
     complex_mesh_from_axis_tfast_t
     complex_mesh_from_axis_tfast_y
     complex_mesh_from_axis_tfast_x
+    complex_affine_comb_real
   )
 
   set(vk_spv_outputs "")
