@@ -61,12 +61,13 @@ def _assert_gpu_result_not_degenerate(field, reference, context):
     """
     Fail with the real cause when a Vulkan propagate returns a ~zero field.
 
-    The Vulkan backend silently stops producing results after the tenth
-    propagate call in a process: call 11 onwards returns an all-but-zero field
-    with status 0 and nothing in the log buffer. An exhausted run then shows up
-    as a relative error of exactly 1.0, which reads like a convergence or
-    accuracy regression and has been misreported as one. Check the output norm
-    directly so the failure names the backend instead.
+    A degenerate result scores a relative error of exactly 1.0, which reads
+    like a convergence or accuracy regression and was misreported as one for
+    six pull requests. The cause then was a process-wide ceiling of ten Vulkan
+    propagate calls, fixed by reusing one VkInstance per process (#36); this
+    guard stays because the symptom is silent otherwise - such a run returns
+    status 0 with nothing in the log buffer - so any future backend path that
+    reintroduces it is named rather than blamed on the operator algebra.
     """
     out_norm = _l2_norm(field)
     ref_norm = _l2_norm(reference)
@@ -74,8 +75,8 @@ def _assert_gpu_result_not_degenerate(field, reference, context):
         raise AssertionError(
             f"{context}: Vulkan backend returned a degenerate (~zero) field - "
             f"output norm {out_norm:.3e} against reference norm {ref_norm:.3e}. "
-            f"This is the backend's 10-propagate-per-process ceiling, not a "
-            f"numerical regression in the operator path."
+            f"The backend stopped producing results; this is not a numerical "
+            f"regression in the operator path."
         )
 
 
