@@ -157,6 +157,30 @@ static void test_init_state_success(void)
     printf("test_init_state_success: validates allocation sizing info.\n");
 }
 
+/* AUTO must initialise in every build: Vulkan when usable, the CPU otherwise. */
+static void test_init_state_auto_backend(void)
+{
+    const size_t num_time_samples = 64u;
+    sim_config* config = create_sim_config(num_time_samples);
+    STATE_CHECK(config != NULL);
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_AUTO);
+
+    simulation_state* state = NULL;
+    allocation_info info = {0};
+    STATE_CHECK(init_simulation_state(config, num_time_samples, 2u, &exec_options, &info, &state) == 0);
+    STATE_CHECK(state != NULL && state->backend != NULL);
+    const vector_backend_type used = vector_backend_get_type(state->backend);
+    STATE_CHECK(used == VECTOR_BACKEND_CPU || used == VECTOR_BACKEND_VULKAN);
+#if !ENABLE_VULKAN_BACKEND
+    STATE_CHECK(used == VECTOR_BACKEND_CPU);
+#endif
+
+    free_simulation_state(state);
+    free_sim_config(config);
+    printf("test_init_state_auto_backend: AUTO resolved to %s.\n",
+           (used == VECTOR_BACKEND_VULKAN) ? "Vulkan" : "CPU");
+}
+
 static void test_record_count_does_not_change_init_snapshot_allocation(void)
 {
     const size_t num_time_samples = 1024u;
@@ -980,6 +1004,7 @@ static void test_storage_only_propagate_without_dense_output(void)
 int main(void)
 {
     test_init_state_success();
+    test_init_state_auto_backend();
     test_record_count_does_not_change_init_snapshot_allocation();
     test_init_state_invalid_args();
     test_init_state_xy_shape_rejected_without_tensor();

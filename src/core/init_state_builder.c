@@ -870,7 +870,16 @@ simulation_state* create_simulation_state_with_storage(
         state->backend = vector_backend_create_vulkan(&exec_options->vulkan);
     }
     else if (exec_options->backend_type == VECTOR_BACKEND_AUTO) {
+        /* Vulkan when a device is usable, otherwise the CPU (as query_runtime_limits). */
+#if ENABLE_VULKAN_BACKEND
         state->backend = vector_backend_create_vulkan(NULL);
+        if (state->backend == NULL) {
+            log_emit(LOG_LEVEL_WARN, "[nlolib] auto backend: no usable Vulkan device; using the CPU backend.");
+        }
+#endif
+        if (state->backend == NULL) {
+            state->backend = vector_backend_create_cpu();
+        }
     }
     else {
         state->backend = NULL;
