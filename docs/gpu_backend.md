@@ -29,6 +29,31 @@ apply: the CPU backend, a program that did not lower, a glslang failure, or
 
 once per program at warning level and the run continues on the interpreter.
 
+### Checking whether the JIT ran
+
+Two counters in `nlo_perf_profile_snapshot`, read back through
+`nlolib_perf_profile_read`, report what the JIT actually did:
+
+- `operator_jit_programs` — operator programs bound to a JIT-compiled GPU
+  kernel, whether freshly compiled or taken from the cache.
+- `operator_jit_fallbacks` — programs left on the interpreter, because the
+  program did not lower, because `NLO_OPERATOR_JIT=0` turned the JIT off, or
+  because compilation failed.
+
+Unlike every other counter in that struct, these two accumulate
+unconditionally: they do not need `nlolib_perf_profile_set_enabled`, so an
+ordinary Release build can tell a real JIT run from a silent fallback to the
+interpreter. They are counted once per active operator program as a simulation
+state is built, not per step, and are cumulative until
+`nlolib_perf_profile_reset`, so a process that builds several states
+accumulates over all of them.
+
+Both stay zero wherever the JIT is never reached: on the CPU backend, and in a
+build configured with `ENABLE_VULKAN_BACKEND=OFF`.
+
+The C API, Python (`perf_profile_read().operator_jit_programs`) and MATLAB all
+expose them. Julia has no perf-profile binding.
+
 Measured solve-time speedup against the interpreter, Linux / Quadro P4000 /
 NVIDIA 535, Release, fixed step: ×2.10 on the 1-D expression case, ×1.58–1.60
 on the (2+1)D GRIN cases, and ×1.21–1.22 on the (3+1)D tensor cases, which are
@@ -110,6 +135,10 @@ a shell export:
   before the first simulation state is built. Changing it mid-process does
   nothing.
 
+`operator_jit_programs` and `operator_jit_fallbacks` are how to confirm that
+`NLO_OPERATOR_JIT=0` took effect: with it set, every active operator program is
+counted as a fallback and no programs are counted.
+
 ## GPU Phase Timings
 
 With `NLO_GPU_TIMESTAMPS=1` and profiling enabled through
@@ -120,7 +149,8 @@ and four host slots (init ms, solve ms, queue submits, dropped timestamps).
 
 This is a C API call. The bindings expose the rest of the perf-profile surface
 (`perf_profile_set_enabled`, `perf_profile_is_enabled`, `perf_profile_reset`,
-`perf_profile_read`) but not the GPU phase read. The query pool is allocated
+`perf_profile_read`) but not the GPU phase read. Unlike the two JIT counters
+above, the phase timings need profiling enabled as well as the switch. The query pool is allocated
 only when the switch is set, so an unset run carries no query cost.
 
 ## Where the Numbers Come From
