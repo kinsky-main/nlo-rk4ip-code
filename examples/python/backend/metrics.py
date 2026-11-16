@@ -113,5 +113,4 @@ def filtered_relative_l2_intensity_error_curve(
         )
         for idx in range(int(pred.shape[0]))
     ]
-    print(values)
     return np.asarray(values, dtype=np.float64)

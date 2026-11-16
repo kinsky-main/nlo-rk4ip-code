@@ -57,6 +57,29 @@ def _relative_l2_error(a, b):
     return _l2_norm(diff) / denom
 
 
+def _assert_gpu_result_not_degenerate(field, reference, context):
+    """
+    Fail with the real cause when a Vulkan propagate returns a ~zero field.
+
+    A degenerate result scores a relative error of exactly 1.0, which reads
+    like a convergence or accuracy regression and was misreported as one for
+    six pull requests. The cause then was a process-wide ceiling of ten Vulkan
+    propagate calls, fixed by reusing one VkInstance per process (#36); this
+    guard stays because the symptom is silent otherwise - such a run returns
+    status 0 with nothing in the log buffer - so any future backend path that
+    reintroduces it is named rather than blamed on the operator algebra.
+    """
+    out_norm = _l2_norm(field)
+    ref_norm = _l2_norm(reference)
+    if ref_norm > 0.0 and out_norm <= (1.0e-6 * ref_norm):
+        raise AssertionError(
+            f"{context}: Vulkan backend returned a degenerate (~zero) field - "
+            f"output norm {out_norm:.3e} against reference norm {ref_norm:.3e}. "
+            f"The backend stopped producing results; this is not a numerical "
+            f"regression in the operator path."
+        )
+
+
 def _filtered_relative_l2_error(a, b, min_relative_intensity=1.0e-8):
     if len(a) != len(b):
         raise ValueError("a and b must have the same length.")
@@ -1276,15 +1299,17 @@ def test_second_order_soliton_adaptive_vs_fixed_reference_auto_gpu(api, opts):
     assert all(math.isfinite(v) and v > 0.0 for v in adaptive_steps)
     assert math.isfinite(adaptive_error)
     assert math.isfinite(fixed_error)
-    assert fixed_error < adaptive_error, (
-        f"fixed-step reference should outperform adaptive second-order run on the same GPU path: "
-        f"fixed={fixed_error}, adaptive={adaptive_error}"
-    )
-    # Diagnostic guard: adaptive should stay in the same broad error band as a
-    # fine fixed-step reference, but current solver work still leaves a clear
-    # gap here for the second-order case.
-    assert adaptive_error <= (10.0 * fixed_error), (
-        f"adaptive second-order error drifted too far above fixed-step reference: "
+    # The adaptive run is driven to a 1e-10 local tolerance and may refine down
+    # to min_step_size=1e-9, while the reference is pinned to a uniform
+    # h = z_final/1024 that only buys ~5e-8 on this case; the controller spends
+    # ~1500 steps to reach its tolerance. So the adaptive run must come out
+    # clearly ahead. Bounding it against the measured fixed-step error rather
+    # than an absolute number keeps the check meaningful: the comparison itself
+    # bottoms out near 4e-11 (analytic reference and time-grid discretization),
+    # so the adaptive run cannot be held to its 1e-10 tolerance directly.
+    assert adaptive_error <= (0.1 * fixed_error), (
+        f"adaptive second-order run should be clearly more accurate than the "
+        f"coarser fixed-step reference on the same GPU path: "
         f"fixed={fixed_error}, adaptive={adaptive_error}"
     )
 
@@ -1380,6 +1405,11 @@ def test_fixed_step_nonlinear_only_order_auto_gpu(api, opts):
             ),
         )
         final_field = api.propagate(cfg, a0, 2, default_execution_options(VECTOR_BACKEND_AUTO)).records[1]
+        _assert_gpu_result_not_degenerate(
+            final_field,
+            exact,
+            f"nonlinear-only fixed-step run at {step_count} steps",
+        )
         errors.append(_relative_l2_error(final_field, exact))
 
     local_orders = [
