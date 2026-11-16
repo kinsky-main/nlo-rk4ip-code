@@ -4,7 +4,7 @@ name: ci
 # directory is tag-triggered, so before this existed a pull request showed no
 # checks at all and nothing ran its tests.
 #
-# Three jobs, split by what they cost:
+# Four jobs, split by what they cost:
 #   * checks  -- the source-only gates. A checkout and an interpreter, well
 #                under a minute, so every push gets an answer immediately.
 #   * build   -- configures and compiles the library the way a release does and
@@ -13,6 +13,9 @@ name: ci
 #   * build-windows -- the same configure, build and test on MSVC. A separate
 #                job rather than a matrix: the Vulkan toolchain is installed a
 #                different way and the option set differs by one entry.
+#   * build-cpu-only -- the same again with ENABLE_VULKAN_BACKEND=OFF, which no
+#                other job compiles. Cheapest of the three builds: no Vulkan
+#                loader, no glslang, no VkFFT.
 #
 # Also runs on push to main: a merge commit is a tree no pull request ever
 # tested, and main is what the release tags are cut from.
@@ -219,6 +222,73 @@ jobs:
       # Same exclusion as the ubuntu job, for the same reasons: the test_python_*
       # cases need numpy, matplotlib and the examples tree, and the test_julia_*
       # cases need a Julia toolchain and are not registered without one.
+      - name: Run the tests that need no GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctest --test-dir build --build-config Release --output-on-failure \
+            -E '^test_(python|julia)_'
+
+  build-cpu-only:
+    name: Build and test (ubuntu-24.04, Vulkan off)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # What this covers that no other job does: the Vulkan-disabled
+      # configuration. Both build jobs above configure ENABLE_VULKAN_BACKEND=ON,
+      # so nothing compiled this one, and it has source of its own that an
+      # ENABLE_VULKAN_BACKEND=ON build never sees -- the placeholder typedef
+      # block in src/backend/vector_backend_internal.h and the whole of
+      # src/backend/vulkan_stubs.c.
+      #
+      # It went untested long enough to break. A VkQueryPool field reached main
+      # with no matching placeholder typedef, which made this configuration fail
+      # to compile outright, and a second defect was hiding behind it: a
+      # tests/fft/test_fft.c expectation that only held when VKFFT was compiled
+      # in, which nothing could run while the build was broken.
+      #
+      # It is also a release configuration, not just a developer convenience:
+      # tools/release/build_wheel_macos.sh and
+      # tools/release/build_mltbx_macos.sh both configure
+      # ENABLE_VULKAN_BACKEND=OFF, so the macOS wheel and toolbox are built from
+      # exactly this configuration. They set BUILD_TESTING=OFF and so run no
+      # tests, which is why a compile break here surfaced as neither a CI
+      # failure nor a release failure.
+      #
+      # No apt install step: with the backend off, CMake needs neither the
+      # Vulkan loader nor glslang, and VkFFT is not built. That makes this the
+      # cheapest of the three build jobs by a wide margin.
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          source tools/release/cmake_options.sh
+          nlo_configure_verified build \
+            CMAKE_BUILD_TYPE=Release \
+            BUILD_TESTING=ON \
+            INSTALL_GIT_HOOKS=OFF \
+            BUMP_PATCH_ON_BUILD=OFF \
+            NLOLIB_BUILD_DOCS=OFF \
+            NLOLIB_BUILD_BENCHMARKS=OFF \
+            NLOLIB_BUILD_EXAMPLES=OFF \
+            ENABLE_VULKAN_BACKEND=OFF \
+            ENABLE_VKFFT=OFF
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --config Release --parallel
+
+      # Same exclusion as the other build jobs, for the same reasons. There is
+      # no GPU question here at all: with the backend disabled, every Vulkan
+      # entry point is a stub returning VEC_STATUS_UNSUPPORTED, so this job's
+      # result is the same on any runner.
       - name: Run the tests that need no GPU
         shell: bash
         run: |

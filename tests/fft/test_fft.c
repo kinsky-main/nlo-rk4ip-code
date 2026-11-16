@@ -11,6 +11,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifndef ENABLE_VKFFT
+#define ENABLE_VKFFT 1
+#endif
+
 #ifndef TEST_EPS
 #define TEST_EPS 1e-10
 #endif
@@ -87,12 +91,19 @@ static void test_fft_backend_selection_validation(void)
     FFT_CHECK(auto_plan != NULL);
     fft_plan_destroy(auto_plan);
 
-    /* Explicit VKFFT requests are a type-mismatch on CPU backends. */
+    /* An explicit VKFFT request on a CPU backend is always refused, but the
+     * reason depends on the build: a type-mismatch where VKFFT is compiled in,
+     * and an unsupported feature where it is not. */
+#if ENABLE_VKFFT
+    const vec_status expected_vkfft_status = VEC_STATUS_INVALID_ARGUMENT;
+#else
+    const vec_status expected_vkfft_status = VEC_STATUS_UNSUPPORTED;
+#endif
     fft_plan* vk_plan = NULL;
     FFT_CHECK(fft_plan_create_with_backend(backend,
                                                n,
                                                FFT_BACKEND_VKFFT,
-                                               &vk_plan) == VEC_STATUS_INVALID_ARGUMENT);
+                                               &vk_plan) == expected_vkfft_status);
     FFT_CHECK(vk_plan == NULL);
 
     vector_backend_destroy(backend);
