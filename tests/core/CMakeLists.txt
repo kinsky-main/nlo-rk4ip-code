@@ -118,3 +118,20 @@ if(UNIX)
 endif()
 
 add_test(NAME test_tensor_bench_plan COMMAND test_tensor_bench_plan)
+
+add_executable(test_core_operator_lowering
+  ${CMAKE_CURRENT_LIST_DIR}/test_operator_lowering.c
+  ${CMAKE_SOURCE_DIR}/src/physics/operator_program_compile.c
+  ${CMAKE_SOURCE_DIR}/src/numerics/vector_ops.c
+)
+
+target_include_directories(test_core_operator_lowering PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(test_core_operator_lowering PRIVATE
+  ENABLE_VULKAN_BACKEND=0
+  ENABLE_VKFFT=0
+)
+if(UNIX)
+  target_link_libraries(test_core_operator_lowering PRIVATE m)
+endif()
+
+add_test(NAME test_core_operator_lowering COMMAND test_core_operator_lowering)

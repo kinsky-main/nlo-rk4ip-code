@@ -4,6 +4,7 @@
  */
 
 #include "physics/operator_program.h"
+#include "physics/operator_program_jit.h"
 
 vec_status operator_program_execute(
     vector_backend* backend,
@@ -17,9 +18,20 @@ vec_status operator_program_execute(
     if (backend == NULL ||
         program == NULL ||
         eval_ctx == NULL ||
-        stack_vectors == NULL ||
         out_vector == NULL ||
-        !program->active ||
+        !program->active) {
+        return VEC_STATUS_INVALID_ARGUMENT;
+    }
+
+    if (program->vk_jit_active) {
+        const vec_status jit_status =
+            operator_program_execute_jit(backend, program, eval_ctx, out_vector);
+        if (jit_status != VEC_STATUS_UNSUPPORTED) {
+            return jit_status;
+        }
+    }
+
+    if (stack_vectors == NULL ||
         program->required_stack_slots == 0u ||
         stack_vector_count < program->required_stack_slots) {
         return VEC_STATUS_INVALID_ARGUMENT;

@@ -34,6 +34,32 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+### What CI Runs
+
+`.github/workflows/ci.yml` runs on every pull request against `main` and on
+every push to `main`:
+
+- a source-only job that needs nothing but a Python interpreter, so it answers
+  in under a minute:
+
+  ```bash
+  python tools/release/check_versions.py
+  python tools/write_sbom.py --check
+  python tools/check_api_parity.py
+  ```
+
+- a Linux job that configures and builds with the Vulkan backend on, then runs
+  the native test suite:
+
+  ```bash
+  ctest --test-dir build --output-on-failure -E '^test_(python|julia)_'
+  ```
+
+The runners have no GPU, so the Vulkan cases skip their device work and only the
+CPU paths are exercised. The `test_python_*` and `test_julia_*` cases are
+excluded there and are not covered by CI: run the full `ctest` above locally
+before opening a pull request that touches the Python or Julia bindings.
+
 ## Default Operator Forms
 
 The public runtime-operator configuration uses the reference forms:

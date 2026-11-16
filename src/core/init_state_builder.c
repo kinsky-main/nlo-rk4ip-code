@@ -10,6 +10,7 @@
 #include "io/log_sink.h"
 #include "io/snapshot_store.h"
 #include "physics/operators.h"
+#include "physics/operator_program_jit.h"
 #include "utility/state_debug.h"
 #include <math.h>
 #include <stdint.h>
@@ -139,6 +140,29 @@ static int operator_program_uses_opcode(
         }
     }
     return 0;
+}
+
+/* Compile @p program to one Vulkan kernel; failures keep the interpreter. */
+static void prepare_operator_program_jit(
+    simulation_state* state,
+    operator_program* program,
+    const char* label
+)
+{
+    if (!program->active || vector_backend_get_type(state->backend) != VECTOR_BACKEND_VULKAN) {
+        return;
+    }
+
+    const vec_status status = operator_program_prepare_jit(state->backend, program);
+    if (status == VEC_STATUS_OK || status == VEC_STATUS_UNSUPPORTED ||
+        program->vk_jit_warning_emitted) {
+        return;
+    }
+    log_emit(LOG_LEVEL_WARN,
+             "[nlolib] Vulkan operator JIT unavailable for %s; using the interpreter. status=%d",
+             label,
+             (int)status);
+    program->vk_jit_warning_emitted = 1;
 }
 
 static void warn_legacy_nonlinear_expression(
@@ -1297,6 +1321,18 @@ simulation_state* create_simulation_state_with_storage(
         return NULL;
     }
     warn_legacy_nonlinear_expression(nonlinear_expr, &state->nonlinear_operator_program);
+
+    if (state->tensor_mode_active) {
+        prepare_operator_program_jit(state, &state->potential_operator_program, "potential_expr");
+        prepare_operator_program_jit(state, &state->linear_factor_operator_program, "linear_factor_expr");
+        prepare_operator_program_jit(state, &state->linear_operator_program, "linear_expr");
+    } else {
+        prepare_operator_program_jit(state,
+                                     &state->dispersion_factor_operator_program,
+                                     "dispersion_factor_expr");
+        prepare_operator_program_jit(state, &state->dispersion_operator_program, "dispersion_expr");
+    }
+    prepare_operator_program_jit(state, &state->nonlinear_operator_program, "nonlinear_expr");
 
     size_t required_stack_slots = state->nonlinear_operator_program.required_stack_slots;
     if (state->tensor_mode_active) {

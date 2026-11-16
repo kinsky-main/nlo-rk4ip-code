@@ -33,6 +33,11 @@ vec_status vk_ensure_reduction_capacity(vector_backend* backend, VkDeviceSize mi
 
 vec_status vk_begin_commands(vector_backend* backend);
 vec_status vk_submit_commands(vector_backend* backend);
+vec_status vk_acquire_descriptor_set(
+    vector_backend* backend,
+    VkDescriptorSet* out_descriptor_set
+);
+void vk_operator_jit_destroy_all(vector_backend* backend);
 
 void vk_cmd_transfer_to_compute(
     VkCommandBuffer cmd,

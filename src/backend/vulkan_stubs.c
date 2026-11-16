@@ -6,6 +6,7 @@
 
 #include "backend/vk_auto_context.h"
 #include "numerics/vk_vector_ops.h"
+#include "physics/operator_program_jit.h"
 #include <string.h>
 
 static vec_status vk_unavailable_status(void)
@@ -307,4 +308,33 @@ vec_status vk_op_complex_mesh_from_axis_tfast(
     (void)ny;
     (void)axis_kind;
     return vk_unavailable_status();
+}
+
+vec_status operator_program_prepare_jit(
+    vector_backend* backend,
+    operator_program* program
+)
+{
+    (void)backend;
+    (void)program;
+    return vk_unavailable_status();
+}
+
+vec_status operator_program_execute_jit(
+    vector_backend* backend,
+    const operator_program* program,
+    const operator_eval_context* eval_ctx,
+    vec_buffer* out_vector
+)
+{
+    (void)backend;
+    (void)program;
+    (void)eval_ctx;
+    (void)out_vector;
+    return vk_unavailable_status();
+}
+
+size_t operator_program_jit_cache_entry_count(void)
+{
+    return 0u;
 }

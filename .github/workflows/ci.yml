@@ -1,0 +1,137 @@
+name: ci
+
+# The only workflow that runs on a pull request. Everything else in this
+# directory is tag-triggered, so before this existed a pull request showed no
+# checks at all and nothing ran its tests.
+#
+# Two jobs, split by what they cost:
+#   * checks  -- the source-only gates. A checkout and an interpreter, well
+#                under a minute, so every push gets an answer immediately.
+#   * build   -- configures and compiles the library the way a release does and
+#                runs the native test suite. Several minutes, because the pinned
+#                FFTW, SQLite, glslang and VkFFT are all built from source.
+#
+# Also runs on push to main: a merge commit is a tree no pull request ever
+# tested, and main is what the release tags are cut from.
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# Unlike the release workflows, a superseded pull request run is safe to throw
+# away: it publishes nothing and its only output is a verdict about a commit
+# that has already been replaced.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Source checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # These three are registered as CTest cases (tests/python/CMakeLists.txt)
+      # but are plain `python <script>` invocations over the source tree: no
+      # compiled library, no Vulkan, no MATLAB, no Julia. Invoked directly
+      # rather than through ctest so this job needs no CMake configure --
+      # configuring to reach them would fetch and build FFTW, SQLite, glslang
+      # and VkFFT, which is the whole cost of the build job below, to run three
+      # scripts that read text files. The build job runs them through ctest, so
+      # the registrations stay covered either way.
+      - name: Check the version copies agree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/release/check_versions.py
+
+      - name: Check the SBOM matches the dependency pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/write_sbom.py --check
+
+      - name: Check the C API constants agree across the bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/check_api_parity.py
+
+  build:
+    name: Build and test (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Same step as release-pypi.yml and release-mltbx.yml: the Vulkan backend
+      # needs the loader import library and glslangValidator at build time.
+      # CMake fetches the headers itself, but errors out on these.
+      - name: Install Vulkan loader and glslang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslang-tools
+
+      # ENABLE_VULKAN_BACKEND=ON because that is what every released binary is
+      # built with; a CPU-only configure would leave the backend nobody compiles
+      # locally untested. The runners have no GPU, which the tests tolerate --
+      # see the ctest step. Docs, benchmarks and examples are off: none of them
+      # has a test in the set this job runs.
+      #
+      # nlo_configure_verified fails if any -D did not reach the project; the
+      # option names are unprefixed and a misspelled one is silently ignored.
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          source tools/release/cmake_options.sh
+          nlo_configure_verified build \
+            CMAKE_BUILD_TYPE=Release \
+            BUILD_TESTING=ON \
+            INSTALL_GIT_HOOKS=OFF \
+            BUMP_PATCH_ON_BUILD=OFF \
+            NLOLIB_BUILD_DOCS=OFF \
+            NLOLIB_BUILD_BENCHMARKS=OFF \
+            NLOLIB_BUILD_EXAMPLES=OFF \
+            ENABLE_VULKAN_BACKEND=ON \
+            ENABLE_VKFFT=ON
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --config Release --parallel
+
+      # Excludes the test_python_* and test_julia_* cases. The Python ones need
+      # numpy, matplotlib and the examples tree on PYTHONPATH; the Julia ones
+      # need a Julia toolchain, and tests/julia/CMakeLists.txt returns early
+      # without one, so they are not even registered here. What is left is the
+      # native C suite plus the four source-only checks, which is the surface a
+      # C or CMake change can break.
+      #
+      # Nothing here needs a GPU: every Vulkan case asks the loader for a device
+      # and skips its assertions when none comes back
+      # (tests/numerics/test_nlo_vector_backend_vulkan.c,
+      # tests/core/test_state_alloc.c), so a driverless runner exercises the
+      # build and the CPU paths and reports the GPU paths as passed-by-skip.
+      - name: Run the tests that need no GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctest --test-dir build --build-config Release --output-on-failure \
+            -E '^test_(python|julia)_'

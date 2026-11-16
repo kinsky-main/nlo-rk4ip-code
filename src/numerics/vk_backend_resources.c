@@ -17,7 +17,7 @@ VkDeviceSize vk_min_size(VkDeviceSize a, VkDeviceSize b)
 
 enum {
     VK_DESCRIPTOR_SET_BUDGET_DEFAULT_BYTES = 512u * 1024u,
-    VK_DESCRIPTOR_SET_ESTIMATED_BYTES = 512u,
+    VK_DESCRIPTOR_SET_ESTIMATED_BYTES = 2048u,
     VK_DESCRIPTOR_SET_MIN_COUNT = 16u,
     VK_DESCRIPTOR_SET_MAX_COUNT = 4096u
 };
@@ -257,23 +257,17 @@ static vec_status vk_create_descriptor_resources(
     const vk_backend_config* config
 )
 {
-    VkDescriptorSetLayoutBinding bindings[3] = {0};
-    bindings[0].binding = 0u;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[0].descriptorCount = 1u;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    bindings[1].binding = 1u;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1u;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    bindings[2].binding = 2u;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[2].descriptorCount = 1u;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    VkDescriptorSetLayoutBinding bindings[VK_DESCRIPTOR_BINDING_COUNT] = {0};
+    for (uint32_t i = 0u; i < VK_DESCRIPTOR_BINDING_COUNT; ++i) {
+        bindings[i].binding = i;
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[i].descriptorCount = 1u;
+        bindings[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    }
 
     VkDescriptorSetLayoutCreateInfo layout_info = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        .bindingCount = 3u,
+        .bindingCount = VK_DESCRIPTOR_BINDING_COUNT,
         .pBindings = bindings
     };
     if (vkCreateDescriptorSetLayout(backend->vk.device, &layout_info, NULL, &backend->vk.descriptor_set_layout) != VK_SUCCESS) {
@@ -304,7 +298,7 @@ static vec_status vk_create_descriptor_resources(
         bool attempt_failed = false;
         VkDescriptorPoolSize pool_size = {
             .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 3u * target_count
+            .descriptorCount = VK_DESCRIPTOR_BINDING_COUNT * target_count
         };
         VkDescriptorPoolCreateInfo pool_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -503,6 +497,7 @@ static void vk_destroy_resources(vector_backend* backend)
     vk_destroy_buffer_raw(backend, &backend->vk.reduction_buffer_a, &backend->vk.reduction_memory_a);
     vk_destroy_buffer_raw(backend, &backend->vk.reduction_buffer_b, &backend->vk.reduction_memory_b);
     backend->vk.reduction_capacity = 0u;
+    vk_operator_jit_destroy_all(backend);
 
     for (size_t i = 0u; i < (size_t)VK_KERNEL_COUNT; ++i) {
         if (backend->vk.kernels[i].pipeline != VK_NULL_HANDLE) {
@@ -572,6 +567,7 @@ static void vk_destroy_resources(vector_backend* backend)
     backend->vk.simulation_phase_recording = false;
     backend->vk.simulation_phase_has_commands = false;
     backend->vk.simulation_descriptor_set_cursor = 0u;
+    backend->vk.operator_jit_entries = NULL;
 }
 
 vec_status vk_ensure_staging_capacity(vector_backend* backend, VkDeviceSize min_bytes)
@@ -723,6 +719,7 @@ vec_status vk_backend_init(vector_backend* backend, const vk_backend_config* con
     backend->vk.simulation_phase_recording = false;
     backend->vk.simulation_phase_has_commands = false;
     backend->vk.simulation_descriptor_set_cursor = 0u;
+    backend->vk.operator_jit_entries = NULL;
 
     vec_status status = vk_create_command_resources(backend, config);
     if (status != VEC_STATUS_OK) {
