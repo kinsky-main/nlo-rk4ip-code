@@ -44,6 +44,9 @@ struct fft_plan {
     vec_buffer* vk_placeholder_vec;
     VkBuffer vk_buffer_binding;
     uint64_t vk_buffer_size;
+    /* Launch buffer slots; see fft_vk_execute_inplace. */
+    VkBuffer vk_launch_buffers[2];
+    uint32_t vk_launch_slot;
     VkCommandPool vk_command_pool;
     VkCommandBuffer vk_command_buffer;
     VkFence vkfft_internal_fence;
@@ -217,9 +220,17 @@ static vec_status fft_vk_execute_inplace(
     VkBuffer buffer = target->vk_buffer;
     fft_vk_cmd_compute_barrier(cmd, buffer, (VkDeviceSize)target->bytes);
 
+    /* VkFFT rebinds its descriptors only when the buffer *pointer* changes. A
+     * stack-local pointer can repeat its address with a different buffer, so
+     * use a plan-owned slot that switches exactly when the target changes. */
+    if (plan->vk_launch_buffers[plan->vk_launch_slot] != buffer) {
+        plan->vk_launch_slot ^= 1u;
+        plan->vk_launch_buffers[plan->vk_launch_slot] = buffer;
+    }
+
     VkFFTLaunchParams launch_params = {0};
     launch_params.commandBuffer = &cmd;
-    launch_params.buffer = &buffer;
+    launch_params.buffer = &plan->vk_launch_buffers[plan->vk_launch_slot];
 
     VkFFTResult result = VkFFTAppend(&plan->vk_app, inverse ? 1 : -1, &launch_params);
     if (result != VKFFT_SUCCESS) {

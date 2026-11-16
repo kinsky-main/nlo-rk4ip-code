@@ -10,12 +10,22 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifndef TEST_EPS
 #define TEST_EPS 1e-10
 #endif
 
 #define TEST_FFT_SIZE 16
+
+/* Fails in Release builds too, where NDEBUG disables assert(). */
+#define FFT_CHECK(cond)                                                       \
+    do {                                                                      \
+        if (!(cond)) {                                                        \
+            fprintf(stderr, "%s:%d: FFT_CHECK(%s) failed\n", __FILE__, __LINE__, #cond); \
+            exit(1);                                                          \
+        }                                                                     \
+    } while (0)
 
 static void test_fft_round_trip(void)
 {
@@ -244,6 +254,59 @@ static void test_fft_round_trip_vulkan_if_available(void)
     printf("test_fft_round_trip_vulkan_if_available: validates Vulkan forward/inverse FFT consistency.\n");
 }
 
+/*
+ * Forward FFTs into different buffers from one call site. VkFFT rebinds its
+ * descriptors only when the launch buffer pointer changes, so a stack-local
+ * pointer (same address on every call here) left later FFTs on the first
+ * buffer.
+ */
+static void test_fft_vulkan_rebinds_target_buffers(void)
+{
+    enum { N_TARGETS = 3 };
+    const size_t n = TEST_FFT_SIZE;
+    vector_backend* backend = vector_backend_create_vulkan(NULL);
+    if (backend == NULL) {
+        printf("test_fft_vulkan_rebinds_target_buffers: Vulkan unavailable, skipping.\n");
+        return;
+    }
+
+    fft_plan* plan = NULL;
+    FFT_CHECK(fft_plan_create_with_backend(backend, n, FFT_BACKEND_VKFFT, &plan) == VEC_STATUS_OK);
+
+    /* Input k is a unit impulse at sample k, so every output bin has magnitude 1. */
+    vec_buffer* in[N_TARGETS] = {NULL};
+    vec_buffer* out[N_TARGETS] = {NULL};
+    nlo_complex host[TEST_FFT_SIZE];
+    for (size_t k = 0u; k < N_TARGETS; ++k) {
+        for (size_t i = 0u; i < n; ++i) {
+            host[i] = make((i == k) ? 1.0 : 0.0, 0.0);
+        }
+        FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &in[k]) == VEC_STATUS_OK);
+        FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &out[k]) == VEC_STATUS_OK);
+        FFT_CHECK(vec_upload(backend, in[k], host, sizeof(host)) == VEC_STATUS_OK);
+    }
+    for (size_t k = 0u; k < N_TARGETS; ++k) {
+        FFT_CHECK(fft_forward_vec(plan, in[k], out[k]) == VEC_STATUS_OK);
+    }
+
+    for (size_t k = 0u; k < N_TARGETS; ++k) {
+        FFT_CHECK(vec_download(backend, out[k], host, sizeof(host)) == VEC_STATUS_OK);
+        for (size_t i = 0u; i < n; ++i) {
+            const double phase = -2.0 * 3.14159265358979323846 * (double)(i * k) / (double)n;
+            FFT_CHECK(fabs(RE(host[i]) - cos(phase)) < 1e-12);
+            FFT_CHECK(fabs(fabs(IM(host[i])) - fabs(sin(phase))) < 1e-12);
+        }
+    }
+
+    for (size_t k = 0u; k < N_TARGETS; ++k) {
+        vec_destroy(backend, in[k]);
+        vec_destroy(backend, out[k]);
+    }
+    fft_plan_destroy(plan);
+    vector_backend_destroy(backend);
+    printf("test_fft_vulkan_rebinds_target_buffers: each target buffer is transformed.\n");
+}
+
 int main(void)
 {
     test_fft_round_trip();
@@ -251,6 +314,7 @@ int main(void)
     test_fft_shape_and_io_validation();
     test_fft_round_trip_3d_shape();
     test_fft_round_trip_vulkan_if_available();
+    test_fft_vulkan_rebinds_target_buffers();
     printf("test_fft: all subtests completed.\n");
     return 0;
 }
