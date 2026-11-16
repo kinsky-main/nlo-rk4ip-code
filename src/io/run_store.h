@@ -26,7 +26,12 @@ typedef enum {
     RUN_STORE_LOCK_TIMEOUT = 1,
     /** The staging database holds no complete run (no `runs` row). */
     RUN_STORE_INCOMPLETE = 2,
-    RUN_STORE_ERROR = 3
+    RUN_STORE_ERROR = 3,
+    /**
+     * The run's `run_id` already names another run (a different key) in the
+     * shared database; nothing was changed and the staging file is kept.
+     */
+    RUN_STORE_CONFLICT = 4
 } run_store_status;
 
 /** @brief Digests of the large inputs that enter a run key. */
@@ -123,6 +128,19 @@ run_store_status run_store_recover(
 
 /** @brief Set @p out_present to 1 when the shared database has a `runs` row for @p key. */
 run_store_status run_store_has_key(const char* shared_path, const char* key, int* out_present);
+
+/**
+ * @brief Find the run that holds @p run_id in the shared database.
+ *
+ * @param shared_path Shared run database path; a missing file holds no run.
+ * @param run_id Run id to look up.
+ * @param out_key Receives the key of the run holding @p run_id, or "" when its
+ *        data was written without a key (by an older release).
+ * @param out_found Receives 1 when some run holds @p run_id, else 0.
+ * @return RUN_STORE_OK, or RUN_STORE_ERROR when the database cannot be read.
+ */
+run_store_status run_store_run_id_owner(const char* shared_path, const char* run_id,
+                                        char out_key[STORAGE_KEY_MAX], int* out_found);
 
 /** @brief Read the layout of a stored run. */
 run_store_status run_store_read_layout(const char* db_path, const char* key, storage_run_layout* out_layout);

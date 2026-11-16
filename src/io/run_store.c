@@ -1936,6 +1936,36 @@ static run_store_status staging_inspect(const char* staging_path, int deep,
     return status;
 }
 
+/*
+ * The data tables are keyed by run_id, so a staged run may only reuse a
+ * run_id that the shared database holds for the same key. Sets @p owner to
+ * the other key ("" for data written without a key); 1 on a conflict, 0 when
+ * there is none, -1 when the query fails.
+ */
+static int run_id_taken(sqlite3* db, const char* key, const char* run_id, char owner[STORAGE_KEY_MAX])
+{
+    owner[0] = '\0';
+    if (!db_table_exists(db, "main", "io_runs")) {
+        return 0;
+    }
+    sqlite3_stmt* stmt = NULL;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT COALESCE(key, '') FROM main.io_runs "
+                           "WHERE run_id=?1 AND (key IS NULL OR key<>?2) LIMIT 1;",
+                           -1, &stmt, NULL) != SQLITE_OK) {
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, run_id, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, key, -1, SQLITE_TRANSIENT);
+    const int rc = sqlite3_step(stmt);
+    int taken = (rc == SQLITE_ROW) ? 1 : (rc == SQLITE_DONE) ? 0 : -1;
+    if (taken == 1) {
+        (void)snprintf(owner, STORAGE_KEY_MAX, "%s", (const char*)sqlite3_column_text(stmt, 0));
+    }
+    sqlite3_finalize(stmt);
+    return taken;
+}
+
 /* 1 when the shared database already holds a run with this key that was created after the staged one. */
 static int staged_run_superseded(sqlite3* db, const char* key)
 {
@@ -2052,8 +2082,21 @@ static run_store_status session_merge(merge_session* s, const char* staging_path
                     maps = stg_count(db, "stg", "io_record_maps", run_id);
                     chunks = stg_count(db, "stg", "io_record_chunks", run_id);
                     finals = stg_count(db, "stg", "io_final_output_fields", run_id);
-                    superseded = staged_run_superseded(db, key);
-                    status = superseded ? RUN_STORE_OK : merge_locked(db, &s->lock, key, run_id, index_file);
+                    char owner[STORAGE_KEY_MAX];
+                    const int taken = run_id_taken(db, key, run_id, owner);
+                    if (taken != 0) {
+                        if (taken > 0) {
+                            log_emit(LOG_LEVEL_ERROR,
+                                     "[nlolib][store] run_id '%s' of run %s already names run %s in %s; "
+                                     "not merged, staging file %s kept (use another run_id)",
+                                     run_id, key, owner[0] != '\0' ? owner : "(written without a key)",
+                                     shared_path, staging_path);
+                        }
+                        status = (taken > 0) ? RUN_STORE_CONFLICT : RUN_STORE_ERROR;
+                    } else {
+                        superseded = staged_run_superseded(db, key);
+                        status = superseded ? RUN_STORE_OK : merge_locked(db, &s->lock, key, run_id, index_file);
+                    }
                     (void)sqlite3_exec(db, "DETACH DATABASE stg;", NULL, NULL, NULL);
                 }
             }
@@ -2078,14 +2121,14 @@ static run_store_status session_merge(merge_session* s, const char* staging_path
             write_state(shared_path, &s->lock, &h, key);
         }
         run_store_discard(staging_path);
-    } else {
+    } else if (status != RUN_STORE_CONFLICT) {
         /* Check the view again before the next merge of the pass. */
         s->fresh = 0;
     }
 
     if (status == RUN_STORE_OK) {
         log_emit(LOG_LEVEL_INFO, "[nlolib][store] merged run %s into %s", key, shared_path);
-    } else {
+    } else if (status != RUN_STORE_CONFLICT) {
         log_emit(LOG_LEVEL_ERROR,
                  "[nlolib][store] merge of %s into %s failed; staging file kept",
                  staging_path,
@@ -2176,6 +2219,7 @@ typedef struct {
     size_t discarded;
     size_t skipped;
     int failed;
+    int conflict;
 } recover_ctx;
 
 /* Parse "<stem>.<key>.<pid>.<token>.<host>.sqlite" from the right. */
@@ -2271,6 +2315,9 @@ static void recover_one(recover_ctx* ctx, const char* name)
         const run_store_status merged = session_merge(&ctx->session, path);
         if (merged == RUN_STORE_OK) {
             ctx->merged += 1u;
+        } else if (merged == RUN_STORE_CONFLICT) {
+            ctx->skipped += 1u;
+            ctx->conflict = 1;
         } else if (merged == RUN_STORE_INCOMPLETE || merged == RUN_STORE_ERROR) {
             ctx->skipped += 1u;
             ctx->failed = ctx->failed || (merged == RUN_STORE_ERROR && rs_file_exists(path) &&
@@ -2338,7 +2385,7 @@ run_store_status run_store_recover(
     if (out_skipped != NULL) {
         *out_skipped = ctx.skipped;
     }
-    return ctx.failed ? RUN_STORE_ERROR : RUN_STORE_OK;
+    return ctx.failed ? RUN_STORE_ERROR : ctx.conflict ? RUN_STORE_CONFLICT : RUN_STORE_OK;
 }
 
 run_store_status run_store_has_key(const char* shared_path, const char* key, int* out_present)
@@ -2364,6 +2411,43 @@ run_store_status run_store_has_key(const char* shared_path, const char* key, int
             const int rc = sqlite3_step(stmt);
             if (rc == SQLITE_ROW || rc == SQLITE_DONE) {
                 *out_present = (rc == SQLITE_ROW);
+                status = RUN_STORE_OK;
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+    sqlite3_close(db);
+    return status;
+}
+
+run_store_status run_store_run_id_owner(const char* shared_path, const char* run_id,
+                                        char out_key[STORAGE_KEY_MAX], int* out_found)
+{
+    if (shared_path == NULL || run_id == NULL || out_key == NULL || out_found == NULL) {
+        return RUN_STORE_ERROR;
+    }
+    out_key[0] = '\0';
+    *out_found = 0;
+    if (!rs_file_exists(shared_path)) {
+        return RUN_STORE_OK;
+    }
+    sqlite3* db = NULL;
+    if (reader_open(shared_path, &db) != 0) {
+        return RUN_STORE_ERROR;
+    }
+    run_store_status status = RUN_STORE_OK;
+    if (db_table_exists(db, "main", "io_runs")) {
+        sqlite3_stmt* stmt = NULL;
+        status = RUN_STORE_ERROR;
+        if (sqlite3_prepare_v2(db, "SELECT COALESCE(key, '') FROM io_runs WHERE run_id=?1;", -1, &stmt, NULL) ==
+            SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, run_id, -1, SQLITE_TRANSIENT);
+            const int rc = sqlite3_step(stmt);
+            if (rc == SQLITE_ROW || rc == SQLITE_DONE) {
+                *out_found = (rc == SQLITE_ROW);
+                if (rc == SQLITE_ROW) {
+                    (void)snprintf(out_key, STORAGE_KEY_MAX, "%s", (const char*)sqlite3_column_text(stmt, 0));
+                }
                 status = RUN_STORE_OK;
             }
         }
@@ -2533,6 +2617,20 @@ run_store_status run_store_has_key(const char* shared_path, const char* key, int
     (void)key;
     if (out_present != NULL) {
         *out_present = 0;
+    }
+    return RUN_STORE_ERROR;
+}
+
+run_store_status run_store_run_id_owner(const char* shared_path, const char* run_id,
+                                        char out_key[STORAGE_KEY_MAX], int* out_found)
+{
+    (void)shared_path;
+    (void)run_id;
+    if (out_key != NULL) {
+        out_key[0] = '\0';
+    }
+    if (out_found != NULL) {
+        *out_found = 0;
     }
     return RUN_STORE_ERROR;
 }

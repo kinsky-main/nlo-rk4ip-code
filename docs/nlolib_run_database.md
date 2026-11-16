@@ -54,7 +54,12 @@ timeout (Nlolib uses 60 s), read in one transaction and close it.
    ignored.
 2. `runs.nlolib_run_id` (equivalently `io_runs.run_id` where `io_runs.key =
    runs.key`) is the `run_id` that every data table below is keyed by. By
-   default it equals `runs.key`.
+   default it equals `runs.key`. A caller may set its own `run_id`; it names
+   one run (one key) in the database. A new run whose explicit `run_id`
+   already names a run with another key is refused before it starts
+   (`NLOLIB_STATUS_INVALID_ARGUMENT`), and a staged run that would reuse one is
+   not merged and stays in `staging/`. Rerunning the same key with the same
+   `run_id` replaces that run, as usual.
 3. `io_record_layout` gives the grid, record counts and axes of the run.
 4. `io_record_maps` holds the reduced maps, one row per record.
 5. `io_final_output_fields` holds the final field, `io_record_chunks` the raw

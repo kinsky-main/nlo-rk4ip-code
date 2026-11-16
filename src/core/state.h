@@ -303,6 +303,10 @@ typedef enum {
  *
  * @param sqlite_path UTF-8 path of the shared run database.
  * @param run_id Optional data-table run id; NULL or empty uses the run key.
+ *        An explicit run id must not name a run with another key in the
+ *        shared database: nlolib_propagate() then returns
+ *        NLOLIB_STATUS_INVALID_ARGUMENT before running, and a run staged
+ *        before the other was merged is not merged (it stays in staging).
  * @param sqlite_max_bytes Staging database size cap in bytes (0: 50 GiB).
  * @param chunk_records Records per raw chunk and per write transaction (0: 16).
  * @param cap_policy Behaviour when @c sqlite_max_bytes is reached.

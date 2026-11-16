@@ -402,7 +402,10 @@ NLOLIB_API nlolib_status nlolib_storage_has_run(const char* sqlite_path, const c
  * @param out_merged Optional count of merged files.
  * @param out_discarded Optional count of deleted files.
  * @param out_skipped Optional count of files left in place.
- * @return nlolib_status status code.
+ * @return NLOLIB_STATUS_OK; NLOLIB_STATUS_INVALID_ARGUMENT when a complete
+ *         file was left in place because its run_id names a run with another
+ *         key in the shared database (the other files are still processed);
+ *         another status when a merge failed.
  */
 NLOLIB_API nlolib_status nlolib_storage_recover_staging(
     const char* sqlite_path,

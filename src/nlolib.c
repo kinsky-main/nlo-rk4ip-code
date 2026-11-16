@@ -235,6 +235,25 @@ static int staging_begin(
         return -1;
     }
     (void)snprintf(staging->shared_path, sizeof(staging->shared_path), "%s", staging->options.sqlite_path);
+    if (staging->options.run_id != NULL && staging->options.run_id[0] != '\0') {
+        /*
+         * The data tables are keyed by run_id: refuse an explicit one that
+         * names another run before anything is staged. A run staged before
+         * the other one was merged is refused again at merge time.
+         */
+        char owner[STORAGE_KEY_MAX];
+        int found = 0;
+        if (run_store_run_id_owner(staging->shared_path, staging->options.run_id, owner, &found) == RUN_STORE_OK &&
+            found && strcmp(owner, staging->key_info.key) != 0) {
+            log_emit(LOG_LEVEL_ERROR,
+                     "[nlolib][store] run_id '%s' already names run %s in %s; this run (key %s) needs another run_id",
+                     staging->options.run_id,
+                     owner[0] != '\0' ? owner : "(written without a key)",
+                     staging->shared_path,
+                     staging->key_info.key);
+            return -2;
+        }
+    }
     if (run_store_make_staging_path(staging->shared_path,
                                         staging->key_info.key,
                                         staging->path,
@@ -573,12 +592,16 @@ NLOLIB_API nlolib_status nlolib_propagate(
             ? *local_options.exec_options
             : execution_options_default(VECTOR_BACKEND_AUTO);
     staging_run staging;
-    if (staging_begin(&staging,
-                      config,
-                      num_time_samples,
-                      input_field,
-                      num_recorded_samples,
-                      &local_options) != 0) {
+    const int staging_rc = staging_begin(&staging,
+                                         config,
+                                         num_time_samples,
+                                         input_field,
+                                         num_recorded_samples,
+                                         &local_options);
+    if (staging_rc == -2) {
+        return propagate_fail("storage.run_id_taken", NLOLIB_STATUS_INVALID_ARGUMENT);
+    }
+    if (staging_rc != 0) {
         return propagate_fail("storage.staging", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
 
@@ -764,8 +787,16 @@ NLOLIB_API nlolib_status nlolib_propagate(
                      staging.path,
                      staging.shared_path);
         } else {
-            stored.merged = (run_store_merge(staging.path, staging.shared_path) == RUN_STORE_OK) ? 1 : 0;
-            if (!stored.merged) {
+            const run_store_status merge_status = run_store_merge(staging.path, staging.shared_path);
+            stored.merged = (merge_status == RUN_STORE_OK) ? 1 : 0;
+            if (merge_status == RUN_STORE_CONFLICT) {
+                log_emit(LOG_LEVEL_ERROR,
+                         "[nlolib][store] run %s is complete in %s but its run_id names another run in %s; "
+                         "it was not merged.",
+                         stored.key,
+                         staging.path,
+                         staging.shared_path);
+            } else if (!stored.merged) {
                 log_emit(LOG_LEVEL_WARN,
                          "[nlolib][store] run %s is complete in %s but not merged into %s; "
                          "merge it later with nlolib_storage_recover_staging().",
@@ -854,6 +885,8 @@ static nlolib_status map_store_status(run_store_status status)
     switch (status) {
         case RUN_STORE_OK:
             return NLOLIB_STATUS_OK;
+        case RUN_STORE_CONFLICT:
+            return NLOLIB_STATUS_INVALID_ARGUMENT;
         case RUN_STORE_LOCK_TIMEOUT:
         case RUN_STORE_INCOMPLETE:
         case RUN_STORE_ERROR:

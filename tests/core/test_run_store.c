@@ -1178,6 +1178,70 @@ static void test_recovery_pass_settles_once(const char* root)
     check_runs_contract(db_path);
 }
 
+/*
+ * Two runs with different keys and one explicit run_id: the data tables are
+ * keyed by run_id, so the second must never replace the first run's data. A
+ * new run is refused before it starts; one staged before the first was merged
+ * is refused at merge time and kept in staging. A rerun of the same key with
+ * the same run_id still replaces its own run.
+ */
+static void test_run_id_conflict(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    char sdir[1024];
+    staging_dir(db_path, sdir, sizeof(sdir));
+    run_case rc;
+    case_init_1d(&rc, 64u, 1.0, 4u, db_path);
+    rc.storage.run_id = "shared-label";
+
+    /* B is staged first and left for a later merge. */
+    const nlo_complex a_sample = rc.field[3];
+    rc.storage.defer_merge = 1;
+    rc.field[3].re += 0.5;
+    storage_result b;
+    CHECK(case_run(&rc, NULL, 0u, &b) == NLOLIB_STATUS_OK && b.deferred == 1, "deferred run B");
+    rc.field[3] = a_sample;
+
+    /* A takes the label in the shared database. */
+    rc.storage.defer_merge = 0;
+    storage_result a;
+    CHECK(case_run(&rc, NULL, 0u, &a) == NLOLIB_STATUS_OK && a.merged == 1, "run A");
+    CHECK(strcmp(a.key, b.key) != 0, "A and B must have different keys");
+    const long long a_maps = count_where_key(db_path, "io_record_maps", a.key);
+    CHECK(a_maps == 4, "A maps %lld", a_maps);
+
+    /* Merging B would put B's data under A's runs row: refused, B kept. */
+    size_t merged = 9u;
+    size_t skipped = 0u;
+    CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, &skipped) != NLOLIB_STATUS_OK,
+          "recovery merged a run whose run_id belongs to another key");
+    CHECK(merged == 0u && skipped == 1u, "conflict pass merged %zu skipped %zu", merged, skipped);
+    CHECK(count_files(sdir, ".sqlite") == 1u, "conflicting staging file not kept");
+    int present = 0;
+    CHECK(nlolib_storage_has_run(db_path, a.key, &present) == NLOLIB_STATUS_OK && present == 1, "A's runs row lost");
+    CHECK(nlolib_storage_has_run(db_path, b.key, &present) == NLOLIB_STATUS_OK && present == 0, "B merged");
+    CHECK(count_where_key(db_path, "io_record_maps", a.key) == a_maps, "A's maps changed");
+    CHECK(count_where_key(db_path, "io_record_layout", a.key) == 1, "A's layout lost");
+    CHECK(count_where_key(db_path, "io_final_output_fields", a.key) == 1, "A's final field lost");
+
+    /* A new run with the taken label is refused before it starts and stages nothing. */
+    rc.field[3].re += 1.0;
+    CHECK(case_run(&rc, NULL, 0u, NULL) == NLOLIB_STATUS_INVALID_ARGUMENT, "new run with a taken run_id not refused");
+    rc.field[3] = a_sample;
+    CHECK(count_files(sdir, ".sqlite") == 1u, "refused run left a staging file");
+
+    /* Rerunning A itself is allowed and replaces it. */
+    storage_result again;
+    memset(&again, 0, sizeof(again));
+    const nlolib_status again_status = case_run(&rc, NULL, 0u, &again);
+    CHECK(again_status == NLOLIB_STATUS_OK && again.merged == 1 && strcmp(again.key, a.key) == 0,
+          "rerun of A: status %d merged %d key %s (A %s)", (int)again_status, again.merged, again.key, a.key);
+    CHECK(count_where_key(db_path, "io_record_maps", a.key) == a_maps, "A's maps after rerun");
+    case_free(&rc);
+    check_runs_contract(db_path);
+}
+
 /* A merge split over many small transactions, a writer killed between two of them, and the clean-up. */
 static void test_batched_and_interrupted_merge(const char* root)
 {
@@ -1991,6 +2055,7 @@ int main(int argc, char** argv)
         {"vfs_choices", test_vfs_choices},
         {"deferred_merge", test_deferred_merge},
         {"recovery_pass_settles_once", test_recovery_pass_settles_once},
+        {"run_id_conflict", test_run_id_conflict},
         {"batched_interrupted_merge", test_batched_and_interrupted_merge},
         {"stale_view_guard", test_stale_view_guard},
         {"hot_journal", test_hot_journal},
