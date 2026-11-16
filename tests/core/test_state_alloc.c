@@ -8,7 +8,6 @@
 #include "core/state.h"
 #include "io/snapshot_store.h"
 #include "nlolib.h"
-#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +21,15 @@
 #define TEST_FREQ_EPS 1e-9
 #endif
 
+/* Not assert(): Release builds define NDEBUG. */
+#define STATE_CHECK(cond)                                                     \
+    do {                                                                      \
+        if (!(cond)) {                                                        \
+            fprintf(stderr, "%s:%d: STATE_CHECK(%s) failed\n", __FILE__, __LINE__, #cond); \
+            exit(1);                                                          \
+        }                                                                     \
+    } while (0)
+
 static double test_expected_omega_unshifted(size_t index, size_t num_time_samples, double omega_step)
 {
     const size_t positive_limit = (num_time_samples - 1u) / 2u;
@@ -34,9 +42,9 @@ static double test_expected_omega_unshifted(size_t index, size_t num_time_sample
 
 static void test_fill_expected_omega_grid(nlo_complex* out_grid, size_t num_time_samples, double delta_time)
 {
-    assert(out_grid != NULL);
-    assert(num_time_samples > 0u);
-    assert(delta_time > 0.0);
+    STATE_CHECK(out_grid != NULL);
+    STATE_CHECK(num_time_samples > 0u);
+    STATE_CHECK(delta_time > 0.0);
 
     const double omega_step = TEST_TWO_PI / ((double)num_time_samples * delta_time);
     for (size_t i = 0u; i < num_time_samples; ++i) {
@@ -46,14 +54,14 @@ static void test_fill_expected_omega_grid(nlo_complex* out_grid, size_t num_time
 
 static void test_assert_grid_matches(const nlo_complex* actual, const nlo_complex* expected, size_t count)
 {
-    assert(actual != NULL);
-    assert(expected != NULL);
+    STATE_CHECK(actual != NULL);
+    STATE_CHECK(expected != NULL);
 
     for (size_t i = 0u; i < count; ++i) {
         const double expected_real = expected[i].re;
         const double tol = TEST_FREQ_EPS * fmax(1.0, fabs(expected_real));
-        assert(fabs(actual[i].re - expected_real) <= tol);
-        assert(fabs(actual[i].im - expected[i].im) <= tol);
+        STATE_CHECK(fabs(actual[i].re - expected_real) <= tol);
+        STATE_CHECK(fabs(actual[i].im - expected[i].im) <= tol);
     }
 }
 
@@ -63,27 +71,27 @@ static void test_init_state_success(void)
     const size_t num_records = 64;
 
     sim_config* config = create_sim_config(num_time_samples);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
 
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
     simulation_state* state = NULL;
     allocation_info info = {0};
 
-    assert(init_simulation_state(config,
-                                     num_time_samples,
-                                     num_records,
-                                     &exec_options,
-                                     &info,
-                                     &state) == 0);
-    assert(state != NULL);
+    STATE_CHECK(init_simulation_state(config,
+                                          num_time_samples,
+                                          num_records,
+                                          &exec_options,
+                                          &info,
+                                          &state) == 0);
+    STATE_CHECK(state != NULL);
 
-    assert(info.requested_records == num_records);
-    assert(info.allocated_records <= 1u);
-    assert(info.per_record_bytes == num_time_samples * sizeof(nlo_complex));
-    assert(info.host_snapshot_bytes <= info.per_record_bytes);
-    assert(info.working_vector_bytes >= info.per_record_bytes * 12u);
-    assert(info.backend_type == VECTOR_BACKEND_CPU);
+    STATE_CHECK(info.requested_records == num_records);
+    STATE_CHECK(info.allocated_records <= 1u);
+    STATE_CHECK(info.per_record_bytes == num_time_samples * sizeof(nlo_complex));
+    STATE_CHECK(info.host_snapshot_bytes <= info.per_record_bytes);
+    STATE_CHECK(info.working_vector_bytes >= info.per_record_bytes * 12u);
+    STATE_CHECK(info.backend_type == VECTOR_BACKEND_CPU);
 
     free_simulation_state(state);
     free_sim_config(config);
@@ -95,7 +103,7 @@ static void test_record_count_does_not_change_init_snapshot_allocation(void)
 {
     const size_t num_time_samples = 1024u;
     sim_config* config = create_sim_config(num_time_samples);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
 
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
@@ -104,25 +112,25 @@ static void test_record_count_does_not_change_init_snapshot_allocation(void)
     allocation_info info_small = {0};
     allocation_info info_large = {0};
 
-    assert(init_simulation_state(config,
-                                     num_time_samples,
-                                     2u,
-                                     &exec_options,
-                                     &info_small,
-                                     &state_small) == 0);
-    assert(init_simulation_state(config,
-                                     num_time_samples,
-                                     128u,
-                                     &exec_options,
-                                     &info_large,
-                                     &state_large) == 0);
-    assert(state_small != NULL);
-    assert(state_large != NULL);
+    STATE_CHECK(init_simulation_state(config,
+                                          num_time_samples,
+                                          2u,
+                                          &exec_options,
+                                          &info_small,
+                                          &state_small) == 0);
+    STATE_CHECK(init_simulation_state(config,
+                                          num_time_samples,
+                                          128u,
+                                          &exec_options,
+                                          &info_large,
+                                          &state_large) == 0);
+    STATE_CHECK(state_small != NULL);
+    STATE_CHECK(state_large != NULL);
 
-    assert(info_small.per_record_bytes == info_large.per_record_bytes);
-    assert(info_small.host_snapshot_bytes == info_large.host_snapshot_bytes);
-    assert(info_small.working_vector_bytes == info_large.working_vector_bytes);
-    assert(info_small.allocated_records == info_large.allocated_records);
+    STATE_CHECK(info_small.per_record_bytes == info_large.per_record_bytes);
+    STATE_CHECK(info_small.host_snapshot_bytes == info_large.host_snapshot_bytes);
+    STATE_CHECK(info_small.working_vector_bytes == info_large.working_vector_bytes);
+    STATE_CHECK(info_small.allocated_records == info_large.allocated_records);
 
     free_simulation_state(state_large);
     free_simulation_state(state_small);
@@ -137,22 +145,22 @@ static void test_init_state_invalid_args(void)
     allocation_info info = {0};
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
-    assert(init_simulation_state(NULL, 8, 1, &exec_options, &info, &state) != 0);
-    assert(state == NULL);
+    STATE_CHECK(init_simulation_state(NULL, 8, 1, &exec_options, &info, &state) != 0);
+    STATE_CHECK(state == NULL);
 
     sim_config* config = create_sim_config(8);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
 
-    assert(init_simulation_state(config, 0, 1, &exec_options, &info, &state) != 0);
-    assert(state == NULL);
+    STATE_CHECK(init_simulation_state(config, 0, 1, &exec_options, &info, &state) != 0);
+    STATE_CHECK(state == NULL);
 
-    assert(init_simulation_state(config, 8, 0, &exec_options, &info, &state) != 0);
-    assert(state == NULL);
+    STATE_CHECK(init_simulation_state(config, 8, 0, &exec_options, &info, &state) != 0);
+    STATE_CHECK(state == NULL);
 
     config->spatial.nx = 3;
     config->spatial.ny = 3;
-    assert(init_simulation_state(config, 8, 1, &exec_options, &info, &state) != 0);
-    assert(state == NULL);
+    STATE_CHECK(init_simulation_state(config, 8, 1, &exec_options, &info, &state) != 0);
+    STATE_CHECK(state == NULL);
 
     free_sim_config(config);
 
@@ -167,7 +175,7 @@ static void test_init_state_xy_shape_rejected_without_tensor(void)
     const size_t num_records = 8;
 
     sim_config* config = create_sim_config(num_time_samples);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
 
     config->spatial.nx = nx;
     config->spatial.ny = ny;
@@ -179,13 +187,13 @@ static void test_init_state_xy_shape_rejected_without_tensor(void)
 
     simulation_state* state = NULL;
     allocation_info info = {0};
-    assert(init_simulation_state(config,
-                                     num_time_samples,
-                                     num_records,
-                                     &exec_options,
-                                     &info,
-                                     &state) != 0);
-    assert(state == NULL);
+    STATE_CHECK(init_simulation_state(config,
+                                          num_time_samples,
+                                          num_records,
+                                          &exec_options,
+                                          &info,
+                                          &state) != 0);
+    STATE_CHECK(state == NULL);
     free_sim_config(config);
 
     printf("test_init_state_xy_shape_rejected_without_tensor: validates legacy flattened XY rejection.\n");
@@ -204,24 +212,24 @@ static void test_init_state_tensor_shape_rules(void)
         const size_t total_samples = nt * nx * ny;
 
         sim_config* config = create_sim_config(total_samples);
-        assert(config != NULL);
+        STATE_CHECK(config != NULL);
         config->tensor.nt = nt;
         config->tensor.nx = nx;
         config->tensor.ny = ny;
         config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
 
-        assert(init_simulation_state(config,
-                                         total_samples,
-                                         4u,
-                                         &exec_options,
-                                         &info,
-                                         &state) == 0);
-        assert(state != NULL);
-        assert(state->nt == nt);
-        assert(state->nx == nx);
-        assert(state->ny == ny);
-        assert(state->num_points_xy == nx * ny);
-        assert(state->tensor_mode_active == 1);
+        STATE_CHECK(init_simulation_state(config,
+                                              total_samples,
+                                              4u,
+                                              &exec_options,
+                                              &info,
+                                              &state) == 0);
+        STATE_CHECK(state != NULL);
+        STATE_CHECK(state->nt == nt);
+        STATE_CHECK(state->nx == nx);
+        STATE_CHECK(state->ny == ny);
+        STATE_CHECK(state->num_points_xy == nx * ny);
+        STATE_CHECK(state->tensor_mode_active == 1);
         free_simulation_state(state);
         state = NULL;
         free_sim_config(config);
@@ -234,22 +242,22 @@ static void test_init_state_tensor_shape_rules(void)
         const size_t total_samples = nt * nx;
 
         sim_config* config = create_sim_config(total_samples);
-        assert(config != NULL);
+        STATE_CHECK(config != NULL);
         config->tensor.nt = nt;
         config->tensor.nx = nx;
         config->tensor.ny = ny;
         config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
 
-        assert(init_simulation_state(config,
-                                         total_samples,
-                                         2u,
-                                         &exec_options,
-                                         &info,
-                                         &state) == 0);
-        assert(state != NULL);
-        assert(state->nt == nt);
-        assert(state->nx == nx);
-        assert(state->ny == 1u);
+        STATE_CHECK(init_simulation_state(config,
+                                              total_samples,
+                                              2u,
+                                              &exec_options,
+                                              &info,
+                                              &state) == 0);
+        STATE_CHECK(state != NULL);
+        STATE_CHECK(state->nt == nt);
+        STATE_CHECK(state->nx == nx);
+        STATE_CHECK(state->ny == 1u);
         free_simulation_state(state);
         state = NULL;
         free_sim_config(config);
@@ -258,35 +266,35 @@ static void test_init_state_tensor_shape_rules(void)
     {
         const size_t total_samples = 16u;
         sim_config* config = create_sim_config(total_samples);
-        assert(config != NULL);
+        STATE_CHECK(config != NULL);
         config->tensor.nt = 4u;
         config->tensor.nx = 2u;
         config->tensor.ny = 3u;
         config->tensor.layout = TENSOR_LAYOUT_XYT_T_FAST;
-        assert(init_simulation_state(config,
-                                         total_samples,
-                                         2u,
-                                         &exec_options,
-                                         &info,
-                                         &state) != 0);
-        assert(state == NULL);
+        STATE_CHECK(init_simulation_state(config,
+                                              total_samples,
+                                              2u,
+                                              &exec_options,
+                                              &info,
+                                              &state) != 0);
+        STATE_CHECK(state == NULL);
         free_sim_config(config);
     }
 
     {
         sim_config* config = create_sim_config(16u);
-        assert(config != NULL);
+        STATE_CHECK(config != NULL);
         config->tensor.nt = 4u;
         config->tensor.nx = 2u;
         config->tensor.ny = 2u;
         config->tensor.layout = 7;
-        assert(init_simulation_state(config,
-                                         16u,
-                                         1u,
-                                         &exec_options,
-                                         &info,
-                                         &state) != 0);
-        assert(state == NULL);
+        STATE_CHECK(init_simulation_state(config,
+                                              16u,
+                                              1u,
+                                              &exec_options,
+                                              &info,
+                                              &state) != 0);
+        STATE_CHECK(state == NULL);
         free_sim_config(config);
     }
 
@@ -299,7 +307,7 @@ static void test_default_frequency_grid_generated_when_invalid(void)
     const double delta_time = 0.25;
 
     sim_config* config = create_sim_config(num_time_samples);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
 
     config->time.delta_time = delta_time;
     for (size_t i = 0u; i < num_time_samples; ++i) {
@@ -308,24 +316,24 @@ static void test_default_frequency_grid_generated_when_invalid(void)
 
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
     simulation_state* state = NULL;
-    assert(init_simulation_state(config,
-                                     num_time_samples,
-                                     2u,
-                                     &exec_options,
-                                     NULL,
-                                     &state) == 0);
-    assert(state != NULL);
+    STATE_CHECK(init_simulation_state(config,
+                                          num_time_samples,
+                                          2u,
+                                          &exec_options,
+                                          NULL,
+                                          &state) == 0);
+    STATE_CHECK(state != NULL);
 
     nlo_complex* downloaded = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
     nlo_complex* expected = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
-    assert(downloaded != NULL);
-    assert(expected != NULL);
+    STATE_CHECK(downloaded != NULL);
+    STATE_CHECK(expected != NULL);
 
     test_fill_expected_omega_grid(expected, num_time_samples, delta_time);
-    assert(vec_download(state->backend,
-                            state->frequency_grid_vec,
-                            downloaded,
-                            num_time_samples * sizeof(nlo_complex)) == VEC_STATUS_OK);
+    STATE_CHECK(vec_download(state->backend,
+                                 state->frequency_grid_vec,
+                                 downloaded,
+                                 num_time_samples * sizeof(nlo_complex)) == VEC_STATUS_OK);
     test_assert_grid_matches(downloaded, expected, num_time_samples);
 
     free(expected);
@@ -342,27 +350,27 @@ static void test_frequency_grid_preserved_when_valid(void)
     const double delta_time = 0.125;
 
     sim_config* config = create_sim_config(num_time_samples);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
 
     config->time.delta_time = delta_time;
     test_fill_expected_omega_grid(config->frequency.frequency_grid, num_time_samples, delta_time);
 
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
     simulation_state* state = NULL;
-    assert(init_simulation_state(config,
-                                     num_time_samples,
-                                     2u,
-                                     &exec_options,
-                                     NULL,
-                                     &state) == 0);
-    assert(state != NULL);
+    STATE_CHECK(init_simulation_state(config,
+                                          num_time_samples,
+                                          2u,
+                                          &exec_options,
+                                          NULL,
+                                          &state) == 0);
+    STATE_CHECK(state != NULL);
 
     nlo_complex* downloaded = (nlo_complex*)calloc(num_time_samples, sizeof(nlo_complex));
-    assert(downloaded != NULL);
-    assert(vec_download(state->backend,
-                            state->frequency_grid_vec,
-                            downloaded,
-                            num_time_samples * sizeof(nlo_complex)) == VEC_STATUS_OK);
+    STATE_CHECK(downloaded != NULL);
+    STATE_CHECK(vec_download(state->backend,
+                                 state->frequency_grid_vec,
+                                 downloaded,
+                                 num_time_samples * sizeof(nlo_complex)) == VEC_STATUS_OK);
     test_assert_grid_matches(downloaded, config->frequency.frequency_grid, num_time_samples);
 
     free(downloaded);
@@ -381,7 +389,7 @@ static void test_tensor_mode_frequency_mesh_generation(void)
     const double delta_time = 0.5;
 
     sim_config* config = create_sim_config(total);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
     config->tensor.nt = nt;
     config->tensor.nx = nx;
     config->tensor.ny = ny;
@@ -395,47 +403,47 @@ static void test_tensor_mode_frequency_mesh_generation(void)
 
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
     simulation_state* state = NULL;
-    assert(init_simulation_state(config,
-                                     total,
-                                     2u,
-                                     &exec_options,
-                                     NULL,
-                                     &state) == 0);
-    assert(state != NULL);
-    assert(state->tensor_mode_active == 1);
-    assert(state->nt == nt);
-    assert(state->nx == nx);
-    assert(state->ny == ny);
-    assert(state->init_vectors.wt_axis_vec == NULL);
-    assert(state->init_vectors.kx_axis_vec == NULL);
-    assert(state->init_vectors.ky_axis_vec == NULL);
-    assert(state->init_vectors.t_axis_vec == NULL);
-    assert(state->init_vectors.x_axis_vec == NULL);
-    assert(state->init_vectors.y_axis_vec == NULL);
-    assert(state->frequency_grid_vec == NULL);
+    STATE_CHECK(init_simulation_state(config,
+                                          total,
+                                          2u,
+                                          &exec_options,
+                                          NULL,
+                                          &state) == 0);
+    STATE_CHECK(state != NULL);
+    STATE_CHECK(state->tensor_mode_active == 1);
+    STATE_CHECK(state->nt == nt);
+    STATE_CHECK(state->nx == nx);
+    STATE_CHECK(state->ny == ny);
+    STATE_CHECK(state->init_vectors.wt_axis_vec == NULL);
+    STATE_CHECK(state->init_vectors.kx_axis_vec == NULL);
+    STATE_CHECK(state->init_vectors.ky_axis_vec == NULL);
+    STATE_CHECK(state->init_vectors.t_axis_vec == NULL);
+    STATE_CHECK(state->init_vectors.x_axis_vec == NULL);
+    STATE_CHECK(state->init_vectors.y_axis_vec == NULL);
+    STATE_CHECK(state->frequency_grid_vec == NULL);
 
     nlo_complex expected_axis[3] = {0};
     test_fill_expected_omega_grid(expected_axis, nt, delta_time);
 
     nlo_complex downloaded[12] = {0};
-    assert(vec_download(state->backend,
-                            state->working_vectors.wt_mesh_vec,
-                            downloaded,
-                            sizeof(downloaded)) == VEC_STATUS_OK);
+    STATE_CHECK(vec_download(state->backend,
+                                 state->working_vectors.wt_mesh_vec,
+                                 downloaded,
+                                 sizeof(downloaded)) == VEC_STATUS_OK);
     for (size_t block = 0u; block < (nx * ny); ++block) {
         const size_t base = block * nt;
         for (size_t t = 0u; t < nt; ++t) {
-            assert(fabs(downloaded[base + t].re - expected_axis[t].re) <= TEST_FREQ_EPS);
-            assert(fabs(downloaded[base + t].im - expected_axis[t].im) <= TEST_FREQ_EPS);
+            STATE_CHECK(fabs(downloaded[base + t].re - expected_axis[t].re) <= TEST_FREQ_EPS);
+            STATE_CHECK(fabs(downloaded[base + t].im - expected_axis[t].im) <= TEST_FREQ_EPS);
         }
     }
 
     nlo_complex potential_downloaded[12] = {0};
-    assert(vec_download(state->backend,
-                            state->working_vectors.potential_vec,
-                            potential_downloaded,
-                            sizeof(potential_downloaded)) == VEC_STATUS_OK);
-    assert(fabs(potential_downloaded[0].re + 1.5) <= TEST_FREQ_EPS);
+    STATE_CHECK(vec_download(state->backend,
+                                 state->working_vectors.potential_vec,
+                                 potential_downloaded,
+                                 sizeof(potential_downloaded)) == VEC_STATUS_OK);
+    STATE_CHECK(fabs(potential_downloaded[0].re + 1.5) <= TEST_FREQ_EPS);
 
     free_simulation_state(state);
     free_sim_config(config);
@@ -462,7 +470,7 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
     const size_t total = nt * nx * ny;
 
     sim_config* config = create_sim_config(total);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
     config->tensor.nt = nt;
     config->tensor.nx = nx;
     config->tensor.ny = ny;
@@ -479,14 +487,14 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
 
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_AUTO);
     simulation_state* state = NULL;
-    assert(init_simulation_state(config,
-                                     total,
-                                     2u,
-                                     &exec_options,
-                                     NULL,
-                                     &state) == 0);
-    assert(state != NULL);
-    assert(vector_backend_get_type(state->backend) == VECTOR_BACKEND_VULKAN);
+    STATE_CHECK(init_simulation_state(config,
+                                          total,
+                                          2u,
+                                          &exec_options,
+                                          NULL,
+                                          &state) == 0);
+    STATE_CHECK(state != NULL);
+    STATE_CHECK(vector_backend_get_type(state->backend) == VECTOR_BACKEND_VULKAN);
 
     free_simulation_state(state);
     free_sim_config(config);
@@ -494,15 +502,6 @@ static void test_tensor_mode_linear_factor_literal_power_vulkan(void)
     printf("test_tensor_mode_linear_factor_literal_power_vulkan: validates Vulkan literal-power lowering.\n");
 #endif
 }
-
-/* Not assert(): Release builds define NDEBUG. */
-#define STATE_CHECK(cond)                                                     \
-    do {                                                                      \
-        if (!(cond)) {                                                        \
-            fprintf(stderr, "%s:%d: STATE_CHECK(%s) failed\n", __FILE__, __LINE__, #cond); \
-            exit(1);                                                          \
-        }                                                                     \
-    } while (0)
 
 #if ENABLE_VULKAN_BACKEND
 static void set_operator_jit_env(const char* value)
@@ -646,7 +645,7 @@ static void test_snapshot_store_dense_readback(void)
     const size_t total = num_time_samples * num_records;
 
     sim_config* config = create_sim_config(num_time_samples);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
     char db_path[256];
@@ -665,30 +664,30 @@ static void test_snapshot_store_dense_readback(void)
     open_params.num_recorded_samples = num_records;
 
     snapshot_store* store = snapshot_store_open(&open_params);
-    assert(store != NULL);
+    STATE_CHECK(store != NULL);
 
     nlo_complex* expected = (nlo_complex*)calloc(total, sizeof(nlo_complex));
     nlo_complex* restored = (nlo_complex*)calloc(total, sizeof(nlo_complex));
-    assert(expected != NULL);
-    assert(restored != NULL);
+    STATE_CHECK(expected != NULL);
+    STATE_CHECK(restored != NULL);
 
     for (size_t record = 0u; record < num_records; ++record) {
         for (size_t t = 0u; t < num_time_samples; ++t) {
             const size_t idx = (record * num_time_samples) + t;
             expected[idx] = make((double)(100u * record + t), (double)(-1.0 * (double)record));
         }
-        assert(snapshot_store_write_record(
-                   store,
-                   record,
-                   expected + (record * num_time_samples),
-                   num_time_samples) != SNAPSHOT_STORE_STATUS_ERROR);
+        STATE_CHECK(snapshot_store_write_record(
+                        store,
+                        record,
+                        expected + (record * num_time_samples),
+                        num_time_samples) != SNAPSHOT_STORE_STATUS_ERROR);
     }
 
-    assert(snapshot_store_read_all_records(store, restored, num_records, num_time_samples) ==
-           SNAPSHOT_STORE_STATUS_OK);
+    STATE_CHECK(snapshot_store_read_all_records(store, restored, num_records, num_time_samples) ==
+                SNAPSHOT_STORE_STATUS_OK);
     for (size_t i = 0u; i < total; ++i) {
-        assert(fabs(restored[i].re - expected[i].re) <= TEST_FREQ_EPS);
-        assert(fabs(restored[i].im - expected[i].im) <= TEST_FREQ_EPS);
+        STATE_CHECK(fabs(restored[i].re - expected[i].re) <= TEST_FREQ_EPS);
+        STATE_CHECK(fabs(restored[i].im - expected[i].im) <= TEST_FREQ_EPS);
     }
 
     snapshot_store_close(store);
@@ -738,8 +737,8 @@ static void test_dense_output_safety_cap_rejects_before_init(void)
         &options,
         &out);
 
-    assert(status == NLOLIB_STATUS_INVALID_ARGUMENT);
-    assert(records_written == 0u);
+    STATE_CHECK(status == NLOLIB_STATUS_INVALID_ARGUMENT);
+    STATE_CHECK(records_written == 0u);
 
     printf("test_dense_output_safety_cap_rejects_before_init: rejects oversized dense output.\n");
 }
@@ -753,7 +752,7 @@ static void test_storage_only_propagate_without_dense_output(void)
 
     const size_t num_time_samples = 16u;
     sim_config* config = create_sim_config(num_time_samples);
-    assert(config != NULL);
+    STATE_CHECK(config != NULL);
     config->propagation.propagation_distance = 0.02;
     config->propagation.starting_step_size = 0.01;
     config->propagation.max_step_size = 0.01;
@@ -796,9 +795,9 @@ static void test_storage_only_propagate_without_dense_output(void)
 
     const nlolib_status status =
         nlolib_propagate(&sim_section, &physics_section, num_time_samples, input, &options, &out);
-    assert(status == NLOLIB_STATUS_OK);
-    assert(records_written == 0u);
-    assert(storage_result.chunks_written == 3u);
+    STATE_CHECK(status == NLOLIB_STATUS_OK);
+    STATE_CHECK(records_written == 0u);
+    STATE_CHECK(storage_result.chunks_written == 2u);
 
     free_sim_config(config);
     (void)remove(db_path);
