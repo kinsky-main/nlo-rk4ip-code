@@ -12,6 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #ifndef TEST_TWO_PI
 #define TEST_TWO_PI 6.283185307179586476925286766559
@@ -29,6 +34,55 @@
             exit(1);                                                          \
         }                                                                     \
     } while (0)
+
+/* The sqlite paths used to come from an unseeded rand(), so every run reused
+ * the same two filenames, and the remove() calls sat after the checks, so a
+ * STATE_CHECK exiting early left the database behind for the next run to
+ * inherit. The path now carries the process id, and atexit() removes the file
+ * and its -wal/-shm siblings on every exit path, STATE_CHECK's exit(1)
+ * included. */
+#define TEST_DB_PATH_MAX 4u
+
+static char g_test_db_paths[TEST_DB_PATH_MAX][256];
+static size_t g_test_db_path_count = 0u;
+
+static void test_remove_db_files(void)
+{
+    /* The precision keeps the sidecar names provably within their buffer. */
+    const int stem_max = (int)(sizeof(g_test_db_paths[0]) - 1u);
+    for (size_t i = 0u; i < g_test_db_path_count; ++i) {
+        char sidecar[sizeof(g_test_db_paths[0]) + 8u];
+        (void)remove(g_test_db_paths[i]);
+        (void)snprintf(sidecar, sizeof(sidecar), "%.*s-wal", stem_max, g_test_db_paths[i]);
+        (void)remove(sidecar);
+        (void)snprintf(sidecar, sizeof(sidecar), "%.*s-shm", stem_max, g_test_db_paths[i]);
+        (void)remove(sidecar);
+    }
+}
+
+/* A database path unique to this process, removed again when it exits. */
+static const char* test_db_path(const char* stem)
+{
+    STATE_CHECK(g_test_db_path_count < TEST_DB_PATH_MAX);
+    if (g_test_db_path_count == 0u) {
+        STATE_CHECK(atexit(test_remove_db_files) == 0);
+    }
+
+    char* const slot = g_test_db_paths[g_test_db_path_count];
+#if defined(_WIN32)
+    const unsigned long pid = (unsigned long)_getpid();
+#else
+    const unsigned long pid = (unsigned long)getpid();
+#endif
+    (void)snprintf(slot,
+                   sizeof(g_test_db_paths[0]),
+                   "%s_%lu_%u.sqlite3",
+                   stem,
+                   pid,
+                   (unsigned)g_test_db_path_count);
+    ++g_test_db_path_count;
+    return slot;
+}
 
 static double test_expected_omega_unshifted(size_t index, size_t num_time_samples, double omega_step)
 {
@@ -648,8 +702,7 @@ static void test_snapshot_store_dense_readback(void)
     STATE_CHECK(config != NULL);
     execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
 
-    char db_path[256];
-    (void)snprintf(db_path, sizeof(db_path), "test_snapshot_store_readback_%u.sqlite3", (unsigned)rand());
+    const char* const db_path = test_db_path("test_snapshot_store_readback");
 
     storage_options storage_options = storage_options_default();
     storage_options.sqlite_path = db_path;
@@ -694,14 +747,6 @@ static void test_snapshot_store_dense_readback(void)
     free(expected);
     free(restored);
     free_sim_config(config);
-
-    (void)remove(db_path);
-    char db_wal_path[280];
-    char db_shm_path[280];
-    (void)snprintf(db_wal_path, sizeof(db_wal_path), "%s-wal", db_path);
-    (void)snprintf(db_shm_path, sizeof(db_shm_path), "%s-shm", db_path);
-    (void)remove(db_wal_path);
-    (void)remove(db_shm_path);
 
     printf("test_snapshot_store_dense_readback: validates dense record reconstruction from chunks.\n");
 }
@@ -764,8 +809,7 @@ static void test_storage_only_propagate_without_dense_output(void)
         input[i] = make(0.1 * (double)i, 0.0);
     }
 
-    char db_path[256];
-    (void)snprintf(db_path, sizeof(db_path), "test_storage_only_%u.sqlite3", (unsigned)rand());
+    const char* const db_path = test_db_path("test_storage_only");
 
     storage_options storage_options = storage_options_default();
     storage_options.sqlite_path = db_path;
@@ -800,7 +844,6 @@ static void test_storage_only_propagate_without_dense_output(void)
     STATE_CHECK(storage_result.chunks_written == 2u);
 
     free_sim_config(config);
-    (void)remove(db_path);
 
     printf("test_storage_only_propagate_without_dense_output: accepts storage-only propagation.\n");
 }
