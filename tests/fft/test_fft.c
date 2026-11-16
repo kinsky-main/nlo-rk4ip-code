@@ -6,7 +6,6 @@
 #include "backend/nlo_complex.h"
 #include "backend/vector_backend.h"
 #include "fft/fft.h"
-#include <assert.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -38,31 +37,31 @@ static void test_fft_round_trip(void)
     }
 
     vector_backend* backend = vector_backend_create_cpu();
-    assert(backend != NULL);
+    FFT_CHECK(backend != NULL);
 
     vec_buffer* in = NULL;
     vec_buffer* freq = NULL;
     vec_buffer* out = NULL;
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &in) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &freq) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &out) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &in) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &freq) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &out) == VEC_STATUS_OK);
 
-    assert(vec_upload(backend, in, time_domain, sizeof(time_domain)) == VEC_STATUS_OK);
+    FFT_CHECK(vec_upload(backend, in, time_domain, sizeof(time_domain)) == VEC_STATUS_OK);
 
     fft_plan* plan = NULL;
-    assert(fft_plan_create_with_backend(backend,
-                                            n,
-                                            FFT_BACKEND_FFTW,
-                                            &plan) == VEC_STATUS_OK);
-    assert(plan != NULL);
+    FFT_CHECK(fft_plan_create_with_backend(backend,
+                                               n,
+                                               FFT_BACKEND_FFTW,
+                                               &plan) == VEC_STATUS_OK);
+    FFT_CHECK(plan != NULL);
 
-    assert(fft_forward_vec(plan, in, freq) == VEC_STATUS_OK);
-    assert(fft_inverse_vec(plan, freq, out) == VEC_STATUS_OK);
-    assert(vec_download(backend, out, round_trip, sizeof(round_trip)) == VEC_STATUS_OK);
+    FFT_CHECK(fft_forward_vec(plan, in, freq) == VEC_STATUS_OK);
+    FFT_CHECK(fft_inverse_vec(plan, freq, out) == VEC_STATUS_OK);
+    FFT_CHECK(vec_download(backend, out, round_trip, sizeof(round_trip)) == VEC_STATUS_OK);
 
     for (size_t i = 0; i < n; ++i) {
-        assert(fabs(RE(round_trip[i]) - RE(time_domain[i])) < TEST_EPS);
-        assert(fabs(IM(round_trip[i]) - IM(time_domain[i])) < TEST_EPS);
+        FFT_CHECK(fabs(RE(round_trip[i]) - RE(time_domain[i])) < TEST_EPS);
+        FFT_CHECK(fabs(IM(round_trip[i]) - IM(time_domain[i])) < TEST_EPS);
     }
 
     fft_plan_destroy(plan);
@@ -78,23 +77,23 @@ static void test_fft_backend_selection_validation(void)
 {
     const size_t n = TEST_FFT_SIZE;
     vector_backend* backend = vector_backend_create_cpu();
-    assert(backend != NULL);
+    FFT_CHECK(backend != NULL);
 
     fft_plan* auto_plan = NULL;
-    assert(fft_plan_create_with_backend(backend,
-                                            n,
-                                            FFT_BACKEND_AUTO,
-                                            &auto_plan) == VEC_STATUS_OK);
-    assert(auto_plan != NULL);
+    FFT_CHECK(fft_plan_create_with_backend(backend,
+                                               n,
+                                               FFT_BACKEND_AUTO,
+                                               &auto_plan) == VEC_STATUS_OK);
+    FFT_CHECK(auto_plan != NULL);
     fft_plan_destroy(auto_plan);
 
     /* Explicit VKFFT requests are a type-mismatch on CPU backends. */
     fft_plan* vk_plan = NULL;
-    assert(fft_plan_create_with_backend(backend,
-                                            n,
-                                            FFT_BACKEND_VKFFT,
-                                            &vk_plan) == VEC_STATUS_INVALID_ARGUMENT);
-    assert(vk_plan == NULL);
+    FFT_CHECK(fft_plan_create_with_backend(backend,
+                                               n,
+                                               FFT_BACKEND_VKFFT,
+                                               &vk_plan) == VEC_STATUS_INVALID_ARGUMENT);
+    FFT_CHECK(vk_plan == NULL);
 
     vector_backend_destroy(backend);
     printf("test_fft_backend_selection_validation: validates runtime FFT selection guards.\n");
@@ -104,47 +103,47 @@ static void test_fft_shape_and_io_validation(void)
 {
     const size_t n = TEST_FFT_SIZE;
     vector_backend* backend = vector_backend_create_cpu();
-    assert(backend != NULL);
+    FFT_CHECK(backend != NULL);
 
     fft_plan* plan = NULL;
     fft_shape invalid_rank = {
         .rank = 0u,
         .dims = {n, 1u, 1u}
     };
-    assert(fft_plan_create_shaped_with_backend(backend,
-                                                   &invalid_rank,
-                                                   FFT_BACKEND_FFTW,
-                                                   &plan) == VEC_STATUS_INVALID_ARGUMENT);
-    assert(plan == NULL);
+    FFT_CHECK(fft_plan_create_shaped_with_backend(backend,
+                                                      &invalid_rank,
+                                                      FFT_BACKEND_FFTW,
+                                                      &plan) == VEC_STATUS_INVALID_ARGUMENT);
+    FFT_CHECK(plan == NULL);
 
     fft_shape invalid_dim = {
         .rank = 2u,
         .dims = {n, 0u, 1u}
     };
-    assert(fft_plan_create_shaped_with_backend(backend,
-                                                   &invalid_dim,
-                                                   FFT_BACKEND_FFTW,
-                                                   &plan) == VEC_STATUS_INVALID_ARGUMENT);
-    assert(plan == NULL);
+    FFT_CHECK(fft_plan_create_shaped_with_backend(backend,
+                                                      &invalid_dim,
+                                                      FFT_BACKEND_FFTW,
+                                                      &plan) == VEC_STATUS_INVALID_ARGUMENT);
+    FFT_CHECK(plan == NULL);
 
-    assert(fft_plan_create_with_backend(backend,
-                                            n,
-                                            FFT_BACKEND_FFTW,
-                                            &plan) == VEC_STATUS_OK);
-    assert(plan != NULL);
+    FFT_CHECK(fft_plan_create_with_backend(backend,
+                                               n,
+                                               FFT_BACKEND_FFTW,
+                                               &plan) == VEC_STATUS_OK);
+    FFT_CHECK(plan != NULL);
 
     vec_buffer* in = NULL;
     vec_buffer* out = NULL;
     vec_buffer* wrong_len = NULL;
     vec_buffer* wrong_kind = NULL;
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &in) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &out) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n - 1u, &wrong_len) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_REAL64, n, &wrong_kind) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &in) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &out) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n - 1u, &wrong_len) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_REAL64, n, &wrong_kind) == VEC_STATUS_OK);
 
-    assert(fft_forward_vec(plan, in, wrong_len) == VEC_STATUS_INVALID_ARGUMENT);
-    assert(fft_forward_vec(plan, in, wrong_kind) == VEC_STATUS_INVALID_ARGUMENT);
-    assert(fft_inverse_vec(plan, wrong_len, out) == VEC_STATUS_INVALID_ARGUMENT);
+    FFT_CHECK(fft_forward_vec(plan, in, wrong_len) == VEC_STATUS_INVALID_ARGUMENT);
+    FFT_CHECK(fft_forward_vec(plan, in, wrong_kind) == VEC_STATUS_INVALID_ARGUMENT);
+    FFT_CHECK(fft_inverse_vec(plan, wrong_len, out) == VEC_STATUS_INVALID_ARGUMENT);
 
     vec_destroy(backend, wrong_kind);
     vec_destroy(backend, wrong_len);
@@ -169,33 +168,33 @@ static void test_fft_round_trip_3d_shape(void)
     }
 
     vector_backend* backend = vector_backend_create_cpu();
-    assert(backend != NULL);
+    FFT_CHECK(backend != NULL);
 
     vec_buffer* in = NULL;
     vec_buffer* freq = NULL;
     vec_buffer* out = NULL;
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &in) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &freq) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &out) == VEC_STATUS_OK);
-    assert(vec_upload(backend, in, time_domain, sizeof(time_domain)) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &in) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &freq) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &out) == VEC_STATUS_OK);
+    FFT_CHECK(vec_upload(backend, in, time_domain, sizeof(time_domain)) == VEC_STATUS_OK);
 
     const fft_shape shape = {
         .rank = 3u,
         .dims = {nt, ny, nx}
     };
     fft_plan* plan = NULL;
-    assert(fft_plan_create_shaped_with_backend(backend,
-                                                   &shape,
-                                                   FFT_BACKEND_FFTW,
-                                                   &plan) == VEC_STATUS_OK);
-    assert(plan != NULL);
-    assert(fft_forward_vec(plan, in, freq) == VEC_STATUS_OK);
-    assert(fft_inverse_vec(plan, freq, out) == VEC_STATUS_OK);
-    assert(vec_download(backend, out, round_trip, sizeof(round_trip)) == VEC_STATUS_OK);
+    FFT_CHECK(fft_plan_create_shaped_with_backend(backend,
+                                                      &shape,
+                                                      FFT_BACKEND_FFTW,
+                                                      &plan) == VEC_STATUS_OK);
+    FFT_CHECK(plan != NULL);
+    FFT_CHECK(fft_forward_vec(plan, in, freq) == VEC_STATUS_OK);
+    FFT_CHECK(fft_inverse_vec(plan, freq, out) == VEC_STATUS_OK);
+    FFT_CHECK(vec_download(backend, out, round_trip, sizeof(round_trip)) == VEC_STATUS_OK);
 
     for (size_t i = 0u; i < n; ++i) {
-        assert(fabs(RE(round_trip[i]) - RE(time_domain[i])) < TEST_EPS);
-        assert(fabs(IM(round_trip[i]) - IM(time_domain[i])) < TEST_EPS);
+        FFT_CHECK(fabs(RE(round_trip[i]) - RE(time_domain[i])) < TEST_EPS);
+        FFT_CHECK(fabs(IM(round_trip[i]) - IM(time_domain[i])) < TEST_EPS);
     }
 
     fft_plan_destroy(plan);
@@ -225,25 +224,25 @@ static void test_fft_round_trip_vulkan_if_available(void)
     vec_buffer* in = NULL;
     vec_buffer* freq = NULL;
     vec_buffer* out = NULL;
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &in) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &freq) == VEC_STATUS_OK);
-    assert(vec_create(backend, VEC_KIND_COMPLEX64, n, &out) == VEC_STATUS_OK);
-    assert(vec_upload(backend, in, time_domain, sizeof(time_domain)) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &in) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &freq) == VEC_STATUS_OK);
+    FFT_CHECK(vec_create(backend, VEC_KIND_COMPLEX64, n, &out) == VEC_STATUS_OK);
+    FFT_CHECK(vec_upload(backend, in, time_domain, sizeof(time_domain)) == VEC_STATUS_OK);
 
     fft_plan* plan = NULL;
-    assert(fft_plan_create_with_backend(backend,
-                                            n,
-                                            FFT_BACKEND_VKFFT,
-                                            &plan) == VEC_STATUS_OK);
-    assert(plan != NULL);
+    FFT_CHECK(fft_plan_create_with_backend(backend,
+                                               n,
+                                               FFT_BACKEND_VKFFT,
+                                               &plan) == VEC_STATUS_OK);
+    FFT_CHECK(plan != NULL);
 
-    assert(fft_forward_vec(plan, in, freq) == VEC_STATUS_OK);
-    assert(fft_inverse_vec(plan, freq, out) == VEC_STATUS_OK);
-    assert(vec_download(backend, out, round_trip, sizeof(round_trip)) == VEC_STATUS_OK);
+    FFT_CHECK(fft_forward_vec(plan, in, freq) == VEC_STATUS_OK);
+    FFT_CHECK(fft_inverse_vec(plan, freq, out) == VEC_STATUS_OK);
+    FFT_CHECK(vec_download(backend, out, round_trip, sizeof(round_trip)) == VEC_STATUS_OK);
 
     for (size_t i = 0u; i < n; ++i) {
-        assert(fabs(RE(round_trip[i]) - RE(time_domain[i])) < 1e-8);
-        assert(fabs(IM(round_trip[i]) - IM(time_domain[i])) < 1e-8);
+        FFT_CHECK(fabs(RE(round_trip[i]) - RE(time_domain[i])) < 1e-8);
+        FFT_CHECK(fabs(IM(round_trip[i]) - IM(time_domain[i])) < 1e-8);
     }
 
     fft_plan_destroy(plan);
