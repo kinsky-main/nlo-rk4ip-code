@@ -24,6 +24,7 @@ typedef void* VkQueue;
 typedef void* VkCommandPool;
 typedef void* VkCommandBuffer;
 typedef void* VkFence;
+typedef void* VkQueryPool;
 typedef void* VkDescriptorSetLayout;
 typedef void* VkDescriptorPool;
 typedef void* VkDescriptorSet;
