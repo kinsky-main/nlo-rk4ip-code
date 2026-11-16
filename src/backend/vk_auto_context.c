@@ -33,7 +33,6 @@ static void instance_unlock(void) { (void)pthread_mutex_unlock(&g_instance_lock)
  */
 static VkInstance g_shared_instance = VK_NULL_HANDLE;
 static unsigned int g_instance_create_count = 0u;
-static int g_instance_atexit_registered = 0;
 
 /**
  * @brief Report whether a Vulkan loader is installed on this machine.
@@ -291,11 +290,6 @@ static int vk_auto_select_device(
     return 0;
 }
 
-static void vk_auto_instance_atexit(void)
-{
-    vk_auto_instance_shutdown();
-}
-
 /**
  * @brief Return the process-wide instance, creating it on first need.
  *
@@ -344,9 +338,25 @@ static VkInstance vk_auto_shared_instance(char* reason, size_t reason_capacity)
 
     g_shared_instance = created;
     ++g_instance_create_count;
-    if (!g_instance_atexit_registered) {
-        g_instance_atexit_registered = (atexit(vk_auto_instance_atexit) == 0);
-    }
+
+    /* The instance is deliberately not destroyed at process exit.
+     *
+     * An earlier version registered vk_auto_instance_shutdown() with atexit().
+     * That crashes whenever this library is loaded dynamically -- the Python
+     * ctypes wrapper and MATLAB loadlibrary both do -- because the handler runs
+     * during teardown, after the Vulkan loader this instance belongs to may
+     * already have been unloaded: vkDestroyInstance then jumps through a
+     * dangling dispatch table. Measured on Windows with an RTX 4070, every
+     * Vulkan propagate from Python ended in an access violation at exit
+     * (0xC0000005) with the whole run already complete and correct, which also
+     * took out test_python_api_smoke, test_python_fused_rk_step and
+     * test_python_wheel_jit_relocated. A native executable survived it only
+     * because its loader is still mapped when its own atexit handlers run.
+     *
+     * Leaving one instance for the OS to reclaim costs nothing: the driver
+     * resource that instance reuse exists to bound -- the NVIDIA ICD's D-Bus
+     * connection -- is per instance, so a process ends with exactly one.
+     * vk_auto_instance_shutdown() remains available to release it early. */
     instance_unlock();
     return created;
 }
