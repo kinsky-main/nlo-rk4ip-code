@@ -42,8 +42,33 @@ runtime = nlolib.RuntimeOperators(
 - `nlolib.propagate`
 - `nlolib.query_runtime_limits`
 - `nlolib.translate_callable`
+- `nlolib.perf_profile_read`, `nlolib.perf_profile_reset`,
+  `nlolib.perf_profile_set_enabled`, `nlolib.perf_profile_is_enabled`
 - `nlolib.__version__` -- the project version, from the installed distribution
   metadata or, in a source checkout, from `pyproject.toml`
+
+## Checking Whether the GPU JIT Ran
+
+On the Vulkan backend each operator program is compiled to a single GPU kernel
+at runtime, and falls back to the interpreter when it cannot be. The fallback is
+silent: results stay correct, only slower. Two counters say which happened.
+
+```python
+api = nlolib.NLolib()
+api.perf_profile_reset()
+api.propagate(cfg, field0, 1,
+              nlolib.default_execution_options(nlolib.NLO_VECTOR_BACKEND_AUTO))
+
+snapshot = api.perf_profile_read()
+print(snapshot.operator_jit_programs)   # 3: one kernel per active operator program
+print(snapshot.operator_jit_fallbacks)  # 0: nothing was left on the interpreter
+```
+
+Unlike the timing counters in the same snapshot, these two need no
+`perf_profile_set_enabled(True)`, so a release build can be checked as it
+stands. Both stay zero wherever the JIT is never reached -- the CPU backend, or
+a build configured `ENABLE_VULKAN_BACKEND=OFF` -- which is not the same as a
+program falling back. See [GPU backend behaviour](../docs/gpu_backend.md).
 
 ## Build-Tree Usage
 

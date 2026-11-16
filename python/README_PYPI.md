@@ -12,6 +12,15 @@ For the docs-facing Python usage guide in this repository, see `python/README.md
 - Wheels are intended to bundle `nlolib` and non-system dependencies required by the wrapper.
 - CPU execution path is expected to work out-of-the-box.
 - GPU/Vulkan execution is optional and depends on platform driver/runtime availability.
+- On Vulkan, operator programs are compiled to single GPU kernels at runtime and
+  fall back to an interpreter silently when they cannot be. After a run,
+  `nlolib.perf_profile_read()` reports which happened:
+
+  ```python
+  snapshot = nlolib.perf_profile_read()
+  snapshot.operator_jit_programs   # kernels compiled; 0 on CPU
+  snapshot.operator_jit_fallbacks  # programs left on the interpreter
+  ```
 
 ## Quick start
 

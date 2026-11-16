@@ -132,6 +132,28 @@ result = api.propagate(cfg, field0, 128, struct('backend_type', 2));
 Both forms are documented in
 [The Two API Levels](../docs/matlab_user_guide.md#levels).
 
+## Checking Whether the GPU JIT Ran
+
+On the Vulkan backend each operator program is compiled to a single GPU kernel
+at runtime, and falls back to the interpreter when it cannot be. The fallback is
+silent: results stay correct, only slower. Two counters say which happened.
+
+```matlab
+api = nlolib.NLolib();
+api.perf_profile_reset();
+result = api.propagate(pulse, linearOperator, nonlinearOperator, options);
+
+snapshot = api.perf_profile_read();
+fprintf('%d JIT programs, %d interpreter fallbacks\n', ...
+        snapshot.operator_jit_programs, snapshot.operator_jit_fallbacks);
+```
+
+Unlike the timing counters in the same struct, these two need no
+`perf_profile_set_enabled(true)`, so a shipped toolbox can be checked as it
+stands. Both stay zero wherever the JIT is never reached -- the CPU backend, or
+a library built with `ENABLE_VULKAN_BACKEND=OFF` -- which is not the same as a
+program falling back. See [GPU backend behaviour](../docs/gpu_backend.md).
+
 ## Examples
 
 Self-contained scripts that run against an installed toolbox:
