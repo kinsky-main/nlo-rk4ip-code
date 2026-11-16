@@ -757,6 +757,75 @@ static void test_concurrent_writers(const char* root)
     check_runs_contract(db_path);
 }
 
+/*
+ * Readers while other runs merge. Writers take no SQLite locks by default, so a
+ * read-only reader that opens during a merge sees its journal as hot and gets
+ * "attempt to write a readonly database". has_run and the read functions must
+ * wait that out, not report a stored run as missing or fail.
+ */
+static void test_readers_during_merge(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    run_case first;
+    case_init_1d(&first, 256u, 0.4, 4u, db_path);
+    storage_result stored;
+    CHECK(case_run(&first, NULL, 0u, &stored) == NLOLIB_STATUS_OK && stored.merged == 1, "first run merged");
+    case_free(&first);
+
+    const int writers = 2;
+    const int runs_each = 6;
+    pid_t pids[2];
+    for (int w = 0; w < writers; ++w) {
+        pids[w] = fork();
+        if (pids[w] == 0) {
+            int bad = 0;
+            for (int r = 0; r < runs_each; ++r) {
+                run_case rc;
+                case_init_1d(&rc, 4096u, 0.5 + 0.01 * (double)(w * runs_each + r), 32u, db_path);
+                rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+                storage_result result;
+                if (case_run(&rc, NULL, 0u, &result) != NLOLIB_STATUS_OK || result.merged != 1) {
+                    bad = 1;
+                }
+                case_free(&rc);
+            }
+            _exit(bad);
+        }
+    }
+    long reads = 0;
+    long missing = 0;
+    long failed = 0;
+    int live = writers;
+    while (live > 0) {
+        int present = 0;
+        const nlolib_status has = nlolib_storage_has_run(db_path, stored.key, &present);
+        storage_run_layout layout;
+        const nlolib_status read = nlolib_storage_read_run_layout(db_path, stored.key, &layout);
+        reads += 1;
+        failed += (has != NLOLIB_STATUS_OK) + (read != NLOLIB_STATUS_OK);
+        missing += (has == NLOLIB_STATUS_OK && !present);
+        live = 0;
+        for (int w = 0; w < writers; ++w) {
+            if (pids[w] > 0) {
+                int status = 0;
+                if (waitpid(pids[w], &status, WNOHANG) == pids[w]) {
+                    CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0, "writer %d failed", w);
+                    pids[w] = 0;
+                } else {
+                    live += 1;
+                }
+            }
+        }
+    }
+    printf("readers_during_merge: %ld reads, %ld reported missing, %ld failed\n", reads, missing, failed);
+    CHECK(missing == 0, "has_run reported a stored run missing %ld times", missing);
+    CHECK(failed == 0, "reads failed %ld times during merges", failed);
+    sqlite3* db = open_ro(db_path);
+    CHECK(sql_int(db, "SELECT COUNT(*) FROM runs;") == 1 + writers * runs_each, "runs rows after readers test");
+    sqlite3_close(db);
+}
+
 static int kill_after_steps(const progress_info* info, void* user)
 {
     (void)user;
@@ -1877,6 +1946,7 @@ int main(int argc, char** argv)
     } tests[] = {
         {"basic", test_basic_run},
         {"concurrent", test_concurrent_writers},
+        {"readers_during_merge", test_readers_during_merge},
         {"killed", test_killed_and_aborted_writer},
         {"locks", test_locks},
         {"old_database", test_old_database},

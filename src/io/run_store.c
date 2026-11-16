@@ -1131,6 +1131,34 @@ static int db_open(const char* path, int readonly, sqlite3** out_db)
     return 0;
 }
 
+/*
+ * Open @p path read-only and start a read transaction, waiting out a merge in
+ * progress. Writers take no SQLite locks by default (unix-none), so a reader
+ * that opens during a merge sees the merge's journal as hot; a read-only
+ * connection cannot roll it back and gets SQLITE_READONLY ("attempt to write a
+ * readonly database") until the merge's transaction ends. Retried like a busy
+ * timeout (60 s).
+ */
+static int reader_open(const char* path, sqlite3** out_db)
+{
+    const double deadline = rs_monotonic_seconds() + 60.0;
+    for (;;) {
+        if (db_open(path, 1, out_db) != 0) {
+            return -1;
+        }
+        const int rc = sqlite3_exec(*out_db, "BEGIN; SELECT COUNT(*) FROM sqlite_master;", NULL, NULL, NULL) & 0xff;
+        if (rc == SQLITE_OK) {
+            return 0;
+        }
+        sqlite3_close(*out_db);
+        *out_db = NULL;
+        if ((rc != SQLITE_READONLY && rc != SQLITE_BUSY) || rs_monotonic_seconds() >= deadline) {
+            return -1;
+        }
+        rs_sleep_ms(20u);
+    }
+}
+
 static int db_table_exists(sqlite3* db, const char* schema, const char* table)
 {
     char sql[256];
@@ -2268,15 +2296,26 @@ run_store_status run_store_has_key(const char* shared_path, const char* key, int
         return RUN_STORE_OK;
     }
     sqlite3* db = NULL;
-    if (db_open(shared_path, 1, &db) != 0) {
+    if (reader_open(shared_path, &db) != 0) {
         return RUN_STORE_ERROR;
     }
+    /* A failed query is an error, never "not stored". */
+    run_store_status status = RUN_STORE_OK;
     if (db_table_exists(db, "main", "runs")) {
-        char found[STORAGE_KEY_MAX];
-        *out_present = (db_text_query(db, "SELECT key FROM runs WHERE key=?1;", key, found, sizeof(found)) == 0);
+        sqlite3_stmt* stmt = NULL;
+        status = RUN_STORE_ERROR;
+        if (sqlite3_prepare_v2(db, "SELECT 1 FROM runs WHERE key=?1;", -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+            const int rc = sqlite3_step(stmt);
+            if (rc == SQLITE_ROW || rc == SQLITE_DONE) {
+                *out_present = (rc == SQLITE_ROW);
+                status = RUN_STORE_OK;
+            }
+        }
+        sqlite3_finalize(stmt);
     }
     sqlite3_close(db);
-    return RUN_STORE_OK;
+    return status;
 }
 
 static int read_run_id(sqlite3* db, const char* key, char run_id[STORAGE_RUN_ID_MAX])
@@ -2292,7 +2331,7 @@ run_store_status run_store_read_layout(const char* db_path, const char* key, sto
     }
     memset(out_layout, 0, sizeof(*out_layout));
     sqlite3* db = NULL;
-    if (db_open(db_path, 1, &db) != 0) {
+    if (reader_open(db_path, &db) != 0) {
         return RUN_STORE_ERROR;
     }
     run_store_status status = RUN_STORE_ERROR;
@@ -2385,7 +2424,7 @@ run_store_status run_store_read_array(
     }
 
     sqlite3* db = NULL;
-    if (db_open(db_path, 1, &db) != 0) {
+    if (reader_open(db_path, &db) != 0) {
         return RUN_STORE_ERROR;
     }
     run_store_status status = RUN_STORE_ERROR;

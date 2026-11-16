@@ -362,8 +362,17 @@ including Nlolib's own `has_run` and read functions, open the file read-only
 with SQLite's default VFS, whose read locks work on the share.
 
 Because writers on Linux take no SQLite locks, a reader may meet a commit in
-progress and get `SQLITE_BUSY` or "database disk image is malformed" for a
-moment; read in one short transaction and retry. ModelStore does.
+progress. A read-only connection opened while a merge is writing finds the
+merge's `-journal`, cannot tell that its writer is alive (the writer holds no
+SQLite lock), takes it for a hot journal that it is not allowed to roll back,
+and gets `SQLITE_READONLY` ("attempt to write a readonly database") until that
+transaction ends; the same holds with `unix-dotfile`, whose lock file other
+SQLite programs do not look for. It may also get `SQLITE_BUSY` or "database
+disk image is malformed" for a moment. All three are transient: read in one
+short transaction and retry with a short pause, as for a busy database.
+ModelStore does. Never open the file read-write to clear the error: that rolls
+back the merge in progress. Nlolib's own `has_run` and read functions wait up
+to 60 s for such a transaction to end.
 
 **Merge.** Nlolib takes the writer lock and then makes sure it sees the latest
 committed state:
