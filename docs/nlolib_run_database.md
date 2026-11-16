@@ -34,17 +34,22 @@ earlier releases do not write them.
 | Path | What it is |
 |---|---|
 | `<store>/nlolib/nlolib.sqlite` | The shared run database: every stored Nlolib run. This is the `sqlite_path` given to Nlolib. |
-| `<store>/nlolib/staging/` | Per-run staging databases of runs in progress (see [writing](#how-nlolib-writes-the-file)). Never read these as run databases. |
+| `<store>/nlolib/staging/` | Per-run staging databases of runs in progress (see [writing](#how-nlolib-writes-the-file)), each with an empty `-journal` beside it once written to. Never read these as run databases. A merged or discarded staging file is removed with its journal. |
 | `<store>/nlolib/nlolib.sqlite.writer-lock` | Lock file held by the writer that is merging into the shared database. |
 | `<store>/nlolib/nlolib.sqlite.writer-lock.break` | Short-lived file held while a stale writer lock is removed. |
 | `<store>/nlolib/nlolib.sqlite.writer-state` | Header state (change counter, size) the last merge committed; lets the next writer detect a stale view. |
-| `<store>/nlolib/nlolib.sqlite-journal` | SQLite's rollback journal, present only during a write transaction (a *hot* journal after a writer died mid-commit; the next merge rolls it back). |
+| `<store>/nlolib/nlolib.sqlite-journal` | SQLite's rollback journal. It stays once the first merge has created it: empty (zero bytes) between transactions, non-empty only while a merge commits, and a *hot* journal (starting with SQLite's journal magic) only after a writer died mid-commit, which the next merge rolls back. An empty journal is normal; do not delete it while Nlolib may be writing. |
 
 Any `sqlite_path` works the same way: the staging folder is `staging/` next to
 it and the lock is `<sqlite_path>.writer-lock`.
 
-The database uses SQLite's rollback journal (`journal_mode=DELETE`), never WAL,
-so it can be read on a network share. Open it read-only (`mode=ro`), set a busy
+The database uses SQLite's rollback journal, never WAL, so it can be read on a
+network share. Nlolib writes it with `journal_mode=TRUNCATE`: a commit empties
+the `-journal` instead of deleting it, because on SMB a journal deleted at one
+commit can still be delete-pending when the next commit creates it again,
+which fails that commit. The journal mode is a setting of the writing
+connection, not of the file: a reader's own connection reports `delete`, and
+the ModelStore contract allows `delete`, `truncate` and `persist`. Open it read-only (`mode=ro`), set a busy
 timeout (Nlolib uses 60 s), read in one transaction and close it.
 
 ## Reading a run {#reading-a-run}
@@ -409,7 +414,7 @@ committed state:
    one recorded in `<sqlite_path>.writer-state` by the previous merge. If not,
    it writes nothing and keeps the staging file.
 
-It then opens the shared database (rollback journal, 60 s busy timeout,
+It then opens the shared database (rollback journal in TRUNCATE mode, 60 s busy timeout,
 `synchronous=FULL`), attaches the staging file and merges in transactions of at
 most 16 MiB of payload each (`NLOLIB_STORE_MERGE_BATCH_BYTES` overrides):
 
@@ -441,11 +446,13 @@ unchanged. The merger only looks at names of the form
 `<stem>.<key>.<pid>.<token>.<host>.sqlite` and decides from the file itself:
 
 - **complete**: a self-consistent SQLite file (header page count matching its
-  size, no `-journal` beside it) with a `runs` row; before merging, SQLite's
+  size, no hot `-journal` beside it) with a `runs` row; before merging, SQLite's
   `quick_check` must also pass;
 - **incomplete**: a valid file without a `runs` row (a run in progress or
-  killed), or one with a hot journal beside it (its writer died during a
-  commit); discarded only on request and when old enough;
+  killed), or one with a hot journal beside it (non-empty and starting with
+  SQLite's journal magic: its writer died during a commit; an empty or
+  header-zeroed journal is not hot); discarded only on request and when old
+  enough;
 - **damaged**: anything else, such as a file still being copied, truncated, or
   preallocated and not yet filled. Damaged files are never merged and never
   deleted automatically; they are reported and left in place.

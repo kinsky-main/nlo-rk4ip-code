@@ -2072,6 +2072,108 @@ static void test_merge_tool_killed(const char* root)
     check_runs_contract(db_path);
 }
 
+/* Path of the one staging file in @p sdir (empty when there is none or several). */
+static void staging_file_path(const char* sdir, char* out, size_t cap)
+{
+    out[0] = '\0';
+    DIR* d = opendir(sdir);
+    if (d == NULL) {
+        return;
+    }
+    size_t found = 0u;
+    struct dirent* ent = NULL;
+    while ((ent = readdir(d)) != NULL) {
+        const size_t len = strlen(ent->d_name);
+        if (len > 7u && strcmp(ent->d_name + len - 7u, ".sqlite") == 0) {
+            found += 1u;
+            path_join(out, cap, sdir, ent->d_name);
+        }
+    }
+    closedir(d);
+    if (found != 1u) {
+        out[0] = '\0';
+    }
+}
+
+static void write_zero_journal(const char* db, size_t bytes)
+{
+    char journal[1100];
+    (void)snprintf(journal, sizeof(journal), "%s-journal", db);
+    FILE* f = fopen(journal, "wb");
+    for (size_t i = 0u; f != NULL && i < bytes; ++i) {
+        fputc(0, f);
+    }
+    if (f != NULL) {
+        fclose(f);
+    }
+}
+
+/*
+ * Writers use journal_mode TRUNCATE: a commit truncates the journal instead
+ * of deleting it, so a zero-length journal stays beside a written file. Such
+ * a journal, or one with a zeroed header as PERSIST leaves it, is never taken
+ * for a hot journal: the staging file is still complete, recovery merges it,
+ * a merge does not roll anything back, and a read-only reader is not refused.
+ * Merged staging files leave no journal behind.
+ */
+static void test_truncate_journal(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    char sdir[1024];
+    staging_dir(db_path, sdir, sizeof(sdir));
+    char journal[1100];
+    (void)snprintf(journal, sizeof(journal), "%s-journal", db_path);
+
+    run_case rc;
+    case_init_1d(&rc, 64u, 1.0, 4u, db_path);
+    rc.storage.chunk_records = 1u;
+    rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+    storage_result result;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.merged == 1, "merged run");
+    CHECK(file_size(journal) == 0, "shared journal is %ld bytes; TRUNCATE leaves it at 0", file_size(journal));
+    CHECK(count_files(sdir, ".sqlite") == 0u && count_files(sdir, "-journal") == 0u, "merge left staging files");
+
+    /* A deferred run keeps its zero-length journal until it is merged. */
+    rc.storage.defer_merge = 1;
+    rc.field[2].re += 0.5;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.deferred == 1, "deferred run");
+    char staged[1100];
+    staging_file_path(sdir, staged, sizeof(staged));
+    char staged_journal[1200];
+    (void)snprintf(staged_journal, sizeof(staged_journal), "%s-journal", staged);
+    CHECK(staged[0] != '\0' && file_size(staged_journal) == 0, "staging journal is %ld bytes", file_size(staged_journal));
+
+    /* Header-zeroed journals (as PERSIST leaves them) beside both files. */
+    write_zero_journal(staged, 4096u);
+    write_zero_journal(db_path, 4096u);
+    sqlite3* ro = open_ro(db_path);
+    CHECK(ro != NULL && sql_int(ro, "SELECT COUNT(*) FROM runs;") == 1, "read-only reader refused beside a zeroed journal");
+    if (ro != NULL) {
+        sqlite3_close(ro);
+    }
+    int present = 0;
+    CHECK(nlolib_storage_has_run(db_path, result.key, &present) == NLOLIB_STATUS_OK && present == 0, "has_run");
+    size_t merged = 0u;
+    size_t skipped = 0u;
+    CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, &skipped) == NLOLIB_STATUS_OK &&
+              merged == 1u && skipped == 0u,
+          "staging file beside a zeroed journal: merged %zu skipped %zu", merged, skipped);
+    CHECK(nlolib_storage_has_run(db_path, result.key, &present) == NLOLIB_STATUS_OK && present == 1, "deferred run missing");
+    CHECK(count_files(sdir, ".sqlite") == 0u && count_files(sdir, "-journal") == 0u, "recovery left staging files");
+    CHECK(file_size(journal) == 0, "shared journal after the merge is %ld bytes", file_size(journal));
+
+    /* A journal whose staging file was deleted by hand is removed by recovery with discard_incomplete. */
+    char orphan[1200];
+    (void)snprintf(orphan, sizeof(orphan), "%s-journal", staged);
+    write_zero_journal(staged, 0u);
+    CHECK(file_size(orphan) == 0, "orphan journal not created");
+    CHECK(nlolib_storage_recover_staging(db_path, 1, 0.0, NULL, NULL, NULL) == NLOLIB_STATUS_OK, "sweep");
+    CHECK(file_size(orphan) < 0, "orphan journal kept");
+    case_free(&rc);
+    check_runs_contract(db_path);
+}
+
 int main(int argc, char** argv)
 {
     char root[1024];
@@ -2098,6 +2200,7 @@ int main(int argc, char** argv)
         {"recovery_pass_settles_once", test_recovery_pass_settles_once},
         {"run_id_conflict", test_run_id_conflict},
         {"write_failure_logged", test_write_failure_logged},
+        {"truncate_journal", test_truncate_journal},
         {"batched_interrupted_merge", test_batched_and_interrupted_merge},
         {"stale_view_guard", test_stale_view_guard},
         {"hot_journal", test_hot_journal},

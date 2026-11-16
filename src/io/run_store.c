@@ -743,10 +743,13 @@ typedef struct {
     int found;
 } prefix_search;
 
+/* Staging databases only: the zero-length `-journal` a writer leaves beside one is not a staging file. */
 static int prefix_visit(const char* name, void* user)
 {
     prefix_search* search = (prefix_search*)user;
-    if (strncmp(name, search->prefix, strlen(search->prefix)) == 0) {
+    const size_t len = strlen(name);
+    if (strncmp(name, search->prefix, strlen(search->prefix)) == 0 && len > 7u &&
+        strcmp(name + len - 7u, ".sqlite") == 0) {
         search->found = 1;
         return 1;
     }
@@ -1444,9 +1447,14 @@ static int open_shared(const char* shared_path, sqlite3** out_db)
         log_emit(LOG_LEVEL_ERROR, "[nlolib][store] cannot open shared database %s", shared_path);
         return -1;
     }
+    /*
+     * TRUNCATE, not DELETE: on SMB a journal deleted at one commit can still be
+     * delete-pending when the next commit creates it again, which fails the
+     * commit (ENOENT, EAGAIN). The journal stays, at zero bytes between commits.
+     */
     char mode[32] = {0};
-    if (db_text_query(*out_db, "PRAGMA journal_mode=DELETE;", NULL, mode, sizeof(mode)) != 0 ||
-        sqlite3_stricmp(mode, "delete") != 0 ||
+    if (db_text_query(*out_db, "PRAGMA journal_mode=TRUNCATE;", NULL, mode, sizeof(mode)) != 0 ||
+        sqlite3_stricmp(mode, "truncate") != 0 ||
         db_exec(*out_db, "PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;") != 0 ||
         snapshot_store_ensure_schema(*out_db) != 0) {
         log_emit(LOG_LEVEL_ERROR,
@@ -1747,6 +1755,36 @@ static int read_db_header(const char* path, db_header* out)
     return 0;
 }
 
+/*
+ * 1 when @p db_path has a hot rollback journal: a `-journal` file that is not
+ * empty and starts with SQLite's journal magic. Writers use journal_mode
+ * TRUNCATE, which leaves a zero-length journal after every commit; PERSIST
+ * would leave one with a zeroed header. Neither is hot, and SQLite itself does
+ * not roll them back.
+ */
+static int journal_is_hot(const char* db_path)
+{
+    static const unsigned char magic[8] = {0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7};
+    char journal[RUN_STORE_PATH_MAX + 16];
+    if (snprintf(journal, sizeof(journal), "%s-journal", db_path) >= (int)sizeof(journal)) {
+        return 0;
+    }
+#if defined(_WIN32)
+    wchar_t* w = rs_wide(journal);
+    FILE* f = (w != NULL) ? _wfopen(w, L"rb") : NULL;
+    free(w);
+#else
+    FILE* f = fopen(journal, "rb");
+#endif
+    if (f == NULL) {
+        return 0;
+    }
+    unsigned char head[8];
+    const size_t n = fread(head, 1u, sizeof(head), f);
+    fclose(f);
+    return n == sizeof(head) && memcmp(head, magic, sizeof(magic)) == 0;
+}
+
 /* A header is self-consistent when its page count is current and matches the file size. */
 static int header_consistent(const db_header* h)
 {
@@ -1813,11 +1851,7 @@ static run_store_status await_fresh_view(const char* shared_path)
     if (settle > 0.0) {
         rs_sleep_ms((unsigned)(settle * 1000.0));
     }
-    char journal[RUN_STORE_PATH_MAX + 16];
-    (void)snprintf(journal, sizeof(journal), "%s-journal", shared_path);
-    db_header jh;
-    (void)read_db_header(journal, &jh);
-    if (jh.exists && jh.file_bytes > 0) {
+    if (journal_is_hot(shared_path)) {
         /*
          * A writer died during a commit and left a hot journal. We hold the
          * writer lock, so no commit is in progress: let SQLite roll it back,
@@ -1889,13 +1923,10 @@ static int verify_merge(const char* shared_path, const char* key, const char* ru
 static run_store_status staging_inspect(const char* staging_path, int deep,
                                         char key[STORAGE_KEY_MAX], char run_id[STORAGE_RUN_ID_MAX])
 {
-    char journal[RUN_STORE_PATH_MAX + 16];
-    (void)snprintf(journal, sizeof(journal), "%s-journal", staging_path);
-    db_header h;
-    (void)read_db_header(journal, &h);
-    if (h.exists && h.file_bytes > 0) {
+    if (journal_is_hot(staging_path)) {
         return RUN_STORE_INCOMPLETE;
     }
+    db_header h;
     if (read_db_header(staging_path, &h) != 0 || !h.exists) {
         return RUN_STORE_ERROR;
     }
@@ -2285,6 +2316,34 @@ static int collect_visit(const char* name, void* user)
     return 0;
 }
 
+typedef struct {
+    const char* stem;
+    const char* staging_dir;
+} journal_sweep;
+
+/* Remove `<stem>.*.sqlite-journal` files whose staging database is gone. */
+static int sweep_journal_visit(const char* name, void* user)
+{
+    const journal_sweep* sweep = (const journal_sweep*)user;
+    static const char suffix[] = ".sqlite-journal";
+    const size_t len = strlen(name);
+    const size_t stem_len = strlen(sweep->stem);
+    if (len <= sizeof(suffix) || strcmp(name + len - (sizeof(suffix) - 1u), suffix) != 0 ||
+        strncmp(name, sweep->stem, stem_len) != 0 || name[stem_len] != '.') {
+        return 0;
+    }
+    char journal[RUN_STORE_PATH_MAX];
+    char db[RUN_STORE_PATH_MAX];
+    if (rs_join(journal, sizeof(journal), sweep->staging_dir, name) != 0 ||
+        snprintf(db, sizeof(db), "%.*s", (int)(strlen(journal) - 8u), journal) >= (int)sizeof(db)) {
+        return 0;
+    }
+    if (!rs_file_exists(db) && rs_unlink(journal) == 0) {
+        log_emit(LOG_LEVEL_INFO, "[nlolib][store] removed journal %s of a staging file that is gone", journal);
+    }
+    return 0;
+}
+
 static void recover_one(recover_ctx* ctx, const char* name)
 {
     unsigned long pid = 0u;
@@ -2374,6 +2433,8 @@ run_store_status run_store_recover(
     free(list.names);
     if (discard_incomplete) {
         ctx.discarded += discard_orphans(&ctx.session, ctx.staging_dir, ctx.stem);
+        journal_sweep sweep = {ctx.stem, ctx.staging_dir};
+        (void)rs_list_dir(ctx.staging_dir, sweep_journal_visit, &sweep);
     }
     session_end(&ctx.session);
     if (out_merged != NULL) {

@@ -1054,8 +1054,13 @@ snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
     }
     sqlite3_busy_timeout(store->db, 60000);
 
-    /* Rollback journal only: WAL needs shared memory that network shares do not provide. */
-    if (sqlite_exec(store->db, "PRAGMA journal_mode=DELETE; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;") != 0 ||
+    /*
+     * Rollback journal only: WAL needs shared memory that network shares do not
+     * provide. TRUNCATE rather than DELETE, so that a commit does not delete a
+     * journal that the next one creates again (on SMB the deleted file can still
+     * be delete-pending); the zero-length journal is removed with the staging file.
+     */
+    if (sqlite_exec(store->db, "PRAGMA journal_mode=TRUNCATE; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;") != 0 ||
         snapshot_store_ensure_schema(store->db) != 0 ||
         store_insert_metadata(store,
                                   params->config,
