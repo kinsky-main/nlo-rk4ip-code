@@ -1955,26 +1955,66 @@ static int staged_run_superseded(sqlite3* db, const char* key)
     return superseded;
 }
 
-run_store_status run_store_merge(const char* staging_path, const char* shared_path)
+/*
+ * The writer lock held over several merges of one pass. The view of the shared
+ * database is settled once after the lock is taken: while the lock stays ours
+ * no other host commits, so later merges of the pass need no settle wait. The
+ * lock is given up and taken again after RUN_STORE_PASS_HOLD_S, so that
+ * writers finishing a run during a long pass are not held up for long.
+ */
+#define RUN_STORE_PASS_HOLD_S 30.0
+
+typedef struct {
+    const char* shared_path;
+    run_lock lock;
+    double taken_at;
+    int fresh;
+} merge_session;
+
+static run_store_status session_lock(merge_session* s)
 {
-    if (staging_path == NULL || shared_path == NULL) {
-        return RUN_STORE_ERROR;
+    if (s->lock.held) {
+        if (rs_monotonic_seconds() - s->taken_at < RUN_STORE_PASS_HOLD_S && lock_refresh(&s->lock) == 0) {
+            return RUN_STORE_OK;
+        }
+        lock_release(&s->lock);
     }
+    s->fresh = 0;
+    const run_store_status status = lock_acquire(&s->lock, s->shared_path);
+    s->taken_at = rs_monotonic_seconds();
+    return status;
+}
+
+static run_store_status session_fresh(merge_session* s)
+{
+    if (!s->fresh) {
+        s->fresh = (await_fresh_view(s->shared_path) == RUN_STORE_OK);
+    }
+    return s->fresh ? RUN_STORE_OK : RUN_STORE_ERROR;
+}
+
+static void session_end(merge_session* s)
+{
+    lock_release(&s->lock);
+    s->fresh = 0;
+}
+
+/* Merge one complete staging file within a session; the lock is kept on return. */
+static run_store_status session_merge(merge_session* s, const char* staging_path)
+{
+    const char* shared_path = s->shared_path;
     char key[STORAGE_KEY_MAX] = {0};
     char run_id[STORAGE_RUN_ID_MAX] = {0};
     const run_store_status inspect = staging_inspect(staging_path, 0, key, run_id);
     if (inspect != RUN_STORE_OK) {
         return inspect;
     }
-
-    run_lock lock;
-    const run_store_status lock_status = lock_acquire(&lock, shared_path);
+    const run_store_status lock_status = session_lock(s);
     if (lock_status != RUN_STORE_OK) {
         return lock_status;
     }
     /* Another writer may have merged this file while we waited: staging files are only deleted under the lock. */
     if (!rs_file_exists(staging_path)) {
-        lock_release(&lock);
         int present = 0;
         if (run_store_has_key(shared_path, key, &present) == RUN_STORE_OK && present) {
             log_emit(LOG_LEVEL_INFO, "[nlolib][store] run %s was already merged into %s", key, shared_path);
@@ -1985,7 +2025,6 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
     /* Full check before anything is copied: a damaged or partly copied file is left alone. */
     const run_store_status deep = staging_inspect(staging_path, 1, key, run_id);
     if (deep != RUN_STORE_OK) {
-        lock_release(&lock);
         log_emit(LOG_LEVEL_WARN,
                  "[nlolib][store] %s is %s; not merged and left in place",
                  staging_path,
@@ -1996,7 +2035,7 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
     run_store_index_file(shared_path, index_file, sizeof(index_file));
     int superseded = 0;
 
-    run_store_status status = await_fresh_view(shared_path);
+    run_store_status status = session_fresh(s);
     sqlite3* db = NULL;
     long long maps = -1;
     long long chunks = -1;
@@ -2014,7 +2053,7 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
                     chunks = stg_count(db, "stg", "io_record_chunks", run_id);
                     finals = stg_count(db, "stg", "io_final_output_fields", run_id);
                     superseded = staged_run_superseded(db, key);
-                    status = superseded ? RUN_STORE_OK : merge_locked(db, &lock, key, run_id, index_file);
+                    status = superseded ? RUN_STORE_OK : merge_locked(db, &s->lock, key, run_id, index_file);
                     (void)sqlite3_exec(db, "DETACH DATABASE stg;", NULL, NULL, NULL);
                 }
             }
@@ -2024,7 +2063,6 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
     if (superseded) {
         /* The shared database holds a newer run with the same key: the newest run wins. */
         run_store_discard(staging_path);
-        lock_release(&lock);
         log_emit(LOG_LEVEL_INFO,
                  "[nlolib][store] %s holds a newer run %s; staged copy %s discarded",
                  shared_path, key, staging_path);
@@ -2037,11 +2075,13 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
     if (status == RUN_STORE_OK) {
         db_header h;
         if (read_db_header(shared_path, &h) == 0) {
-            write_state(shared_path, &lock, &h, key);
+            write_state(shared_path, &s->lock, &h, key);
         }
         run_store_discard(staging_path);
+    } else {
+        /* Check the view again before the next merge of the pass. */
+        s->fresh = 0;
     }
-    lock_release(&lock);
 
     if (status == RUN_STORE_OK) {
         log_emit(LOG_LEVEL_INFO, "[nlolib][store] merged run %s into %s", key, shared_path);
@@ -2054,23 +2094,36 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
     return status;
 }
 
+run_store_status run_store_merge(const char* staging_path, const char* shared_path)
+{
+    if (staging_path == NULL || shared_path == NULL) {
+        return RUN_STORE_ERROR;
+    }
+    merge_session session;
+    memset(&session, 0, sizeof(session));
+    session.shared_path = shared_path;
+    const run_store_status status = session_merge(&session, staging_path);
+    session_end(&session);
+    return status;
+}
+
 /*
  * Under the lock, delete data of interrupted merges: io_runs rows with a key
  * but no `runs` row whose staging file no longer exists. Rows without a key
  * were written before run keys existed and are kept.
  */
-static size_t discard_orphans(const char* shared_path, const char* staging_dir, const char* stem)
+static size_t discard_orphans(merge_session* s, const char* staging_dir, const char* stem)
 {
+    const char* shared_path = s->shared_path;
     if (!rs_file_exists(shared_path)) {
         return 0u;
     }
-    run_lock lock;
-    if (lock_acquire(&lock, shared_path) != RUN_STORE_OK) {
+    if (session_lock(s) != RUN_STORE_OK) {
         return 0u;
     }
     size_t removed = 0u;
     sqlite3* db = NULL;
-    if (await_fresh_view(shared_path) == RUN_STORE_OK && open_shared(shared_path, &db) == 0) {
+    if (session_fresh(s) == RUN_STORE_OK && open_shared(shared_path, &db) == 0) {
         sqlite3_stmt* stmt = NULL;
         char keys[64][STORAGE_KEY_MAX];
         char ids[64][STORAGE_RUN_ID_MAX];
@@ -2093,7 +2146,7 @@ static size_t discard_orphans(const char* shared_path, const char* staging_dir, 
                 continue;
             }
             if (db_exec(db, "BEGIN IMMEDIATE;") == 0 && delete_run(db, keys[i], ids[i]) == 0 &&
-                lock_owned(&lock) && db_exec(db, "COMMIT;") == 0) {
+                lock_owned(&s->lock) && db_exec(db, "COMMIT;") == 0) {
                 removed += 1u;
                 log_emit(LOG_LEVEL_INFO, "[nlolib][store] removed data of interrupted merge %s", keys[i]);
             } else {
@@ -2104,16 +2157,16 @@ static size_t discard_orphans(const char* shared_path, const char* staging_dir, 
         if (removed > 0u) {
             db_header h;
             if (read_db_header(shared_path, &h) == 0) {
-                write_state(shared_path, &lock, &h, "-");
+                write_state(shared_path, &s->lock, &h, "-");
             }
         }
     }
-    lock_release(&lock);
     return removed;
 }
 
 typedef struct {
     const char* shared_path;
+    merge_session session;
     char stem[256];
     char staging_dir[RUN_STORE_PATH_MAX];
     char host[128];
@@ -2215,7 +2268,7 @@ static void recover_one(recover_ctx* ctx, const char* name)
         return;
     }
     if (inspect == RUN_STORE_OK) {
-        const run_store_status merged = run_store_merge(path, ctx->shared_path);
+        const run_store_status merged = session_merge(&ctx->session, path);
         if (merged == RUN_STORE_OK) {
             ctx->merged += 1u;
         } else if (merged == RUN_STORE_INCOMPLETE || merged == RUN_STORE_ERROR) {
@@ -2255,6 +2308,7 @@ run_store_status run_store_recover(
     recover_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.shared_path = shared_path;
+    ctx.session.shared_path = shared_path;
     ctx.discard_incomplete = discard_incomplete;
     ctx.min_age_seconds = (min_age_seconds > 0.0) ? min_age_seconds : 0.0;
     rs_stem(shared_path, ctx.stem, sizeof(ctx.stem));
@@ -2272,8 +2326,9 @@ run_store_status run_store_recover(
     }
     free(list.names);
     if (discard_incomplete) {
-        ctx.discarded += discard_orphans(shared_path, ctx.staging_dir, ctx.stem);
+        ctx.discarded += discard_orphans(&ctx.session, ctx.staging_dir, ctx.stem);
     }
+    session_end(&ctx.session);
     if (out_merged != NULL) {
         *out_merged = ctx.merged;
     }

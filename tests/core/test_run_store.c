@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define PI 3.14159265358979323846
@@ -1140,6 +1141,43 @@ static void test_deferred_merge(const char* root)
     check_runs_contract(db_path);
 }
 
+/* Recovery merges a pass of staging files under one lock and settles the view once, not once per file. */
+static void test_recovery_pass_settles_once(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    char sdir[1024];
+    staging_dir(db_path, sdir, sizeof(sdir));
+    run_case rc;
+    case_init_1d(&rc, 64u, 1.0, 4u, db_path);
+    rc.storage.defer_merge = 1;
+    const size_t runs = 6u;
+    for (size_t i = 0u; i < runs; ++i) {
+        rc.field[1].re += 0.25;
+        CHECK(case_run(&rc, NULL, 0u, NULL) == NLOLIB_STATUS_OK, "deferred run %zu", i);
+    }
+    case_free(&rc);
+    CHECK(count_files(sdir, ".sqlite") == runs, "deferred staging files");
+
+    /* A settle of 0.5 s per file would make the pass take at least 3 s. */
+    setenv("NLOLIB_STORE_SETTLE_S", "0.5", 1);
+    struct timespec t0;
+    struct timespec t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    size_t merged = 0u;
+    const nlolib_status status = nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    unsetenv("NLOLIB_STORE_SETTLE_S");
+    const double elapsed = (double)(t1.tv_sec - t0.tv_sec) + 1e-9 * (double)(t1.tv_nsec - t0.tv_nsec);
+    CHECK(status == NLOLIB_STATUS_OK && merged == runs, "pass merged %zu of %zu", merged, runs);
+    CHECK(elapsed >= 0.5 && elapsed < 2.0, "pass took %.2f s; expected one 0.5 s settle", elapsed);
+    CHECK(count_files(sdir, ".sqlite") == 0u, "staging left after the pass");
+    char lock[1100];
+    (void)snprintf(lock, sizeof(lock), "%s.writer-lock", db_path);
+    CHECK(access(lock, F_OK) != 0, "writer lock kept after the pass");
+    check_runs_contract(db_path);
+}
+
 /* A merge split over many small transactions, a writer killed between two of them, and the clean-up. */
 static void test_batched_and_interrupted_merge(const char* root)
 {
@@ -1952,6 +1990,7 @@ int main(int argc, char** argv)
         {"old_database", test_old_database},
         {"vfs_choices", test_vfs_choices},
         {"deferred_merge", test_deferred_merge},
+        {"recovery_pass_settles_once", test_recovery_pass_settles_once},
         {"batched_interrupted_merge", test_batched_and_interrupted_merge},
         {"stale_view_guard", test_stale_view_guard},
         {"hot_journal", test_hot_journal},

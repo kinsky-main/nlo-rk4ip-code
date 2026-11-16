@@ -403,6 +403,14 @@ only then does it record the new header in `.writer-state`, delete the staging
 file and release the lock. A row in `runs` therefore never appears before all
 of its data.
 
+Recovery (`storage_recover_staging`, `nlolib_store_merge`) merges all complete
+staging files of one pass under one lock, so the settle wait and header check
+run once per pass rather than once per file: while the lock stays its own, no
+other writer commits. It refreshes the lock before each file, and after
+holding it for 30 s it releases it and takes it again (settling again), so
+that a run finishing elsewhere during a long pass waits at most about that
+long. After a failed merge it checks the view again before the next file.
+
 **Staging files from elsewhere.** A complete staging file can be moved to
 another store: copy it into that store's `staging/` folder and merge there;
 `file` is set to the database it is merged into, and the key and data are
