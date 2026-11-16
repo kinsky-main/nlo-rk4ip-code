@@ -11,7 +11,6 @@ EXAMPLES_PYTHON = REPO_ROOT / "examples" / "python"
 if str(EXAMPLES_PYTHON) not in sys.path:
     sys.path.insert(0, str(EXAMPLES_PYTHON))
 
-from backend.metrics import filtered_relative_l2_error, relative_l2_error  # noqa: E402
 from backend.reference import (  # noqa: E402
     analytical_initial_condition_error,
     exact_linear_temporal_final,
@@ -51,6 +50,23 @@ def _centered_time_grid(n: int, dt: float) -> np.ndarray:
 
 def _sech(x: np.ndarray) -> np.ndarray:
     return 1.0 / np.cosh(x)
+
+
+def _relative_l2_error(prediction: np.ndarray, reference: np.ndarray) -> float:
+    """
+    Return ``||pred - ref||_2 / ||ref||_2`` over the values as given.
+
+    Deliberately not ``backend.metrics.relative_l2_intensity_error``: that one
+    compares ``|a|^2``, so it cannot see a phase error at all, and every
+    comparison below is either between complex fields (where the dispersion
+    sign and the identity propagation live entirely in the phase) or between
+    arrays that are already intensities.
+    """
+    pred = np.asarray(prediction)
+    ref = np.asarray(reference)
+    if pred.shape != ref.shape:
+        raise ValueError(f"shape mismatch: {pred.shape} != {ref.shape}")
+    return float(np.linalg.norm(pred - ref)) / max(float(np.linalg.norm(ref)), 1e-15)
 
 
 def _auto_backend_resolves_to_vulkan(api: NLolib) -> bool:
@@ -121,7 +137,7 @@ def test_second_order_reference_matches_known_recurrence_and_midperiod_compressi
 
     initial_intensity = np.abs(records[0]) ** 2
     final_intensity = np.abs(records[-1]) ** 2
-    recurrence_error = relative_l2_error(final_intensity, initial_intensity)
+    recurrence_error = _relative_l2_error(final_intensity, initial_intensity)
 
     assert recurrence_error <= 1.0e-12, f"second-order analytical intensity no longer recurs over one period: {recurrence_error}"
     assert abs(peak_location - 0.5) <= 0.01, (
@@ -160,8 +176,8 @@ def test_linear_reference_prefers_current_dispersion_sign(api: NLolib) -> None:
     )
     current_ref = exact_linear_temporal_final(field0, z_final, omega, c0)
     opposite_ref = exact_linear_temporal_final(field0, z_final, omega, -c0)
-    current_error = relative_l2_error(final_field, current_ref)
-    opposite_error = relative_l2_error(final_field, opposite_ref)
+    current_error = _relative_l2_error(final_field, current_ref)
+    opposite_error = _relative_l2_error(final_field, opposite_ref)
 
     assert current_error <= 1.0e-10, f"CPU linear propagation no longer matches current sign convention: {current_error}"
     assert opposite_error >= (1.0e3 * max(current_error, 1.0e-15)), (
@@ -198,7 +214,7 @@ def test_zero_operator_identity_fixed_step_cpu_and_auto(api: NLolib) -> None:
         api.propagate(cfg, field0.tolist(), 2, default_execution_options(VECTOR_BACKEND_CPU)).records[1],
         dtype=np.complex128,
     )
-    cpu_error = relative_l2_error(cpu_final, field0)
+    cpu_error = _relative_l2_error(cpu_final, field0)
     assert cpu_error <= 1.0e-12, f"CPU identity propagation drifted unexpectedly: {cpu_error}"
 
     if not _auto_backend_resolves_to_vulkan(api):
@@ -209,7 +225,7 @@ def test_zero_operator_identity_fixed_step_cpu_and_auto(api: NLolib) -> None:
         api.propagate(cfg, field0.tolist(), 2, default_execution_options(VECTOR_BACKEND_AUTO)).records[1],
         dtype=np.complex128,
     )
-    auto_error = relative_l2_error(auto_final, field0)
+    auto_error = _relative_l2_error(auto_final, field0)
     assert auto_error <= 5.0e-6, f"AUTO/Vulkan identity propagation drift exceeded diagnostic bound: {auto_error}"
 
 def main() -> None:
