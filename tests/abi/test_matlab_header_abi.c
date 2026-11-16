@@ -323,6 +323,8 @@ ASSERT_OFFSET(nlo_perf_profile_snapshot, gpu_upload_count);
 ASSERT_OFFSET(nlo_perf_profile_snapshot, gpu_download_count);
 ASSERT_OFFSET(nlo_perf_profile_snapshot, gpu_upload_bytes);
 ASSERT_OFFSET(nlo_perf_profile_snapshot, gpu_download_bytes);
+ASSERT_OFFSET(nlo_perf_profile_snapshot, operator_jit_programs);
+ASSERT_OFFSET(nlo_perf_profile_snapshot, operator_jit_fallbacks);
 
 ASSERT_SIZE(progress_info);
 ASSERT_OFFSET(progress_info, event_type);

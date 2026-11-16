@@ -198,6 +198,8 @@ class NloPerfProfileSnapshot(ctypes.Structure):
         ("gpu_download_count", ctypes.c_uint64),
         ("gpu_upload_bytes", ctypes.c_uint64),
         ("gpu_download_bytes", ctypes.c_uint64),
+        ("operator_jit_programs", ctypes.c_uint64),
+        ("operator_jit_fallbacks", ctypes.c_uint64),
     ]
 
 

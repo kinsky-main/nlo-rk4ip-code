@@ -402,6 +402,8 @@ typedef struct
     uint64_t gpu_download_count;
     uint64_t gpu_upload_bytes;
     uint64_t gpu_download_bytes;
+    uint64_t operator_jit_programs;
+    uint64_t operator_jit_fallbacks;
 } nlo_perf_profile_snapshot;
 
 /**

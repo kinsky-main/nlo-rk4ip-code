@@ -36,6 +36,9 @@ typedef struct {
     uint64_t gpu_download_count;
     uint64_t gpu_upload_bytes;
     uint64_t gpu_download_bytes;
+
+    uint64_t operator_jit_programs;
+    uint64_t operator_jit_fallbacks;
 } nlo_perf_profile_snapshot;
 #endif
 
@@ -64,6 +67,26 @@ void perf_profile_reset(void);
  * @param out_snapshot Destination snapshot.
  */
 void perf_profile_snapshot_read(nlo_perf_profile_snapshot* out_snapshot);
+
+/**
+ * @brief Record one operator program bound to a JIT-compiled GPU kernel.
+ *
+ * Accumulated whether or not profiling is enabled: it is one increment per
+ * program at state build, and it is the only way a caller can tell a JIT run
+ * from a silent interpreter fallback.
+ */
+void perf_profile_add_operator_jit_program(void);
+
+/**
+ * @brief Record one operator program left on the interpreter.
+ *
+ * Counted for every active program on a Vulkan backend that does not get a JIT
+ * kernel, whether because the program is not lowerable, because
+ * `NLO_OPERATOR_JIT=0` is set, or because compilation failed. Accumulated
+ * whether or not profiling is enabled, as
+ * ::perf_profile_add_operator_jit_program is.
+ */
+void perf_profile_add_operator_jit_fallback(void);
 
 /**
  * @brief Record elapsed dispersion-operator time.
