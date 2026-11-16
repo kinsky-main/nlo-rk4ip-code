@@ -941,11 +941,15 @@ vec_status operator_program_prepare_jit(
     if (backend == NULL || program == NULL) {
         return VEC_STATUS_INVALID_ARGUMENT;
     }
-    if (!program->active || backend->type != VECTOR_BACKEND_VULKAN || !program->jit_eligible ||
-        jit_disabled_by_environment()) {
+    if (!program->active || backend->type != VECTOR_BACKEND_VULKAN) {
+        return VEC_STATUS_UNSUPPORTED;
+    }
+    if (!program->jit_eligible || jit_disabled_by_environment()) {
+        perf_profile_add_operator_jit_fallback();
         return VEC_STATUS_UNSUPPORTED;
     }
     if (program->vk_jit_entry != NULL) {
+        /* Already prepared, and already counted. */
         program->vk_jit_active = 1;
         return VEC_STATUS_OK;
     }
@@ -954,6 +958,7 @@ vec_status operator_program_prepare_jit(
     if (cached != NULL) {
         program->vk_jit_entry = cached;
         program->vk_jit_active = 1;
+        perf_profile_add_operator_jit_program();
         return VEC_STATUS_OK;
     }
 
@@ -1007,6 +1012,9 @@ vec_status operator_program_prepare_jit(
 cleanup:
     if (status != VEC_STATUS_OK) {
         program->vk_jit_active = 0;
+        perf_profile_add_operator_jit_fallback();
+    } else {
+        perf_profile_add_operator_jit_program();
     }
     free(spirv_words);
     jit_str_builder_destroy(&source);

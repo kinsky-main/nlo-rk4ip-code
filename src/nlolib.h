@@ -102,6 +102,8 @@ typedef struct {
     uint64_t gpu_download_count;
     uint64_t gpu_upload_bytes;
     uint64_t gpu_download_bytes;
+    uint64_t operator_jit_programs;
+    uint64_t operator_jit_fallbacks;
 } nlo_perf_profile_snapshot;
 #endif
 
@@ -129,6 +131,18 @@ NLOLIB_API nlolib_status nlolib_perf_profile_reset(void);
 
 /**
  * @brief Read current runtime performance counters into caller memory.
+ *
+ * Every counter but the two JIT ones accumulates only while profiling is
+ * enabled. `operator_jit_programs` counts operator programs bound to a
+ * JIT-compiled GPU kernel and `operator_jit_fallbacks` counts those left on
+ * the interpreter; both accumulate unconditionally, so a caller can tell a
+ * JIT run from a silent fallback without turning profiling on. Both are
+ * incremented once per active operator program as a simulation state is
+ * built, not per step, and are cumulative since the last
+ * ::nlolib_perf_profile_reset, so they accumulate over every state a process
+ * builds. Both stay zero wherever the JIT is never reached, on the CPU
+ * backend and in a build configured with ENABLE_VULKAN_BACKEND=OFF; that is
+ * not the same as a program falling back to the interpreter.
  *
  * @param out_snapshot Destination snapshot.
  * @return nlolib_status status code.

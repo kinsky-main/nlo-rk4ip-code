@@ -41,6 +41,15 @@ void vk_auto_context_destroy(vk_auto_context* context)
     }
 }
 
+void vk_auto_instance_shutdown(void)
+{
+}
+
+unsigned int vk_auto_instance_create_count(void)
+{
+    return 0u;
+}
+
 vec_status vk_backend_init(vector_backend* backend, const vk_backend_config* config)
 {
     (void)backend;

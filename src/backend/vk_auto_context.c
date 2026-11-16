@@ -12,9 +12,28 @@
 #if defined(_WIN32)
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
+static SRWLOCK g_instance_lock = SRWLOCK_INIT;
+static void instance_lock(void) { AcquireSRWLockExclusive(&g_instance_lock); }
+static void instance_unlock(void) { ReleaseSRWLockExclusive(&g_instance_lock); }
 #else
 #  include <dlfcn.h>
+#  include <pthread.h>
+static pthread_mutex_t g_instance_lock = PTHREAD_MUTEX_INITIALIZER;
+static void instance_lock(void) { (void)pthread_mutex_lock(&g_instance_lock); }
+static void instance_unlock(void) { (void)pthread_mutex_unlock(&g_instance_lock); }
 #endif
+
+/* Process-wide Vulkan instance, guarded by g_instance_lock.
+ *
+ * One instance serves every backend for the lifetime of the process.  A fresh
+ * instance per backend used to leak a driver resource that vkDestroyInstance
+ * does not release -- on the NVIDIA Linux ICD, a D-Bus system-bus connection
+ * opened inside vkCreateInstance, which the driver stops handing out after
+ * eleven, capping a process at eleven backends.  See vk_auto_instance_shutdown().
+ */
+static VkInstance g_shared_instance = VK_NULL_HANDLE;
+static unsigned int g_instance_create_count = 0u;
+static int g_instance_atexit_registered = 0;
 
 /**
  * @brief Report whether a Vulkan loader is installed on this machine.
@@ -272,26 +291,34 @@ static int vk_auto_select_device(
     return 0;
 }
 
-int vk_auto_context_init(
-    vk_auto_context* context,
-    char* reason,
-    size_t reason_capacity
-)
+static void vk_auto_instance_atexit(void)
 {
-    if (context == NULL) {
-        vk_auto_copy_reason(reason, reason_capacity, "Vulkan auto-context pointer is null.");
-        return -1;
-    }
+    vk_auto_instance_shutdown();
+}
 
-    vk_auto_reset_context(context);
-    vk_auto_copy_reason(reason, reason_capacity, "");
+/**
+ * @brief Return the process-wide instance, creating it on first need.
+ *
+ * @param reason Optional failure reason buffer.
+ * @param reason_capacity Size of @p reason in bytes.
+ * @return VkInstance The shared instance, or VK_NULL_HANDLE on failure.
+ */
+static VkInstance vk_auto_shared_instance(char* reason, size_t reason_capacity)
+{
+    instance_lock();
+    if (g_shared_instance != VK_NULL_HANDLE) {
+        VkInstance existing = g_shared_instance;
+        instance_unlock();
+        return existing;
+    }
 
     /* Must precede every other Vulkan call in this process. */
     if (!vk_auto_runtime_available()) {
+        instance_unlock();
         vk_auto_copy_reason(reason,
                             reason_capacity,
                             "No Vulkan loader installed; using the CPU backend.");
-        return -1;
+        return VK_NULL_HANDLE;
     }
 
     VkApplicationInfo app_info = {
@@ -307,8 +334,57 @@ int vk_auto_context_init(
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app_info
     };
-    if (vkCreateInstance(&instance_info, NULL, &context->instance) != VK_SUCCESS) {
+
+    VkInstance created = VK_NULL_HANDLE;
+    if (vkCreateInstance(&instance_info, NULL, &created) != VK_SUCCESS) {
+        instance_unlock();
         vk_auto_copy_reason(reason, reason_capacity, "Failed to create Vulkan instance.");
+        return VK_NULL_HANDLE;
+    }
+
+    g_shared_instance = created;
+    ++g_instance_create_count;
+    if (!g_instance_atexit_registered) {
+        g_instance_atexit_registered = (atexit(vk_auto_instance_atexit) == 0);
+    }
+    instance_unlock();
+    return created;
+}
+
+void vk_auto_instance_shutdown(void)
+{
+    instance_lock();
+    if (g_shared_instance != VK_NULL_HANDLE) {
+        vkDestroyInstance(g_shared_instance, NULL);
+        g_shared_instance = VK_NULL_HANDLE;
+    }
+    instance_unlock();
+}
+
+unsigned int vk_auto_instance_create_count(void)
+{
+    instance_lock();
+    const unsigned int count = g_instance_create_count;
+    instance_unlock();
+    return count;
+}
+
+int vk_auto_context_init(
+    vk_auto_context* context,
+    char* reason,
+    size_t reason_capacity
+)
+{
+    if (context == NULL) {
+        vk_auto_copy_reason(reason, reason_capacity, "Vulkan auto-context pointer is null.");
+        return -1;
+    }
+
+    vk_auto_reset_context(context);
+    vk_auto_copy_reason(reason, reason_capacity, "");
+
+    context->instance = vk_auto_shared_instance(reason, reason_capacity);
+    if (context->instance == VK_NULL_HANDLE) {
         return -1;
     }
 
@@ -317,6 +393,7 @@ int vk_auto_context_init(
         vk_auto_copy_reason(reason,
                                 reason_capacity,
                                 "No compatible Vulkan device with shaderFloat64 and compute queue.");
+        /* Leaves the process-wide instance alive for the next attempt. */
         vk_auto_context_destroy(context);
         return -1;
     }
@@ -376,10 +453,8 @@ void vk_auto_context_destroy(vk_auto_context* context)
         context->device = VK_NULL_HANDLE;
     }
 
-    if (context->instance != VK_NULL_HANDLE) {
-        vkDestroyInstance(context->instance, NULL);
-        context->instance = VK_NULL_HANDLE;
-    }
+    /* The instance is process-wide: clear the borrowed handle, do not destroy it. */
+    context->instance = VK_NULL_HANDLE;
 
     context->physical_device = VK_NULL_HANDLE;
     context->queue = VK_NULL_HANDLE;

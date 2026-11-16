@@ -403,7 +403,8 @@ static vector_backend* vector_backend_create_auto(const vk_backend_config* confi
     }
 
     backend->vk.instance = auto_ctx.instance;
-    backend->vk.owns_instance = true;
+    /* The instance is process-wide and outlives this backend: borrowed, not owned. */
+    backend->vk.owns_instance = false;
     backend->vk.owns_device = true;
     backend->vk.device_type = auto_ctx.device_type;
     backend->vk.device_local_bytes = auto_ctx.device_local_bytes;

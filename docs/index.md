@@ -8,6 +8,7 @@ entrypoints:
 
 - [Runtime Operator Mathematics](runtime_operators.md)
 - [Build and Install](build_and_install.md)
+- [Vulkan Backend Behaviour](gpu_backend.md)
 - [API Reference Guide](api_reference.md)
 - [Python Binding Guide](../python/README.md)
 - [MATLAB Binding Guide](../matlab/README.md)
@@ -89,6 +90,9 @@ D=i\left(\beta_{2,s}\omega_t^2+\beta_t(k_x^2+k_y^2)\right)
   parameters.
 - [Build and Install](build_and_install.md) covers build requirements, targets,
   tests, and docs generation.
+- [Vulkan Backend Behaviour](gpu_backend.md) explains the operator JIT, the
+  fused RK algebra, the compact tensor axes, and the environment switches that
+  turn each of them off.
 - [API Reference Guide](api_reference.md) links into the generated reference for
   the C API and each binding.
 - [MATLAB User Guide](matlab_user_guide.md) is a task-oriented walkthrough of

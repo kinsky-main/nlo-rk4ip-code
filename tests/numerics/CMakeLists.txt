@@ -137,6 +137,38 @@ if(ENABLE_VULKAN_BACKEND)
   add_test(NAME test_operator_jit_vulkan COMMAND test_operator_jit_vulkan)
 endif()
 
+if(ENABLE_VULKAN_BACKEND)
+  add_executable(test_nlo_vk_instance_reuse
+    ${CMAKE_CURRENT_LIST_DIR}/test_nlo_vk_instance_reuse.c
+    ${vector_backend_test_sources}
+  )
+  target_include_directories(test_nlo_vk_instance_reuse PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}/src/generated
+  )
+  target_link_libraries(test_nlo_vk_instance_reuse PRIVATE Vulkan::Vulkan)
+  target_compile_definitions(test_nlo_vk_instance_reuse PRIVATE
+    ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
+    ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
+  )
+  nlolib_use_embedded_spirv(test_nlo_vk_instance_reuse)
+  if(UNIX)
+    target_link_libraries(test_nlo_vk_instance_reuse PRIVATE m)
+  endif()
+  if(WIN32)
+    add_custom_command(TARGET test_nlo_vk_instance_reuse POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+              -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_nlo_vk_instance_reuse>"
+              -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_nlo_vk_instance_reuse>"
+              -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
+    )
+  endif()
+
+  add_test(NAME test_nlo_vk_instance_reuse COMMAND test_nlo_vk_instance_reuse)
+  # The regression this guards manifests as a hang, not as a wrong answer.
+  set_tests_properties(test_nlo_vk_instance_reuse PROPERTIES TIMEOUT 180)
+endif()
+
 add_executable(test_nlo_vector_backend_vulkan_config
   ${CMAKE_CURRENT_LIST_DIR}/test_nlo_vector_backend_vulkan_config.c
   ${vector_backend_test_sources}

@@ -11,6 +11,7 @@ Full rendered documentation is available at
 - Rendered docs home: `docs/index.md`
 - Runtime operator mathematics: `docs/runtime_operators.md`
 - Build and install guide: `docs/build_and_install.md`
+- Vulkan backend behaviour, JIT and runtime switches: `docs/gpu_backend.md`
 - Python binding guide: `python/README.md`
 - MATLAB binding guide: `matlab/README.md`
 - Julia binding guide: `julia/README.md`

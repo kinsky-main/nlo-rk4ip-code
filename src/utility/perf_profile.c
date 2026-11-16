@@ -108,6 +108,18 @@ void perf_profile_snapshot_read(nlo_perf_profile_snapshot* out_snapshot)
     *out_snapshot = g_nlo_perf_profile_state.snapshot;
 }
 
+/* Not gated on `enabled`: callers need the JIT/interpreter split from a
+ * Release build that never turns profiling on. */
+void perf_profile_add_operator_jit_program(void)
+{
+    g_nlo_perf_profile_state.snapshot.operator_jit_programs += 1u;
+}
+
+void perf_profile_add_operator_jit_fallback(void)
+{
+    g_nlo_perf_profile_state.snapshot.operator_jit_fallbacks += 1u;
+}
+
 void perf_profile_add_dispersion_time(double elapsed_ms)
 {
     if (!g_nlo_perf_profile_state.enabled || elapsed_ms < 0.0) {
