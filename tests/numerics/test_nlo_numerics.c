@@ -9,29 +9,38 @@
 #include "backend/nlo_complex.h"
 #include "numerics/math_ops.h"
 #include "numerics/vector_ops.h"
-#include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifndef TEST_EPS
 #define TEST_EPS 1e-12
 #endif
 
+/* Not assert(): Release builds define NDEBUG. */
+#define NUM_CHECK(cond)                                                       \
+    do {                                                                      \
+        if (!(cond)) {                                                        \
+            fprintf(stderr, "%s:%d: NUM_CHECK(%s) failed\n", __FILE__, __LINE__, #cond); \
+            exit(1);                                                          \
+        }                                                                     \
+    } while (0)
+
 static void assert_complex_close(nlo_complex value, nlo_complex expected, double eps)
 {
-    assert(fabs(RE(value) - RE(expected)) < eps);
-    assert(fabs(IM(value) - IM(expected)) < eps);
+    NUM_CHECK(fabs(RE(value) - RE(expected)) < eps);
+    NUM_CHECK(fabs(IM(value) - IM(expected)) < eps);
 }
 
 static void test_nlo_real_factorial(void)
 {
-    assert(real_factorial(0) == 1);
-    assert(real_factorial(1) == 1);
-    assert(real_factorial(2) == 2);
-    assert(real_factorial(3) == 6);
-    assert(real_factorial(4) == 24);
-    assert(real_factorial(6) == 720);
-    assert(real_factorial(10) == 3628800);
+    NUM_CHECK(real_factorial(0) == 1);
+    NUM_CHECK(real_factorial(1) == 1);
+    NUM_CHECK(real_factorial(2) == 2);
+    NUM_CHECK(real_factorial(3) == 6);
+    NUM_CHECK(real_factorial(4) == 24);
+    NUM_CHECK(real_factorial(6) == 720);
+    NUM_CHECK(real_factorial(10) == 3628800);
     printf("test_nlo_real_factorial: validates factorial lookup.\n");
 }
 
@@ -44,32 +53,32 @@ static void test_nlo_real_fill_copy_mul_pow(void)
 
     real_fill(values, 5, -2.5);
     for (size_t i = 0; i < 5; ++i) {
-        assert(fabs(values[i] + 2.5) < TEST_EPS);
+        NUM_CHECK(fabs(values[i] + 2.5) < TEST_EPS);
     }
 
     real_copy(copy, values, 5);
     for (size_t i = 0; i < 5; ++i) {
-        assert(fabs(copy[i] - values[i]) < TEST_EPS);
+        NUM_CHECK(fabs(copy[i] - values[i]) < TEST_EPS);
     }
 
     real_copy(values, factors, 5);
     real_mul_inplace(values, factors, 5);
-    assert(fabs(values[0] - 4.0) < TEST_EPS);
-    assert(fabs(values[1] - 1.0) < TEST_EPS);
-    assert(fabs(values[2] - 0.25) < TEST_EPS);
-    assert(fabs(values[3] - 16.0) < TEST_EPS);
-    assert(fabs(values[4] - 9.0) < TEST_EPS);
+    NUM_CHECK(fabs(values[0] - 4.0) < TEST_EPS);
+    NUM_CHECK(fabs(values[1] - 1.0) < TEST_EPS);
+    NUM_CHECK(fabs(values[2] - 0.25) < TEST_EPS);
+    NUM_CHECK(fabs(values[3] - 16.0) < TEST_EPS);
+    NUM_CHECK(fabs(values[4] - 9.0) < TEST_EPS);
 
     real_pow_int(factors, out, 5, 3);
-    assert(fabs(out[0] - 8.0) < TEST_EPS);
-    assert(fabs(out[1] + 1.0) < TEST_EPS);
-    assert(fabs(out[2] - 0.125) < TEST_EPS);
-    assert(fabs(out[3] - 64.0) < TEST_EPS);
-    assert(fabs(out[4] + 27.0) < TEST_EPS);
+    NUM_CHECK(fabs(out[0] - 8.0) < TEST_EPS);
+    NUM_CHECK(fabs(out[1] + 1.0) < TEST_EPS);
+    NUM_CHECK(fabs(out[2] - 0.125) < TEST_EPS);
+    NUM_CHECK(fabs(out[3] - 64.0) < TEST_EPS);
+    NUM_CHECK(fabs(out[4] + 27.0) < TEST_EPS);
 
     real_pow_int(factors, out, 5, 0);
     for (size_t i = 0; i < 5; ++i) {
-        assert(fabs(out[i] - 1.0) < TEST_EPS);
+        NUM_CHECK(fabs(out[i] - 1.0) < TEST_EPS);
     }
 
     printf("test_nlo_real_fill_copy_mul_pow: validates real vector ops.\n");
@@ -83,8 +92,8 @@ static void test_nlo_complex_fill(void)
     complex_fill(values, 3, fill);
 
     for (size_t i = 0; i < 3; ++i) {
-        assert(RE(values[i]) == RE(fill));
-        assert(IM(values[i]) == IM(fill));
+        NUM_CHECK(RE(values[i]) == RE(fill));
+        NUM_CHECK(IM(values[i]) == IM(fill));
     }
 
     printf("test_nlo_complex_fill: validates complex fill helper.\n");
@@ -150,14 +159,14 @@ static void test_nlo_complex_mul_inplace(void)
 
     complex_mul_inplace(dst, src, 3);
 
-    assert(RE(dst[0]) == 2.0);
-    assert(IM(dst[0]) == 4.0);
+    NUM_CHECK(RE(dst[0]) == 2.0);
+    NUM_CHECK(IM(dst[0]) == 4.0);
 
-    assert(RE(dst[1]) == 4.0);
-    assert(IM(dst[1]) == 3.0);
+    NUM_CHECK(RE(dst[1]) == 4.0);
+    NUM_CHECK(IM(dst[1]) == 3.0);
 
-    assert(RE(dst[2]) == 2.5);
-    assert(IM(dst[2]) == 2.5);
+    NUM_CHECK(RE(dst[2]) == 2.5);
+    NUM_CHECK(IM(dst[2]) == 2.5);
 
     printf("test_nlo_complex_mul_inplace: validates elementwise complex multiply.\n");
 }
@@ -210,10 +219,10 @@ static void test_nlo_complex_real_pow_variants(void)
 
     complex_real_pow(base, out, 4, 0.5);
     assert_complex_close(out[0], make(1.0, 0.0), TEST_EPS);
-    assert(fabs(RE(out[1]) - sqrt(0.5)) < 1e-12);
-    assert(fabs(IM(out[1]) - sqrt(0.5)) < 1e-12);
-    assert(fabs(RE(out[2])) < 1e-10);
-    assert(fabs(IM(out[2]) - 1.0) < 1e-10);
+    NUM_CHECK(fabs(RE(out[1]) - sqrt(0.5)) < 1e-12);
+    NUM_CHECK(fabs(IM(out[1]) - sqrt(0.5)) < 1e-12);
+    NUM_CHECK(fabs(RE(out[2])) < 1e-10);
+    NUM_CHECK(fabs(IM(out[2]) - 1.0) < 1e-10);
     assert_complex_close(out[3], make(0.0, 0.0), TEST_EPS);
 
     complex_copy(inplace, base, 4);
@@ -245,14 +254,14 @@ static void test_calculate_magnitude_squared(void)
 
     calculate_magnitude_squared(src, dst, 4);
 
-    assert(fabs(RE(dst[0]) - 25.0) < TEST_EPS);
-    assert(fabs(IM(dst[0])) < TEST_EPS);
-    assert(fabs(RE(dst[1]) - 29.0) < TEST_EPS);
-    assert(fabs(IM(dst[1])) < TEST_EPS);
-    assert(fabs(RE(dst[2]) - 49.0) < TEST_EPS);
-    assert(fabs(IM(dst[2])) < TEST_EPS);
-    assert(fabs(RE(dst[3]) - (1.5 * 1.5 + 2.5 * 2.5)) < TEST_EPS);
-    assert(fabs(IM(dst[3])) < TEST_EPS);
+    NUM_CHECK(fabs(RE(dst[0]) - 25.0) < TEST_EPS);
+    NUM_CHECK(fabs(IM(dst[0])) < TEST_EPS);
+    NUM_CHECK(fabs(RE(dst[1]) - 29.0) < TEST_EPS);
+    NUM_CHECK(fabs(IM(dst[1])) < TEST_EPS);
+    NUM_CHECK(fabs(RE(dst[2]) - 49.0) < TEST_EPS);
+    NUM_CHECK(fabs(IM(dst[2])) < TEST_EPS);
+    NUM_CHECK(fabs(RE(dst[3]) - (1.5 * 1.5 + 2.5 * 2.5)) < TEST_EPS);
+    NUM_CHECK(fabs(IM(dst[3])) < TEST_EPS);
 
     printf("test_calculate_magnitude_squared: validates |z|^2 helper.\n");
 }
@@ -268,12 +277,12 @@ static void test_nlo_complex_exp_inplace(void)
 
     complex_exp_inplace(values, 3);
 
-    assert(fabs(RE(values[0]) - 1.0) < TEST_EPS);
-    assert(fabs(IM(values[0])) < TEST_EPS);
-    assert(fabs(RE(values[1]) - 2.0) < TEST_EPS);
-    assert(fabs(IM(values[1])) < TEST_EPS);
-    assert(fabs(RE(values[2]) + 1.0) < 1e-10);
-    assert(fabs(IM(values[2])) < 1e-10);
+    NUM_CHECK(fabs(RE(values[0]) - 1.0) < TEST_EPS);
+    NUM_CHECK(fabs(IM(values[0])) < TEST_EPS);
+    NUM_CHECK(fabs(RE(values[1]) - 2.0) < TEST_EPS);
+    NUM_CHECK(fabs(IM(values[1])) < TEST_EPS);
+    NUM_CHECK(fabs(RE(values[2]) + 1.0) < 1e-10);
+    NUM_CHECK(fabs(IM(values[2])) < 1e-10);
 
     printf("test_nlo_complex_exp_inplace: validates complex exp implementation.\n");
 }

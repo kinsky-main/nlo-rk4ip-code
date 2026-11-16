@@ -7,8 +7,17 @@
  */
 
 #include "backend/nlo_complex.h"
-#include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+/* Not assert(): Release builds define NDEBUG. */
+#define CPLX_CHECK(cond)                                                      \
+    do {                                                                      \
+        if (!(cond)) {                                                        \
+            fprintf(stderr, "%s:%d: CPLX_CHECK(%s) failed\n", __FILE__, __LINE__, #cond); \
+            exit(1);                                                          \
+        }                                                                     \
+    } while (0)
 
 /**
  * @brief Test nlo_complex creation
@@ -16,8 +25,8 @@
 void test_nlo_make()
 {
     nlo_complex z = make(3.0, 4.0);
-    assert(RE(z) == 3.0);
-    assert(IM(z) == 4.0);
+    CPLX_CHECK(RE(z) == 3.0);
+    CPLX_CHECK(IM(z) == 4.0);
     printf("test_nlo_make: validates complex constructor values.\n");
 }
 
@@ -29,8 +38,8 @@ void test_nlo_add()
     nlo_complex a = make(1.0, 2.0);
     nlo_complex b = make(3.0, 4.0);
     nlo_complex c = add(a, b);
-    assert(RE(c) == 4.0);
-    assert(IM(c) == 6.0);
+    CPLX_CHECK(RE(c) == 4.0);
+    CPLX_CHECK(IM(c) == 6.0);
     printf("test_nlo_add: validates complex addition.\n");
 }
 
@@ -42,8 +51,8 @@ void test_nlo_mul()
     nlo_complex a = make(1.0, 2.0);
     nlo_complex b = make(3.0, 4.0);
     nlo_complex c = mul(a, b);
-    assert(RE(c) == -5.0); // 1*3 - 2*4
-    assert(IM(c) == 10.0); // 1*4 + 2*3
+    CPLX_CHECK(RE(c) == -5.0); // 1*3 - 2*4
+    CPLX_CHECK(IM(c) == 10.0); // 1*4 + 2*3
     printf("test_nlo_mul: validates complex multiplication.\n");
 }
 
