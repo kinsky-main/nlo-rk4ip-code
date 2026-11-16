@@ -4,12 +4,15 @@ name: ci
 # directory is tag-triggered, so before this existed a pull request showed no
 # checks at all and nothing ran its tests.
 #
-# Two jobs, split by what they cost:
+# Three jobs, split by what they cost:
 #   * checks  -- the source-only gates. A checkout and an interpreter, well
 #                under a minute, so every push gets an answer immediately.
 #   * build   -- configures and compiles the library the way a release does and
 #                runs the native test suite. Several minutes, because the pinned
 #                FFTW, SQLite, glslang and VkFFT are all built from source.
+#   * build-windows -- the same configure, build and test on MSVC. A separate
+#                job rather than a matrix: the Vulkan toolchain is installed a
+#                different way and the option set differs by one entry.
 #
 # Also runs on push to main: a merge commit is a tree no pull request ever
 # tested, and main is what the release tags are cut from.
@@ -129,6 +132,93 @@ jobs:
       # (tests/numerics/test_nlo_vector_backend_vulkan.c,
       # tests/core/test_state_alloc.c), so a driverless runner exercises the
       # build and the CPU paths and reports the GPU paths as passed-by-skip.
+      - name: Run the tests that need no GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          ctest --test-dir build --build-config Release --output-on-failure \
+            -E '^test_(python|julia)_'
+
+  build-windows:
+    name: Build and test (windows-2025)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Same step as release-mltbx.yml. On Windows the loader import library,
+      # glslangValidator and the glslang headers all come out of the LunarG
+      # SDK; there is no apt package to install instead. glslang itself is
+      # still fetched and built from source, because NLOLIB_GLSLANG_PROVIDER
+      # defaults to FETCH.
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'vulkan-sdk.exe'
+          Invoke-WebRequest -Uri 'https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe' -OutFile $installer
+          $installArgs = @('--accept-licenses', '--default-answer', '--confirm-command', 'install')
+          $proc = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru -NoNewWindow
+          if ($proc.ExitCode -ne 0) { throw "Vulkan SDK installer exited with $($proc.ExitCode)" }
+          $sdk = Get-ChildItem 'C:\VulkanSDK' -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $sdk) { throw 'No Vulkan SDK directory found after install' }
+          "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$($sdk.FullName)\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      # The same option set as the ubuntu job above, with one omission:
+      # CMAKE_BUILD_TYPE. The default generator here is Visual Studio, which is
+      # multi-config and never reads that variable, so the -D would land in the
+      # cache as UNINITIALIZED and nlo_configure_verified would report it as an
+      # option the project ignored. Release is selected by --config on the two
+      # steps below instead, which is how the Windows release scripts do it.
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          source tools/release/cmake_options.sh
+          nlo_configure_verified build \
+            BUILD_TESTING=ON \
+            INSTALL_GIT_HOOKS=OFF \
+            BUMP_PATCH_ON_BUILD=OFF \
+            NLOLIB_BUILD_DOCS=OFF \
+            NLOLIB_BUILD_BENCHMARKS=OFF \
+            NLOLIB_BUILD_EXAMPLES=OFF \
+            ENABLE_VULKAN_BACKEND=ON \
+            ENABLE_VKFFT=ON
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --config Release --parallel
+
+      # Why this job exists: tools/release/build_wheel_windows.ps1 and
+      # release-mltbx.yml both configure ENABLE_VULKAN_BACKEND=ON, so the
+      # Windows binaries ship the Vulkan backend and the operator JIT, and the
+      # ubuntu job above cannot tell us whether MSVC accepts them. This job is
+      # a compile and link gate: it catches the things a GCC-only build never
+      # sees -- missing Windows headers, a POSIX call with no MSVC equivalent,
+      # a declaration MSVC's C frontend rejects, an unresolved glslang symbol.
+      #
+      # It is NOT a check on GPU behaviour. GitHub's Windows runners have no
+      # Vulkan device, so, exactly as on the ubuntu runner, every Vulkan case
+      # asks the loader for a device and skips its assertions when none comes
+      # back (tests/numerics/test_operator_jit_vulkan.c,
+      # tests/numerics/test_nlo_vector_backend_vulkan.c,
+      # tests/core/test_state_alloc.c) and reports the GPU paths as
+      # passed-by-skip. The JIT's generated GLSL, its SPIR-V and its dispatch
+      # are only ever executed on a machine with a driver.
+      #
+      # The MSVC it compiles with is whatever the image ships, which is not
+      # pinned to the Visual Studio 2022 the released binaries are built with
+      # (release-mltbx.yml installs that itself); a break specific to one
+      # toolset version can still get past this.
+      #
+      # Same exclusion as the ubuntu job, for the same reasons: the test_python_*
+      # cases need numpy, matplotlib and the examples tree, and the test_julia_*
+      # cases need a Julia toolchain and are not registered without one.
       - name: Run the tests that need no GPU
         shell: bash
         run: |
