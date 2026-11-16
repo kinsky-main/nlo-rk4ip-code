@@ -8,8 +8,10 @@
 - C99 compiler toolchain
 - FFTW build prerequisites handled by CMake
 - Vulkan toolchain only when `ENABLE_VULKAN_BACKEND=ON`
-- glslang development libraries when `ENABLE_VKFFT=ON`; CMake can fetch
-  glslang when system development files are unavailable
+- glslang when `ENABLE_VULKAN_BACKEND=ON`: VkFFT and the operator JIT both
+  compile GLSL at runtime. The default `NLOLIB_GLSLANG_PROVIDER=FETCH` builds
+  it through CMake, so development files are needed only for the `SYSTEM` and
+  `AUTO` providers
 
 ### Optional but commonly needed
 
@@ -55,8 +57,8 @@ Important top-level options:
 - `GLSLANG_GIT_TAG`
 - `BUILD_TESTING`
 
-`NLOLIB_GLSLANG_PROVIDER` controls how VkFFT's runtime glslang dependency is
-resolved:
+`NLOLIB_GLSLANG_PROVIDER` controls how the runtime glslang dependency, shared
+by VkFFT and the Vulkan operator JIT, is resolved:
 
 - `AUTO` first uses an installed Vulkan/glslang development package, then
   fetches glslang if needed.
@@ -150,6 +152,8 @@ Docs notes:
 
 ## Related Guides
 
+- [Vulkan Backend Behaviour](gpu_backend.md) for what the Vulkan backend does
+  at runtime and the environment switches that change it
 - [Python Binding Guide](../python/README.md)
 - [MATLAB Binding Guide](../matlab/README.md)
 - [Julia Binding Guide](../julia/README.md)
