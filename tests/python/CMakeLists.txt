@@ -137,6 +137,18 @@ set_tests_properties(test_python_tensor_backend_scaling_cleanup PROPERTIES
   ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
 )
 
+# Builds the Python package, installs it into a fresh virtualenv outside the
+# source tree, and asserts from there that a Vulkan run took the operator JIT
+# path; skips without Vulkan. Nothing else covers the installed layout, where
+# the archived branch silently fell back to the interpreter.
+add_test(NAME test_python_wheel_jit_relocated
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_wheel_jit_relocated.py"
+)
+set_tests_properties(test_python_wheel_jit_relocated PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
+  TIMEOUT 900
+)
+
 # Fused Vulkan RK algebra against NLO_DISABLE_VK_FUSED_STEP=1; skips without Vulkan.
 add_test(NAME test_python_fused_rk_step
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_fused_rk_step.py"
