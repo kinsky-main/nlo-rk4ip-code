@@ -201,8 +201,16 @@ class NLolib:
         phys_cfg = None
         if config is not None:
             if isinstance(config, PreparedSimConfig):
-                sim_cfg = config.simulation_config
                 phys_cfg = config.physics_config
+                # The library computes max_num_recorded_samples_in_memory and
+                # estimated_required_working_set_bytes only from a config that
+                # states its sample count, and a 1-D config leaves time.nt at
+                # zero so the solver infers the layout instead. Stamp the count
+                # on a copy, so the caller's own config -- which propagate and
+                # the snapshot store both hash -- is left exactly as prepared.
+                sim_cfg = NloSimulationConfig.from_buffer_copy(config.simulation_config)
+                if sim_cfg.time.nt == 0 and sim_cfg.tensor.nt == 0:
+                    sim_cfg.time.nt = int(config.num_time_samples)
             else:
                 sim_cfg = config
         if physics_config is not None:

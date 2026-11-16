@@ -312,6 +312,13 @@ class PreparedSimConfig:
     simulation_config: NloSimulationConfig
     physics_config: NloPhysicsConfig
     keepalive: list[object]
+    #: Total sample count this config was prepared for. The C `simulation_config`
+    #: does not carry it: `time.nt` is left at zero for a 1-D run, which the
+    #: library reads as "infer the layout from the sample count passed to
+    #: propagate", and its frequency grid is a bare pointer with no length. So a
+    #: caller that needs the count after the fact has nowhere to read it, which
+    #: is why `query_runtime_limits` needs this.
+    num_time_samples: int = 0
 
     @property
     def sim_ptr(self) -> ctypes.POINTER(NloSimulationConfig):
@@ -637,4 +644,5 @@ def prepare_sim_config(
         simulation_config=sim_cfg,
         physics_config=physics_cfg,
         keepalive=keepalive,
+        num_time_samples=int(num_time_samples),
     )

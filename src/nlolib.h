@@ -171,6 +171,24 @@ NLOLIB_API nlolib_status nlolib_perf_profile_read_gpu_phases(
 /**
  * @brief Query runtime-derived limits for current backend/config selection.
  *
+ * `estimated_required_working_set_bytes` and
+ * `max_num_recorded_samples_in_memory` are derived from the grid, so they need
+ * a @p simulation_config that states its own sample count: either
+ * `tensor.nt`/`nx`/`ny`, or `time.nt`. A config prepared for propagation
+ * normally leaves `time.nt` at zero, because the solver takes the sample count
+ * as an argument to the propagate call and infers the layout from it, and this
+ * function is not given that argument. Both fields are reported as zero when
+ * the config does not state the count; the remaining limits do not depend on
+ * it. The Python and MATLAB bindings fill it in for this call.
+ *
+ * `max_num_recorded_samples_in_memory` describes in-memory recording, where
+ * every record stays resident: host memory less the working set, divided by the
+ * size of one record. It does not apply to a run streaming to the snapshot
+ * store, which keeps only a ring window of records in host memory; that run's
+ * ceiling is `max_num_recorded_samples_with_storage`, which is a precision
+ * ceiling rather than a memory one, and is the only one propagate enforces.
+ * Pick between them on whether storage is configured, not on which is smaller.
+ *
  * @param simulation_config Optional simulation configuration used to estimate
  *        required working-set bytes and in-memory record capacity.
  * @param physics_config Optional physics/operator configuration.

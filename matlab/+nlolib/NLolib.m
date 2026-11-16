@@ -999,6 +999,11 @@ classdef NLolib < handle
             %     limits  = obj.query_runtime_limits(cfg, execOptions);
             %     records = min(wanted, limits.max_num_recorded_samples_in_memory);
             %
+            %   max_num_recorded_samples_in_memory and
+            %   estimated_required_working_set_bytes are derived from the grid,
+            %   so cfg must carry num_time_samples (or the tensor dimensions)
+            %   for them to be meaningful; they come back 0 otherwise.
+            %
             %   Fields:
             %     max_num_time_samples_runtime
             %     max_num_recorded_samples_in_memory
@@ -1024,6 +1029,19 @@ classdef NLolib < handle
             if ~nlolib.NLolib.has_library_function(obj.LIBNAME, 'nlolib_query_runtime_limits')
                 error('nlolib:runtimeLimitsUnavailable', ...
                       'nlolib_query_runtime_limits is not available in this library build.');
+            end
+
+            % Tell the library the grid this query is about. A config prepared
+            % for propagation leaves time.nt at 0 so the solver infers the
+            % layout, and the two limits that depend on the grid --
+            % max_num_recorded_samples_in_memory and
+            % estimated_required_working_set_bytes -- are then left at 0, which
+            % made the recipe above return 0 records. This is a local copy, so
+            % the caller's own config is untouched.
+            if isstruct(config) && isfield(config, "num_time_samples") && ...
+                    ~isfield(config, "time_nt") && ...
+                    ~(isfield(config, "tensor_nt") && config.tensor_nt > 0)
+                config.time_nt = config.num_time_samples;
             end
 
             [simCfgPtr, physicsCfgPtr, keepalive] = nlolib.prepare_sim_config(config); %#ok<ASGLU>

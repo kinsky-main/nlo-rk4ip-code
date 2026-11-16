@@ -74,6 +74,12 @@ add_test(NAME test_python_perf_profile
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_perf_profile.py"
 )
 
+# The grid-dependent runtime limits are zero unless the config states its own
+# sample count, which a config prepared for propagation does not.
+add_test(NAME test_python_runtime_limits_grid
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_runtime_limits_grid.py"
+)
+
 add_test(NAME test_python_second_order_soliton_plot_cleanup
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_python_second_order_soliton_plot_cleanup.py"
 )
@@ -126,6 +132,10 @@ set_tests_properties(test_python_package_surface PROPERTIES
 )
 
 set_tests_properties(test_python_perf_profile PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
+)
+
+set_tests_properties(test_python_runtime_limits_grid PROPERTIES
   ENVIRONMENT "PYTHONPATH=${_PY_PKG_DIR};NLOLIB_LIBRARY=$<TARGET_FILE:nlolib>;PATH=${_NLOLIB_TEST_PATH}"
 )
 
