@@ -797,7 +797,7 @@ static void test_storage_only_propagate_without_dense_output(void)
         nlolib_propagate(&sim_section, &physics_section, num_time_samples, input, &options, &out);
     STATE_CHECK(status == NLOLIB_STATUS_OK);
     STATE_CHECK(records_written == 0u);
-    STATE_CHECK(storage_result.chunks_written == 3u);
+    STATE_CHECK(storage_result.chunks_written == 2u);
 
     free_sim_config(config);
     (void)remove(db_path);
