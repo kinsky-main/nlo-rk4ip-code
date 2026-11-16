@@ -379,6 +379,24 @@ ModelStore does. Never open the file read-write to clear the error: that rolls
 back the merge in progress. Nlolib's own `has_run` and read functions wait up
 to 60 s for such a transaction to end.
 
+**Reading from other programs.** Any program that reads the database while
+Nlolib may be writing it (ModelStore, a web run browser, the `sqlite3` shell,
+Python's `sqlite3` module):
+
+- Opens it **read-only**: `sqlite3 -readonly <file>` in the shell, the URI
+  `file:<path>?mode=ro` (with `uri=True` in Python), or `SQLITE_OPEN_READONLY`
+  in C. The `sqlite3` shell and most libraries open read-write by default.
+- Reads in one short transaction and, on `SQLITE_READONLY` ("attempt to write
+  a readonly database"), `SQLITE_BUSY` or `SQLITE_CORRUPT` ("database disk
+  image is malformed"), closes or rolls back and retries after a pause of
+  tens of milliseconds, for as long as a merge may take (Nlolib waits up to
+  60 s). A busy timeout alone does not help: `SQLITE_READONLY` is not a busy
+  condition.
+- Never opens it read-write with the default VFS on the share while a writer
+  may be active, not even for a `SELECT`. A read-write connection that meets
+  the merge's `-journal` takes it for a hot journal and rolls it back while
+  the writer is still writing, which can corrupt the database.
+
 **Merge.** Nlolib takes the writer lock and then makes sure it sees the latest
 committed state:
 
