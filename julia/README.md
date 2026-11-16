@@ -75,6 +75,16 @@ NLOLib.load()
 - `NLOLib.propagate`
 - `NLOLib.propagate!`
 
+## Not Exposed Here: the Perf-Profile Counters
+
+The C API, Python and MATLAB can read runtime performance counters through
+`nlolib_perf_profile_read`, including the two that report whether the Vulkan
+backend compiled each operator program to a GPU kernel or fell back to the
+interpreter (`operator_jit_programs` and `operator_jit_fallbacks`). This package
+wraps no part of that surface, so there is no Julia equivalent to show; see
+[GPU backend behaviour](../docs/gpu_backend.md) for what the counters mean and
+the Python guide for the shape of the call.
+
 ## Related Reference
 
 - @ref julia_binding
