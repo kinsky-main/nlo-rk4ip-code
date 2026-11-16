@@ -120,12 +120,52 @@ function(configure_vulkan_backend target target_source_dir target_binary_dir)
   target_link_libraries(${target} PUBLIC Vulkan::Headers Vulkan::Vulkan)
   nlolib_delay_load_vulkan(${target})
 
+  # The operator JIT (numerics/vk_operator_jit.c) compiles GLSL at runtime and
+  # #includes these helpers; embed them so installed builds can resolve them.
+  set(VK_JIT_GLSL_FILES
+    "${VK_KERNEL_SOURCE_DIR}/complex_device.glslinc"
+    "${VK_KERNEL_SOURCE_DIR}/nlo_complex_device.glslinc"
+    "${VK_KERNEL_SOURCE_DIR}/double_math.glslinc"
+    "${VK_KERNEL_SOURCE_DIR}/nlo_double_math.glslinc"
+    "${VK_KERNEL_SOURCE_DIR}/complex_math.glslinc"
+  )
+  set(VK_JIT_GLSL_SOURCE "${VK_SHADER_BLOB_DIR}/vk_jit_glsl_sources.c")
+  set(VK_JIT_GLSL_HEADER "${VK_SHADER_BLOB_DIR}/vk_jit_glsl_sources.h")
+  add_custom_command(
+    OUTPUT "${VK_JIT_GLSL_SOURCE}" "${VK_JIT_GLSL_HEADER}"
+    COMMAND ${CMAKE_COMMAND}
+      "-DGLSL_FILES=${VK_JIT_GLSL_FILES}"
+      "-DOUTPUT_SOURCE=${VK_JIT_GLSL_SOURCE}"
+      "-DOUTPUT_HEADER=${VK_JIT_GLSL_HEADER}"
+      -P "${CMAKE_SOURCE_DIR}/cmake/embed_glsl_sources.cmake"
+    DEPENDS ${VK_JIT_GLSL_FILES} "${CMAKE_SOURCE_DIR}/cmake/embed_glsl_sources.cmake"
+    COMMENT "Embedding GLSL includes for the Vulkan operator JIT"
+    VERBATIM
+  )
+  add_custom_target(vk_jit_glsl_sources
+    DEPENDS "${VK_JIT_GLSL_SOURCE}" "${VK_JIT_GLSL_HEADER}")
+  add_dependencies(${target} vk_jit_glsl_sources)
+  target_sources(${target} PRIVATE "${VK_JIT_GLSL_SOURCE}")
+  set_source_files_properties("${VK_JIT_GLSL_SOURCE}" PROPERTIES GENERATED TRUE)
+  nlolib_link_vulkan_jit_dependencies(${target})
+
   # Published so tests and benchmarks that compile the Vulkan backend sources
   # directly can pick up the same embedded shaders.
   set(NLOLIB_VK_SHADER_BLOB_DIR "${VK_SHADER_BLOB_DIR}"
       CACHE INTERNAL "Directory holding the generated SPIR-V blob sources" FORCE)
   set(NLOLIB_VK_SHADER_BLOB_SOURCE "${VK_SHADER_BLOB_SOURCE}"
       CACHE INTERNAL "Generated SPIR-V blob translation unit" FORCE)
+  set(NLOLIB_VK_JIT_GLSL_SOURCE "${VK_JIT_GLSL_SOURCE}"
+      CACHE INTERNAL "Generated GLSL include table for the operator JIT" FORCE)
+endfunction()
+
+# glslang (runtime GLSL->SPIR-V, shared with VkFFT) and a thread library for
+# the JIT's process-wide SPIR-V cache lock.
+function(nlolib_link_vulkan_jit_dependencies target)
+  include(ResolveGlslang)
+  resolve_glslang_for_vkfft(jit_glslang_target jit_glslang_found)
+  find_package(Threads REQUIRED)
+  target_link_libraries(${target} PRIVATE ${jit_glslang_target} Threads::Threads)
 endfunction()
 
 # Attach the embedded SPIR-V modules to a target that compiles the Vulkan
@@ -137,5 +177,13 @@ function(nlolib_use_embedded_spirv target)
   add_dependencies(${target} vk_shader_blobs)
   set_source_files_properties("${NLOLIB_VK_SHADER_BLOB_SOURCE}" PROPERTIES GENERATED TRUE)
   target_sources(${target} PRIVATE "${NLOLIB_VK_SHADER_BLOB_SOURCE}")
+  # The operator JIT lives with the Vulkan backend sources these targets compile.
+  add_dependencies(${target} vk_jit_glsl_sources)
+  set_source_files_properties("${NLOLIB_VK_JIT_GLSL_SOURCE}" PROPERTIES GENERATED TRUE)
+  target_sources(${target} PRIVATE
+    "${NLOLIB_VK_JIT_GLSL_SOURCE}"
+    "${CMAKE_SOURCE_DIR}/src/numerics/vk_operator_jit.c"
+  )
+  nlolib_link_vulkan_jit_dependencies(${target})
   target_include_directories(${target} PRIVATE "${NLOLIB_VK_SHADER_BLOB_DIR}")
 endfunction()

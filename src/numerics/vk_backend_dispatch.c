@@ -20,7 +20,7 @@ static size_t vk_max_chunk_elements(const vector_backend* backend, size_t elem_s
     return (size_t)max_elems;
 }
 
-static vec_status vk_acquire_descriptor_set(
+vec_status vk_acquire_descriptor_set(
     vector_backend* backend,
     VkDescriptorSet* out_descriptor_set
 )

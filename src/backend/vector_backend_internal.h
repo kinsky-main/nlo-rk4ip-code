@@ -50,8 +50,30 @@ enum {
     /** Vulkan compute local size used by kernels in this backend. */
     VK_LOCAL_SIZE_X = 64u,
     /** Default staging-buffer size used for host/device transfers. */
-    VK_DEFAULT_STAGING_BYTES = 8u * 1024u * 1024u
+    VK_DEFAULT_STAGING_BYTES = 8u * 1024u * 1024u,
+    /** Storage-buffer bindings in the shared compute descriptor set layout. */
+    VK_DESCRIPTOR_BINDING_COUNT = 11u
 };
+
+/**
+ * @brief Binding slots of the shared descriptor set layout.
+ *
+ * Fixed kernels use bindings 0-2. JIT-compiled operator kernels bind the
+ * destination, the field and one buffer per operator symbol.
+ */
+typedef enum {
+    VK_BINDING_DST = 0,
+    VK_BINDING_FIELD = 1,
+    VK_BINDING_W = 2,
+    VK_BINDING_WT = 3,
+    VK_BINDING_KX = 4,
+    VK_BINDING_KY = 5,
+    VK_BINDING_T = 6,
+    VK_BINDING_X = 7,
+    VK_BINDING_Y = 8,
+    VK_BINDING_D = 9,
+    VK_BINDING_V = 10
+} vk_descriptor_binding;
 
 /**
  * @brief Internal kernel identifiers mapped to compiled Vulkan pipelines.
@@ -94,6 +116,8 @@ typedef struct {
 typedef struct {
     VkPipeline pipeline;
 } vk_kernel;
+
+typedef struct vk_operator_jit_entry vk_operator_jit_entry;
 
 /**
  * @brief Internal Vulkan backend runtime state and resources.
@@ -140,6 +164,8 @@ typedef struct {
     bool simulation_phase_recording;
     bool simulation_phase_has_commands;
     uint32_t simulation_descriptor_set_cursor;
+    /** Pipelines for JIT-compiled operator programs, owned by this backend. */
+    vk_operator_jit_entry* operator_jit_entries;
 } vk_backend;
 
 /**
