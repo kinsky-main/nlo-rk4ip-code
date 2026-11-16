@@ -13,7 +13,7 @@
 - [ ] Implement more efficient GPU memory management and data transfer strategies, e.g. pinned memory, async transfers, etc.
 - [ ] Find a better way to implement the parser for operator expressions, current letter style parsing is not very robust and also relies heavily on the wrapper interpreting function handless correctly, ideally would have a more general parser which can handle arbitrary number of variables and coefficients.
 - [ ] Utilise OS level shared memory for GPU backend to allow for larger problem sizes.
-- [ ] Implement arbitrary kernel combinations to chain together operations into single GPU kernels for better performance.
+- [ ] Extend GPU kernel fusion past the operator expressions and the fixed RK-algebra combinations. A Vulkan step still issues separate FFT, operator and algebra dispatches, and the fused RK updates are a hand-written 2-4 term linear combination rather than an arbitrary combination of operations. See `docs/gpu_backend.md`.
 - [ ] Remove low-level high-level API split completely. C API should be sufficiently concise to use directly and then move to an approach where C binding generation is not partly manual eg `clibgen`, `sip`, `pybind11`, and many more.
 
 ## Extensions
@@ -61,3 +61,4 @@
 - [x] Cut first and final step from soliton variable step plot in example.
 - [x] Bring MATLAB and Julia interfaces up to date with Python API, currently using very old interfaces (complete rewrite required).
 - [x] Add more benchmarks and diagnostics, e.g. per-kernel timings, memory usage, RK4 intermediate state dumps, etc.
+- [x] Chain operator expressions into single GPU kernels: each compiled operator program is lowered to a value DAG and JIT-compiled to one Vulkan compute kernel, with the interpreter as the fallback, and the RK4/ERK4(3) copy/scale/add chains are fused into one linear-combination kernel per update. This is the operator half of the old "arbitrary kernel combinations" item; what is left of it is back under Low Priority.
