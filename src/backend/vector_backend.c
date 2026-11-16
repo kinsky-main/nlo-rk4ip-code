@@ -10,6 +10,7 @@
 #include "backend/vk_auto_context.h"
 #include "io/log_sink.h"
 #include "numerics/vector_ops.h"
+#include "utility/perf_profile.h"
 #include "numerics/vk_vector_ops.h"
 #include <limits.h>
 #include <math.h>
@@ -1344,7 +1345,10 @@ vec_status vec_complex_weighted_rms_error(
     }
 
     if (backend->type == VECTOR_BACKEND_VULKAN) {
-        return vk_op_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
+        const int assess_prev_phase = perf_profile_set_gpu_phase(PERF_GPU_PHASE_ERROR_NORM);
+        const vec_status status = vk_op_complex_weighted_rms_error(backend, fine, coarse, atol, rtol, out_error);
+        (void)perf_profile_set_gpu_phase(assess_prev_phase);
+        return status;
     }
 
     return VEC_STATUS_UNSUPPORTED;

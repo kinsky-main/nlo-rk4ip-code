@@ -248,6 +248,16 @@ NLOLIB_API nlolib_status nlolib_perf_profile_read(nlo_perf_profile_snapshot* out
     return NLOLIB_STATUS_OK;
 }
 
+NLOLIB_API nlolib_status nlolib_perf_profile_read_gpu_phases(
+    double* out_phase_ms,
+    uint64_t* out_phase_intervals,
+    double* out_host_slots
+)
+{
+    perf_profile_gpu_phases_read(out_phase_ms, out_phase_intervals, out_host_slots);
+    return NLOLIB_STATUS_OK;
+}
+
 NLOLIB_API nlolib_status nlolib_query_runtime_limits(
     const simulation_config* simulation_config,
     const physics_config* physics_config,
@@ -428,6 +438,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
             : execution_options_default(VECTOR_BACKEND_AUTO);
     simulation_state* state = NULL;
     allocation_info allocation_info = {0};
+    const double assess_init_start_ms = perf_profile_now_ms();
     const int init_status =
         storage_enabled(local_options.storage_options)
             ? init_simulation_state_with_storage(config,
@@ -446,6 +457,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
     if (init_status != 0 || state == NULL) {
         return propagate_fail("init_simulation_state", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
+    perf_profile_add_host_slot(PERF_HOST_SLOT_INIT_MS, perf_profile_now_ms() - assess_init_start_ms);
     state->output_records = local_output.output_records;
     state->output_record_capacity = local_output.output_record_capacity;
     state->explicit_record_z = local_options.explicit_record_z;
@@ -471,7 +483,11 @@ NLOLIB_API nlolib_status nlolib_propagate(
     state->step_events_dropped = 0u;
 
     (void)log_set_progress_callback(local_options.progress_callback, local_options.progress_user_data);
+    const double assess_solve_start_ms = perf_profile_now_ms();
+    const int assess_prev_phase = perf_profile_set_gpu_phase(PERF_GPU_PHASE_RK_ALGEBRA);
     solve_rk4(state);
+    (void)perf_profile_set_gpu_phase(assess_prev_phase);
+    perf_profile_add_host_slot(PERF_HOST_SLOT_SOLVE_MS, perf_profile_now_ms() - assess_solve_start_ms);
     const int progress_aborted = log_progress_abort_requested();
     (void)log_set_progress_callback(NULL, NULL);
 

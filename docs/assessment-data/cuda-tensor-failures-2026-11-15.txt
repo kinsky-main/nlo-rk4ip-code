@@ -1,0 +1,6 @@
+FAILED cuda tensor3d 64
+FAILED cuda grin2p1 64
+FAILED cuda grin2p1 160
+FAILED cuda grin2p1 192
+FAILED cuda tensor3d 256
+FAILED cuda grin2p1 256

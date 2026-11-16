@@ -136,6 +136,25 @@ NLOLIB_API nlolib_status nlolib_perf_profile_reset(void);
 NLOLIB_API nlolib_status nlolib_perf_profile_read(nlo_perf_profile_snapshot* out_snapshot);
 
 /**
+ * @brief Read assessment GPU phase timings (Vulkan timestamp queries).
+ *
+ * Phase order: other, fft, linear, nonlinear, rk_algebra, error_norm.
+ * Host slots: init_ms, solve_ms, queue submits, dropped timestamps.
+ * GPU timings are only collected when NLO_GPU_TIMESTAMPS=1 is set before
+ * backend creation and profiling is enabled.
+ *
+ * @param out_phase_ms Six doubles (milliseconds), or NULL.
+ * @param out_phase_intervals Six counters, or NULL.
+ * @param out_host_slots Four doubles, or NULL.
+ * @return nlolib_status status code.
+ */
+NLOLIB_API nlolib_status nlolib_perf_profile_read_gpu_phases(
+    double* out_phase_ms,
+    uint64_t* out_phase_intervals,
+    double* out_host_slots
+);
+
+/**
  * @brief Query runtime-derived limits for current backend/config selection.
  *
  * @param simulation_config Optional simulation configuration used to estimate

@@ -96,6 +96,7 @@ vec_status apply_dispersion_operator_stage(
 )
 {
 
+    const int assess_prev_phase = perf_profile_set_gpu_phase(PERF_GPU_PHASE_LINEAR);
     const double start_ms = perf_profile_now_ms();
     vec_status status = VEC_STATUS_OK;
     if (state->tensor_mode_active) {
@@ -144,6 +145,7 @@ vec_status apply_dispersion_operator_stage(
         }
     }
     const double end_ms = perf_profile_now_ms();
+    (void)perf_profile_set_gpu_phase(assess_prev_phase);
     if (status == VEC_STATUS_OK) {
         perf_profile_add_dispersion_time(end_ms - start_ms);
     }
@@ -164,6 +166,7 @@ vec_status apply_nonlinear_operator_stage(
         return VEC_STATUS_INVALID_ARGUMENT;
     }
 
+    const int assess_prev_phase = perf_profile_set_gpu_phase(PERF_GPU_PHASE_NONLINEAR);
     const double start_ms = perf_profile_now_ms();
     vec_status status = VEC_STATUS_OK;
     if (state->nonlinear_model == NONLINEAR_MODEL_KERR_RAMAN) {
@@ -190,6 +193,7 @@ vec_status apply_nonlinear_operator_stage(
                                               out_field);
     }
     const double end_ms = perf_profile_now_ms();
+    (void)perf_profile_set_gpu_phase(assess_prev_phase);
     if (status == VEC_STATUS_OK) {
         perf_profile_add_nonlinear_time(end_ms - start_ms);
     }

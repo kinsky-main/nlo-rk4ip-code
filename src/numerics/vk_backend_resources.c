@@ -421,6 +421,57 @@ static vec_status vk_create_kernels(vector_backend* backend)
     return VEC_STATUS_OK;
 }
 
+static void vk_create_timestamp_resources(vector_backend* backend)
+{
+    const char* env = getenv("NLO_GPU_TIMESTAMPS");
+    if (env == NULL || env[0] == '\0' || env[0] == '0') {
+        return;
+    }
+
+    uint32_t family_count = 0u;
+    vkGetPhysicalDeviceQueueFamilyProperties(backend->vk.physical_device, &family_count, NULL);
+    if (family_count == 0u || backend->vk.queue_family_index >= family_count) {
+        return;
+    }
+    VkQueueFamilyProperties* families =
+        (VkQueueFamilyProperties*)calloc((size_t)family_count, sizeof(*families));
+    if (families == NULL) {
+        return;
+    }
+    vkGetPhysicalDeviceQueueFamilyProperties(backend->vk.physical_device, &family_count, families);
+    const uint32_t valid_bits = families[backend->vk.queue_family_index].timestampValidBits;
+    free(families);
+    if (valid_bits == 0u || backend->vk.limits.timestampPeriod <= 0.0f) {
+        return;
+    }
+
+    const uint32_t capacity = 16384u;
+    VkQueryPoolCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+        .queryType = VK_QUERY_TYPE_TIMESTAMP,
+        .queryCount = capacity
+    };
+    if (vkCreateQueryPool(backend->vk.device, &info, NULL, &backend->vk.ts_pool) != VK_SUCCESS) {
+        backend->vk.ts_pool = VK_NULL_HANDLE;
+        return;
+    }
+    backend->vk.ts_tags = (uint8_t*)calloc((size_t)capacity, sizeof(uint8_t));
+    backend->vk.ts_values = (uint64_t*)calloc((size_t)capacity, sizeof(uint64_t));
+    if (backend->vk.ts_tags == NULL || backend->vk.ts_values == NULL) {
+        free(backend->vk.ts_tags);
+        free(backend->vk.ts_values);
+        backend->vk.ts_tags = NULL;
+        backend->vk.ts_values = NULL;
+        vkDestroyQueryPool(backend->vk.device, backend->vk.ts_pool, NULL);
+        backend->vk.ts_pool = VK_NULL_HANDLE;
+        return;
+    }
+    backend->vk.ts_capacity = capacity;
+    backend->vk.ts_cursor = 0u;
+    backend->vk.ts_period_ns = (double)backend->vk.limits.timestampPeriod;
+    backend->vk.ts_valid_mask = (valid_bits >= 64u) ? UINT64_MAX : ((1ull << valid_bits) - 1ull);
+}
+
 static void vk_destroy_resources(vector_backend* backend)
 {
     if (backend == NULL) {
@@ -428,6 +479,15 @@ static void vk_destroy_resources(vector_backend* backend)
     }
 
     const VkDevice device = backend->vk.device;
+    if (backend->vk.ts_pool != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
+        vkDestroyQueryPool(device, backend->vk.ts_pool, NULL);
+    }
+    backend->vk.ts_pool = VK_NULL_HANDLE;
+    free(backend->vk.ts_tags);
+    free(backend->vk.ts_values);
+    backend->vk.ts_tags = NULL;
+    backend->vk.ts_values = NULL;
+    backend->vk.ts_capacity = 0u;
     if (device != VK_NULL_HANDLE &&
         backend->vk.staging_mapped_ptr != NULL &&
         backend->vk.staging_memory != VK_NULL_HANDLE) {
@@ -690,6 +750,7 @@ vec_status vk_backend_init(vector_backend* backend, const vk_backend_config* con
         return status;
     }
 
+    vk_create_timestamp_resources(backend);
     return VEC_STATUS_OK;
 }
 
