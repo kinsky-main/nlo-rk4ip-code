@@ -44,25 +44,22 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # These three are registered as CTest cases (tests/python/CMakeLists.txt)
-      # but are plain `python <script>` invocations over the source tree: no
+      # The bindings are submodules, checked out above so the parity check can
+      # read all three. These two are registered as CTest cases
+      # (tests/CMakeLists.txt) but are plain `python <script>` invocations over the source tree: no
       # compiled library, no Vulkan, no MATLAB, no Julia. Invoked directly
       # rather than through ctest so this job needs no CMake configure --
       # configuring to reach them would fetch and build FFTW, SQLite, glslang
-      # and VkFFT, which is the whole cost of the build job below, to run three
+      # and VkFFT, which is the whole cost of the build job below, to run two
       # scripts that read text files. The build job runs them through ctest, so
       # the registrations stay covered either way.
-      - name: Check the version copies agree
-        shell: bash
-        run: |
-          set -euo pipefail
-          python tools/release/check_versions.py
-
       - name: Check the SBOM matches the dependency pins
         shell: bash
         run: |
@@ -80,12 +77,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # Same step as release-pypi.yml and release-mltbx.yml: the Vulkan backend
+      # Same step as the binding release workflows: the Vulkan backend
       # needs the loader import library and glslangValidator at build time.
       # CMake fetches the headers itself, but errors out on these.
       - name: Install Vulkan loader and glslang
@@ -123,9 +122,10 @@ jobs:
           set -euo pipefail
           cmake --build build --config Release --parallel
 
-      # Excludes the test_python_* and test_julia_* cases. The Python ones need
+      # Excludes the test_python_* and test_julia_* cases, which each binding
+      # repository runs in its own CI against the core it pins. The Python ones need
       # numpy, matplotlib and the examples tree on PYTHONPATH; the Julia ones
-      # need a Julia toolchain, and tests/julia/CMakeLists.txt returns early
+      # need a Julia toolchain, and julia/test/CMakeLists.txt returns early
       # without one, so they are not even registered here. What is left is the
       # native C suite plus the four source-only checks, which is the surface a
       # C or CMake change can break.
@@ -147,12 +147,14 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # Same step as release-mltbx.yml. On Windows the loader import library,
+      # Same step as the MATLAB toolbox release workflow. On Windows the loader import library,
       # glslangValidator and the glslang headers all come out of the LunarG
       # SDK; there is no apt package to install instead. glslang itself is
       # still fetched and built from source, because NLOLIB_GLSLANG_PROVIDER
@@ -197,8 +199,8 @@ jobs:
           set -euo pipefail
           cmake --build build --config Release --parallel
 
-      # Why this job exists: tools/release/build_wheel_windows.ps1 and
-      # release-mltbx.yml both configure ENABLE_VULKAN_BACKEND=ON, so the
+      # Why this job exists: python/tools/build_wheel_windows.ps1 and
+      # release-mltbx.yml in nlolib-matlab both configure ENABLE_VULKAN_BACKEND=ON, so the
       # Windows binaries ship the Vulkan backend and the operator JIT, and the
       # ubuntu job above cannot tell us whether MSVC accepts them. This job is
       # a compile and link gate: it catches the things a GCC-only build never
@@ -216,7 +218,7 @@ jobs:
       #
       # The MSVC it compiles with is whatever the image ships, which is not
       # pinned to the Visual Studio 2022 the released binaries are built with
-      # (release-mltbx.yml installs that itself); a break specific to one
+      # (the binding release workflows install that themselves); a break specific to one
       # toolset version can still get past this.
       #
       # Same exclusion as the ubuntu job, for the same reasons: the test_python_*
@@ -234,6 +236,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - uses: actions/setup-python@v5
         with:
@@ -253,8 +257,8 @@ jobs:
       # in, which nothing could run while the build was broken.
       #
       # It is also a release configuration, not just a developer convenience:
-      # tools/release/build_wheel_macos.sh and
-      # tools/release/build_mltbx_macos.sh both configure
+      # python/tools/build_wheel_macos.sh and
+      # matlab/tools/build_mltbx_macos.sh both configure
       # ENABLE_VULKAN_BACKEND=OFF, so the macOS wheel and toolbox are built from
       # exactly this configuration. They set BUILD_TESTING=OFF and so run no
       # tests, which is why a compile break here surfaced as neither a CI

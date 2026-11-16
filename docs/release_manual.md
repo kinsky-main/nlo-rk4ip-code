@@ -1,81 +1,47 @@
-# Manual Release Guide
+# Release Guide
 
-This document describes manual package publication for Python wheels and MATLAB toolbox bundles.
+Nothing is published from this repository. Each binding is released from its
+own repository, with its own version, by pushing a bare version tag (no `v`
+prefix) there:
 
-The Julia package is not released by hand: it is built, tested and published by
-`.github/workflows/release-julia.yml` on a bare version tag, and the one manual
-step is committing the generated `julia/Artifacts.toml` before registering. See
-`docs/release_julia.md`.
+| Artifact | Repository | Workflow | Guide |
+| --- | --- | --- | --- |
+| Python wheels on PyPI | [nlolib-python](https://github.com/kinsky-main/nlolib-python) | `release-pypi.yml` | [python/docs/release.md](../python/docs/release.md) |
+| `nlolib.mltbx` on GitHub releases and File Exchange | [nlolib-matlab](https://github.com/kinsky-main/nlolib-matlab) | `release-mltbx.yml` | [matlab/docs/development.md](../matlab/docs/development.md) |
+| Julia artifacts and registry entry | [NLOLib.jl](https://github.com/kinsky-main/NLOLib.jl) | `release-julia.yml` | [julia/docs/release.md](../julia/docs/release.md) |
 
-Version policy for distribution builds:
+## What a binding release is built from
 
-- Nothing bumps the version automatically. `check_versions.py --bump` is the
-  one deliberate step, and it rewrites `CMakeLists.txt` with every copy of it.
-- No release script writes a version. The copies agree at every commit, which
-  the `test_version_copies_match` CTest case enforces, so a wheel, a toolbox
-  and a Julia artifact built from the same commit carry the same version
-  without a sync step.
+Each binding repository has a `CORE_REF` file holding one full commit SHA of
+this repository. Its release workflow checks out that commit, configures it
+with `-DNLOLIB_<LANG>_DIR` pointing at the binding, and builds the native
+library from it. So a binding tag always names one binding tree and one core
+tree, and a binding-only fix can ship without touching this repository.
 
-## Prerequisites
+## Releasing a core change
 
-- Python 3.9+
-- CMake + compiler toolchain
-- `python -m pip install build twine`
-- Optional wheel repair tools:
-  - Windows: `delvewheel`
-  - Linux: `auditwheel`
-  - macOS: `delocate`
-- MATLAB (for `.mltbx` generation)
+1. Merge the change here. Bump the core version if the C API or behaviour
+   changed:
 
-## Python Package Publication
+   ```bash
+   python tools/release/check_versions.py --bump minor
+   ```
 
-Wheels are published from CI on a version tag, and the manual commands have
-moved along with the rest of that story to
-[release_python.md](release_python.md). Read it rather than this section: the
-wheel tagging, the platform matrix, and why uploading `dist/*` by hand is no
-longer the right default are all covered there.
+2. In each binding that should ship it: set `CORE_REF` to the merged commit,
+   bump the binding's own version (`pyproject.toml`, `VERSION` or
+   `Project.toml`), merge, and push the version tag. The binding's CI runs its
+   tests against the new core before the tag exists.
+3. Back here, move the submodule pointers to the released binding commits:
 
-## MATLAB Toolbox Publication
+   ```bash
+   git submodule update --remote python matlab julia
+   git commit -am "Update the binding submodules"
+   ```
 
-### Windows
+The binding versions need not match each other or the core version. The core
+version is recorded in `CMakeLists.txt` and `sbom.cdx.json`; `CORE_REF` is what
+ties a published binding to a core tree.
 
-```powershell
-.\tools\release\build_mltbx_windows.ps1 -BuildDir build-wheel-win -Config Release
-```
-
-### Linux
-
-```bash
-./tools/release/build_mltbx_linux.sh build-wheel-linux Release
-```
-
-### macOS (CPU-only packaging path)
-
-```bash
-./tools/release/build_mltbx_macos.sh build-wheel-macos Release
-```
-
-The script writes toolbox artifacts to `dist/` with platform suffixes:
-
-- `nlolib-<version>-win64.mltbx`
-- `nlolib-<version>-glnxa64.mltbx`
-- `nlolib-<version>-maci64.mltbx`
-
-Upload these files to the corresponding GitHub Release.
-
-Note: the release scripts configure CMake with `SQLITE_USE_FETCHCONTENT=ON`,
-which statically links SQLite into `nlolib` and avoids external SQLite runtime DLL dependencies.
-
-## Julia Package Publication
-
-See `docs/release_julia.md`. In short: push the bare version tag, let
-`release-julia` build and publish the per-platform artifact tarballs, reproduce
-the generated `Artifacts.toml` locally with
-
-```bash
-julia julia/tools/bind_artifacts.jl --version <version> --download \
-    --toml julia/Artifacts.toml x86_64-linux-gnu x86_64-w64-mingw32
-```
-
-commit it, and then register that commit with a `@JuliaRegistrator register
-subdir=julia` comment.
+Note: the release builds configure CMake with `SQLITE_USE_FETCHCONTENT=ON`,
+which statically links SQLite into `nlolib` and avoids external SQLite runtime
+DLL dependencies.

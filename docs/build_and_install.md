@@ -68,14 +68,28 @@ by VkFFT and the Vulkan operator JIT, is resolved:
 
 `GLSLANG_GIT_TAG` defaults to `12.3.1` and is used only by the fetch provider.
 
+## Bindings {#bindings}
+
+The Python, MATLAB and Julia bindings are git submodules of this repository
+(`python/`, `matlab/`, `julia/`), each backed by a repository of its own:
+
+```bash
+git submodule update --init
+```
+
+A binding that is checked out is added to the build, with its targets
+(`matlab_stage`, `julia_stage`) and, when `BUILD_TESTING=ON`, its tests
+(`test_python_*`, `test_julia_*`, `test_matlab_bindings`). One that is not is
+skipped. `NLOLIB_PYTHON_DIR`, `NLOLIB_MATLAB_DIR` and `NLOLIB_JULIA_DIR` name a
+binding checkout elsewhere; a binding repository uses them to build itself
+against the core commit its `CORE_REF` file pins.
+
 ## The Project Version
 
-`CMakeLists.txt` holds the version; `pyproject.toml` and `julia/Project.toml`
-carry copies, because a wheel and a Julia package each declare a literal
-version of their own, and `sbom.cdx.json` stamps it too. They must agree at
-every commit, so a release tag can be cut from any commit and the published
-artifacts carry the version their tag names. `test_version_copies_match` and
-`test_sbom_pins_match` fail if they drift.
+`CMakeLists.txt` holds the core library version, and `sbom.cdx.json` stamps a
+copy of it. They must agree at every commit; `test_sbom_pins_match` fails if
+they drift. The bindings are separate repositories with versions of their own
+(see [Bindings](#bindings)).
 
 Nothing advances the version by itself. A release bumps it in one step:
 
@@ -83,13 +97,13 @@ Nothing advances the version by itself. A release bumps it in one step:
 python tools/release/check_versions.py --bump minor
 ```
 
-That rewrites all three together. `--write` syncs the copies without bumping,
-and the bare command verifies them.
+That rewrites both together. `--write` regenerates the SBOM without bumping,
+and the bare command prints the version.
 
 Two options relate to this, both off by default:
 
-- `INSTALL_GIT_HOOKS=ON` installs a pre-commit hook that runs the same check.
-  It changes no file; it only refuses a commit whose versions disagree.
+- `INSTALL_GIT_HOOKS=ON` installs a pre-commit hook that runs the SBOM check.
+  It changes no file; it only refuses a commit whose SBOM is stale.
 - `BUMP_PATCH_ON_BUILD=ON` rewrites the version in `CMakeLists.txt` after a
   successful build. It is a development convenience and must stay off for a
   release build, whose packaged version is read back out of `CMakeLists.txt`
@@ -154,6 +168,6 @@ Docs notes:
 
 - [Vulkan Backend Behaviour](gpu_backend.md) for what the Vulkan backend does
   at runtime and the environment switches that change it
-- [Python Binding Guide](../python/README.md)
-- [MATLAB Binding Guide](../matlab/README.md)
-- [Julia Binding Guide](../julia/README.md)
+- [Python Binding Guide](../python/docs/guide.md)
+- [MATLAB Binding Guide](../matlab/docs/binding_guide.md)
+- [Julia Binding Guide](../julia/docs/guide.md)

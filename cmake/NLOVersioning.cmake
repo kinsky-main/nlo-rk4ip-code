@@ -78,7 +78,7 @@ function(file_is_writable path out_var)
 endfunction()
 
 # Installs a pre-commit hook that fails when the version in CMakeLists.txt and
-# the copies in pyproject.toml and julia/Project.toml disagree. It does not
+# sbom.cdx.json disagree. It does not
 # change the version: a release bumps it with
 # tools/release/check_versions.py --bump.
 function(install_version_check_hook)
@@ -158,7 +158,7 @@ function(install_version_check_hook)
 
   set(HOOK_MARKER "${hook_marker}")
   get_filename_component(hook_repo_root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}" DIRECTORY)
-  set(HOOK_CHECK_SCRIPT "${hook_repo_root}/tools/release/check_versions.py")
+  set(HOOK_CHECK_SCRIPT "${hook_repo_root}/tools/write_sbom.py")
   configure_file(
     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/pre-commit.in"
     "${pre_commit_hook}"

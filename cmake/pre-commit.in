@@ -3,21 +3,16 @@ set -eu
 
 # @HOOK_MARKER@
 #
-# The project version lives in CMakeLists.txt. pyproject.toml and
-# julia/Project.toml carry copies, because a wheel and a Julia package each
-# have to declare a literal version of their own.
+# The project version lives in CMakeLists.txt, and sbom.cdx.json stamps a copy
+# of it alongside the dependency pins from cmake/NLODependencies.cmake.
 #
 # Nothing advances the version by itself. A release bumps it deliberately:
 #
 #   python tools/release/check_versions.py --bump minor
 #
-# This hook only enforces that the three agree, so every commit names one
-# self-consistent version and a release tag can be cut from any commit.
-#
-# An earlier version of this hook bumped the MINOR version on every commit to
-# main instead. That advanced CMakeLists.txt once per commit while the copies
-# stayed where the last release left them, so the packaged version never
-# matched its tag and no equality check could be enforced anywhere.
+# This hook only enforces that the SBOM agrees with both, so every commit names
+# one self-consistent version and a release tag can be cut from any commit. The
+# bindings are separate repositories with versions of their own.
 
 python_bin="@HOOK_PYTHON@"
 if [ ! -x "$python_bin" ]; then
@@ -31,8 +26,8 @@ if [ -z "$python_bin" ]; then
   exit 0
 fi
 
-if ! "$python_bin" "@HOOK_CHECK_SCRIPT@" >/dev/null; then
-  echo "pre-commit: sync them with" >&2
+if ! "$python_bin" "@HOOK_CHECK_SCRIPT@" --check >/dev/null; then
+  echo "pre-commit: sbom.cdx.json is stale; regenerate it with" >&2
   echo "  python tools/release/check_versions.py --write" >&2
   echo "then stage the result." >&2
   exit 1

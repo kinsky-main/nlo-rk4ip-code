@@ -82,9 +82,16 @@ set(_builtin_types
 # ---------------------------------------------------------------------------
 # Scan the wrapper sources.
 # ---------------------------------------------------------------------------
-file(GLOB_RECURSE _m_files "${NLOLIB_SOURCE_DIR}/matlab/*.m")
+# The wrapper only: the top-level scripts and the +nlolib package. The
+# binding repository also carries examples and tests, which are not scanned.
+if(NOT NLOLIB_MATLAB_DIR)
+  set(NLOLIB_MATLAB_DIR "${NLOLIB_SOURCE_DIR}/matlab")
+endif()
+file(GLOB _m_files "${NLOLIB_MATLAB_DIR}/*.m")
+file(GLOB_RECURSE _m_package_files "${NLOLIB_MATLAB_DIR}/+nlolib/*.m")
+list(APPEND _m_files ${_m_package_files})
 if(NOT _m_files)
-  message(FATAL_ERROR "No MATLAB sources found under ${NLOLIB_SOURCE_DIR}/matlab")
+  message(FATAL_ERROR "No MATLAB sources found under ${NLOLIB_MATLAB_DIR}")
 endif()
 
 set(_errors "")

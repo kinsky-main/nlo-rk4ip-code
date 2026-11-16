@@ -10,7 +10,7 @@ project(nlolib VERSION 1.20.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
 
 option(ENABLE_RK4_DEBUG_DIAGNOSTICS "Enable debug-only RK4/dispersion diagnostics in Debug builds" ON)
-option(INSTALL_GIT_HOOKS "Install the pre-commit hook that checks the version copies agree" OFF)
+option(INSTALL_GIT_HOOKS "Install the pre-commit hook that checks sbom.cdx.json matches the version and pins" OFF)
 option(NLOLIB_BUILD_DOCS "Build API docs with Doxygen" ON)
 option(NLOLIB_BUILD_BENCHMARKS "Build benchmark executables" ON)
 option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
@@ -61,11 +61,29 @@ if(INSTALL_GIT_HOOKS)
 endif()
 
 add_subdirectory(src)
-add_subdirectory(python)
-add_subdirectory(matlab)
-add_subdirectory(julia)
 
 include(CTest)
+
+# Each language binding lives in its own repository and is mounted here as a
+# git submodule (git submodule update --init). A binding that is not checked
+# out is skipped, so the core library builds on its own. NLOLIB_<LANG>_DIR
+# points the build at a checkout elsewhere, which is how a binding repository
+# builds and tests itself against the core revision it pins.
+foreach(_binding python matlab julia)
+  string(TOUPPER "${_binding}" _BINDING)
+  set(NLOLIB_${_BINDING}_DIR "${CMAKE_CURRENT_LIST_DIR}/${_binding}" CACHE PATH
+      "Checkout of the ${_binding} binding repository")
+  # A normal variable over the cache entry, so a Windows path given with
+  # backslashes on the command line is usable in CMake strings.
+  file(TO_CMAKE_PATH "${NLOLIB_${_BINDING}_DIR}" NLOLIB_${_BINDING}_DIR)
+  if(EXISTS "${NLOLIB_${_BINDING}_DIR}/CMakeLists.txt")
+    add_subdirectory("${NLOLIB_${_BINDING}_DIR}" "${CMAKE_BINARY_DIR}/${_binding}")
+  else()
+    message(STATUS "No ${_binding} binding at ${NLOLIB_${_BINDING}_DIR}; skipping it "
+                   "(git submodule update --init ${_binding}).")
+  endif()
+endforeach()
+
 if(BUMP_PATCH_ON_BUILD)
   add_patch_bump_on_build(
     VERSION_FILE "${CMAKE_CURRENT_LIST_FILE}"

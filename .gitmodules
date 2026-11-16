@@ -1,0 +1,9 @@
+[submodule "python"]
+	path = python
+	url = https://github.com/kinsky-main/nlolib-python.git
+[submodule "matlab"]
+	path = matlab
+	url = https://github.com/kinsky-main/nlolib-matlab.git
+[submodule "julia"]
+	path = julia
+	url = https://github.com/kinsky-main/NLOLib.jl.git

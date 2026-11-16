@@ -471,7 +471,7 @@
       "bom-ref": "python@>=3.9",
       "name": "python",
       "version": "3.9",
-      "description": "Interpreter for the Python binding (python/nlolib, ctypes, no compiled extension) and the CTest Python suite. pyproject.toml: requires-python >=3.9. 3.12 verified.",
+      "description": "Interpreter for the Python binding (python/nlolib, ctypes, no compiled extension) and the CTest Python suite. python/pyproject.toml: requires-python >=3.9. 3.12 verified.",
       "scope": "excluded",
       "properties": [
         {
@@ -484,7 +484,7 @@
         },
         {
           "name": "nlolib:cmake",
-          "value": "tests/python/CMakeLists.txt find_package(Python3)"
+          "value": "tests/CMakeLists.txt find_package(Python3)"
         }
       ],
       "licenses": [
@@ -501,7 +501,7 @@
       "bom-ref": "numpy@>=1.24",
       "name": "numpy",
       "version": "1.24",
-      "description": "Required by the Python binding, tests and examples (examples/python/requirements.txt).",
+      "description": "Required by the Python binding, tests and examples (python/examples/requirements.txt).",
       "scope": "excluded",
       "properties": [
         {
@@ -605,7 +605,7 @@
       "bom-ref": "MATLAB@>=R2019b",
       "name": "MATLAB",
       "version": "R2019b",
-      "description": "MATLAB toolbox target (matlab_stage / package_mltbx.m). matlab/README.md: R2019b or later, no compiler needed on the client.",
+      "description": "MATLAB toolbox target (matlab_stage / package_mltbx.m). matlab/docs/binding_guide.md: R2019b or later, no compiler needed on the client.",
       "scope": "excluded",
       "properties": [
         {

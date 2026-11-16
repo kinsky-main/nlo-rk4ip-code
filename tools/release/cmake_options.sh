@@ -9,12 +9,17 @@
 # Usage:
 #   source "$(dirname "${BASH_SOURCE[0]}")/cmake_options.sh"
 #   nlo_configure_verified "$BUILD_DIR" NAME=VALUE [NAME=VALUE ...]
+#
+# The source directory is $NLO_SOURCE_DIR, or the current directory. Arguments
+# in the NLO_EXTRA_CMAKE_ARGS array are passed through unverified; that is for
+# values CMake normalises, such as paths, where a string comparison would fail.
 
 nlo_configure_verified() {
     local build_dir="$1"
     shift
     local options=("$@")
-    local args=(-S . -B "$build_dir")
+    local args=(-S "${NLO_SOURCE_DIR:-.}" -B "$build_dir"
+                ${NLO_EXTRA_CMAKE_ARGS[@]+"${NLO_EXTRA_CMAKE_ARGS[@]}"})
     local option
     for option in "${options[@]}"; do
         args+=("-D${option}")

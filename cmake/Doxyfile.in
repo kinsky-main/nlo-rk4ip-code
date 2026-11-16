@@ -9,9 +9,9 @@ QUIET                  = YES
 
 INPUT                  = "@CMAKE_SOURCE_DIR@/src" \
                          "@CMAKE_SOURCE_DIR@/docs" \
-                         "@CMAKE_SOURCE_DIR@/python/README.md" \
-                         "@CMAKE_SOURCE_DIR@/matlab/README.md" \
-                         "@CMAKE_SOURCE_DIR@/julia/README.md"
+                         "@NLOLIB_PYTHON_DIR@/docs" \
+                         "@NLOLIB_MATLAB_DIR@/docs" \
+                         "@NLOLIB_JULIA_DIR@/docs"
 FILE_PATTERNS          = *.h *.c *.md *.dox *.py
 EXTRACT_ALL            = YES
 EXTRACT_STATIC         = YES

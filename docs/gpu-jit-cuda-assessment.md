@@ -368,7 +368,7 @@ option plumbing that C needs, and D needs both A's lowering and C.
   `cufft64_12.dll` (284 MB) and the NVRTC build also `nvrtc64_130_0.dll`
   (91 MB) + `nvrtc-builtins64_130.dll` (4.5 MB) in the DLL import table, so
   `nlolib.dll` fails to load on any machine without them. The release wheel
-  (`tools/release/build_wheel_windows.ps1` on the PyPI release branch) builds
+  (`python/tools/build_wheel_windows.ps1` on the PyPI release branch) builds
   Vulkan + VkFFT and bundles DLLs with delvewheel; bundling cuFFT alone is
   ~3× PyPI's default 100 MB file limit. C/D could only ship as a separate
   variant (for example a `-cu13` wheel depending on NVIDIA's PyPI runtime
