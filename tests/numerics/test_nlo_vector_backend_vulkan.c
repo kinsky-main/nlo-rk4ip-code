@@ -94,9 +94,10 @@ int main(void)
         vector_backend_destroy(auto_backend);
     }
 
-    vk_backend_config invalid = {0};
-    VK_CHECK(vector_backend_create_vulkan(&invalid) == NULL);
-    printf("test_nlo_vector_backend_vulkan: validates Vulkan explicit config guards.\n");
+    /* A zeroed config is not invalid: the handle triple may be all set or all
+     * omitted, and all-omitted requests auto selection. The explicit-config
+     * guards live in test_nlo_vector_backend_vulkan_config. */
+    printf("test_nlo_vector_backend_vulkan: Vulkan backend smoke checks done.\n");
     return 0;
 }
 

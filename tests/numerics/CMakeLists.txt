@@ -168,3 +168,35 @@ if(ENABLE_VULKAN_BACKEND)
   # The regression this guards manifests as a hang, not as a wrong answer.
   set_tests_properties(test_nlo_vk_instance_reuse PROPERTIES TIMEOUT 180)
 endif()
+
+add_executable(test_nlo_vector_backend_vulkan_config
+  ${CMAKE_CURRENT_LIST_DIR}/test_nlo_vector_backend_vulkan_config.c
+  ${vector_backend_test_sources}
+)
+target_include_directories(test_nlo_vector_backend_vulkan_config PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+if(ENABLE_VULKAN_BACKEND)
+  target_include_directories(test_nlo_vector_backend_vulkan_config PRIVATE ${CMAKE_BINARY_DIR}/src/generated)
+endif()
+target_compile_definitions(test_nlo_vector_backend_vulkan_config PRIVATE
+  ENABLE_VULKAN_BACKEND=$<IF:$<BOOL:${ENABLE_VULKAN_BACKEND}>,1,0>
+  ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
+)
+if(ENABLE_VULKAN_BACKEND)
+  target_link_libraries(test_nlo_vector_backend_vulkan_config PRIVATE Vulkan::Vulkan)
+endif()
+nlolib_use_embedded_spirv(test_nlo_vector_backend_vulkan_config)
+if(UNIX)
+  target_link_libraries(test_nlo_vector_backend_vulkan_config PRIVATE m)
+endif()
+if(WIN32)
+  add_custom_command(TARGET test_nlo_vector_backend_vulkan_config POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DNLO_RUNTIME_SOURCE="$<TARGET_FILE:test_nlo_vector_backend_vulkan_config>"
+            -DNLO_RUNTIME_DEST="$<TARGET_FILE_DIR:test_nlo_vector_backend_vulkan_config>"
+            -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
+  )
+endif()
+
+add_test(NAME test_nlo_vector_backend_vulkan_config COMMAND test_nlo_vector_backend_vulkan_config)
