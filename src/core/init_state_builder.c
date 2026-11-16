@@ -9,6 +9,7 @@
 #include "fft/fft.h"
 #include "io/log_sink.h"
 #include "io/snapshot_store.h"
+#include "core/runtime_defaults.h"
 #include "physics/operators.h"
 #include "physics/operator_program_jit.h"
 #include "utility/state_debug.h"
@@ -49,42 +50,6 @@
 #define FREQ_GRID_REL_TOL 1e-9
 #endif
 
-#ifndef DEFAULT_DISPERSION_FACTOR_EXPR
-#define DEFAULT_DISPERSION_FACTOR_EXPR "i*c0*w*w-c1"
-#endif
-
-#ifndef DEFAULT_LINEAR_FACTOR_EXPR
-#define DEFAULT_LINEAR_FACTOR_EXPR "i*c0*wt*wt-c1"
-#endif
-
-#ifndef DEFAULT_DISPERSION_EXPR
-#define DEFAULT_DISPERSION_EXPR "exp(h*D)"
-#endif
-
-#ifndef DEFAULT_LINEAR_EXPR
-#define DEFAULT_LINEAR_EXPR "exp(h*D)"
-#endif
-
-#ifndef DEFAULT_POTENTIAL_EXPR
-#define DEFAULT_POTENTIAL_EXPR "0"
-#endif
-
-#ifndef DEFAULT_NONLINEAR_EXPR
-#define DEFAULT_NONLINEAR_EXPR "i*A*(c2*I + V)"
-#endif
-
-#ifndef DEFAULT_C0
-#define DEFAULT_C0 -0.5
-#endif
-
-#ifndef DEFAULT_C1
-#define DEFAULT_C1 0.0
-#endif
-
-#ifndef DEFAULT_C2
-#define DEFAULT_C2 1.0
-#endif
-
 static void destroy_init_vec_if_set(vector_backend* backend, vec_buffer** vec)
 {
     if (backend == NULL || vec == NULL || *vec == NULL) {
@@ -109,17 +74,6 @@ static void release_init_vectors(simulation_state* state)
     destroy_init_vec_if_set(state->backend, &state->init_vectors.y_axis_vec);
 }
 
-#ifndef DEFAULT_C3
-#define DEFAULT_C3 0.0
-#endif
-
-#ifndef DEFAULT_RAMAN_TAU1
-#define DEFAULT_RAMAN_TAU1 0.0122
-#endif
-
-#ifndef DEFAULT_RAMAN_TAU2
-#define DEFAULT_RAMAN_TAU2 0.0320
-#endif
 static vec_status create_complex_vec(vector_backend* backend, size_t length, vec_buffer** out_vec)
 {
     return vec_create(backend, VEC_KIND_COMPLEX64, length, out_vec);

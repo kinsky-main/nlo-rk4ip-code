@@ -553,6 +553,22 @@ static void check_maps_against_records(const char* db_path, const char* key, con
     CHECK(nlolib_storage_read_run_array(db_path, key, "omega", omega, nt, &count) == NLOLIB_STATUS_OK && count == nt,
           "read omega");
 
+    /* t, x, y centered on the grid's middle with the run's steps (layout document). */
+    const char* axis_names[3] = {"t", "x", "y"};
+    const size_t axis_len[3] = {nt, nx, ny};
+    const double axis_step[3] = {rc->sim.time.delta_time,
+                                 (rc->sim.spatial.delta_x > 0.0) ? rc->sim.spatial.delta_x : 1.0,
+                                 (rc->sim.spatial.delta_y > 0.0) ? rc->sim.spatial.delta_y : 1.0};
+    for (int a = 0; a < 3; ++a) {
+        double axis[1024];
+        size_t m = 0u;
+        CHECK(nlolib_storage_read_run_array(db_path, key, axis_names[a], axis, 1024u, &m) == NLOLIB_STATUS_OK &&
+                  m == axis_len[a], "read %s axis", axis_names[a]);
+        for (size_t i = 0u; i < m; ++i) {
+            const double expected = ((double)i - 0.5 * (double)(axis_len[a] - 1u)) * axis_step[a];
+            CHECK(fabs(axis[i] - expected) <= 1e-12 * fmax(1.0, fabs(expected)), "%s axis[%zu]", axis_names[a], i);
+        }
+    }
     /* omega ascending, step 2 pi / (nt dt), zero at index nt/2. */
     const double dw = 2.0 * PI / ((double)nt * rc->sim.time.delta_time);
     CHECK(fabs(omega[nt / 2u]) < 1e-12 && fabs(omega[1] - omega[0] - dw) < 1e-9 * dw, "omega axis");
@@ -1230,6 +1246,620 @@ static void test_hot_journal(const char* root)
     check_runs_contract(db_path);
 }
 
+/* -------------------------------------------------------------------------
+ * Verification pass: copied staging files, same keys, key stability,
+ * truncation and a merge tool killed mid-merge
+ * ---------------------------------------------------------------------- */
+
+/* Copy @p from to @p to; keep only the first @p keep bytes, or zero the rest when @p zero_tail. */
+static int copy_file(const char* from, const char* to, long keep, int zero_tail)
+{
+    FILE* in = fopen(from, "rb");
+    FILE* out = fopen(to, "wb");
+    if (in == NULL || out == NULL) {
+        if (in != NULL) {
+            fclose(in);
+        }
+        if (out != NULL) {
+            fclose(out);
+        }
+        return -1;
+    }
+    long n = 0;
+    int c = 0;
+    while ((c = fgetc(in)) != EOF) {
+        if (keep >= 0 && n >= keep) {
+            if (!zero_tail) {
+                break;
+            }
+            c = 0;
+        }
+        fputc(c, out);
+        n += 1;
+    }
+    fclose(in);
+    fclose(out);
+    return 0;
+}
+
+/* Name of the only staging file in @p dir. */
+static int only_staging_file(const char* dir, char* out_name, size_t cap)
+{
+    DIR* d = opendir(dir);
+    int found = 0;
+    struct dirent* ent = NULL;
+    while (d != NULL && (ent = readdir(d)) != NULL) {
+        const size_t len = strlen(ent->d_name);
+        if (len > 7u && strcmp(ent->d_name + len - 7u, ".sqlite") == 0) {
+            (void)snprintf(out_name, cap, "%s", ent->d_name);
+            found += 1;
+        }
+    }
+    if (d != NULL) {
+        closedir(d);
+    }
+    return found == 1 ? 0 : -1;
+}
+
+static long file_size(const char* path)
+{
+    struct stat st;
+    return (stat(path, &st) == 0) ? (long)st.st_size : -1;
+}
+
+static int run_tool(const char* args, const char* target)
+{
+    if (g_merge_tool == NULL) {
+        return -1;
+    }
+    char cmd[3000];
+    (void)snprintf(cmd, sizeof(cmd), "'%s' -q %s '%s' 2>/dev/null", g_merge_tool, args, target);
+    return system(cmd);
+}
+
+static double* read_array(const char* db, const char* key, const char* name, size_t* out_n)
+{
+    size_t n = 0u;
+    if (nlolib_storage_read_run_array(db, key, name, NULL, 0u, &n) != NLOLIB_STATUS_OK) {
+        *out_n = 0u;
+        return NULL;
+    }
+    double* values = (double*)calloc(n > 0u ? n : 1u, sizeof(double));
+    if (nlolib_storage_read_run_array(db, key, name, values, n, out_n) != NLOLIB_STATUS_OK) {
+        *out_n = 0u;
+    }
+    return values;
+}
+
+/*
+ * A deferred run staged for one store, copied into another store's staging/
+ * and merged there with nlolib_store_merge. Half-copied and zero-filled copies
+ * are neither merged nor deleted, even with --discard-incomplete --min-age 0.
+ */
+static void test_copied_staging(const char* root)
+{
+    char a_root[1100];
+    char a_dir[1100];
+    char a_db[1200];
+    char a_staging[1200];
+    path_join(a_root, sizeof(a_root), root, "a");
+    path_join(a_dir, sizeof(a_dir), a_root, "otherfolder");
+    (void)mkdir(root, 0775);
+    (void)mkdir(a_root, 0775);
+    (void)mkdir(a_dir, 0775);
+    path_join(a_db, sizeof(a_db), a_dir, "nlolib.sqlite");
+    path_join(a_staging, sizeof(a_staging), a_dir, "staging");
+
+    run_case rc;
+    case_init_1d(&rc, 128u, 1.0, 6u, a_db);
+    rc.storage.defer_merge = 1;
+    rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+    storage_result result;
+    CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.deferred == 1, "deferred run for store a");
+    case_free(&rc);
+    char name[600];
+    CHECK(only_staging_file(a_staging, name, sizeof(name)) == 0, "no single staging file in store a");
+    char src[1900];
+    path_join(src, sizeof(src), a_staging, name);
+
+    static const char* arrays[] = {"z", "t", "omega", "power", "spectrum", "fluence_x", "fluence_y", "final_field", "raw"};
+    double* original[9];
+    size_t original_n[9];
+    for (size_t i = 0u; i < 9u; ++i) {
+        original[i] = read_array(src, result.key, arrays[i], &original_n[i]);
+        CHECK(original_n[i] > 0u, "staging array %s empty", arrays[i]);
+    }
+
+    char b_db[1100];
+    char b_store[1100];
+    path_join(b_store, sizeof(b_store), root, "b");
+    make_store(b_store, b_db, sizeof(b_db));
+    char b_staging[1200];
+    staging_dir(b_db, b_staging, sizeof(b_staging));
+    (void)mkdir(b_staging, 0775);
+    char dst[1900];
+    path_join(dst, sizeof(dst), b_staging, name);
+    const long full = file_size(src);
+    int present = 1;
+
+    /* Half copied: a truncated file under the final name. */
+    CHECK(copy_file(src, dst, full / 2, 0) == 0, "half copy");
+    (void)run_tool("--discard-incomplete --min-age 0", b_store);
+    CHECK(file_size(dst) == full / 2, "half-copied staging file was changed or deleted");
+    CHECK(nlolib_storage_has_run(b_db, result.key, &present) == NLOLIB_STATUS_OK && present == 0, "half copy merged");
+
+    /* Preallocated copy: full size, second half still zeros. */
+    CHECK(copy_file(src, dst, full / 2, 1) == 0, "zero-tail copy");
+    (void)run_tool("--discard-incomplete --min-age 0", b_store);
+    CHECK(file_size(dst) == full, "zero-filled staging file was changed or deleted");
+    CHECK(nlolib_storage_has_run(b_db, result.key, &present) == NLOLIB_STATUS_OK && present == 0, "zero-filled copy merged");
+    unlink(dst);
+
+    /* Safe protocol: copy under another name, then rename into place. */
+    char part[2000];
+    (void)snprintf(part, sizeof(part), "%s.part", dst);
+    CHECK(copy_file(src, part, -1, 0) == 0, "part copy");
+    CHECK(run_tool("--discard-incomplete --min-age 0", b_store) == 0, "tool with a .part file present");
+    CHECK(file_size(part) == full, ".part file touched");
+    CHECK(rename(part, dst) == 0, "rename into place");
+    CHECK(run_tool("", b_store) == 0, "merge tool failed");
+    CHECK(nlolib_storage_has_run(b_db, result.key, &present) == NLOLIB_STATUS_OK && present == 1, "copied run not merged");
+    CHECK(count_files(b_staging, ".sqlite") == 0u, "merged copy not removed");
+    CHECK(file_size(src) == full, "source staging file changed");
+
+    sqlite3* db = open_ro(b_db);
+    char text[256];
+    sql_text(db, "SELECT file FROM runs;", text, sizeof(text));
+    CHECK(strcmp(text, "nlolib/nlolib.sqlite") == 0, "file of copied run is '%s'", text);
+    sql_text(db, "SELECT key FROM runs;", text, sizeof(text));
+    CHECK(strcmp(text, result.key) == 0, "key of copied run is '%s'", text);
+    sqlite3_close(db);
+    for (size_t i = 0u; i < 9u; ++i) {
+        size_t n = 0u;
+        double* merged = read_array(b_db, result.key, arrays[i], &n);
+        CHECK(n == original_n[i] && memcmp(merged, original[i], n * sizeof(double)) == 0,
+              "merged %s differs from the staging file (%zu vs %zu values)", arrays[i], n, original_n[i]);
+        free(merged);
+        free(original[i]);
+    }
+    check_runs_contract(b_db);
+}
+
+static void staging_created_at(const char* path, char* out, size_t cap)
+{
+    sqlite3* db = open_ro(path);
+    out[0] = '\0';
+    if (db != NULL) {
+        sql_text(db, "SELECT created_at FROM runs;", out, cap);
+        sqlite3_close(db);
+    }
+}
+
+/* Two staged copies of one key, a staged run whose key is already stored, and an older copy arriving late. */
+static void test_same_key(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    char sdir[1024];
+    staging_dir(db_path, sdir, sizeof(sdir));
+    run_case rc;
+    case_init_1d(&rc, 64u, 1.0, 5u, db_path);
+    rc.storage.defer_merge = 1;
+    storage_result first;
+    storage_result second;
+    CHECK(case_run(&rc, NULL, 0u, &first) == NLOLIB_STATUS_OK && first.deferred == 1, "first staged copy");
+    usleep(5000);
+    CHECK(case_run(&rc, NULL, 0u, &second) == NLOLIB_STATUS_OK && second.deferred == 1, "second staged copy");
+    CHECK(strcmp(first.key, second.key) == 0, "same parameters gave different keys");
+    CHECK(count_files(sdir, ".sqlite") == 2u, "two staging files expected");
+    int present = 1;
+    CHECK(nlolib_storage_has_run(db_path, first.key, &present) == NLOLIB_STATUS_OK && present == 0,
+          "has_run is true for staged runs");
+
+    /* Newest created_at wins whatever order the files are merged in. */
+    char newest[32] = "";
+    DIR* d = opendir(sdir);
+    struct dirent* ent = NULL;
+    while (d != NULL && (ent = readdir(d)) != NULL) {
+        if (strstr(ent->d_name, ".sqlite") == NULL) {
+            continue;
+        }
+        char path[1400];
+        char created[32];
+        path_join(path, sizeof(path), sdir, ent->d_name);
+        staging_created_at(path, created, sizeof(created));
+        if (strcmp(created, newest) > 0) {
+            (void)snprintf(newest, sizeof(newest), "%s", created);
+        }
+    }
+    if (d != NULL) {
+        closedir(d);
+    }
+    size_t merged = 0u;
+    CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL) == NLOLIB_STATUS_OK && merged == 2u,
+          "both copies resolved (%zu)", merged);
+    CHECK(nlolib_storage_has_run(db_path, first.key, &present) == NLOLIB_STATUS_OK && present == 1, "has_run after merge");
+    CHECK(count_files(sdir, ".sqlite") == 0u, "a same-key copy was left in staging");
+    sqlite3* db = open_ro(db_path);
+    char text[64];
+    sql_text(db, "SELECT created_at FROM runs;", text, sizeof(text));
+    CHECK(strcmp(text, newest) == 0, "stored created_at %s is not the newest copy %s", text, newest);
+    CHECK(sql_int(db, "SELECT COUNT(*) FROM runs;") == 1 && sql_int(db, "SELECT COUNT(*) FROM io_runs;") == 1 &&
+              sql_int(db, "SELECT COUNT(*) FROM io_record_maps;") == 5,
+          "same key duplicated");
+    sqlite3_close(db);
+
+    /* A staged run whose key is already stored replaces it (it is newer). */
+    storage_result third;
+    CHECK(case_run(&rc, NULL, 0u, &third) == NLOLIB_STATUS_OK, "third staged copy");
+    char third_path[1400];
+    char third_name[600];
+    CHECK(only_staging_file(sdir, third_name, sizeof(third_name)) == 0, "third staging file");
+    path_join(third_path, sizeof(third_path), sdir, third_name);
+    char third_created[32];
+    staging_created_at(third_path, third_created, sizeof(third_created));
+    /* Keep a copy of it to bring back later as a late, older copy. */
+    char late[1500];
+    (void)snprintf(late, sizeof(late), "%s/late-copy.bak", root);
+    CHECK(copy_file(third_path, late, -1, 0) == 0, "keep late copy");
+    CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL) == NLOLIB_STATUS_OK && merged == 1u,
+          "third copy merged");
+    db = open_ro(db_path);
+    sql_text(db, "SELECT created_at FROM runs;", text, sizeof(text));
+    CHECK(strcmp(text, third_created) == 0, "stored run not replaced by the newer copy");
+    sqlite3_close(db);
+
+    /* A newer run is merged, then the older copy arrives: it is superseded and removed, not merged. */
+    usleep(5000);
+    storage_result fourth;
+    CHECK(case_run(&rc, NULL, 0u, &fourth) == NLOLIB_STATUS_OK, "fourth staged copy");
+    CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL) == NLOLIB_STATUS_OK && merged == 1u,
+          "fourth copy merged");
+    db = open_ro(db_path);
+    char fourth_created[32];
+    sql_text(db, "SELECT created_at FROM runs;", fourth_created, sizeof(fourth_created));
+    sqlite3_close(db);
+    CHECK(strcmp(fourth_created, third_created) > 0, "fourth run is not newer");
+    CHECK(copy_file(late, third_path, -1, 0) == 0, "restore late copy");
+    CHECK(nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL) == NLOLIB_STATUS_OK && merged == 1u,
+          "late copy resolved");
+    CHECK(count_files(sdir, ".sqlite") == 0u, "superseded copy left in staging");
+    db = open_ro(db_path);
+    sql_text(db, "SELECT created_at FROM runs;", text, sizeof(text));
+    CHECK(strcmp(text, fourth_created) == 0, "an older copy replaced a newer run (%s)", text);
+    CHECK(sql_int(db, "SELECT COUNT(*) FROM runs;") == 1 && sql_int(db, "SELECT COUNT(*) FROM io_record_maps;") == 5,
+          "rows duplicated after the late copy");
+    sqlite3_close(db);
+    unlink(late);
+    case_free(&rc);
+    check_runs_contract(db_path);
+}
+
+/* Exactly representable run used for the cross-binding key check (same values in the Julia and Python tests). */
+#define KEY_REFERENCE_N 16u
+static const char* const k_reference_key = "a29aa53a4be7d5f7";
+
+static void reference_case(run_case* rc, nlo_complex* field, nlo_complex* omega)
+{
+    memset(rc, 0, sizeof(*rc));
+    rc->nt = KEY_REFERENCE_N;
+    rc->nx = 1u;
+    rc->ny = 1u;
+    rc->n = KEY_REFERENCE_N;
+    for (size_t i = 0u; i < KEY_REFERENCE_N; ++i) {
+        field[i] = make(((double)i - 8.0) / 16.0, (double)(i % 4u) / 8.0);
+        omega[i] = make(0.5 * (double)((i <= 7u) ? (long)i : (long)i - 16), 0.0);
+    }
+    rc->field = field;
+    rc->sim.propagation.propagation_distance = 0.25;
+    rc->sim.propagation.starting_step_size = 0.0625;
+    rc->sim.propagation.max_step_size = 0.125;
+    rc->sim.propagation.min_step_size = 0.0009765625;
+    rc->sim.propagation.error_tolerance = 1e-6;
+    rc->sim.time.pulse_period = 2.0;
+    rc->sim.time.delta_time = 0.125;
+    rc->sim.frequency.frequency_grid = omega;
+    rc->sim.spatial.delta_x = 1.0;
+    rc->sim.spatial.delta_y = 1.0;
+    rc->phys.dispersion_factor_expr = "i*c0*w*w";
+    rc->phys.nonlinear_expr = "i*A*(c1*I)";
+    rc->phys.num_constants = 2u;
+    rc->phys.constants[0] = -0.04;
+    rc->phys.constants[1] = 1.0;
+    rc->storage = (storage_options){0};
+    rc->storage.log_final_output_field_to_db = 1;
+    rc->storage.record_mode = STORAGE_RECORD_MODE_REDUCED;
+    rc->options = nlolib_propagate_options_default();
+    rc->options.num_recorded_samples = 3u;
+    rc->options.storage_options = &rc->storage;
+}
+
+static void key_of(const run_case* rc, char out[STORAGE_KEY_MAX])
+{
+    out[0] = '\0';
+    CHECK(nlolib_storage_run_key(&rc->sim, &rc->phys, rc->n, rc->field, &rc->options, out) == NLOLIB_STATUS_OK,
+          "run_key failed");
+}
+
+/* The key is the same for equivalent spellings of one run and different for every parameter that defines it. */
+static void test_key_stability(const char* root)
+{
+    (void)root;
+    nlo_complex field[KEY_REFERENCE_N];
+    nlo_complex omega[KEY_REFERENCE_N];
+    nlo_complex alt[KEY_REFERENCE_N];
+    run_case rc;
+    reference_case(&rc, field, omega);
+    char base[STORAGE_KEY_MAX];
+    key_of(&rc, base);
+    printf("  reference key: %s\n", base);
+    if (strcmp(k_reference_key, "REFERENCE_KEY_PLACEHOLDER") != 0) {
+        CHECK(strcmp(base, k_reference_key) == 0, "reference key %s, expected %s", base, k_reference_key);
+    }
+
+    /* Same key: backend, aliases, irrelevant fields, equivalent spellings of dt. */
+    char key[STORAGE_KEY_MAX];
+    execution_options exec = (execution_options){0};
+    exec.backend_type = VECTOR_BACKEND_VULKAN;
+    rc.options.exec_options = &exec;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "exec options changed the key");
+    exec.backend_type = VECTOR_BACKEND_CPU;
+    exec.fft_backend = FFT_BACKEND_FFTW;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "cpu backend changed the key");
+    rc.options.exec_options = NULL;
+    rc.phys.linear_factor_expr = "i*c0*w*w"; /* Julia fills both aliases; time-only runs use dispersion_factor */
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "unused linear_factor_expr changed a time-only key");
+    rc.phys.linear_factor_expr = NULL;
+    rc.phys.nonlinear_gamma = 3.0;
+    rc.phys.raman_tau1 = 0.0122;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "Raman settings changed an expression-model key");
+    rc.phys.nonlinear_gamma = 0.0;
+    rc.phys.raman_tau1 = 0.0;
+    rc.sim.spatial.delta_x = 7.0;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "dx changed a time-only key");
+    rc.sim.spatial.delta_x = 1.0;
+    rc.sim.time.pulse_period = 0.0;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "pulse_period changed the key although delta_time is set");
+    rc.sim.time.pulse_period = 2.0;
+    rc.sim.time.delta_time = 0.0;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "dt from pulse_period differs from the same delta_time");
+    rc.sim.time.delta_time = 0.125;
+    rc.phys.num_constants = 4u;
+    rc.phys.constants[2] = 1.0; /* the defaults of c2, c3 */
+    rc.phys.constants[3] = 0.0;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "explicit default constants changed the key");
+    rc.phys.num_constants = 2u;
+    rc.phys.constants[2] = 0.0;
+    rc.options.storage_options = &rc.storage;
+    rc.storage.sqlite_path = "/somewhere/else.sqlite";
+    rc.storage.chunk_records = 3u;
+    rc.storage.run_id = "label";
+    rc.storage.defer_merge = 1;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "path, chunk size, run_id or defer_merge changed the key");
+    rc.storage.sqlite_path = NULL;
+    rc.storage.chunk_records = 0u;
+    rc.storage.run_id = NULL;
+    rc.storage.defer_merge = 0;
+
+    /* Different key: every parameter that defines the run or its stored output. */
+    char keys[40][STORAGE_KEY_MAX];
+    const char* labels[40];
+    size_t nk = 0u;
+#define VARY(label, change, restore) \
+    do {                              \
+        change;                       \
+        key_of(&rc, keys[nk]);        \
+        labels[nk++] = (label);       \
+        restore;                      \
+    } while (0)
+    VARY("dt", rc.sim.time.delta_time = 0.25, rc.sim.time.delta_time = 0.125);
+    VARY("z", rc.sim.propagation.propagation_distance = 0.5, rc.sim.propagation.propagation_distance = 0.25);
+    VARY("h_start", rc.sim.propagation.starting_step_size = 0.03125, rc.sim.propagation.starting_step_size = 0.0625);
+    VARY("h_max", rc.sim.propagation.max_step_size = 0.25, rc.sim.propagation.max_step_size = 0.125);
+    VARY("h_min", rc.sim.propagation.min_step_size = 0.001953125, rc.sim.propagation.min_step_size = 0.0009765625);
+    VARY("tol", rc.sim.propagation.error_tolerance = 1e-7, rc.sim.propagation.error_tolerance = 1e-6);
+    VARY("dispersion_factor_expr", rc.phys.dispersion_factor_expr = "i*c0*w*w-c1", rc.phys.dispersion_factor_expr = "i*c0*w*w");
+    VARY("dispersion_expr", rc.phys.dispersion_expr = "exp(h*D)*1", rc.phys.dispersion_expr = NULL);
+    VARY("nonlinear_expr", rc.phys.nonlinear_expr = "i*A*(c1*I+V)", rc.phys.nonlinear_expr = "i*A*(c1*I)");
+    VARY("c0", rc.phys.constants[0] = -0.05, rc.phys.constants[0] = -0.04);
+    VARY("c1", rc.phys.constants[1] = 1.5, rc.phys.constants[1] = 1.0);
+    VARY("c4", (rc.phys.num_constants = 5u, rc.phys.constants[4] = 2.0), (rc.phys.num_constants = 2u, rc.phys.constants[4] = 0.0));
+    VARY("raman model", (rc.phys.nonlinear_model = NONLINEAR_MODEL_KERR_RAMAN, rc.phys.nonlinear_gamma = 1.0),
+         (rc.phys.nonlinear_model = NONLINEAR_MODEL_EXPR, rc.phys.nonlinear_gamma = 0.0));
+    rc.phys.nonlinear_model = NONLINEAR_MODEL_KERR_RAMAN;
+    rc.phys.nonlinear_gamma = 1.0;
+    char raman_base[STORAGE_KEY_MAX];
+    key_of(&rc, raman_base);
+    VARY("gamma", rc.phys.nonlinear_gamma = 2.0, rc.phys.nonlinear_gamma = 1.0);
+    VARY("raman_fraction", rc.phys.raman_fraction = 0.18, rc.phys.raman_fraction = 0.0);
+    VARY("raman_tau1", rc.phys.raman_tau1 = 0.02, rc.phys.raman_tau1 = 0.0);
+    VARY("raman_tau2", rc.phys.raman_tau2 = 0.05, rc.phys.raman_tau2 = 0.0);
+    VARY("shock_omega0", rc.phys.shock_omega0 = 10.0, rc.phys.shock_omega0 = 0.0);
+    rc.phys.raman_tau1 = 0.0122; /* the default value: same as unset */
+    key_of(&rc, key);
+    CHECK(strcmp(key, raman_base) == 0, "explicit default raman_tau1 changed the key");
+    rc.phys.raman_tau1 = 0.0;
+    rc.phys.nonlinear_model = NONLINEAR_MODEL_EXPR;
+    rc.phys.nonlinear_gamma = 0.0;
+    VARY("input sample", field[3].re += 1.0 / 1024.0, field[3].re -= 1.0 / 1024.0);
+    VARY("frequency grid", omega[5].re += 0.5, omega[5].re -= 0.5);
+    memcpy(alt, field, sizeof(alt));
+    VARY("potential grid", rc.sim.spatial.potential_grid = alt, rc.sim.spatial.potential_grid = NULL);
+    VARY("records", rc.options.num_recorded_samples = 4u, rc.options.num_recorded_samples = 3u);
+    double zs[3] = {0.0, 0.125, 0.25};
+    VARY("explicit z", (rc.options.explicit_record_z = zs, rc.options.explicit_record_z_count = 3u),
+         (rc.options.explicit_record_z = NULL, rc.options.explicit_record_z_count = 0u));
+    VARY("record_mode", rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW,
+         rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED);
+    VARY("final_field", rc.storage.log_final_output_field_to_db = 0, rc.storage.log_final_output_field_to_db = 1);
+    rc.storage.record_mode = STORAGE_RECORD_MODE_RAW;
+    VARY("raw (stride 1)", (void)0, (void)0);
+    VARY("raw_stride_t", rc.storage.raw_stride_t = 2u, rc.storage.raw_stride_t = 0u);
+    rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED;
+    key_of(&rc, key);
+    CHECK(strcmp(key, base) == 0, "restoring every parameter did not restore the key");
+
+    /* Tensor runs: transverse steps, potential and linear expressions. */
+#define VARY_T(label, change, restore) \
+    do {                                \
+        change;                         \
+        key_of(&t, keys[nk]);           \
+        labels[nk++] = (label);         \
+        restore;                        \
+    } while (0)
+    run_case t;
+    case_init_3d(&t, 16u, 4u, 4u, 3u, NULL);
+    char tbase[STORAGE_KEY_MAX];
+    key_of(&t, tbase);
+    VARY_T("3d dx", t.sim.spatial.delta_x = 0.5, t.sim.spatial.delta_x = 0.4);
+    VARY_T("3d dy", t.sim.spatial.delta_y = 0.5, t.sim.spatial.delta_y = 0.4);
+    VARY_T("3d potential_expr", t.phys.potential_expr = "0.5", t.phys.potential_expr = NULL);
+    VARY_T("3d linear_factor_expr", t.phys.linear_factor_expr = "i*c0*(wt*wt)", t.phys.linear_factor_expr =
+         "i*(c0*(wt*wt) + c1*((kx*kx)+(ky*ky)))");
+    VARY_T("3d potential grid", t.potential[0].re += 1.0, t.potential[0].re -= 1.0);
+#undef VARY
+#undef VARY_T
+    case_free(&t);
+
+    for (size_t i = 0u; i < nk; ++i) {
+        CHECK(strcmp(keys[i], base) != 0 && strcmp(keys[i], tbase) != 0, "%s did not change the key", labels[i]);
+        for (size_t j = i + 1u; j < nk; ++j) {
+            CHECK(strcmp(keys[i], keys[j]) != 0, "%s and %s gave the same key", labels[i], labels[j]);
+        }
+    }
+}
+
+/* A run stopped early by the size cap: nlolib_records_written and nlolib_truncated tell the truth. */
+static void test_truncated_run(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    static const storage_record_mode modes[2] = {STORAGE_RECORD_MODE_RAW, STORAGE_RECORD_MODE_REDUCED_AND_RAW};
+    for (int m = 0; m < 2; ++m) {
+        run_case rc;
+        case_init_1d(&rc, 1024u, 1.0 + 0.1 * m, 20u, db_path);
+        rc.storage.record_mode = modes[m];
+        rc.storage.chunk_records = 2u;
+        rc.storage.sqlite_max_bytes = (1u << 20) + 200u * 1024u; /* room for a few 32 KiB chunks */
+        storage_result result;
+        CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.merged == 1, "capped run (mode %d)", m);
+        CHECK(result.truncated == 1, "capped run not truncated (mode %d)", m);
+        storage_run_layout layout;
+        CHECK(nlolib_storage_read_run_layout(db_path, result.key, &layout) == NLOLIB_STATUS_OK, "layout");
+        CHECK(layout.raw_records > 0u && layout.raw_records < 20u, "raw records %zu", layout.raw_records);
+        sqlite3* db = open_ro(db_path);
+        char q[256];
+        (void)snprintf(q, sizeof(q), "SELECT nlolib_records_written FROM runs WHERE key='%s';", result.key);
+        const long long written = sql_int(db, q);
+        (void)snprintf(q, sizeof(q), "SELECT nlolib_truncated FROM runs WHERE key='%s';", result.key);
+        CHECK(sql_int(db, q) == 1, "nlolib_truncated not set (mode %d)", m);
+        (void)snprintf(q, sizeof(q), "SELECT nlolib_num_records FROM runs WHERE key='%s';", result.key);
+        CHECK(sql_int(db, q) == 20, "nlolib_num_records (mode %d)", m);
+        sqlite3_close(db);
+        if (modes[m] == STORAGE_RECORD_MODE_RAW) {
+            CHECK(written == (long long)layout.raw_records, "raw-only records_written %lld, stored %zu", written,
+                  layout.raw_records);
+        } else {
+            CHECK(written == 20 && layout.num_records == 20u, "maps stored for every record: %lld", written);
+        }
+        CHECK(count_where_key(db_path, "io_record_chunks", result.key) > 0, "no raw chunks kept");
+        case_free(&rc);
+    }
+    check_runs_contract(db_path);
+}
+
+/*
+ * nlolib_store_merge killed with SIGKILL at many points of a multi-transaction
+ * merge: after every kill the shared database is intact, every `runs` row has
+ * all its data, and the next merge finishes the job.
+ */
+static void test_merge_tool_killed(const char* root)
+{
+    if (g_merge_tool == NULL) {
+        printf("  (merge tool path not given; skipped)\n");
+        return;
+    }
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    char sdir[1024];
+    staging_dir(db_path, sdir, sizeof(sdir));
+    const int runs = 4;
+    char keys[4][STORAGE_KEY_MAX];
+    for (int r = 0; r < runs; ++r) {
+        run_case rc;
+        case_init_3d(&rc, 64u, 8u, 8u, 16u, db_path);
+        rc.field[0].re += 0.25 * r;
+        rc.storage.defer_merge = 1;
+        rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+        rc.storage.chunk_records = 2u;
+        storage_result result;
+        CHECK(case_run(&rc, NULL, 0u, &result) == NLOLIB_STATUS_OK && result.deferred == 1, "staged run %d", r);
+        (void)snprintf(keys[r], sizeof(keys[r]), "%s", result.key);
+        case_free(&rc);
+    }
+    setenv("NLOLIB_STORE_MERGE_BATCH_BYTES", "65536", 1);
+    static const unsigned delays_ms[] = {5, 20, 40, 60, 80, 110, 150, 200, 260, 330, 420, 520};
+    int kills = 0;
+    int journals = 0;
+    for (size_t i = 0u; i < 60u && count_files(sdir, ".sqlite") > 0u; ++i) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl(g_merge_tool, g_merge_tool, "-q", db_path, (char*)NULL);
+            _exit(127);
+        }
+        usleep(1000u * delays_ms[i % (sizeof(delays_ms) / sizeof(delays_ms[0]))]);
+        if (kill(pid, SIGKILL) == 0) {
+            kills += 1;
+        }
+        (void)waitpid(pid, NULL, 0);
+        char journal[1100];
+        (void)snprintf(journal, sizeof(journal), "%s-journal", db_path);
+        if (file_size(journal) > 0) {
+            journals += 1;
+        }
+        /* The writer lock of the killed tool is stale (dead pid); the next merger breaks it. A reader may
+         * meet the hot journal: that is the documented case a writer has to roll back first. */
+        if (file_size(journal) <= 0) {
+            sqlite3* db = open_ro(db_path);
+            if (db != NULL) {
+                char integrity[64];
+                sql_text(db, "PRAGMA integrity_check;", integrity, sizeof(integrity));
+                CHECK(integrity[0] == '\0' || strcmp(integrity, "ok") == 0, "integrity after kill %zu: %s", i, integrity);
+                CHECK(sql_int(db, "SELECT COUNT(*) FROM runs r WHERE "
+                                  "(SELECT COUNT(*) FROM io_record_maps m WHERE m.run_id = r.nlolib_run_id) != 16 OR "
+                                  "(SELECT COUNT(*) FROM io_record_chunks c WHERE c.run_id = r.nlolib_run_id) != 8 OR "
+                                  "(SELECT COUNT(*) FROM io_final_output_fields f WHERE f.run_id = r.nlolib_run_id) != 1;") <= 0,
+                      "a runs row without all its data after kill %zu", i);
+                sqlite3_close(db);
+            }
+        }
+    }
+    unsetenv("NLOLIB_STORE_MERGE_BATCH_BYTES");
+    printf("  killed the merge tool %d times, %d left a hot journal\n", kills, journals);
+    CHECK(run_tool("", db_path) == 0, "final merge after kills failed");
+    CHECK(count_files(sdir, ".sqlite") == 0u, "staging files left after the final merge");
+    for (int r = 0; r < runs; ++r) {
+        int present = 0;
+        CHECK(nlolib_storage_has_run(db_path, keys[r], &present) == NLOLIB_STATUS_OK && present == 1, "run %d lost", r);
+        CHECK(count_where_key(db_path, "io_record_maps", keys[r]) == 16 &&
+                  count_where_key(db_path, "io_record_chunks", keys[r]) == 8,
+              "run %d incomplete after kills", r);
+    }
+    sqlite3* db = open_ro(db_path);
+    CHECK(sql_int(db, "SELECT COUNT(*) FROM io_runs;") == runs, "leftover partial merges in io_runs");
+    sqlite3_close(db);
+    check_runs_contract(db_path);
+}
+
 int main(int argc, char** argv)
 {
     char root[1024];
@@ -1255,6 +1885,11 @@ int main(int argc, char** argv)
         {"batched_interrupted_merge", test_batched_and_interrupted_merge},
         {"stale_view_guard", test_stale_view_guard},
         {"hot_journal", test_hot_journal},
+        {"copied_staging", test_copied_staging},
+        {"same_key", test_same_key},
+        {"key_stability", test_key_stability},
+        {"truncated_run", test_truncated_run},
+        {"merge_tool_killed", test_merge_tool_killed},
     };
     for (size_t i = 0u; i < sizeof(tests) / sizeof(tests[0]); ++i) {
         path_join(sub, sizeof(sub), root, tests[i].name);

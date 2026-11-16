@@ -8,13 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef DEFAULT_RAMAN_TAU1
-#define DEFAULT_RAMAN_TAU1 0.0122
-#endif
-
-#ifndef DEFAULT_RAMAN_TAU2
-#define DEFAULT_RAMAN_TAU2 0.0320
-#endif
+#include "core/runtime_defaults.h"
 
 execution_options execution_options_default(vector_backend_type backend_type)
 {

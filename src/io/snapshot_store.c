@@ -1316,7 +1316,8 @@ static int store_insert_runs_row(snapshot_store* store, const snapshot_store_fin
     set_text(&values[i++], params->input_sha256);
     set_text(&values[i++], params->potential_sha256);
     set_i64(&values[i++], (sqlite3_int64)store->num_recorded_samples);
-    set_i64(&values[i++], (sqlite3_int64)store->records_seen);
+    /* Records stored: maps rows when maps are kept, raw records otherwise (fewer when truncated). */
+    set_i64(&values[i++], (sqlite3_int64)(store->store_maps ? store->records_seen : store->raw_records));
     set_text(&values[i++], record_mode_name(store->record_mode));
     if (store->store_raw) {
         set_i64(&values[i], (sqlite3_int64)store->stride_t);

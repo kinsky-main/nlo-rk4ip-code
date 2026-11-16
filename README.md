@@ -134,7 +134,9 @@ nlolib_store_merge --watch 60 /path/to/store
 
 On Linux and macOS, run databases are written with SQLite's `unix-none` VFS
 under Nlolib's own writer lock, because SQLite's Unix locking cannot commit on
-SMB mounts (`NLOLIB_STORE_VFS` overrides). Tables, blob encoding, axes, units
+SMB mounts (`NLOLIB_STORE_VFS` overrides). Do not open the database read-write
+with other SQLite programs while Nlolib writes to it; for a database on a local
+disk that other programs use too, set `NLOLIB_STORE_VFS=unix`. Tables, blob encoding, axes, units
 and the lock protocol are specified in `docs/nlolib_run_database.md`.
 
 ## Bindings

@@ -17,6 +17,7 @@
 #include "io/snapshot_store.h"
 #include "io/log_sink.h"
 #include "core/sim_dimensions_internal.h"
+#include "core/runtime_defaults.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,6 +131,11 @@ static void key_put_complex_array(sha256_ctx* ctx, const char* name, const nlo_c
     sha256_update(ctx, line, strlen(line));
 }
 
+static const char* key_expr(const char* expr, const char* fallback)
+{
+    return (expr != NULL && expr[0] != '\0') ? expr : fallback;
+}
+
 int run_store_compute_key(
     const sim_config* config,
     size_t num_time_samples,
@@ -155,21 +161,35 @@ int run_store_compute_key(
     }
     const int tensor_mode = (config->tensor.nt > 0u) ? 1 : 0;
 
+    /*
+     * The key describes the physics the solver runs, so every value enters as
+     * the core resolves it: unset expressions take their defaults, aliases are
+     * merged, constants are the effective c0..cN, dt is the resolved step,
+     * transverse steps count only for axes with more than one sample, and the
+     * Raman settings only for the Kerr-Raman model.
+     */
+    const runtime_operator_params* rt = &config->runtime;
+    const double dt = (config->time.delta_time > 0.0) ? config->time.delta_time
+                      : (config->time.pulse_period > 0.0) ? config->time.pulse_period / (double)nt
+                      : 1.0;
+
     sha256_ctx ctx;
     sha256_init(&ctx);
     key_put_text(&ctx, "kind", "nlolib");
-    key_put_u64(&ctx, "key_version", 1u);
+    key_put_u64(&ctx, "key_version", 2u);
 
     key_put_u64(&ctx, "num_time_samples", num_time_samples);
     key_put_u64(&ctx, "nt", nt);
     key_put_u64(&ctx, "nx", nx);
     key_put_u64(&ctx, "ny", ny);
     key_put_u64(&ctx, "tensor_mode", (uint64_t)tensor_mode);
-    key_put_u64(&ctx, "tensor_layout", (uint64_t)(int64_t)config->tensor.layout);
-    key_put_f64(&ctx, "delta_time", config->time.delta_time);
-    key_put_f64(&ctx, "pulse_period", config->time.pulse_period);
-    key_put_f64(&ctx, "delta_x", config->spatial.delta_x);
-    key_put_f64(&ctx, "delta_y", config->spatial.delta_y);
+    key_put_f64(&ctx, "dt", dt);
+    if (nx > 1u) {
+        key_put_f64(&ctx, "dx", (config->spatial.delta_x > 0.0) ? config->spatial.delta_x : 1.0);
+    }
+    if (ny > 1u) {
+        key_put_f64(&ctx, "dy", (config->spatial.delta_y > 0.0) ? config->spatial.delta_y : 1.0);
+    }
 
     key_put_f64(&ctx, "propagation_distance", config->propagation.propagation_distance);
     key_put_f64(&ctx, "starting_step_size", config->propagation.starting_step_size);
@@ -177,28 +197,46 @@ int run_store_compute_key(
     key_put_f64(&ctx, "min_step_size", config->propagation.min_step_size);
     key_put_f64(&ctx, "error_tolerance", config->propagation.error_tolerance);
 
-    const runtime_operator_params* rt = &config->runtime;
-    key_put_text(&ctx, "linear_factor_expr", rt->linear_factor_expr);
-    key_put_text(&ctx, "linear_expr", rt->linear_expr);
-    key_put_text(&ctx, "potential_expr", rt->potential_expr);
-    key_put_text(&ctx, "dispersion_factor_expr", rt->dispersion_factor_expr);
-    key_put_text(&ctx, "dispersion_expr", rt->dispersion_expr);
-    key_put_text(&ctx, "nonlinear_expr", rt->nonlinear_expr);
-    const size_t num_constants =
-        (rt->num_constants <= RUNTIME_OPERATOR_CONSTANTS_MAX) ? rt->num_constants : RUNTIME_OPERATOR_CONSTANTS_MAX;
+    /* Only the programs the solver compiles for this mode (see init_state_builder.c). */
+    if (tensor_mode) {
+        key_put_text(&ctx, "linear_factor_expr",
+                     key_expr(rt->linear_factor_expr, key_expr(rt->dispersion_factor_expr, DEFAULT_LINEAR_FACTOR_EXPR)));
+        key_put_text(&ctx, "linear_expr", key_expr(rt->linear_expr, key_expr(rt->dispersion_expr, DEFAULT_LINEAR_EXPR)));
+        key_put_text(&ctx, "potential_expr", key_expr(rt->potential_expr, DEFAULT_POTENTIAL_EXPR));
+    } else {
+        key_put_text(&ctx, "dispersion_factor_expr",
+                     key_expr(rt->dispersion_factor_expr, DEFAULT_DISPERSION_FACTOR_EXPR));
+        key_put_text(&ctx, "dispersion_expr", key_expr(rt->dispersion_expr, DEFAULT_DISPERSION_EXPR));
+    }
+    key_put_text(&ctx, "nonlinear_expr", key_expr(rt->nonlinear_expr, DEFAULT_NONLINEAR_EXPR));
+
+    double constants[RUNTIME_OPERATOR_CONSTANTS_MAX] = {DEFAULT_C0, DEFAULT_C1, DEFAULT_C2, DEFAULT_C3};
+    size_t num_constants = 4u;
+    if (rt->num_constants > RUNTIME_OPERATOR_CONSTANTS_MAX) {
+        return -1;
+    }
+    for (size_t i = 0u; i < rt->num_constants; ++i) {
+        constants[i] = rt->constants[i];
+    }
+    if (rt->num_constants > num_constants) {
+        num_constants = rt->num_constants;
+    }
     key_put_u64(&ctx, "num_constants", num_constants);
     for (size_t i = 0u; i < num_constants; ++i) {
         char name[32];
         (void)snprintf(name, sizeof(name), "c%zu", i);
-        key_put_f64(&ctx, name, rt->constants[i]);
+        key_put_f64(&ctx, name, constants[i]);
     }
-    key_put_u64(&ctx, "nonlinear_model", (uint64_t)(int64_t)rt->nonlinear_model);
-    key_put_f64(&ctx, "nonlinear_gamma", rt->nonlinear_gamma);
-    key_put_f64(&ctx, "raman_fraction", rt->raman_fraction);
-    key_put_f64(&ctx, "raman_tau1", rt->raman_tau1);
-    key_put_f64(&ctx, "raman_tau2", rt->raman_tau2);
-    key_put_f64(&ctx, "shock_omega0", rt->shock_omega0);
-    key_put_complex_array(&ctx, "raman_response_time", rt->raman_response_time, rt->raman_response_len);
+    const int raman = (rt->nonlinear_model == NONLINEAR_MODEL_KERR_RAMAN);
+    key_put_u64(&ctx, "nonlinear_model", raman ? 1u : 0u);
+    if (raman) {
+        key_put_f64(&ctx, "nonlinear_gamma", rt->nonlinear_gamma);
+        key_put_f64(&ctx, "raman_fraction", rt->raman_fraction);
+        key_put_f64(&ctx, "raman_tau1", (rt->raman_tau1 > 0.0) ? rt->raman_tau1 : DEFAULT_RAMAN_TAU1);
+        key_put_f64(&ctx, "raman_tau2", (rt->raman_tau2 > 0.0) ? rt->raman_tau2 : DEFAULT_RAMAN_TAU2);
+        key_put_f64(&ctx, "shock_omega0", rt->shock_omega0);
+        key_put_complex_array(&ctx, "raman_response_time", rt->raman_response_time, rt->raman_response_len);
+    }
 
     complex_array_sha256(input_field, num_time_samples, out_info->input_sha256);
     key_put_text(&ctx, "input_field_sha256", out_info->input_sha256);
@@ -1524,6 +1562,20 @@ static int merge_table_batched(merge_txn* m, const char* table, const char* inde
     return rc;
 }
 
+/* `file` names the database the run is in now, whatever store the staging file was made for. */
+static int set_runs_file(sqlite3* db, const char* key, const char* index_file)
+{
+    sqlite3_stmt* stmt = NULL;
+    if (sqlite3_prepare_v2(db, "UPDATE main.runs SET file=?2 WHERE key=?1;", -1, &stmt, NULL) != SQLITE_OK) {
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, index_file, -1, SQLITE_TRANSIENT);
+    const int rc = (sqlite3_step(stmt) == SQLITE_DONE) ? 0 : -1;
+    sqlite3_finalize(stmt);
+    return rc;
+}
+
 static long long stg_count(sqlite3* db, const char* schema, const char* table, const char* run_id)
 {
     if (!db_table_exists(db, schema, table)) {
@@ -1552,7 +1604,8 @@ static long long stg_count(sqlite3* db, const char* schema, const char* table, c
  * staging file again starts over from step 1, and nlolib_storage_recover_staging
  * deletes such data when its staging file is gone.
  */
-static run_store_status merge_locked(sqlite3* db, run_lock* lock, const char* key, const char* run_id)
+static run_store_status merge_locked(sqlite3* db, run_lock* lock, const char* key, const char* run_id,
+                                     const char* index_file)
 {
     merge_txn m;
     memset(&m, 0, sizeof(m));
@@ -1594,6 +1647,7 @@ static run_store_status merge_locked(sqlite3* db, run_lock* lock, const char* ke
          copy_rows(db, "io_final_output_fields", "INSERT", "run_id=?1", run_id, 0, 0) == 0 &&
          merge_runs_columns(db) == 0 &&
          copy_rows(db, "runs", "INSERT", "key=(SELECT key FROM stg.io_runs WHERE run_id=?1)", run_id, 0, 0) == 0 &&
+         set_runs_file(db, key, index_file) == 0 &&
          merge_commit(&m) == 0;
     if (!ok) {
         if (m.in_txn) {
@@ -1793,13 +1847,48 @@ static int verify_merge(const char* shared_path, const char* key, const char* ru
 }
 
 /* Inspect a staging database: key and run id of its complete run, if any. */
-static run_store_status staging_inspect(const char* staging_path, char key[STORAGE_KEY_MAX], char run_id[STORAGE_RUN_ID_MAX])
+/*
+ * Classify a staging file:
+ *   RUN_STORE_OK         a complete run (its `runs` row is present);
+ *   RUN_STORE_INCOMPLETE a valid database without a `runs` row (a run in
+ *                        progress or killed), or one with a hot journal (its
+ *                        writer died during a commit);
+ *   RUN_STORE_ERROR      damaged, truncated or still being copied: its header
+ *                        does not match its size, or (with @p deep) SQLite's
+ *                        quick_check fails. Such files are never merged or
+ *                        deleted automatically.
+ */
+static run_store_status staging_inspect(const char* staging_path, int deep,
+                                        char key[STORAGE_KEY_MAX], char run_id[STORAGE_RUN_ID_MAX])
 {
+    char journal[RUN_STORE_PATH_MAX + 16];
+    (void)snprintf(journal, sizeof(journal), "%s-journal", staging_path);
+    db_header h;
+    (void)read_db_header(journal, &h);
+    if (h.exists && h.file_bytes > 0) {
+        return RUN_STORE_INCOMPLETE;
+    }
+    if (read_db_header(staging_path, &h) != 0 || !h.exists) {
+        return RUN_STORE_ERROR;
+    }
+    if (h.file_bytes == 0) {
+        return RUN_STORE_INCOMPLETE;
+    }
+    if (!header_consistent(&h)) {
+        return RUN_STORE_ERROR;
+    }
     sqlite3* db = NULL;
     if (db_open(staging_path, 1, &db) != 0) {
         return RUN_STORE_ERROR;
     }
     run_store_status status = RUN_STORE_INCOMPLETE;
+    if (deep) {
+        char check[64] = {0};
+        if (db_text_query(db, "PRAGMA quick_check;", NULL, check, sizeof(check)) != 0 || strcmp(check, "ok") != 0) {
+            sqlite3_close(db);
+            return RUN_STORE_ERROR;
+        }
+    }
     if (db_table_exists(db, "main", "runs") && db_table_exists(db, "main", "io_runs")) {
         sqlite3_stmt* stmt = NULL;
         if (sqlite3_prepare_v2(db,
@@ -1819,6 +1908,25 @@ static run_store_status staging_inspect(const char* staging_path, char key[STORA
     return status;
 }
 
+/* 1 when the shared database already holds a run with this key that was created after the staged one. */
+static int staged_run_superseded(sqlite3* db, const char* key)
+{
+    sqlite3_stmt* stmt = NULL;
+    int superseded = 0;
+    if (sqlite3_prepare_v2(db,
+                           "SELECT (SELECT created_at FROM main.runs WHERE key=?1), "
+                           "(SELECT created_at FROM stg.runs WHERE key=?1);",
+                           -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_type(stmt, 0) == SQLITE_TEXT &&
+            sqlite3_column_type(stmt, 1) == SQLITE_TEXT) {
+            superseded = strcmp((const char*)sqlite3_column_text(stmt, 0), (const char*)sqlite3_column_text(stmt, 1)) > 0;
+        }
+        sqlite3_finalize(stmt);
+    }
+    return superseded;
+}
+
 run_store_status run_store_merge(const char* staging_path, const char* shared_path)
 {
     if (staging_path == NULL || shared_path == NULL) {
@@ -1826,7 +1934,7 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
     }
     char key[STORAGE_KEY_MAX] = {0};
     char run_id[STORAGE_RUN_ID_MAX] = {0};
-    const run_store_status inspect = staging_inspect(staging_path, key, run_id);
+    const run_store_status inspect = staging_inspect(staging_path, 0, key, run_id);
     if (inspect != RUN_STORE_OK) {
         return inspect;
     }
@@ -1837,7 +1945,7 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
         return lock_status;
     }
     /* Another writer may have merged this file while we waited: staging files are only deleted under the lock. */
-    if (!rs_file_exists(staging_path) || staging_inspect(staging_path, key, run_id) != RUN_STORE_OK) {
+    if (!rs_file_exists(staging_path)) {
         lock_release(&lock);
         int present = 0;
         if (run_store_has_key(shared_path, key, &present) == RUN_STORE_OK && present) {
@@ -1846,6 +1954,19 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
         }
         return RUN_STORE_ERROR;
     }
+    /* Full check before anything is copied: a damaged or partly copied file is left alone. */
+    const run_store_status deep = staging_inspect(staging_path, 1, key, run_id);
+    if (deep != RUN_STORE_OK) {
+        lock_release(&lock);
+        log_emit(LOG_LEVEL_WARN,
+                 "[nlolib][store] %s is %s; not merged and left in place",
+                 staging_path,
+                 deep == RUN_STORE_INCOMPLETE ? "incomplete" : "damaged or still being copied");
+        return deep;
+    }
+    char index_file[RUN_STORE_PATH_MAX];
+    run_store_index_file(shared_path, index_file, sizeof(index_file));
+    int superseded = 0;
 
     run_store_status status = await_fresh_view(shared_path);
     sqlite3* db = NULL;
@@ -1864,12 +1985,22 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
                     maps = stg_count(db, "stg", "io_record_maps", run_id);
                     chunks = stg_count(db, "stg", "io_record_chunks", run_id);
                     finals = stg_count(db, "stg", "io_final_output_fields", run_id);
-                    status = merge_locked(db, &lock, key, run_id);
+                    superseded = staged_run_superseded(db, key);
+                    status = superseded ? RUN_STORE_OK : merge_locked(db, &lock, key, run_id, index_file);
                     (void)sqlite3_exec(db, "DETACH DATABASE stg;", NULL, NULL, NULL);
                 }
             }
             sqlite3_close(db);
         }
+    }
+    if (superseded) {
+        /* The shared database holds a newer run with the same key: the newest run wins. */
+        run_store_discard(staging_path);
+        lock_release(&lock);
+        log_emit(LOG_LEVEL_INFO,
+                 "[nlolib][store] %s holds a newer run %s; staged copy %s discarded",
+                 shared_path, key, staging_path);
+        return RUN_STORE_OK;
     }
     if (status == RUN_STORE_OK && verify_merge(shared_path, key, run_id, maps, chunks, finals) != 0) {
         log_emit(LOG_LEVEL_ERROR, "[nlolib][store] run %s did not read back from %s after the merge", key, shared_path);
@@ -2043,7 +2174,13 @@ static void recover_one(recover_ctx* ctx, const char* name)
     const int same_host = (strcmp(host, ctx->host) == 0);
     char key[STORAGE_KEY_MAX];
     char run_id[STORAGE_RUN_ID_MAX];
-    const run_store_status inspect = staging_inspect(path, key, run_id);
+    const run_store_status inspect = staging_inspect(path, 0, key, run_id);
+    if (inspect == RUN_STORE_ERROR) {
+        /* Damaged, truncated or still being copied: never merged or deleted here. */
+        log_emit(LOG_LEVEL_WARN, "[nlolib][store] %s is damaged or still being copied; left in place", path);
+        ctx->skipped += 1u;
+        return;
+    }
     /* Complete files are merged whoever wrote them; incomplete ones of live local processes are runs in progress. */
     if (inspect != RUN_STORE_OK && same_host && pid != rs_pid() && rs_pid_alive(pid) != 0) {
         ctx->skipped += 1u;
@@ -2053,6 +2190,10 @@ static void recover_one(recover_ctx* ctx, const char* name)
         const run_store_status merged = run_store_merge(path, ctx->shared_path);
         if (merged == RUN_STORE_OK) {
             ctx->merged += 1u;
+        } else if (merged == RUN_STORE_INCOMPLETE || merged == RUN_STORE_ERROR) {
+            ctx->skipped += 1u;
+            ctx->failed = ctx->failed || (merged == RUN_STORE_ERROR && rs_file_exists(path) &&
+                                          staging_inspect(path, 0, key, run_id) == RUN_STORE_OK);
         } else {
             ctx->skipped += 1u;
             ctx->failed = 1;

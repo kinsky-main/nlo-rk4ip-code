@@ -9,8 +9,8 @@ The file is a *run database* in the sense of the ModelStore index contract
 (version 1): it holds a table `runs` with one row per complete run, which
 ModelStore copies into its index, plus Nlolib's own data tables, described here.
 
-Everything below refers to layout version 1 of these tables (Nlolib 1.19.0 and
-later).
+Everything below refers to layout version 1 of these tables. Nlolib 1.20.0 and
+earlier releases do not write them.
 
 ## Contents
 
@@ -123,7 +123,7 @@ CREATE TABLE runs (
 |---|---|
 | `key` | 16 lowercase hex digits, see [the run key](#the-run-key). |
 | `kind` | `nlolib` |
-| `file` | `<parent folder>/<file name>` of the shared database, e.g. `nlolib/nlolib.sqlite` (ModelStore rewrites it on sync). |
+| `file` | `<parent folder>/<file name>` of the database the run was merged into, e.g. `nlolib/nlolib.sqlite` (ModelStore rewrites it on sync). |
 | `created_at` | UTC time the run finished, written as `strftime('%Y-%m-%dT%H:%M:%f', 'now')`, i.e. `YYYY-MM-DDTHH:MM:SS.sss`. |
 | `git_commit` | Commit of the Nlolib build (40 hex digits, `-dirty` appended if the build tree had uncommitted changes to tracked files), or `nlolib-<version>` for a build without a repository. |
 | `julia_version` | Always NULL. The binding is in `nlolib_binding`. |
@@ -134,7 +134,7 @@ applicable to this run".
 
 | Column | Type | Meaning |
 |---|---|---|
-| `nlolib_version` | TEXT | Nlolib release, e.g. `1.19.0`. |
+| `nlolib_version` | TEXT | Nlolib release, e.g. `1.20.0`. |
 | `nlolib_binding` | TEXT | What made the run: `c` (C API), `julia`, `python`, `matlab`, or the caller's own tag. |
 | `nlolib_backend` | TEXT | Backend that ran it: `cpu` or `vulkan`. Not part of the key. |
 | `nlolib_run_id` | TEXT | `run_id` of the run in the data tables. |
@@ -165,7 +165,7 @@ applicable to this run".
 | `nlolib_input_sha256` | TEXT | SHA-256 of the input field (blob encoding above), 64 hex digits. |
 | `nlolib_potential_sha256` | TEXT | SHA-256 of the potential grid, or NULL when none was given. |
 | `nlolib_num_records` | INTEGER | Records requested. |
-| `nlolib_records_written` | INTEGER | Records stored (`io_record_layout.num_records`). |
+| `nlolib_records_written` | INTEGER | Records stored: rows of `io_record_maps` when maps are kept, otherwise raw records (`io_record_layout.raw_records`, fewer than requested when truncated). |
 | `nlolib_record_mode` | TEXT | `reduced`, `raw` or `reduced+raw`. |
 | `nlolib_raw_stride_t` | INTEGER | Raw time stride; NULL in `reduced` mode. |
 | `nlolib_raw_stride_x` | INTEGER | Raw x stride; NULL in `reduced` mode. |
@@ -331,6 +331,22 @@ minute. Both arrangements work at once: complete staging files are merged by
 whoever gets to them first, under the lock, and a file merged by one writer is
 gone (deleted under the lock) when the next one looks.
 
+**Other programs on the same file.** Because Nlolib's Linux and macOS
+writers take no SQLite locks by default, other SQLite programs must not open
+the shared database read-write while Nlolib may be writing to it. On a local
+disk this was measured: with four Nlolib writers merging, a stock `sqlite3`
+connection opened read-write (the `sqlite3` command-line tool, Python's
+`sqlite3.connect(path)`) treated the writers' journals as hot and rolled them
+back, so merges failed and readers met malformed pages and `runs` rows without
+their data; a stock writer inserting and deleting rows corrupted the file.
+Read-only connections (`mode=ro`) only see "attempt to write a readonly
+database" or "database is locked" and must retry. To share a database on a
+local disk with other SQLite programs, set `NLOLIB_STORE_VFS=unix` (SQLite's
+standard locking): under the same load every run was stored and readers saw
+nothing worse than "database is locked". On a Linux SMB mount, `unix` cannot
+commit at all, so there the rule is: no read-write SQLite connections to the
+shared file except Nlolib's merger.
+
 **SQLite locking.** SQLite's default Unix locking cannot commit on a Linux SMB
 (CIFS) mount: the mount turns SQLite's byte-range locks into SMB locks, and SMB
 refuses the read-to-write upgrade SQLite uses to commit, so every write ends in
@@ -377,6 +393,27 @@ consistent, the `runs` row exists and the row counts match the staging file;
 only then does it record the new header in `.writer-state`, delete the staging
 file and release the lock. A row in `runs` therefore never appears before all
 of its data.
+
+**Staging files from elsewhere.** A complete staging file can be moved to
+another store: copy it into that store's `staging/` folder and merge there;
+`file` is set to the database it is merged into, and the key and data are
+unchanged. The merger only looks at names of the form
+`<stem>.<key>.<pid>.<token>.<host>.sqlite` and decides from the file itself:
+
+- **complete**: a self-consistent SQLite file (header page count matching its
+  size, no `-journal` beside it) with a `runs` row; before merging, SQLite's
+  `quick_check` must also pass;
+- **incomplete**: a valid file without a `runs` row (a run in progress or
+  killed), or one with a hot journal beside it (its writer died during a
+  commit); discarded only on request and when old enough;
+- **damaged**: anything else, such as a file still being copied, truncated, or
+  preallocated and not yet filled. Damaged files are never merged and never
+  deleted automatically; they are reported and left in place.
+
+To copy a staging file in, copy it under a name that does not end in `.sqlite`
+(for example `<name>.sqlite.part`) and rename it to its final name once the
+copy has finished; a rename within one folder is atomic. Copy it only after its
+writer has finished (the run reported `deferred`).
 
 **Interrupted runs and merges.** A run that is aborted (progress callback) or
 fails never touches the shared database and deletes its staging file. A killed
@@ -438,29 +475,60 @@ disk. Existing rows are kept.
 `key` is the first 16 hex digits of the SHA-256 of a canonical text. Readers
 never parse it; this section only says what makes two runs the same run. The
 text is a sequence of lines `name=value\n`, starting with `kind=6:nlolib` and
-`key_version=1`, then:
+`key_version=2`. Every value enters as the solver uses it, so equivalent ways of
+writing one run give one key:
 
-- grid: total samples, `nt`, `nx`, `ny`, tensor mode and layout, `dt`, pulse
-  period, `dx`, `dy`;
+- grid: total samples, `nt`, `nx`, `ny`, tensor mode, the resolved time step
+  (`delta_time`, or `pulse_period / nt` when `delta_time` is 0), and `dx` / `dy`
+  only for an axis with more than one sample;
 - solver: propagation distance, initial, maximum and minimum step, tolerance;
-- operators: every expression string (length-prefixed, `-` when unset), the
-  number of constants and each constant, nonlinear model, `γ`, `f_R`, `τ1`, `τ2`,
-  `ω0`, and the SHA-256 of a custom Raman response;
+- operators: the expressions the solver compiles for the mode, with unset ones
+  replaced by their defaults and aliases resolved (`linear_factor_expr`,
+  `linear_expr` and `potential_expr` for (t, x, y) runs; `dispersion_factor_expr`
+  and `dispersion_expr` for time-only runs; `nonlinear_expr` for both); the
+  effective constants `c0 … cN` (the defaults `c0..c3 = -0.5, 0, 1, 0` where
+  not given); the nonlinear model and, for the Kerr–Raman model only, `γ`,
+  `f_R`, `τ1`, `τ2` (defaults applied), `ω0` and a custom Raman response;
 - inputs: SHA-256 of the input field, of the potential grid and of any
   caller-supplied frequency grid, `wt`, `kx`, `ky` axes or spatial frequency grid;
 - record specification: record count, SHA-256 of an explicit z schedule, record
   mode, final-field flag and, unless the mode is `reduced`, the raw strides.
 
-Doubles enter as the hex of their IEEE-754 bits, arrays as SHA-256 of their
-little-endian bytes. The execution backend, FFT backend, device settings, chunk
-size, size cap, `run_id` and file path are not part of the key: the same run on
-CPU and on Vulkan has one key, and storing it again replaces its row.
+Doubles enter as the hex of their IEEE-754 bits, sizes as decimal integers,
+strings with their byte length, arrays as SHA-256 of their little-endian
+bytes; nothing is formatted through the C locale. The execution backend, FFT
+backend, device settings, the Vulkan operator JIT (`NLO_OPERATOR_JIT`), the
+fused RK step (`NLO_DISABLE_VK_FUSED_STEP`), profiling, chunk size, size cap,
+`run_id`, `defer_merge` and file path are not part of the key: the same run on
+CPU, on Vulkan with JIT kernels and on Vulkan with the interpreter has one key. The C, Julia and Python tests pin one exactly representable run to the
+same key (`a29aa53a4be7d5f7`).
+
+The key is therefore the same on Windows and Linux for the same bits of input.
+It can differ when the inputs themselves differ in their last bits: an input
+field or grid computed with `exp`, `cosh`, `sin` and similar functions may
+round differently in the C or language runtime of another platform, and then
+the field digest, and the key, differ. Grids built from `+ - * /` and decimal
+literals (such as the bindings' default frequency grids) are identical
+everywhere.
 
 Operators given as host-language callables never reach the key as code: the
 Python binding translates them into runtime expressions (capturing their
 constants) before calling the C library, MATLAB translates function handles the
 same way, and the Julia binding accepts expressions only. The key hashes the
 translated expressions and constants, so no caller-supplied label is needed.
+
+**The same key twice.** Two runs with the same key (for example two users
+running the same parameters) are the same run; the database keeps one. When a
+staged run is merged and the shared database already holds its key, the run
+with the later `created_at` wins: a newer staged run replaces the stored one
+(its `runs` row and all its data, in the merge's transactions), an older one is
+discarded without being merged. Either way the staging file is removed, and
+recovery counts it as merged. With several staging files of one key the result
+does not depend on the order they are merged in. `created_at` comes from the
+writing host's clock, so between hosts with skewed clocks "later" means later
+by those clocks. `storage_has_run` looks only at the shared database: it is
+false while runs of that key exist only as staging files and true once one is
+merged.
 
 ## API
 
