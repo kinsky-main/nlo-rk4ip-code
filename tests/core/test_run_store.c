@@ -2072,6 +2072,101 @@ static void test_merge_tool_killed(const char* root)
     check_runs_contract(db_path);
 }
 
+/*
+ * Run one stored run in a child process with injected I/O failures
+ * (NLOLIB_STORE_TEST_IO_FAULTS) and a retry budget; report its status,
+ * whether it merged, how long it took, and whether each of up to two
+ * strings appears in its log. Exit code: bit 0 run OK, bit 1 merged,
+ * bit 2 first string found, bit 3 second string found. The duration is
+ * passed back through a file next to the database.
+ */
+static int faulted_run(const char* db_path, const char* faults, const char* budget,
+                       const char* want1, const char* want2, double* out_seconds)
+{
+    char timing[1100];
+    (void)snprintf(timing, sizeof(timing), "%s.timing", db_path);
+    pid_t pid = fork();
+    if (pid == 0) {
+        setenv("NLOLIB_STORE_TEST_IO_FAULTS", faults, 1);
+        if (budget != NULL) {
+            setenv("NLOLIB_STORE_IO_RETRY_S", budget, 1);
+        }
+        (void)nlolib_set_log_buffer(1u << 18);
+        run_case rc;
+        case_init_1d(&rc, 256u, 1.0, 8u, db_path);
+        rc.storage.chunk_records = 2u;
+        rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+        storage_result result;
+        memset(&result, 0, sizeof(result));
+        struct timespec t0;
+        struct timespec t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        const nlolib_status status = case_run(&rc, NULL, 0u, &result);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        static char text[1u << 18];
+        size_t written = 0u;
+        (void)nlolib_read_log_buffer(text, sizeof(text), &written, 0);
+        text[(written < sizeof(text)) ? written : sizeof(text) - 1u] = '\0';
+        FILE* f = fopen(timing, "w");
+        if (f != NULL) {
+            fprintf(f, "%f\n", (double)(t1.tv_sec - t0.tv_sec) + 1e-9 * (double)(t1.tv_nsec - t0.tv_nsec));
+            fclose(f);
+        }
+        int code = 0;
+        code |= (status == NLOLIB_STATUS_OK) ? 1 : 0;
+        code |= (result.merged == 1) ? 2 : 0;
+        code |= (want1 == NULL || strstr(text, want1) != NULL) ? 4 : 0;
+        code |= (want2 == NULL || strstr(text, want2) != NULL) ? 8 : 0;
+        if ((code & 12) != 12) {
+            fprintf(stderr, "log of the faulted run (%s):\n%s\n", faults, text);
+        }
+        _exit(code);
+    }
+    int status = 0;
+    (void)waitpid(pid, &status, 0);
+    *out_seconds = -1.0;
+    FILE* f = fopen(timing, "r");
+    if (f != NULL) {
+        if (fscanf(f, "%lf", out_seconds) != 1) {
+            *out_seconds = -1.0;
+        }
+        fclose(f);
+        unlink(timing);
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+/*
+ * The failures a loaded SMB share returned to staging writers (CANTOPEN with
+ * ENOENT on a re-created file, EAGAIN from fsync, truncate and write) are
+ * retried until the call succeeds, so the run completes and merges. A failure
+ * that outlasts the retry budget fails the run and the log names it; one that
+ * is not transient (EIO) is not retried.
+ */
+static void test_io_faults_retried(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    char sdir[1024];
+    staging_dir(db_path, sdir, sizeof(sdir));
+    double seconds = 0.0;
+
+    int code = faulted_run(db_path, "open:4:2,sync:3:11,truncate:3:11,write:3:11", NULL,
+                           "open of ", "succeeded after", &seconds);
+    CHECK(code == 15, "transient faults: exit %d (1 ok, 2 merged, 4/8 retries logged)", code);
+    CHECK(count_files(sdir, ".sqlite") == 0u, "staging file left after a retried run");
+    check_runs_contract(db_path);
+
+    code = faulted_run(db_path, "sync:1000000:11", "0.3", "giving up", "os errno: 11", &seconds);
+    CHECK((code & 3) == 0 && (code & 12) == 12, "endless EAGAIN: exit %d (expected a failed run naming errno 11)", code);
+    CHECK(seconds >= 0.3 && seconds < 5.0, "endless EAGAIN gave up after %.2f s; budget 0.3 s", seconds);
+    CHECK(count_files(sdir, ".sqlite") == 0u, "failed run left its staging file");
+
+    code = faulted_run(db_path, "sync:1:5", NULL, "os errno: 5", NULL, &seconds);
+    CHECK((code & 1) == 0 && (code & 4) == 4, "EIO: exit %d (expected a failed run naming errno 5)", code);
+    CHECK(seconds >= 0.0 && seconds < 2.0, "EIO took %.2f s; it must not be retried", seconds);
+}
+
 /* Path of the one staging file in @p sdir (empty when there is none or several). */
 static void staging_file_path(const char* sdir, char* out, size_t cap)
 {
@@ -2201,6 +2296,7 @@ int main(int argc, char** argv)
         {"run_id_conflict", test_run_id_conflict},
         {"write_failure_logged", test_write_failure_logged},
         {"truncate_journal", test_truncate_journal},
+        {"io_faults_retried", test_io_faults_retried},
         {"batched_interrupted_merge", test_batched_and_interrupted_merge},
         {"stale_view_guard", test_stale_view_guard},
         {"hot_journal", test_hot_journal},

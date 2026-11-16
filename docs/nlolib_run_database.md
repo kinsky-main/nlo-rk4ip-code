@@ -371,6 +371,23 @@ hot journal on open. The VFS can be chosen with `NLOLIB_STORE_VFS` (`unix-none`,
 including Nlolib's own `has_run` and read functions, open the file read-only
 with SQLite's default VFS, whose read locks work on the share.
 
+**Transient share failures.** Under load an SMB share fails some file
+operations for a moment: creating a file whose previous namesake is still
+delete-pending fails with ENOENT, and a write, fsync, truncate or delete can
+fail with EAGAIN. On Linux and macOS, Nlolib's writers open staging and shared
+databases through a thin VFS around the one above (it appears to SQLite as
+`nlolib-retry-unix-none`). It retries such a call, with a backoff from 20 ms
+doubling to 1 s, until it succeeds or 30 s have been spent on it
+(`NLOLIB_STORE_IO_RETRY_S`, 0 to disable). Only then does SQLite see the
+failure, and the run fails. The errors retried are EAGAIN, EINTR, EBUSY and
+ETIMEDOUT for any of these calls, plus ENOENT and ESTALE when creating a file.
+Others (EIO, ENOSPC, EFBIG, EACCES, ...) fail at once. Each retried call is
+logged as a warning when it succeeds and as an error when it gives up, with
+the file and errno. A failed staging write is logged with SQLite's extended
+result code and errno, and fails the run with
+`NLOLIB_STATUS_ALLOCATION_FAILED`. Readers are not wrapped: a read-only reader
+already retries for 60 s.
+
 Because writers on Linux take no SQLite locks, a reader may meet a commit in
 progress. A read-only connection opened while a merge is writing finds the
 merge's `-journal`, cannot tell that its writer is alive (the writer holds no

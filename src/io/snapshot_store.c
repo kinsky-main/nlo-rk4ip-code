@@ -20,6 +20,7 @@
 #include <sqlite3.h>
 #include <fftw3.h>
 #include "io/run_store.h"
+#include "io/store_vfs.h"
 
 #ifndef STORAGE_DEFAULT_DB_MAX_BYTES
 #define STORAGE_DEFAULT_DB_MAX_BYTES (50ull * 1024ull * 1024ull * 1024ull)
@@ -1043,11 +1044,14 @@ snapshot_store* snapshot_store_open(const snapshot_store_open_params* params)
         }
     }
 
-    /* Staging files live on the share too: write them with the run store's VFS (see run_store_sqlite_vfs). */
+    /*
+     * Staging files live on the share too: write them with the run store's VFS
+     * (see run_store_sqlite_vfs), wrapped to retry transient share failures.
+     */
     if (sqlite3_open_v2(options->sqlite_path,
                         &store->db,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-                        run_store_sqlite_vfs()) != SQLITE_OK) {
+                        store_vfs_writer_name()) != SQLITE_OK) {
         log_sqlite_failure(store->db, "open", SQLITE_CANTOPEN);
         snapshot_store_close(store);
         return NULL;

@@ -15,6 +15,7 @@
 #include "io/run_store.h"
 #include "io/sha256.h"
 #include "io/snapshot_store.h"
+#include "io/store_vfs.h"
 #include "io/log_sink.h"
 #include "core/sim_dimensions_internal.h"
 #include "core/runtime_defaults.h"
@@ -573,7 +574,17 @@ static int rs_unlink(const char* path)
     free(w);
     return rc;
 #else
-    return unlink(path);
+    /* A loaded SMB share can refuse an unlink for a moment (EAGAIN, EBUSY). */
+    unsigned delay_ms = 20u;
+    for (int attempt = 0;; ++attempt) {
+        const int rc = unlink(path);
+        if (rc == 0 || attempt >= 6 || !(errno == EAGAIN || errno == EBUSY || errno == EINTR)) {
+            return rc;
+        }
+        struct timespec ts = {0, (long)delay_ms * 1000000L};
+        (void)nanosleep(&ts, NULL);
+        delay_ms *= 2u;
+    }
 #endif
 }
 
@@ -1113,12 +1124,15 @@ const char* run_store_sqlite_vfs(void)
 #endif
 }
 
-/* Readers use SQLite's default VFS (read locks work on SMB); writers use run_store_sqlite_vfs(). */
+/*
+ * Readers use SQLite's default VFS (read locks work on SMB); writers use
+ * run_store_sqlite_vfs() wrapped to retry transient share failures.
+ */
 static int db_open(const char* path, int readonly, sqlite3** out_db)
 {
     *out_db = NULL;
     const int flags = readonly ? SQLITE_OPEN_READONLY : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE);
-    const char* vfs = readonly ? NULL : run_store_sqlite_vfs();
+    const char* vfs = readonly ? NULL : store_vfs_writer_name();
     if (vfs != NULL && sqlite3_vfs_find(vfs) == NULL) {
         log_emit(LOG_LEVEL_ERROR, "[nlolib][store] SQLite VFS '%s' is not available", vfs);
         return -1;

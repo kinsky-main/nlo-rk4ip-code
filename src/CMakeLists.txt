@@ -19,6 +19,7 @@ set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/io/log_sink.c
   ${CMAKE_CURRENT_LIST_DIR}/io/snapshot_store.c
   ${CMAKE_CURRENT_LIST_DIR}/io/run_store.c
+  ${CMAKE_CURRENT_LIST_DIR}/io/store_vfs.c
   ${CMAKE_CURRENT_LIST_DIR}/io/sha256.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/perf_profile.c
   ${CMAKE_CURRENT_LIST_DIR}/utility/rk4_debug.c

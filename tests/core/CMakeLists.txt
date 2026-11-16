@@ -19,6 +19,7 @@ add_executable(test_core_state_alloc
   ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
   ${CMAKE_SOURCE_DIR}/src/io/snapshot_store.c
   ${CMAKE_SOURCE_DIR}/src/io/run_store.c
+  ${CMAKE_SOURCE_DIR}/src/io/store_vfs.c
   ${CMAKE_SOURCE_DIR}/src/io/sha256.c
   ${CMAKE_SOURCE_DIR}/src/utility/perf_profile.c
   ${CMAKE_SOURCE_DIR}/src/utility/rk4_debug.c

@@ -14,6 +14,7 @@ add_executable(bench_solver_backend
   ${CMAKE_SOURCE_DIR}/src/io/log_sink.c
   ${CMAKE_SOURCE_DIR}/src/io/snapshot_store.c
   ${CMAKE_SOURCE_DIR}/src/io/run_store.c
+  ${CMAKE_SOURCE_DIR}/src/io/store_vfs.c
   ${CMAKE_SOURCE_DIR}/src/io/sha256.c
   ${CMAKE_SOURCE_DIR}/src/backend/vector_backend.c
   ${CMAKE_SOURCE_DIR}/src/backend/vk_auto_context.c
