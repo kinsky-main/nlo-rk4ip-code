@@ -231,12 +231,35 @@ int query_runtime_limits_internal(
         (void)checked_mul_size_t(requested_num_time_samples,
                                  bytes_per_sample,
                                  &out_limits->estimated_required_working_set_bytes);
-        out_limits->max_num_recorded_samples_in_memory =
-            out_limits->max_num_recorded_samples_with_storage;
     }
 
     size_t runtime_limit = max_samples_by_element_size;
     const size_t host_available = apply_memory_headroom(query_available_system_memory_bytes());
+
+    /* Records accumulate in host memory, one field snapshot each, so the
+     * in-memory capacity is what host memory is left over after the working set
+     * divided by the size of a record. It used to be set to
+     * max_num_recorded_samples_with_storage, which made the two fields equal and
+     * the in-memory one say nothing: the documented
+     * min(wanted, max_num_recorded_samples_in_memory) could never reduce
+     * anything. Zero still means "not derivable", which is the case when the
+     * config does not state its sample count. */
+    if (requested_num_time_samples > 0u && host_available > 0u) {
+        size_t bytes_per_record = 0u;
+        if (checked_mul_size_t(requested_num_time_samples,
+                               sizeof(nlo_complex),
+                               &bytes_per_record) == 0 &&
+            bytes_per_record > 0u) {
+            const size_t working_set = out_limits->estimated_required_working_set_bytes;
+            const size_t record_budget =
+                (host_available > working_set) ? (host_available - working_set) : 0u;
+            size_t in_memory = record_budget / bytes_per_record;
+            if (in_memory > out_limits->max_num_recorded_samples_with_storage) {
+                in_memory = out_limits->max_num_recorded_samples_with_storage;
+            }
+            out_limits->max_num_recorded_samples_in_memory = in_memory;
+        }
+    }
     if (host_available > 0u) {
         const size_t host_limit = host_available / bytes_per_sample;
         if (host_limit > 0u && host_limit < runtime_limit) {
