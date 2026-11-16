@@ -136,9 +136,13 @@ NLOLIB_API nlolib_status nlolib_perf_profile_reset(void);
  * enabled. `operator_jit_programs` counts operator programs bound to a
  * JIT-compiled GPU kernel and `operator_jit_fallbacks` counts those left on
  * the interpreter; both accumulate unconditionally, so a caller can tell a
- * JIT run from a silent fallback without turning profiling on. Both are zero
- * on the CPU backend, which has no JIT. Counts are cumulative since the last
- * ::nlolib_perf_profile_reset and are per propagated state, not per step.
+ * JIT run from a silent fallback without turning profiling on. Both are
+ * incremented once per active operator program as a simulation state is
+ * built, not per step, and are cumulative since the last
+ * ::nlolib_perf_profile_reset, so they accumulate over every state a process
+ * builds. Both stay zero wherever the JIT is never reached, on the CPU
+ * backend and in a build configured with ENABLE_VULKAN_BACKEND=OFF; that is
+ * not the same as a program falling back to the interpreter.
  *
  * @param out_snapshot Destination snapshot.
  * @return nlolib_status status code.
