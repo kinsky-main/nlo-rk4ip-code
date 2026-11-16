@@ -1,5 +1,6 @@
 # Writes OUTPUT with NLOLIB_GIT_COMMIT for the `git_commit` column of stored runs:
-# the commit hash, with "-dirty" when tracked files differ from it, or
+# the commit hash, with "-dirty" when tracked files differ from it (the binding
+# submodules are separate repositories and do not count), or
 # "nlolib-<VERSION>" when SOURCE_DIR is not a git checkout. Run at build time so
 # the value follows commits made without reconfiguring.
 if(NOT DEFINED OUTPUT OR NOT DEFINED SOURCE_DIR OR NOT DEFINED VERSION)
@@ -19,7 +20,7 @@ if(GIT_FOUND)
   if(head_rc EQUAL 0 AND head MATCHES "^[0-9a-f]+$")
     set(revision "${head}")
     execute_process(
-      COMMAND "${GIT_EXECUTABLE}" -C "${SOURCE_DIR}" status --porcelain --untracked-files=no
+      COMMAND "${GIT_EXECUTABLE}" -C "${SOURCE_DIR}" status --porcelain --untracked-files=no --ignore-submodules=all
       OUTPUT_VARIABLE dirty
       RESULT_VARIABLE dirty_rc
       OUTPUT_STRIP_TRAILING_WHITESPACE

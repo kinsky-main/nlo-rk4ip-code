@@ -108,6 +108,9 @@ void run_store_discard(const char* staging_path);
  * @param shared_path Shared run database path.
  * @param discard_incomplete Nonzero deletes staging files without a `runs` row.
  * @param min_age_seconds Incomplete files younger than this are kept.
+ * @param out_merged Receives the number of staging files merged; may be NULL.
+ * @param out_discarded Receives the number of staging files deleted; may be NULL.
+ * @param out_skipped Receives the number of staging files left in place; may be NULL.
  */
 run_store_status run_store_recover(
     const char* shared_path,

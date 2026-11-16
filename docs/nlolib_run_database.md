@@ -29,7 +29,7 @@ earlier releases do not write them.
 - [The run key](#the-run-key)
 - [API](#api)
 
-## Files and folders
+## Files and folders {#files-and-folders}
 
 | Path | What it is |
 |---|---|
@@ -47,7 +47,7 @@ The database uses SQLite's rollback journal (`journal_mode=DELETE`), never WAL,
 so it can be read on a network share. Open it read-only (`mode=ro`), set a busy
 timeout (Nlolib uses 60 s), read in one transaction and close it.
 
-## Reading a run
+## Reading a run {#reading-a-run}
 
 1. Start from `runs`. A row there promises that the run is complete; data rows
    without a `runs` row belong to a merge that has not finished and must be
@@ -60,7 +60,7 @@ timeout (Nlolib uses 60 s), read in one transaction and close it.
 5. `io_final_output_fields` holds the final field, `io_record_chunks` the raw
    records when they were stored.
 
-## Blob encoding
+## Blob encoding {#blob-encoding}
 
 Every array is a BLOB of packed IEEE-754 binary64 values in **little-endian**
 byte order, with no header or padding. The element count is `length(blob) / 8`.
@@ -80,7 +80,7 @@ idx = ((x * ny) + y) * nt + t
 In NumPy: `np.frombuffer(blob, '<c16').reshape(nx, ny, nt)`; in Julia:
 `reshape(reinterpret(ComplexF64, blob), nt, ny, nx)`.
 
-## Grids and axes
+## Grids and axes {#grids-and-axes}
 
 A run has `nt` time samples, `nx` x samples and `ny` y samples (`nx = ny = 1` for
 a time-only run). Spacings `dt`, `dx`, `dy` are those of the run.
@@ -103,7 +103,7 @@ when `A` is in √W). The maps below are plain sums over grid points with no
 `dt`, `dx`, `dy` weights; multiply by the spacings to get integrals (see each
 map).
 
-## Table `runs`
+## Table `runs` {#table-runs}
 
 The table of the ModelStore index contract. The fixed columns are exactly its
 minimal DDL:
@@ -125,7 +125,7 @@ CREATE TABLE runs (
 | `kind` | `nlolib` |
 | `file` | `<parent folder>/<file name>` of the database the run was merged into, e.g. `nlolib/nlolib.sqlite` (ModelStore rewrites it on sync). |
 | `created_at` | UTC time the run finished, written as `strftime('%Y-%m-%dT%H:%M:%f', 'now')`, i.e. `YYYY-MM-DDTHH:MM:SS.sss`. |
-| `git_commit` | Commit of the Nlolib build (40 hex digits, `-dirty` appended if the build tree had uncommitted changes to tracked files), or `nlolib-<version>` for a build without a repository. |
+| `git_commit` | Commit of the Nlolib core build (40 hex digits, `-dirty` appended if the build tree had uncommitted changes to tracked files), or `nlolib-` and the version (e.g. `nlolib-1.20.0`) for a build without a repository. The binding submodules are not part of it: a binding checked out at another commit, or with local changes, does not make it `-dirty`. |
 | `julia_version` | Always NULL. The binding is in `nlolib_binding`. |
 
 Parameter columns, all prefixed `nlolib_` so they cannot collide with other
@@ -134,7 +134,7 @@ applicable to this run".
 
 | Column | Type | Meaning |
 |---|---|---|
-| `nlolib_version` | TEXT | Nlolib release, e.g. `1.20.0`. |
+| `nlolib_version` | TEXT | Version of the Nlolib core library that ran it, e.g. `1.20.0`. The bindings are released with versions of their own, which are not recorded. |
 | `nlolib_binding` | TEXT | What made the run: `c` (C API), `julia`, `python`, `matlab`, or the caller's own tag. |
 | `nlolib_backend` | TEXT | Backend that ran it: `cpu` or `vulkan`. Not part of the key. |
 | `nlolib_run_id` | TEXT | `run_id` of the run in the data tables. |
@@ -173,7 +173,7 @@ applicable to this run".
 | `nlolib_final_field` | INTEGER | 1 when the final field is stored, else 0. |
 | `nlolib_truncated` | INTEGER | 1 when raw records stopped at the size cap, else 0. |
 
-## Table `io_record_layout`
+## Table `io_record_layout` {#table-io_record_layout}
 
 One row per run.
 
@@ -193,7 +193,7 @@ One row per run.
 | `x_axis` | BLOB | `nx` reals. |
 | `y_axis` | BLOB | `ny` reals. |
 
-## Table `io_record_maps`
+## Table `io_record_maps` {#table-io_record_maps}
 
 Reduced maps, one row per record, present in modes `reduced` (the default) and
 `reduced+raw`. `A_r(t, x, y)` is the field of record `r`.
@@ -230,7 +230,7 @@ Integrals from the sums:
 For a time-only run `fluence_x` and `fluence_y` each hold one value, the record's
 `Σ_t |A|²`.
 
-## Table `io_final_output_fields`
+## Table `io_final_output_fields` {#table-io_final_output_fields}
 
 The final field (at `z = nlolib_z_end`), stored unless the caller turned it off
 (`nlolib_final_field = 0`).
@@ -242,7 +242,7 @@ The final field (at `z = nlolib_z_end`), stored unless the caller turned it off
 | `payload` | BLOB | The full field, complex, time fastest (`idx = ((x*ny)+y)*nt + t`). |
 | `created_utc` | TEXT | SQLite `CURRENT_TIMESTAMP` of the row (not contract form). |
 
-## Table `io_record_chunks`
+## Table `io_record_chunks` {#table-io_record_chunks}
 
 Raw records, present in modes `raw` and `reduced+raw`, in chunks of consecutive
 records.
@@ -264,14 +264,14 @@ field. Record `record_start + k` is at `record_z[record_start + k]`.
 Databases written before layout version 1 have raw records only, always at full
 resolution, and no `io_record_layout` or `runs` rows for those runs.
 
-## Other tables
+## Other tables {#other-tables}
 
 `io_runs` (one row per run: `run_id`, `key`, record and chunk counters, size
 cap), `io_sim_config` and `io_system_config` (solver and execution settings,
 keyed by hashes) are kept for Nlolib's own bookkeeping and older readers. Their
 `created_utc` columns use SQLite's `YYYY-MM-DD HH:MM:SS` form, not the contract's.
 
-## Example queries
+## Example queries {#example-queries}
 
 All runs with their grid:
 
@@ -304,7 +304,7 @@ SELECT f.payload FROM runs r JOIN io_final_output_fields f ON f.run_id = r.nloli
 WHERE r.key = :key;
 ```
 
-## How Nlolib writes the file
+## How Nlolib writes the file {#how-nlolib-writes-the-file}
 
 **Staging.** A run streams into its own staging database
 `staging/<stem>.<key>.<pid>.<token>.<host>.sqlite` (`<stem>` is the shared file's
@@ -479,7 +479,7 @@ SQLite's default VFS; on a Linux SMB mount that cannot commit, so such a file
 must be converted once (`PRAGMA journal_mode=DELETE;`) from Windows or a local
 disk. Existing rows are kept.
 
-## The run key
+## The run key {#the-run-key}
 
 `key` is the first 16 hex digits of the SHA-256 of a canonical text. Readers
 never parse it; this section only says what makes two runs the same run. The
@@ -539,7 +539,13 @@ by those clocks. `storage_has_run` looks only at the shared database: it is
 false while runs of that key exist only as staging files and true once one is
 merged.
 
-## API
+## API {#api}
+
+The C API is part of the core library. The Julia, Python and MATLAB entry
+points are in the binding repositories, mounted in the core repository as the
+`julia/`, `python/` and `matlab/` submodules. A binding can call them only
+against a core that has them; the `CORE_REF` file of a binding names the core
+commit it is built and tested with.
 
 | C | Julia | Python | MATLAB |
 |---|---|---|---|
