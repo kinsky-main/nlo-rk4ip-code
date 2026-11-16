@@ -1,3 +1,6 @@
+# Consumed by the core repository's CMakeLists.txt, either as the julia/
+# submodule or through -DNLOLIB_JULIA_DIR=<this checkout>. Not a project of its
+# own: CMAKE_SOURCE_DIR is the core repository.
 set(JULIA_STAGE_DIR "${CMAKE_BINARY_DIR}/julia_package" CACHE PATH
     "Directory where the Julia package files are staged")
 
@@ -13,16 +16,16 @@ add_custom_command(TARGET julia_stage POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${JULIA_STAGE_DIR}/lib"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${JULIA_STAGE_DIR}/examples"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/julia/Project.toml"
+        "${CMAKE_CURRENT_LIST_DIR}/Project.toml"
         "${JULIA_STAGE_DIR}/Project.toml"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/julia/src"
+        "${CMAKE_CURRENT_LIST_DIR}/src"
         "${JULIA_STAGE_DIR}/src"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/julia/test"
+        "${CMAKE_CURRENT_LIST_DIR}/test"
         "${JULIA_STAGE_DIR}/test"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/examples/julia"
+        "${CMAKE_CURRENT_LIST_DIR}/examples"
         "${JULIA_STAGE_DIR}/examples/julia"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_SOURCE_DIR}/src/nlolib.h"
@@ -37,3 +40,7 @@ add_custom_command(TARGET julia_stage POST_BUILD
         -P "${CMAKE_SOURCE_DIR}/cmake/copy_runtime_deps.cmake"
     COMMENT "Copying Julia package sources, tests, examples, public header, and shared library to ${JULIA_STAGE_DIR}"
 )
+
+if(BUILD_TESTING)
+  add_subdirectory(test)
+endif()

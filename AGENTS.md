@@ -6,14 +6,29 @@
 
 ## Repo Layout
 - Core library: `src/`
-- Bindings and package surfaces: `python/`, `matlab/`, `julia/`
-- Tests: `tests/core/`, `tests/python/`, `tests/julia/`, `tests/matlab/`
-- Executables, demos, and benchmark code: `examples/`, `benchmarks/`
+- Bindings: `python/`, `matlab/`, `julia/` are git submodules, one repository
+  each (`nlolib-python`, `nlolib-matlab`, `NLOLib.jl`). Each holds its own
+  package, tests, examples, README, version, and release workflow.
+- Core tests: `tests/core/`, `tests/fft/`, `tests/numerics/`, `tests/abi/`
+- Executables, demos, and benchmark code: `examples/c/`, `benchmarks/`
 - Docs and release helpers: `docs/`, `tools/`
-- Build/package entry points: `CMakeLists.txt`, `README.md`, `pyproject.toml`
+- Build entry points: `CMakeLists.txt`, `README.md`
+
+## Submodules
+- Run `git submodule update --init` after cloning; a binding that is not checked
+  out is skipped by CMake along with its targets and tests.
+- A change inside `python/`, `matlab/` or `julia/` is a commit in that
+  submodule's repository, not in this one. Commit and push it there first, then
+  commit the moved submodule pointer here.
+- Each binding pins the core commit it is released from in its `CORE_REF` file.
+  A cross-cutting change lands core first, then the binding (with `CORE_REF`
+  moved), then the submodule pointer here.
+- Binding versions are independent of the core version and live in the binding
+  (`pyproject.toml`, `VERSION`, `Project.toml`). Release tags are pushed to the
+  binding repository, not here.
 
 ## Build Notes
-- Top-level build is CMake; root `CMakeLists.txt` adds `src/`, `python/`, `matlab/`, `julia/`, `tests/`, `benchmarks/`, and `examples/`.
+- Top-level build is CMake; root `CMakeLists.txt` adds `src/`, each checked-out binding (`python/`, `matlab/`, `julia/`, or the directory named by `NLOLIB_PYTHON_DIR` / `NLOLIB_MATLAB_DIR` / `NLOLIB_JULIA_DIR`), `tests/`, `benchmarks/`, and `examples/`.
 - Both repo-mutating options now default to `OFF`; pass them explicitly only to
   turn one on:
   - `-DBUMP_PATCH_ON_BUILD=ON` rewrites the version in `CMakeLists.txt` after a
@@ -21,12 +36,11 @@
     read back out of `CMakeLists.txt`, so a mid-build bump publishes a version
     that does not match its tag.
   - `-DINSTALL_GIT_HOOKS=ON` installs a pre-commit hook that only checks the
-    version copies agree. It does not change any file.
-- The version is advanced deliberately, by one command:
+    SBOM agrees with the version and dependency pins. It does not change any file.
+- The core version is advanced deliberately, by one command:
   `python tools/release/check_versions.py --bump minor`. It rewrites
-  `CMakeLists.txt`, the `pyproject.toml` / `julia/Project.toml` copies and
-  `sbom.cdx.json` together, so every commit names one self-consistent version
-  and a release tag can be cut from any commit.
+  `CMakeLists.txt` and `sbom.cdx.json` together, so every commit names one
+  self-consistent version.
 - Docs target is conditional: `NLOLIB_BUILD_DOCS=ON` and Doxygen available, otherwise no `docs` target is created.
 - Benchmarks depend on the Vulkan backend; `NLOLIB_BUILD_BENCHMARKS` is forced off when `ENABLE_VULKAN_BACKEND=OFF`.
 
@@ -64,11 +78,12 @@
   - core C/CMake changes: targeted `ctest` cases under `tests/core`
   - Python binding/example changes: targeted `ctest -R "^test_python_.*"` or the specific Python test
   - Julia changes: targeted Julia `ctest` cases
-  - MATLAB changes: `test_matlab_runtime_handle_parser` only when enabled and MATLAB is available
+  - MATLAB changes: `test_matlab_bindings` only when `NLOLIB_BUILD_MATLAB_TESTS=ON` and MATLAB is available
 - Note when tests were not run.
 
 ## Common Issues
 - Python tests are part of the CTest surface when `BUILD_TESTING=ON`, so Python availability matters for full test runs.
 - The docs target is optional even when `NLOLIB_BUILD_DOCS=ON`; missing Doxygen means no `docs` target is generated.
 - Only `BUMP_PATCH_ON_BUILD=ON` makes a build rewrite the repo version; it is off by default.
-- `test_version_copies_match` fails when `CMakeLists.txt`, `pyproject.toml` and `julia/Project.toml` disagree, and `test_sbom_pins_match` fails when `sbom.cdx.json` is behind. Fix both with `python tools/release/check_versions.py --write`, not by editing one file by hand.
+- `test_sbom_pins_match` fails when `sbom.cdx.json` is behind `CMakeLists.txt` or the dependency pins. Fix it with `python tools/release/check_versions.py --write`, not by editing the file by hand.
+- `tools/check_api_parity.py` fails with a missing-source error when a binding submodule is not checked out; run `git submodule update --init`.

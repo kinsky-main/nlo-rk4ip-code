@@ -1,0 +1,60 @@
+function runtime_temporal_demo()
+setup_matlab_example_environment();
+
+n = 512;
+dt = 0.02;
+t = backend.centered_time_grid(n, dt);
+field0 = exp(-((t / 0.25) .^ 2)) .* exp(-1i * 8.0 * t);
+
+omega = backend.angular_frequency_grid(n, dt);
+beta2 = 0.05;
+
+pulse = struct();
+pulse.samples = field0;
+pulse.delta_time = dt;
+pulse.pulse_period = n * dt;
+pulse.frequency_grid = complex(omega, zeros(size(omega)));
+
+linearOperator = struct();
+linearOperator.fn = @(A, w) 1i * (beta2 / 2.0) * (w .* w);
+
+nonlinearOperator = struct();
+nonlinearOperator.expr = "i*A*(gamma*I + V)";
+nonlinearOperator.params = struct('gamma', 0.01);
+
+api = nlolib.NLolib();
+api.set_log_buffer(uint64(256 * 1024));
+api.set_log_level(int32(2));
+api.set_progress_options(true, int32(10), false);
+simOptions = backend.default_simulation_options( ...
+    "backend", "auto", ...
+    "fft_backend", "vkfft");
+execOptions = backend.make_exec_options(simOptions, 2);
+propagateOptions = struct();
+propagateOptions.propagation_distance = 0.25;
+propagateOptions.records = 2;
+propagateOptions.preset = "accuracy";
+propagateOptions.exec_options = execOptions;
+propagateOptions.exec_options.matlab_stream_logs = true;
+propagateOptions.exec_options.matlab_log_buffer_bytes = uint64(256 * 1024);
+result = api.propagate(pulse, linearOperator, nonlinearOperator, propagateOptions);
+records = result.records;
+finalField = records(end, :).';
+
+fprintf("runtime_temporal_demo: propagated %d samples.\n", n);
+fprintf("initial power=%.6e final power=%.6e\n", ...
+        sum(abs(field0) .^ 2), sum(abs(finalField) .^ 2));
+
+outputDir = fullfile(fileparts(mfilename("fullpath")), "output", "runtime_temporal_demo");
+if ~isfolder(outputDir)
+    mkdir(outputDir);
+end
+plotPath = backend.plot_final_intensity_comparison( ...
+    t, records(1, :), records(end, :), ...
+    fullfile(outputDir, "final_intensity_comparison.png"), ...
+    "x_label", "Time t", ...
+    "title", "Runtime Temporal Demo: Initial vs Final Intensity", ...
+    "reference_label", "Initial", ...
+    "final_label", "Final");
+fprintf("saved plot: %s\n", plotPath);
+end

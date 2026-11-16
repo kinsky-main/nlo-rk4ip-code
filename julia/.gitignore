@@ -1,0 +1,10 @@
+/core/
+/build/
+/build-*/
+/dist/
+/lib/
+output/
+*.sqlite3
+*.so
+*.dll
+*.dylib

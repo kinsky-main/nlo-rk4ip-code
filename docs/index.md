@@ -10,10 +10,10 @@ entrypoints:
 - [Build and Install](build_and_install.md)
 - [Vulkan Backend Behaviour](gpu_backend.md)
 - [API Reference Guide](api_reference.md)
-- [Python Binding Guide](../python/README.md)
-- [MATLAB Binding Guide](../matlab/README.md)
-- [MATLAB User Guide](matlab_user_guide.md)
-- [Julia Binding Guide](../julia/README.md)
+- [Python Binding Guide](../python/docs/guide.md)
+- [MATLAB Binding Guide](../matlab/docs/binding_guide.md)
+- [MATLAB User Guide](../matlab/docs/user_guide.md)
+- [Julia Binding Guide](../julia/docs/guide.md)
 
 ## Default Operator Forms
 
@@ -95,16 +95,16 @@ D=i\left(\beta_{2,s}\omega_t^2+\beta_t(k_x^2+k_y^2)\right)
   turn each of them off.
 - [API Reference Guide](api_reference.md) links into the generated reference for
   the C API and each binding.
-- [MATLAB User Guide](matlab_user_guide.md) is a task-oriented walkthrough of
+- [MATLAB User Guide](../matlab/docs/user_guide.md) is a task-oriented walkthrough of
   the MATLAB binding, with worked examples for temporal, transverse, and
   coupled 3+1D runs.
 
 ## Binding Guides
 
-- [Python Binding Guide](../python/README.md)
-- [MATLAB Binding Guide](../matlab/README.md) and
-  [MATLAB User Guide](matlab_user_guide.md)
-- [Julia Binding Guide](../julia/README.md)
+- [Python Binding Guide](../python/docs/guide.md)
+- [MATLAB Binding Guide](../matlab/docs/binding_guide.md) and
+  [MATLAB User Guide](../matlab/docs/user_guide.md)
+- [Julia Binding Guide](../julia/docs/guide.md)
 
 ## API Entry Points
 

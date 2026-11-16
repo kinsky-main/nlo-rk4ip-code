@@ -49,7 +49,7 @@ using Downloads
 using SHA
 using TOML
 
-const DEFAULT_REPO = "kinsky-main/nlo-rk4ip-code"
+const DEFAULT_REPO = "kinsky-main/NLOLib.jl"
 const ARTIFACT_NAME = "nlolib"
 
 function die(msg)

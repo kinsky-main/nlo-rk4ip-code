@@ -1,7 +1,8 @@
-# Julia Binding Guide
+# NLOLib.jl
 
-The Julia package exposes the native wrapper through the exported `NLOLib`
-module.
+Julia package for the nlolib nonlinear-optics runtime: a split-step (RK4IP)
+propagator for pulses and beams in nonlinear media, with a CPU backend and an
+optional Vulkan GPU backend.
 
 ## Install
 
@@ -11,30 +12,16 @@ Pkg.add("NLOLib")
 ```
 
 The native library and its runtime dependencies arrive as a Julia artifact, so
-nothing is compiled on install and no Vulkan SDK is needed. On Linux the Vulkan
+nothing is compiled on install and no Vulkan SDK is needed. Linux x86-64 and
+Windows x86-64 are supported, on Julia 1.10 or later. On Linux the Vulkan
 loader (`libvulkan.so.1`) must be present because it is a plain shared-library
-dependency; on Windows it is delay-loaded and optional. Without a Vulkan driver
-the CPU backend runs unchanged.
+dependency; on Windows it is optional. Without a Vulkan driver the CPU backend
+runs unchanged.
 
-`NLOLib.load()` resolves the library from an explicit path, then
-`ENV["NLOLIB_LIBRARY"]`, then the installed artifact, then a build tree. Release
-and registration details are in `../docs/release_julia.md`.
+## Quick start
 
-## Minimal Math-to-API Example
-
-This example uses the quadratic GLSE mapping
-
-\f[
-D(\omega)=i\left(\frac{\beta_2}{2}\right)\omega^2-\frac{\alpha}{2},
-\qquad
-N(A)=i\gamma A|A|^2
-\f]
-
-so the runtime constants are
-
-- `c0 = beta2 / 2`
-- `c1 = alpha / 2`
-- `c2 = gamma`
+Operators are expression strings with named constants. For the GLSE with
+dispersion `beta2`, loss `alpha` and Kerr coefficient `gamma`:
 
 ```julia
 using NLOLib
@@ -50,41 +37,36 @@ phys = NLOLib.physics_config(
 )
 ```
 
-## Build-Tree Usage
+The main entry points are `NLOLib.NLolib`, `NLOLib.RuntimeOperators`,
+`NLOLib.PulseSpec`, `NLOLib.physics_config`, `NLOLib.query_runtime_limits`,
+`NLOLib.propagate` and `NLOLib.propagate!`.
+
+`NLOLib.load()` resolves the library from an explicit path, then
+`ENV["NLOLIB_LIBRARY"]`, then the installed artifact.
+
+## Examples
+
+The [`examples/`](examples) directory is a Julia project of its own with
+runnable scripts: second-order and high-order GRIN solitons, Raman scattering,
+and 3D tensor dispersion.
 
 ```bash
-cmake --build build --config Release --target julia_stage
+julia --project=examples -e 'using Pkg; Pkg.instantiate()'
+julia --project=examples examples/second_order_soliton_rk4ip.jl
 ```
 
-Then in Julia:
+## Documentation
 
-```julia
-using Pkg
-Pkg.activate("build/julia_package")
-using NLOLib
-NLOLib.load()
-```
+- [Full documentation and API reference](https://kinsky-main.github.io/nlo-rk4ip-code/)
+- [Binding guide](docs/guide.md)
+- [Working on the package itself](docs/development.md) and
+  [releasing](docs/release.md)
 
-## Public API Entry Points
+## Links
 
-- `NLOLib.NLolib`
-- `NLOLib.RuntimeOperators`
-- `NLOLib.PulseSpec`
-- `NLOLib.physics_config`
-- `NLOLib.query_runtime_limits`
-- `NLOLib.propagate`
-- `NLOLib.propagate!`
+- Source and issues: https://github.com/kinsky-main/NLOLib.jl
+- Core C library: https://github.com/kinsky-main/nlo-rk4ip-code
 
-## Not Exposed Here: the Perf-Profile Counters
+## License
 
-The C API, Python and MATLAB can read runtime performance counters through
-`nlolib_perf_profile_read`, including the two that report whether the Vulkan
-backend compiled each operator program to a GPU kernel or fell back to the
-interpreter (`operator_jit_programs` and `operator_jit_fallbacks`). This package
-wraps no part of that surface, so there is no Julia equivalent to show; see
-[GPU backend behaviour](../docs/gpu_backend.md) for what the counters mean and
-the Python guide for the shape of the call.
-
-## Related Reference
-
-- @ref julia_binding
+GPL-2.0-or-later.

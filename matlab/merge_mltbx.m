@@ -41,9 +41,8 @@ for idx = 1:numel(bundles)
     end
 end
 
-repoRoot = fileparts(fileparts(mfilename("fullpath")));
 if nargin < 2 || strlength(string(outputPath)) == 0
-    outputPath = fullfile(repoRoot, "dist", sprintf('nlolib-%s.mltbx', version));
+    outputPath = fullfile(pwd, "dist", sprintf('nlolib-%s.mltbx', version));
 end
 outputPath = char(string(outputPath));
 

@@ -11,10 +11,15 @@ saveToPath = logical(saveToPath);
 matlabRoot = fileparts(mfilename("fullpath"));
 repoRoot = fileparts(matlabRoot);
 
+% Examples sit in examples/ in a source checkout and in examples/matlab in a
+% staged or installed toolbox.
+examplesDir = fullfile(matlabRoot, "examples");
+if ~isfile(fullfile(examplesDir, "setup_matlab_example_environment.m"))
+    examplesDir = fullfile(matlabRoot, "examples", "matlab");
+end
 candidates = {
     matlabRoot
-    fullfile(repoRoot, "examples", "matlab")
-    fullfile(matlabRoot, "examples", "matlab")
+    examplesDir
 };
 
 added = strings(0, 1);

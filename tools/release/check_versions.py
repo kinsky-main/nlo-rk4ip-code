@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
-"""Check, sync, or bump the project version and its packaged copies.
+"""Check or bump the core library version.
 
-``CMakeLists.txt`` is the single source of truth. ``pyproject.toml`` and
-``julia/Project.toml`` hold copies, because a wheel and a Julia package each
-have to carry a literal version of their own, and ``sbom.cdx.json`` stamps it
-as well.
+``CMakeLists.txt`` is the single source of truth, and ``sbom.cdx.json`` stamps
+a copy of it. They must agree at every commit, so that a release tag can be cut
+from any commit; ``test_sbom_pins_match`` enforces that, as does the pre-commit
+hook ``INSTALL_GIT_HOOKS`` installs.
 
-They must agree at every commit, so that a release tag can be cut from any
-commit and the published artifacts carry the version their tag names. That
-invariant is enforced in three places: the ``test_version_copies_match`` and
-``test_sbom_pins_match`` CTest cases, the pre-commit hook
-``INSTALL_GIT_HOOKS`` installs, and the ``verify`` job of each release
-workflow.
+The Python, MATLAB and Julia bindings are separate repositories (the python/,
+matlab/ and julia/ submodules) with versions of their own, each pinning the
+core revision it is built from in its ``CORE_REF`` file. Nothing here reads or
+writes them.
 
-    default        verify the two literal copies agree, and fail if they do
-                   not (``test_sbom_pins_match`` covers the SBOM)
-    --write        rewrite the copies, and the SBOM, from the CMake version
+    default        print the version
+    --write        regenerate the SBOM from the CMake version
     --bump KIND    advance the CMake version (major, minor or patch) and
-                   rewrite the copies to match
+                   regenerate the SBOM to match
 
 Nothing advances the version automatically. ``--bump`` is the deliberate step a
-release takes; until this is run again, every commit keeps naming the released
-version, which is what makes the equality check above possible.
+release takes.
 
 With ``--tag NAME`` the tag is checked too. Tags are bare versions with no "v"
-prefix, because File Exchange reads the tag as the release version (see
-.github/workflows/release-mltbx.yml).
+prefix.
 """
 
 import argparse
@@ -37,8 +32,6 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 CMAKE_PATTERN = r"project\([^)]*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)"
-COPY_PATTERN = r'(?m)^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"'
-COPIES = ("pyproject.toml", "julia/Project.toml")
 
 BUMP_KINDS = ("major", "minor", "patch")
 
@@ -52,24 +45,10 @@ def read(relative: str, pattern: str) -> str:
     return match.group(1)
 
 
-def write(relative: str, version: str) -> bool:
-    path = ROOT / relative
-    text = path.read_text(encoding="utf-8")
-    updated, count = re.subn(COPY_PATTERN, f'version = "{version}"', text, count=1)
-    if count != 1:
-        print(f"Could not rewrite the version in {path}", file=sys.stderr)
-        raise SystemExit(1)
-    if updated == text:
-        return False
-    path.write_text(updated, encoding="utf-8")
-    return True
-
-
 def rewrite_sbom() -> None:
     """Regenerate sbom.cdx.json, which stamps the project version three times.
 
-    It is a copy like the other two, but a structured one: the version appears
-    as a bom-ref, a version field and a purl. tools/write_sbom.py already owns
+    The version appears there as a bom-ref, a version field and a purl. tools/write_sbom.py already owns
     that layout, and test_sbom_pins_match already verifies it, so delegate
     rather than reimplement the JSON surgery here.
     """
@@ -118,12 +97,12 @@ def main() -> int:
     parser.add_argument(
         "--write",
         action="store_true",
-        help="rewrite the copies from the CMake version instead of verifying them",
+        help="regenerate the SBOM from the CMake version",
     )
     parser.add_argument(
         "--bump",
         choices=BUMP_KINDS,
-        help="advance the CMake project version, then rewrite the copies to match",
+        help="advance the CMake project version, then regenerate the SBOM",
     )
     args = parser.parse_args()
 
@@ -144,17 +123,6 @@ def main() -> int:
 
     if args.write:
         rewrite_sbom()
-
-    for relative in COPIES:
-        if args.write:
-            if write(relative, expected):
-                print(f"{relative}: set to {expected}", file=sys.stderr)
-        else:
-            found = read(relative, COPY_PATTERN)
-            if found != expected:
-                problems.append(
-                    f"{relative} has {found}, expected {expected} from CMakeLists.txt"
-                )
 
     if problems:
         for problem in problems:

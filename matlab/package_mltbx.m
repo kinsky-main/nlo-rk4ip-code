@@ -4,7 +4,10 @@ function artifactPath = package_mltbx(buildDir, config)
 %   artifactPath = package_mltbx(buildDir, config)
 %
 % This helper stages files via CMake target `matlab_stage` and then emits
-% a platform-tagged `.mltbx` bundle under `<repo>/dist`.  Platform binaries
+% a platform-tagged `.mltbx` bundle under `dist` in the current folder.
+% buildDir is the CMake build directory of the core repository, configured
+% with this binding (see README.md); a relative path is taken from the
+% current folder. The version comes from the VERSION file beside this one.  Platform binaries
 % (shared library, loadlibrary prototype and thunk) live in lib/<arch>, so
 % bundles from several platforms can be combined with merge_mltbx.
 %
@@ -17,10 +20,13 @@ if nargin < 2 || strlength(string(config)) == 0
     config = "Release";
 end
 
-repoRoot = fileparts(fileparts(mfilename("fullpath")));
-buildDirAbs = fullfile(repoRoot, char(string(buildDir)));
+matlabDir = fileparts(mfilename("fullpath"));
+buildDirAbs = char(string(buildDir));
+if ~(startsWith(buildDirAbs, {'/', '\'}) || ~isempty(regexp(buildDirAbs, '^[A-Za-z]:', 'once')))
+    buildDirAbs = fullfile(pwd, buildDirAbs);
+end
 stageDir = fullfile(buildDirAbs, "matlab_toolbox");
-distDir = fullfile(repoRoot, "dist");
+distDir = fullfile(pwd, "dist");
 if ~isfolder(distDir)
     mkdir(distDir);
 end
@@ -50,13 +56,13 @@ end
 % Generate the loadlibrary prototype and thunk here, on the build machine,
 % so the shipped toolbox never has to parse the header — and therefore never
 % needs a C compiler on the client.
-package_mltbx_generate_prototype(repoRoot, stageDir);
+package_mltbx_generate_prototype(matlabDir, stageDir);
 
 % Compile the live progress MEX here as well, so users get the Command
 % Window progress bar without a compiler.
 build_progress_mex(fullfile(stageDir, "+nlolib", "private"));
 
-version = package_mltbx_read_version(fullfile(repoRoot, "CMakeLists.txt"));
+version = package_mltbx_read_version(fullfile(matlabDir, "VERSION"));
 platformTag = package_mltbx_platform_tag();
 artifactName = sprintf('nlolib-%s-%s.mltbx', version, platformTag);
 artifactPath = fullfile(distDir, artifactName);
@@ -100,7 +106,7 @@ matlab.addons.toolbox.packageToolbox(opts);
 fprintf('Created toolbox bundle: %s\n', artifactPath);
 end
 
-function package_mltbx_generate_prototype(repoRoot, stageDir)
+function package_mltbx_generate_prototype(matlabDir, stageDir)
 %PACKAGE_MLTBX_GENERATE_PROTOTYPE Emit nlolib_proto.m and its thunk into stageDir.
 if ispc
     libFile = "nlolib.dll";
@@ -121,23 +127,21 @@ if ~isfile(libraryPath) || ~isfile(headerPath)
            'loadlibrary prototype.\n  %s\n  %s'], libraryPath, headerPath);
 end
 
-matlabDir = fullfile(repoRoot, "matlab");
 addpath(matlabDir);
 generate_library_prototype(libraryPath, headerPath, archDir);
 end
 
-function version = package_mltbx_read_version(cmakePath)
-if ~isfile(cmakePath)
-    version = "0.0.0";
-    return;
+function version = package_mltbx_read_version(versionPath)
+%PACKAGE_MLTBX_READ_VERSION Toolbox version from the VERSION file.
+%   Fails rather than defaulting: a bundle stamped 0.0.0 would install over a
+%   real one and File Exchange would publish it under the tag's name.
+if ~isfile(versionPath)
+    error('nlolib:matlabVersionMissing', 'Version file not found: %s', versionPath);
 end
-contents = fileread(cmakePath);
-tokens = regexp(contents, 'project\([^)]*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)', ...
-                'tokens', 'once');
-if isempty(tokens)
-    version = "0.0.0";
-else
-    version = string(tokens{1});
+version = string(strtrim(fileread(versionPath)));
+if isempty(regexp(version, '^[0-9]+\.[0-9]+\.[0-9]+$', 'once'))
+    error('nlolib:matlabVersionInvalid', ...
+          'Expected MAJOR.MINOR.PATCH in %s, found "%s".', versionPath, version);
 end
 end
 

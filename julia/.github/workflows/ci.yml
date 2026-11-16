@@ -1,0 +1,81 @@
+name: ci
+
+# Builds the core library at the revision CORE_REF pins, with this checkout as
+# its Julia binding, and runs the package tests against it. The runners have no
+# GPU; test/runtests.jl pins the CPU backend for every propagation.
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned core revision
+        id: core
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/check_version.py
+          echo "ref=$(tr -d '[:space:]' < CORE_REF)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: kinsky-main/nlo-rk4ip-code
+          ref: ${{ steps.core.outputs.ref }}
+          path: core
+
+      # Source-only: the C API constants this binding re-declares must agree
+      # with the core's canonical list.
+      - name: Check the binding API constants
+        run: python3 core/tools/check_api_parity.py --bindings julia --julia-dir .
+
+      - name: Install Vulkan loader and glslang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslang-tools
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+
+      # nlo_configure_verified fails if any -D did not reach the project; the
+      # option names are unprefixed and a misspelled one is silently ignored.
+      - name: Configure
+        shell: bash
+        run: |
+          set -euo pipefail
+          source tools/cmake_options.sh
+          NLO_SOURCE_DIR=core nlo_configure_verified build \
+            CMAKE_BUILD_TYPE=Release \
+            BUILD_TESTING=ON \
+            NLOLIB_BUILD_DOCS=OFF \
+            NLOLIB_BUILD_BENCHMARKS=OFF \
+            NLOLIB_BUILD_EXAMPLES=OFF \
+            ENABLE_VULKAN_BACKEND=ON \
+            ENABLE_VKFFT=ON \
+            NLOLIB_JULIA_DIR="$GITHUB_WORKSPACE"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      # test_julia_example_soliton is left to local runs: it instantiates the
+      # plotting stack the examples use, which takes longer than everything
+      # else in this job put together.
+      - name: Run the Julia tests
+        run: ctest --test-dir build --build-config Release --output-on-failure -R '^test_julia_api_smoke$'

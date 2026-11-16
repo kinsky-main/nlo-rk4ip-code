@@ -87,18 +87,18 @@ from .translate.runtime_expr import translate_callable
 def _detect_version() -> str:
     """Report this package's version without storing a copy of it.
 
-    ``CMakeLists.txt`` is the source of truth and ``pyproject.toml`` holds the
-    only Python-side copy, which ``test_version_copies_match`` keeps equal to
-    it. Deriving the attribute from one of those rather than assigning a
-    literal here means there is no further copy to drift.
+    ``pyproject.toml`` is the source of truth for the Python package version,
+    which is released independently of the core library. Deriving the
+    attribute from it rather than assigning a literal here means there is no
+    second copy to drift.
 
-    A source checkout has the package at ``<repo>/python/nlolib``, so its
-    ``pyproject.toml`` is two directories up; it is read first because an
-    installed nlolib can shadow a checkout on ``sys.path``, and the installed
-    distribution metadata would then name a version this code is not. The
-    ``name`` check keeps an unrelated ``pyproject.toml`` from answering.
+    A source checkout has ``pyproject.toml`` next to the package directory; it
+    is read first because an installed nlolib can shadow a checkout on
+    ``sys.path``, and the installed distribution metadata would then name a
+    version this code is not. The ``name`` check keeps an unrelated
+    ``pyproject.toml`` from answering.
     """
-    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
     try:
         text = pyproject.read_text(encoding="utf-8")
     except OSError:

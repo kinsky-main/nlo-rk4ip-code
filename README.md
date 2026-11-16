@@ -12,10 +12,20 @@ Full rendered documentation is available at
 - Runtime operator mathematics: `docs/runtime_operators.md`
 - Build and install guide: `docs/build_and_install.md`
 - Vulkan backend behaviour, JIT and runtime switches: `docs/gpu_backend.md`
-- Python binding guide: `python/README.md`
-- MATLAB binding guide: `matlab/README.md`
-- Julia binding guide: `julia/README.md`
-- Julia release and registration guide: `docs/release_julia.md`
+- Bindings and how they are released: [Bindings](#bindings) below
+
+## Getting the Source
+
+The Python, MATLAB and Julia bindings are separate repositories, mounted here
+as the `python/`, `matlab/` and `julia/` git submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/kinsky-main/nlo-rk4ip-code.git
+```
+
+In an existing clone, `git submodule update --init` fetches them. The core
+library builds without them; a binding that is not checked out is skipped, along
+with its targets and tests.
 
 ## Quick Start
 
@@ -58,8 +68,9 @@ every push to `main`:
 
 The runners have no GPU, so the Vulkan cases skip their device work and only the
 CPU paths are exercised. The `test_python_*` and `test_julia_*` cases are
-excluded there and are not covered by CI: run the full `ctest` above locally
-before opening a pull request that touches the Python or Julia bindings.
+excluded here; each binding repository runs its own suite in its own CI, against
+the core revision it pins. Run the full `ctest` above locally before opening a
+pull request that changes behaviour the bindings rely on.
 
 ## Default Operator Forms
 
@@ -94,46 +105,33 @@ Generated output:
 
 ## Bindings
 
-- Python package and docs-facing guide: `python/README.md`
-- MATLAB package guide: `matlab/README.md`
-- Julia package guide: `julia/README.md`
+Each binding is its own repository with its own version, tests, examples and
+release pipeline, and is mounted here as a submodule:
 
-The PyPI/package readme remains `python/README_PYPI.md`.
+| Binding | Submodule | Repository | Published to |
+| --- | --- | --- | --- |
+| Python | `python/` | [nlolib-python](https://github.com/kinsky-main/nlolib-python) | PyPI (`pip install nlolib`) |
+| MATLAB | `matlab/` | [nlolib-matlab](https://github.com/kinsky-main/nlolib-matlab) | File Exchange / GitHub releases (`nlolib.mltbx`) |
+| Julia | `julia/` | [NLOLib.jl](https://github.com/kinsky-main/NLOLib.jl) | General registry (`] add NLOLib`) |
 
-The Julia package installs from the General registry with `] add NLOLib`, which
-downloads a prebuilt artifact instead of compiling anything; a built checkout
-also works through the `julia_stage` target. Both paths, the release flow and
-registration are in `docs/release_julia.md`.
+Inside this repository a binding builds against the tree it is mounted in:
+`cmake --build build` puts the shared library beside the Python package, and
+the `matlab_stage` and `julia_stage` targets stage the other two. On its own, a
+binding repository builds against the core commit named in its `CORE_REF` file,
+by configuring this repository with `-DNLOLIB_PYTHON_DIR`, `-DNLOLIB_MATLAB_DIR`
+or `-DNLOLIB_JULIA_DIR` pointing at the binding checkout.
 
-## Python Releases
-
-Wheels are published to PyPI by `.github/workflows/release-pypi.yml` when a
-bare version tag (no `v` prefix) is pushed. One wheel per platform, Linux and
-Windows x86-64, each smoke-tested on a clean runner before anything is
-uploaded. Run the workflow manually for a dry run that builds and checks the
-wheels but publishes nothing.
-
-To build a wheel locally:
-
-```bash
-./tools/release/build_wheel_linux.sh build-wheel-linux Release
-```
-
-```powershell
-.\tools\release\build_wheel_windows.ps1 -BuildDir build-wheel-win -Config Release
-```
-
-Both need the Vulkan loader and `glslangValidator`. See
-[docs/release_python.md](docs/release_python.md) for the full story: the wheel
-tagging, the platform matrix and its glibc floor, Trusted Publishing setup,
-and why macOS is not published.
+A change that touches both sides lands in three steps: merge the core change
+here, point the binding's `CORE_REF` at it (with the binding change) and merge
+that, then update the submodule pointer here. Releases are cut from the binding
+repositories; see [docs/release_manual.md](docs/release_manual.md).
 
 ## Python Benchmarks
 
 Run the nlolib-only tensor CPU vs GPU benchmark with:
 
 ```powershell
-python examples/python/tensor_backend_scaling_nlolib_rk4ip.py
+python python/examples/tensor_backend_scaling_nlolib_rk4ip.py
 ```
 
 The nlolib-only runtime plot fits the GPU curve in two regions: a smaller
@@ -142,7 +140,7 @@ ringbuffer-friendly region and a larger transfer-limited region.
 The mixed nlolib/MMTools runtime comparison remains:
 
 ```powershell
-python examples/python/tensor_backend_scaling_rk4ip.py
+python python/examples/tensor_backend_scaling_rk4ip.py
 ```
 
 It translates MMTools scalar mode counts into GRIN-effective nlolib grid

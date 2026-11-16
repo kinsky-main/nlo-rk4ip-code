@@ -160,12 +160,12 @@ def build_bom(P: dict[str, str], version: str, serial: str) -> dict:
              purl="pkg:generic/doxygen@1.9", bomref="doxygen@>=1.9", props={"nlolib:constraint": ">=1.9"}),
         comp("python", "3.9", "application", "PSF-2.0", "test", "excluded",
              "Interpreter for the Python binding (python/nlolib, ctypes, no compiled extension) and "
-             "the CTest Python suite. pyproject.toml: requires-python >=3.9. 3.12 verified.",
+             "the CTest Python suite. python/pyproject.toml: requires-python >=3.9. 3.12 verified.",
              purl="pkg:generic/python@3.9", bomref="python@>=3.9",
              props={"nlolib:constraint": ">=3.9",
-                    "nlolib:cmake": "tests/python/CMakeLists.txt find_package(Python3)"}),
+                    "nlolib:cmake": "tests/CMakeLists.txt find_package(Python3)"}),
         comp("numpy", "1.24", "library", "BSD-3-Clause", "test", "excluded",
-             "Required by the Python binding, tests and examples (examples/python/requirements.txt).",
+             "Required by the Python binding, tests and examples (python/examples/requirements.txt).",
              purl="pkg:pypi/numpy@1.24", bomref="numpy@>=1.24", props={"nlolib:constraint": ">=1.24"}),
         comp("matplotlib", "3.8", "library", "PSF-2.0", "test", "excluded",
              "Plotting in Python examples and several CTest cases (requirements.txt: >=3.8; "
@@ -179,7 +179,7 @@ def build_bom(P: dict[str, str], version: str, serial: str) -> dict:
              "when no julia binary is found.",
              purl="pkg:generic/julia@1.10", bomref="julia@1.10", props={"nlolib:constraint": "^1.10"}),
         comp("MATLAB", "R2019b", "application", None, "bindings", "excluded",
-             "MATLAB toolbox target (matlab_stage / package_mltbx.m). matlab/README.md: R2019b or "
+             "MATLAB toolbox target (matlab_stage / package_mltbx.m). matlab/docs/binding_guide.md: R2019b or "
              "later, no compiler needed on the client.",
              purl="pkg:generic/matlab@R2019b", bomref="MATLAB@>=R2019b",
              props={"nlolib:constraint": ">=R2019b"}),
