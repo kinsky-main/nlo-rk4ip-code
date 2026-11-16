@@ -75,10 +75,14 @@ void vk_auto_context_destroy(vk_auto_context* context);
  * not release (the NVIDIA Linux ICD opens a D-Bus system-bus connection inside
  * vkCreateInstance and keeps it, capping a process at eleven instances).
  *
- * Also registered with atexit(), so callers need not invoke it.  Call it
- * explicitly only to release the instance early, after every backend created
- * from it has been destroyed; a later backend creation makes a fresh instance.
- * Safe to call more than once, and from any thread.
+ * Nothing calls this at process exit: destroying the instance from an atexit
+ * handler faults when the library is loaded dynamically, because the Vulkan
+ * loader may already be unloaded by then.  The final instance is left for the
+ * OS to reclaim, which is why the one it holds is bounded at one.
+ *
+ * Call it to release the instance early, after every backend created from it
+ * has been destroyed; a later backend creation makes a fresh instance.  Safe to
+ * call more than once, and from any thread.
  */
 void vk_auto_instance_shutdown(void);
 
