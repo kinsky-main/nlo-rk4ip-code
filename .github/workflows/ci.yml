@@ -66,7 +66,7 @@ jobs:
           set -euo pipefail
           python tools/write_sbom.py --check
 
-      - name: Check the C API constants agree across the bindings
+      - name: Check the bindings expose the shared API surface
         shell: bash
         run: |
           set -euo pipefail

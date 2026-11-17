@@ -59,6 +59,10 @@ every push to `main`:
   python tools/check_api_parity.py
   ```
 
+  `check_api_parity.py` compares the three bindings with the shared public
+  surface in `tests/api_surface.json` (see `docs/binding_api_vocabulary.md`)
+  and fails on any difference.
+
 - a Linux job that configures and builds with the Vulkan backend on, then runs
   the native test suite:
 
@@ -114,6 +118,28 @@ release pipeline, and is mounted here as a submodule:
 | MATLAB | `matlab/` | [nlolib-matlab](https://github.com/kinsky-main/nlolib-matlab) | File Exchange / GitHub releases (`nlolib.mltbx`) |
 | Julia | `julia/` | [NLOLib.jl](https://github.com/kinsky-main/NLOLib.jl) | General registry (`] add NLOLib`) |
 
+The three bindings share one public API, each in its own language's idiom:
+one `propagate` entry point, operators written as plain functions, the same
+option and field names, and lowercase strings for backend and other enum
+values. [docs/binding_api_vocabulary.md](docs/binding_api_vocabulary.md) is the
+reference. In Python:
+
+```python
+import nlolib
+
+result = nlolib.propagate(
+    nlolib.PulseSpec(samples=field0, delta_time=dt),
+    lambda A, w: 1j * (0.5 * beta2) * w * w,   # linear operator
+    lambda A, I: 1j * gamma * A * I,           # nonlinear operator
+    propagation_distance=1.0,
+    num_records=2,
+    exec_options=nlolib.ExecutionOptions(backend_type="auto"),
+)
+```
+
+Each binding ships the same twelve examples under its `examples/` directory,
+starting with `quickstart`.
+
 Inside this repository a binding builds against the tree it is mounted in:
 `cmake --build build` puts the shared library beside the Python package, and
 the `matlab_stage` and `julia_stage` targets stage the other two. On its own, a
@@ -131,7 +157,7 @@ repositories; see [docs/release_manual.md](docs/release_manual.md).
 Run the nlolib-only tensor CPU vs GPU benchmark with:
 
 ```powershell
-python python/examples/tensor_backend_scaling_nlolib_rk4ip.py
+python python/examples/tensor_backend_scaling_nlolib.py
 ```
 
 The nlolib-only runtime plot fits the GPU curve in two regions: a smaller
@@ -140,7 +166,7 @@ ringbuffer-friendly region and a larger transfer-limited region.
 The mixed nlolib/MMTools runtime comparison remains:
 
 ```powershell
-python python/examples/tensor_backend_scaling_rk4ip.py
+python python/examples/tensor_backend_scaling.py
 ```
 
 It translates MMTools scalar mode counts into GRIN-effective nlolib grid
