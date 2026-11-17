@@ -57,7 +57,11 @@
         {"name": "step_history_capacity", "kind": "option", "default": 200000},
         {"name": "progress_callback", "kind": "option", "default": null}
       ],
-      "returns": "PropagationResult"
+      "returns": "PropagationResult",
+      "notes": [
+        "pulse must be the PulseSpec type (in MATLAB a struct with the PulseSpec field names). A dict, mapping or NamedTuple is the 'bad pulse' error.",
+        "The same holds for exec_options and storage: ExecutionOptions and StorageOptions, a struct in MATLAB."
+      ]
     },
     "query_runtime_limits": {
       "params": [
@@ -118,7 +122,11 @@
     "_comment": [
       "Python: dataclasses / exception classes. Julia: structs. MATLAB: plain",
       "structs with these field names (no class), so 'matlab' is null and only",
-      "the field words are checked there. Errors are in 'errors'."
+      "the field words are checked there. Errors are in 'errors'.",
+      "",
+      "Not checked by the tool: field value types. Every flag is a boolean in",
+      "every binding (marked 'type': 'boolean'); PerfProfileSnapshot has none,",
+      "its fields are milliseconds and counts."
     ],
     "PulseSpec": {
       "names": {"python": "PulseSpec", "julia": "PulseSpec", "matlab": null},
@@ -180,7 +188,7 @@
         {"name": "records_requested"},
         {"name": "records_written"},
         {"name": "backend_requested", "enum": "vector_backend"},
-        {"name": "coupled"},
+        {"name": "coupled", "type": "boolean"},
         {"name": "status", "enum": "status"}
       ]
     },
@@ -195,8 +203,9 @@
       "names": {"python": "StorageResult", "julia": "StorageResult", "matlab": null},
       "fields": [
         {"name": "run_id"}, {"name": "records_captured"}, {"name": "records_spilled"},
-        {"name": "chunks_written"}, {"name": "db_size_bytes"}, {"name": "truncated"}
-      ]
+        {"name": "chunks_written"}, {"name": "db_size_bytes"}, {"name": "truncated", "type": "boolean"}
+      ],
+      "notes": ["truncated is a boolean in every binding, not the C int."]
     },
     "ProgressInfo": {
       "names": {"python": "ProgressInfo", "julia": "ProgressInfo", "matlab": null},
@@ -215,8 +224,9 @@
         {"name": "max_num_recorded_samples_with_storage"},
         {"name": "estimated_required_working_set_bytes"},
         {"name": "estimated_device_budget_bytes"},
-        {"name": "storage_available"}
-      ]
+        {"name": "storage_available", "type": "boolean"}
+      ],
+      "notes": ["storage_available is a boolean in every binding, not the C int."]
     },
     "PerfProfileSnapshot": {
       "names": {"python": "PerfProfileSnapshot", "julia": "PerfProfileSnapshot", "matlab": null},
@@ -366,6 +376,18 @@
         "PropagationAbortedError": {"base": "Exception", "fields": ["result"]}
       }
     },
+    "status": {
+      "_comment": [
+        "What the error's status field holds. It is a 'status' enum string when",
+        "a C call returned it. When no C call happened it is as listed here;",
+        "'unset' is None in Python and nothing in Julia. MATLAB errors carry",
+        "no status field: the identifier says which case it is, and",
+        "nlolib:statusFailed names the status string in its message."
+      ],
+      "C call returned a non-OK status": "that status string",
+      "feature not in this build": "not_implemented",
+      "library not found or not loadable": "unset (Python raises OSError, which has no status field)"
+    },
     "matlab_ids": [
       "nlolib:invalidOperator",
       "nlolib:invalidPulse",
@@ -411,12 +433,38 @@
     },
     "rule": [
       "The binding picks the C context by run type and writes the lowered text to the one C field the core compiles for that run type; it leaves the other field unset.",
-      "A parameter binds by name when its name is a symbol of the context (or an alias of one); otherwise it takes the next unused symbol in the context's parameter order.",
-      "A symbol the context does not list is the 'operator cannot be translated' error, raised by the binding before the C call.",
-      "w and wt name the same axis in every linear context, so one linear operator written as (A, w) works for both run types.",
       "potential_operator on a temporal run is a bad option value: the core does not compile it there. Use pulse.potential_grid.",
       "potential_operator is ignored by the core when pulse.potential_grid is set; passing both is a bad option value."
     ],
+    "runtime_symbols": ["A", "I", "D", "V", "h", "w", "wt", "kx", "ky", "x", "y", "t"],
+    "parameter_binding": {
+      "_comment": [
+        "How an operator function's parameters become runtime symbols. 'The",
+        "context's symbols' are its 'parameters' list plus its 'aliases'. The",
+        "error in (c) and (d) is 'operator cannot be translated', raised by the",
+        "binding before the C call."
+      ],
+      "steps": [
+        "(a) First, every parameter whose name is one of the context's symbols binds to that symbol, wherever it stands in the parameter list.",
+        "(b) Then the remaining parameters bind, left to right, to the next symbol of the context's parameter order that is not bound yet. More parameters than symbols is the error.",
+        "(c) A parameter named after a runtime symbol the context does not provide (kx in dispersion_factor, I in linear_factor) is the error. It is never rebound positionally.",
+        "(d) Two parameters that resolve to the same symbol are the error.",
+        "(e) w and wt are one symbol in the four linear contexts. The binding emits the context's own spelling: w for a temporal run, wt for a tensor run. So (A, w, wt) is error (d).",
+        "(f) Runtime symbols enter only through parameters. A free name in the body is a captured constant, whatever it is called."
+      ],
+      "examples": [
+        {"signature": "(B, A)", "context": "dispersion_factor",
+         "result": "A binds to A by name (a); B takes the next unused symbol, w (b)."},
+        {"signature": "(A, omega)", "context": "dispersion_factor or linear_factor",
+         "result": "omega is not a runtime symbol, so it takes the next unused symbol: w in a temporal run, wt in a tensor run (b)."},
+        {"signature": "(A, w, wt, kx, ky)", "context": "linear_factor",
+         "result": "error (d): w and wt resolve to the same symbol."},
+        {"signature": "(A, w, kx, ky)", "context": "linear_factor",
+         "result": "A, wt, kx, ky: w is rewritten to wt (e)."},
+        {"signature": "(A, kx)", "context": "dispersion_factor",
+         "result": "error (c): kx is a runtime symbol a temporal run does not provide."}
+      ]
+    },
     "slots": {
       "linear_operator": {
         "temporal": {"c_field": "dispersion_factor_expr", "context": "dispersion_factor"},
@@ -453,14 +501,14 @@
         "parameters": ["A", "wt", "kx", "ky", "x", "y", "t"],
         "aliases": {"w": "wt"},
         "c_allows": ["A", "wt", "kx", "ky", "x", "y", "t"],
-        "c_note": "the C parser also accepts w here and compiles it as wt"
+        "c_note": "context_allows_symbol_w is false here, but the parser's branch for the identifier w then tests context_allows_symbol_wt and emits the wt opcode, so C does compile w as wt in this context. The bindings rewrite w to wt themselves and do not depend on that."
       },
       "linear": {
         "c_enum": 4, "run_type": "tensor",
         "parameters": ["A", "D", "h", "wt", "kx", "ky", "x", "y", "t", "V"],
         "aliases": {"w": "wt"},
         "c_allows": ["A", "D", "h", "V", "wt", "kx", "ky", "x", "y", "t"],
-        "c_note": "the C parser also accepts w here and compiles it as wt"
+        "c_note": "context_allows_symbol_w is false here, but the parser's branch for the identifier w then tests context_allows_symbol_wt and emits the wt opcode, so C does compile w as wt in this context. The bindings rewrite w to wt themselves and do not depend on that."
       },
       "potential": {
         "c_enum": 5, "run_type": "tensor",
@@ -489,6 +537,12 @@
       "record_z unset and num_records == 1: final field only; records holds that one field and z_axis is [propagation_distance].",
       "otherwise: dense output at num_records uniformly spaced positions from 0 to propagation_distance (num_records from the preset when unset)."
     ],
+    "known_core_discrepancy": {
+      "_comment": "Recorded, not resolved: the owner decides whether the rule or the core changes.",
+      "rule": "record_z with one position returns the field at that position.",
+      "core": "Core 9417e92 (src/nlolib.c, the num_recorded_samples == 1u branches) downloads the current field, which is the final field at propagation_distance, into the only record whenever exactly one record is requested, in either output mode.",
+      "effect": "Today a single record_z position p returns the field at propagation_distance, not at p, unless p equals propagation_distance. z_axis must report what was returned."
+    },
     "c_mapping": {
       "record_z": {"output_mode": "PROPAGATE_OUTPUT_DENSE", "c_value": 0, "explicit_record_z": "record_z"},
       "num_records_1": {"output_mode": "PROPAGATE_OUTPUT_FINAL_ONLY", "c_value": 1},
@@ -576,13 +630,16 @@
   "known_gaps": {
     "_comment": [
       "Parts of the target a binding is allowed not to have yet, each with the",
-      "reason. A gap that has since been closed is reported, so this list cannot",
-      "outlive the gap it describes."
+      "reason. Keys are '<function>.<parameter>', 'types.<Type>' or",
+      "'enums.<enum>'. A parameter gap that has since been closed is reported,",
+      "so this list cannot outlive the gap it describes."
     ],
     "python": {},
     "julia": {},
     "matlab": {
-      "propagate.progress_callback": "progress_mex cannot forward to a function handle yet; separate task"
+      "propagate.progress_callback": "progress_mex cannot forward to a function handle yet; separate task",
+      "types.ProgressInfo": "only reaches the caller through progress_callback",
+      "enums.progress_event": "only reaches the caller through ProgressInfo.event_type"
     }
   },
 

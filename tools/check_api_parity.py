@@ -204,10 +204,13 @@ def check_removed(diffs, manifest, language, exported, sources):
             diffs.add("removed", f"{name} still occurs in {', '.join(hits)}")
 
 
-def check_enums(diffs, manifest, sources):
+def check_enums(diffs, manifest, language, sources):
     """Every enum string must occur as a quoted literal in the package source."""
     joined = "\n".join(sources.values())
+    gaps = gaps_for(manifest, language)
     for enum, spec in public(manifest["enums"]).items():
+        if f"enums.{enum}" in gaps:
+            continue
         missing = [
             value for value in spec["values"]
             if f'"{value}"' not in joined and f"'{value}'" not in joined
@@ -289,9 +292,13 @@ def check_examples(diffs, manifest, language, root):
     for stem in sorted(present):
         if stem in shared or stem in on_demand:
             continue
-        covered = dropped.get(stem)
-        reason = f"covered by {covered}" if covered else "not in the shared set"
-        diffs.add("examples", f"examples/{stem}{suffix} should go: {reason}")
+        bare = stem[:-len("_rk4ip")] if stem.endswith("_rk4ip") else None
+        if stem in dropped:
+            diffs.add("examples", f"examples/{stem}{suffix} should go: covered by {dropped[stem]}")
+        elif bare in shared or bare in on_demand:
+            diffs.add("examples", f"examples/{stem}{suffix} should be renamed {bare}{suffix}")
+        else:
+            diffs.add("examples", f"examples/{stem}{suffix} should go: not in the shared set")
 
 
 # -- Python ----------------------------------------------------------------
@@ -427,7 +434,7 @@ def python_surface(root, manifest):
             diffs.add("errors", f"{name} must derive from {spec['base']}")
 
     check_removed(diffs, manifest, "python", set(exported), sources)
-    check_enums(diffs, manifest, sources)
+    check_enums(diffs, manifest, "python", sources)
     check_presets(diffs, manifest, sources)
     check_examples(diffs, manifest, "python", root)
     return diffs
@@ -624,7 +631,7 @@ def julia_surface(root, manifest):
             diffs.add("errors", f"{name} must be a subtype of {spec['base']}")
 
     check_removed(diffs, manifest, "julia", set(exported), sources)
-    check_enums(diffs, manifest, sources)
+    check_enums(diffs, manifest, "julia", sources)
     check_presets(diffs, manifest, sources)
     check_examples(diffs, manifest, "julia", root)
     return diffs
@@ -684,6 +691,8 @@ def matlab_surface(root, manifest):
         compare_names(diffs, "functions", function, found, want)
 
     for name, spec in public(manifest["types"]).items():
+        if f"types.{name}" in gaps:
+            continue
         for field in spec["fields"] + spec.get("meta", []):
             if not word(field["name"]).search(joined):
                 diffs.add("types", f"{name}: field {field['name']} does not occur in +nlolib")
@@ -698,7 +707,7 @@ def matlab_surface(root, manifest):
         diffs.add("errors", f"{identifier} is never raised")
 
     check_removed(diffs, manifest, "matlab", None, sources)
-    check_enums(diffs, manifest, sources)
+    check_enums(diffs, manifest, "matlab", sources)
     check_presets(diffs, manifest, sources)
     check_examples(diffs, manifest, "matlab", root)
     return diffs

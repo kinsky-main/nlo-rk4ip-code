@@ -103,6 +103,16 @@ One rule, in every binding; there is no `output` option.
 3. Otherwise: `num_records` uniformly spaced positions from 0 to
    `propagation_distance`.
 
+Known core discrepancy, not resolved: for a `record_z` with exactly one
+position, rule 1 says the field at that position comes back. Core `9417e92`
+does not do that. `src/nlolib.c` (the `num_recorded_samples == 1u` branches)
+downloads the current field, which is the final field at
+`propagation_distance`, into the only record whenever exactly one record is
+requested, in either output mode. So today a single position `p` returns the
+field at `propagation_distance` unless `p` equals it. Either the rule or the
+core has to change; until then a binding must report in `z_axis` what was
+actually returned.
+
 ## 3. Types
 
 | Type | Fields, in order |
@@ -121,6 +131,15 @@ One rule, in every binding; there is no `output` option.
 `records` keeps each language's layout: a list of rows in Python, records x
 samples in MATLAB, samples x records in Julia. `step_history` is unset unless
 `capture_step_history`; `storage_result` is unset unless `storage` was given.
+
+The checker compares field names, not value types, so these are stated here:
+
+- Flags are booleans in every binding, not the C `int`:
+  `RuntimeLimits.storage_available`, `StorageResult.truncated`, `meta.coupled`.
+  `PerfProfileSnapshot` has no flags; its fields are milliseconds and counts.
+- `pulse` must be the `PulseSpec` type, which in MATLAB is a struct with the
+  `PulseSpec` field names. A dict, mapping or NamedTuple is the "bad pulse"
+  error. The same holds for `exec_options` and `storage`.
 
 ## 4. Enum values are strings
 
@@ -162,6 +181,17 @@ replaces `NT_MAX`; a `run_id` longer than 63 characters is a bad option value.
 `NlolibError` derives from `RuntimeError`. MATLAB raises these seven
 identifiers and no other `nlolib:` identifier.
 
+What `.status` holds:
+
+| Case | `.status` |
+|---|---|
+| A C call returned a non-OK status | that status string, for example `"invalid_argument"` |
+| Feature not in this build (no C call was made) | `"not_implemented"` |
+| Library not found or not loadable (no C call was made) | unset: `nothing` in Julia; Python raises `OSError`, which has no `status` |
+
+MATLAB errors carry no status field. The identifier says which case it is, and
+`nlolib:statusFailed` names the status string in its message.
+
 ## 6. How operators are lowered
 
 Each operator function is translated once, at setup, into the expression text
@@ -181,15 +211,10 @@ The rule, the same in all three bindings:
 
 1. The binding picks the context by run type and writes the text to the one C
    field the core compiles for that run type. It leaves the other field unset.
-2. A parameter binds by name when its name is a symbol of the context or an
-   alias of one. Otherwise it takes the next unused symbol in the context's
-   parameter order.
-3. A symbol the context does not list is the "operator cannot be translated"
-   error, raised by the binding before the C call.
-4. `w` and `wt` name the same axis in every linear context, so a linear
-   operator written as `(A, w)` works for both run types.
-5. `potential_operator` on a temporal run, or together with
+2. `potential_operator` on a temporal run, or together with
    `pulse.potential_grid`, is a bad option value: the core would ignore it.
+3. Parameters bind to runtime symbols as described under "How parameters
+   bind" below.
 
 | Operator | Temporal run | Tensor run |
 |---|---|---|
@@ -202,13 +227,48 @@ The rule, the same in all three bindings:
 |---|---|---|---|
 | `dispersion_factor` | `A`, `w` | `wt` = `w` | `A`, `w`, `wt` |
 | `dispersion` | `A`, `D`, `h`, `w`, `V` | `wt` = `w` | `A`, `D`, `h`, `V`, `w`, `wt` |
-| `linear_factor` | `A`, `wt`, `kx`, `ky`, `x`, `y`, `t` | `w` = `wt` | the same; `w` is compiled as `wt` |
-| `linear` | `A`, `D`, `h`, `wt`, `kx`, `ky`, `x`, `y`, `t`, `V` | `w` = `wt` | the same; `w` is compiled as `wt` |
+| `linear_factor` | `A`, `wt`, `kx`, `ky`, `x`, `y`, `t` | `w` = `wt` | the same, and `w` (see below) |
+| `linear` | `A`, `D`, `h`, `wt`, `kx`, `ky`, `x`, `y`, `t`, `V` | `w` = `wt` | the same, and `w` (see below) |
 | `potential` | `x`, `y`, `t` | | `A`, `x`, `y`, `t` |
 | `nonlinear` | `A`, `I`, `V` | | `A`, `I`, `V`, `x`, `y`, `t` |
 
 Functions: `exp`, `log`, `sqrt`, `sin`, `cos`. Imaginary unit: `i`. Named
 constants: `c0` to `c15`.
+
+### How parameters bind
+
+The runtime symbols are `A`, `I`, `D`, `V`, `h`, `w`, `wt`, `kx`, `ky`, `x`,
+`y`, `t`. A context's symbols are its parameters in the table above plus its
+alias. "The error" below is "operator cannot be translated", raised by the
+binding before the C call.
+
+- (a) First, every parameter whose name is one of the context's symbols binds
+  to that symbol, wherever it stands in the parameter list.
+- (b) Then the remaining parameters bind, left to right, to the next symbol in
+  the context's order that is not bound yet. More parameters than symbols is
+  the error.
+- (c) A parameter named after a runtime symbol the context does not provide is
+  the error. It is never rebound positionally.
+- (d) Two parameters that resolve to the same symbol are the error.
+- (e) `w` and `wt` are one symbol in the four linear contexts. The binding
+  emits the context's own spelling: `w` for a temporal run, `wt` for a tensor
+  run.
+- (f) Runtime symbols enter only through parameters. A free name in the body
+  is a captured constant, whatever it is called.
+
+| Operator | Context | Result |
+|---|---|---|
+| `@(B, A)` | `dispersion_factor` | `A` binds to `A` by name (a); `B` takes the next unused symbol, `w` (b) |
+| `@(A, omega)` | `dispersion_factor` or `linear_factor` | `omega` is not a runtime symbol, so it takes the next unused symbol: `w` in a temporal run, `wt` in a tensor run (b) |
+| `@(A, w, wt, kx, ky)` | `linear_factor` | error (d): `w` and `wt` are the same symbol |
+| `@(A, w, kx, ky)` | `linear_factor` | `A`, `wt`, `kx`, `ky`; `w` is rewritten to `wt` (e) |
+| `@(A, kx)` | `dispersion_factor` | error (c): a temporal run does not provide `kx` |
+
+On `w` in the tensor contexts: `context_allows_symbol_w` is true only for the
+two dispersion contexts. The parser's branch for the identifier `w` then tests
+`context_allows_symbol_wt` and emits the `wt` opcode, so the C core does
+compile `w` as `wt` in `linear_factor` and `linear`. The bindings rewrite `w`
+to `wt` themselves and do not depend on that.
 
 What changes from the bindings as they stood: Python lowered the linear
 operator in the `linear_factor` context for every run and wrote the text to
@@ -275,6 +335,7 @@ result = nlolib.propagate( ...
 | `meta` keys `output`, `records`, `message`, `storage_enabled`, `records_returned` | removed |
 | `meta.step_history`, `meta.storage_result` | `result.step_history`, `result.storage_result` |
 | `query_runtime_limits(config, ...)` | `query_runtime_limits(pulse, exec_options)` |
+| a dict, mapping or NamedTuple as `pulse` | `PulseSpec` (a struct in MATLAB) |
 
 ### Python
 
@@ -378,7 +439,9 @@ Kept on demand in one binding, not run by default: `tensor_backend_scaling*`,
 ## 10. Known gaps
 
 - MATLAB has no `progress_callback`: `progress_mex` cannot forward to a
-  function handle yet.
+  function handle yet. `ProgressInfo` and the `"accepted"`, `"rejected"`,
+  `"finish"` event strings reach a caller only through that callback, so they
+  are part of the same gap and are not counted as MATLAB differences.
 
 ## 11. Order of work
 
