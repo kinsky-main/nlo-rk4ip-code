@@ -131,6 +131,13 @@ target_compile_definitions(nlolib PUBLIC
 # Command-line merge of completed staging files, for the host that merges runs.
 add_executable(nlolib_store_merge ${CMAKE_CURRENT_LIST_DIR}/tools/store_merge.c)
 target_link_libraries(nlolib_store_merge PRIVATE nlolib)
+# Packages ship the tool in bin/ beside the library in lib/ (the Julia artifact).
+if(UNIX AND NOT APPLE)
+  set_target_properties(nlolib_store_merge PROPERTIES
+    BUILD_RPATH "\$ORIGIN/../lib"
+    INSTALL_RPATH "\$ORIGIN/../lib"
+  )
+endif()
 if(WIN32)
   add_custom_command(TARGET nlolib_store_merge POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:nlolib> $<TARGET_FILE_DIR:nlolib_store_merge>
