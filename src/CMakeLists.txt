@@ -98,6 +98,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     -static-libgcc
     -Wl,--exclude-libs,ALL
   )
+  # Keeps the floor at glibc 2.35 when the build host's glibc is newer.
+  target_sources(nlolib PRIVATE ${CMAKE_CURRENT_LIST_DIR}/utility/glibc_compat.c)
 endif()
 
 if(ENABLE_VULKAN_BACKEND)
