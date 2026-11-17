@@ -1,28 +1,21 @@
 #!/usr/bin/env python3
-"""Check that the Python, Julia and MATLAB bindings agree on the API constants.
+"""Check that the Python, Julia and MATLAB bindings expose the same public API.
 
-Every binding re-declares the C API's enums and limits in its own source, so a
-value changed in src/nlolib.h, or a name added to one binding only, drifts
-silently -- there is no compile-time link between the four copies. This is the
-static guard for that failure mode, in the same spirit as
-cmake/check_matlab_binding_types.cmake.
+The three bindings share one vocabulary and one structure, each in its own
+language's idiom. tests/api_surface.json holds that surface as data: functions
+and their parameters, types and their fields, string enum values, presets,
+error identifiers, names that must not come back, and the shared examples with
+their parameter blocks. docs/binding_api_vocabulary.md is the prose version.
 
-tests/api_parity.json holds the canonical names and values. For each binding
-this script reads the flat table of literal definitions and checks that every
-canonical name is defined with the canonical value, and -- for Python and Julia,
-which have explicit export lists -- that it is actually exported rather than
-merely defined.
+Nothing links the three implementations at build time, so a name added to one
+binding only, or a default changed in one, drifts silently. This script is the
+static guard for that: it reads each binding's sources and reports every
+difference from the manifest. Any difference fails (``--surface enforce``, the
+default); ``--surface report`` prints them and exits 0.
 
 Scans source text only: no interpreter, no MATLAB installation, nothing built.
-
-tests/api_surface.json is the second manifest: the whole public surface the
-three bindings are meant to share -- functions and their parameters, types and
-their fields, string enum values, presets, error identifiers, names that must
-not come back, and the shared examples. The bindings are compared with it the
-same text-only way. That comparison reports and does not fail (``--surface
-report``, the default) until the bindings have been moved to the shared
-surface; ``--surface enforce`` makes a difference fail, ``--surface off`` skips
-it. docs/binding_api_vocabulary.md describes the surface in prose.
+What that cannot see is listed in the manifest's comments -- field value types,
+and the C integer each enum string maps to, which the bindings' own tests cover.
 
 Each binding lives in its own repository, mounted here as the python/, julia/
 and matlab/ submodules. All three are required by default, so a checkout that
@@ -42,36 +35,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-# Python: `NAME = 123` in the binding module, plus a quoted entry in __all__.
-# The NLO_* aliases assign from another name rather than a literal, and are not
-# part of the canonical set, so a non-literal right-hand side is skipped.
-PYTHON_DEFINE = re.compile(r'(?m)^([A-Z][A-Z0-9_]*)\s*=\s*(.+?)\s*$')
-
-# Julia: `const NAME = Cint(0)` / `const NAME = 64`, plus `export NAME`.
-JULIA_DEFINE = re.compile(r'(?m)^const\s+([A-Z][A-Z0-9_]*)\s*=\s*(.+?)\s*$')
 JULIA_EXPORT = re.compile(r'(?m)^export\s+([A-Za-z_][A-Za-z0-9_!]*)\s*$')
-
-# MATLAB: `NAME = int32(0)` inside the properties (Constant) block. Everything
-# in that block is public, so there is no separate export list to check.
-MATLAB_DEFINE = re.compile(r'(?m)^\s{8}([A-Z][A-Z0-9_]*)\s*=\s*(.+?)\s*$')
-
-# Shared shapes of an integer literal across the three languages: a bare
-# integer, a cast such as int32(0) / Cint(0) / uint64(64), or the uint64 maximum
-# spelled as a saturation call.
-LITERAL = re.compile(r'^(?:[A-Za-z_][A-Za-z0-9_]*\(\s*)?(-?\d+)\s*\)?$')
-UINT64_MAX = 2**64 - 1
-UINT64_MAX_CALLS = ("intmax('uint64')", 'intmax("uint64")', "typemax(UInt64)")
-
-
-def parse_value(text):
-    """Return the integer a definition's right-hand side denotes, or None."""
-    text = text.split('#')[0].split('%')[0].strip()
-    if text in UINT64_MAX_CALLS:
-        return UINT64_MAX
-    if text == "ctypes.c_size_t(-1).value":
-        return UINT64_MAX
-    match = LITERAL.match(text)
-    return int(match.group(1)) if match else None
 
 
 def read(path):
@@ -84,43 +48,8 @@ def read(path):
     return path.read_text(encoding="utf-8")
 
 
-def collect(pattern, text):
-    found = {}
-    for name, raw in pattern.findall(text):
-        value = parse_value(raw)
-        if value is not None:
-            found[name] = value
-    return found
-
-
-def python_binding(root):
-    init = read(root / "nlolib" / "__init__.py")
-    exported = set(re.findall(r'"([A-Za-z_][A-Za-z0-9_]*)"', init))
-    return collect(PYTHON_DEFINE, read(root / "nlolib" / "_binding.py")), exported
-
-
-def julia_binding(root):
-    exported = set(JULIA_EXPORT.findall(read(root / "src" / "NLOLib.jl")))
-    return collect(JULIA_DEFINE, read(root / "src" / "types.jl")), exported
-
-
-def matlab_binding(root):
-    # A binding on the shared surface has no public constants class at all.
-    if not (root / "+nlolib" / "constants.m").exists():
-        return {}, set()
-    return collect(MATLAB_DEFINE, read(root / "+nlolib" / "constants.m")), None
-
-
-# {language: reader}, each returning (defined_values, exported_names_or_None).
-BINDINGS = {"python": python_binding, "julia": julia_binding, "matlab": matlab_binding}
-
-
-# --------------------------------------------------------------------------
-# Surface check: the bindings against tests/api_surface.json.
-#
 # Each reader returns the differences by category. One difference is one thing
-# a binding has to change, so the counts are a work list.
-# --------------------------------------------------------------------------
+# a binding has to change.
 
 NUMBER = re.compile(r'(?<![A-Za-z_.\d])-?\d+(?:\.\d*)?(?:[eE][-+]?\d+)?')
 BLOCK_BEGIN = "nlolib-example-parameters: begin"
@@ -128,6 +57,7 @@ BLOCK_END = "nlolib-example-parameters: end"
 BLOCK_LINE = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;#%]+?)\s*;?\s*(?:[#%].*)?$')
 EXAMPLE_SUFFIX = {"python": ".py", "julia": ".jl", "matlab": ".m"}
 QUOTE = "[\"']"
+ENUM_WINDOW = 400
 
 
 class Differences:
@@ -205,21 +135,31 @@ def check_removed(diffs, manifest, language, exported, sources):
 
 
 def check_enums(diffs, manifest, language, sources):
-    """Every enum string must occur as a quoted literal in the package source."""
-    joined = "\n".join(sources.values())
+    """Every enum's strings must occur together, as one table of quoted literals.
+
+    A lone occurrence of a common word such as "error" or "auto" somewhere in
+    the package does not count: all values of the enum have to be found within
+    ENUM_WINDOW characters of each other in one file.
+    """
     gaps = gaps_for(manifest, language)
     for enum, spec in public(manifest["enums"]).items():
         if f"enums.{enum}" in gaps:
             continue
-        missing = [
-            value for value in spec["values"]
-            if f'"{value}"' not in joined and f"'{value}'" not in joined
-        ]
-        if missing:
+        values = list(spec["values"])
+        best_missing = values
+        for text in sources.values():
+            for match in re.finditer(QUOTE + re.escape(values[0]) + QUOTE, text):
+                window = text[max(0, match.start() - ENUM_WINDOW):match.end() + ENUM_WINDOW]
+                missing = [
+                    v for v in values if f'"{v}"' not in window and f"'{v}'" not in window
+                ]
+                if len(missing) < len(best_missing):
+                    best_missing = missing
+        if best_missing:
             diffs.add(
                 "enums",
-                f"{enum} ({', '.join(spec['used_by'])}): no string literal for "
-                f"{', '.join(missing)}",
+                f"{enum} ({', '.join(spec['used_by'])}): no table of string literals "
+                f"holding {', '.join(best_missing)}",
             )
 
 
@@ -694,8 +634,12 @@ def matlab_surface(root, manifest):
         if f"types.{name}" in gaps:
             continue
         for field in spec["fields"] + spec.get("meta", []):
-            if not word(field["name"]).search(joined):
-                diffs.add("types", f"{name}: field {field['name']} does not occur in +nlolib")
+            # As a struct field: .name or a quoted 'name' / "name".
+            used = re.compile(
+                r"(?:\.|" + QUOTE + r")" + re.escape(field["name"]) + r"(?![A-Za-z0-9_])"
+            )
+            if not used.search(joined):
+                diffs.add("types", f"{name}: field {field['name']} is never used as a field in +nlolib")
 
     allowed = set(manifest["errors"]["matlab_ids"])
     used = set()
@@ -736,14 +680,22 @@ def report_surface(manifest, selected, directories, summary_only):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", default=str(ROOT / "tests" / "api_parity.json"))
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--manifest",
+        "--surface-manifest",
+        dest="manifest",
+        default=str(ROOT / "tests" / "api_surface.json"),
+        help="the surface manifest (default: tests/api_surface.json)",
+    )
     parser.add_argument(
         "--bindings",
-        default=",".join(BINDINGS),
+        default=",".join(SURFACES),
         help="comma-separated bindings to check (default: all three)",
     )
-    for language in BINDINGS:
+    for language in SURFACES:
         parser.add_argument(
             f"--{language}-dir",
             default=str(ROOT / language),
@@ -751,112 +703,39 @@ def main() -> int:
         )
     parser.add_argument(
         "--surface",
-        choices=("off", "report", "enforce"),
-        default="report",
-        help="compare the bindings with the surface manifest: report prints the "
-        "differences and does not fail (default), enforce fails on any",
-    )
-    parser.add_argument(
-        "--surface-manifest", default=str(ROOT / "tests" / "api_surface.json")
+        choices=("report", "enforce"),
+        default="enforce",
+        help="enforce fails on any difference (default); report prints the "
+        "differences and exits 0",
     )
     parser.add_argument(
         "--surface-summary",
         action="store_true",
-        help="print only the difference counts of the surface comparison",
+        help="print only the difference counts",
     )
     args = parser.parse_args()
 
     selected = [name for name in args.bindings.split(",") if name]
-    unknown = sorted(set(selected) - set(BINDINGS))
+    unknown = sorted(set(selected) - set(SURFACES))
     if unknown or not selected:
-        parser.error(f"--bindings takes any of {', '.join(BINDINGS)}")
+        parser.error(f"--bindings takes any of {', '.join(SURFACES)}")
 
-    manifest = json.loads(read(args.manifest))
-    canonical = manifest["constants"]
-    gaps = {k: v for k, v in manifest["known_gaps"].items() if not k.startswith("_")}
-
-    problems = []
-    checked = 0
-    constants_checked = []
-
-    for language in selected:
-        defined, exported = BINDINGS[language](
-            pathlib.Path(getattr(args, f"{language}_dir"))
-        )
-        allowed = gaps.get(language, {})
-        allowed = {k: v for k, v in allowed.items() if not k.startswith("_")}
-
-        # A binding moved to the shared surface exports no integer constants:
-        # its enum values are strings, covered by the surface manifest. The
-        # constants are checked only while a binding still exports them.
-        if exported is not None and not any(name in exported for name in canonical):
-            print(f"api parity: {language} exports no integer constants; constants check skipped")
-            continue
-        constants_checked.append(language)
-
-        for name, want in canonical.items():
-            excused = name in allowed
-            if name not in defined:
-                if not excused:
-                    problems.append(f"{language}: {name} is not defined")
-                continue
-            if defined[name] != want:
-                problems.append(
-                    f"{language}: {name} is {defined[name]}, canonical value is {want}"
-                )
-            elif exported is not None and name not in exported:
-                if not excused:
-                    problems.append(
-                        f"{language}: {name} is defined but not exported"
-                    )
-            elif excused:
-                problems.append(
-                    f"{language}: {name} is listed as a known gap but is present; "
-                    f"remove it from known_gaps in {args.manifest}"
-                )
-            checked += 1
-
-        for name in allowed:
-            if name not in canonical:
-                problems.append(
-                    f"{language}: known_gaps names {name}, which is not in the "
-                    f"canonical set"
-                )
-
-    if problems:
-        for problem in sorted(problems):
-            print(f"::error::{problem}", file=sys.stderr)
+    directories = {
+        language: pathlib.Path(getattr(args, f"{language}_dir")) for language in selected
+    }
+    differences = report_surface(
+        json.loads(read(args.manifest)), selected, directories, args.surface_summary
+    )
+    if differences and args.surface == "enforce":
         print(
-            f"\n{len(problems)} parity problem(s) across the bindings. "
-            f"Canonical names live in {args.manifest}.",
+            f"\n{differences} surface difference(s). The shared surface lives in "
+            f"{args.manifest}.",
             file=sys.stderr,
         )
-    elif constants_checked:
-        print(
-            f"api parity: {len(canonical)} constants agree across "
-            f"{', '.join(constants_checked)}"
-        )
-
-    if args.surface != "off":
-        directories = {
-            language: pathlib.Path(getattr(args, f"{language}_dir")) for language in selected
-        }
-        differences = report_surface(
-            json.loads(read(args.surface_manifest)), selected, directories, args.surface_summary
-        )
-        if differences and args.surface == "enforce":
-            print(
-                f"\n{differences} surface difference(s). The target surface lives in "
-                f"{args.surface_manifest}.",
-                file=sys.stderr,
-            )
-            return 1
-        if differences and not problems:
-            print(
-                f"api surface: {differences} difference(s) reported, not enforced "
-                "(--surface enforce makes them fail)"
-            )
-    return 1 if problems else 0
+        return 1
+    if differences:
+        print(f"api surface: {differences} difference(s) reported, not enforced")
+    return 0
 
 
 if __name__ == "__main__":

@@ -18,11 +18,11 @@ add_test(NAME test_sbom_pins_match
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/write_sbom.py" --check
 )
 
-# Every binding re-declares the C API enums and limits in its own source, with
-# no compile-time link between the copies. Scans the sources only, so it needs
-# neither Julia nor MATLAB nor a built library. Only the bindings that are
-# checked out are compared; ci.yml runs the script without --bindings, which
-# requires all three.
+# The three bindings share one public surface (tests/api_surface.json), with no
+# compile-time link between the implementations. Scans the sources only, so it
+# needs neither Julia nor MATLAB nor a built library, and fails on any
+# difference. Only the bindings that are checked out are compared; ci.yml runs
+# the script without --bindings, which requires all three.
 set(_parity_bindings "")
 set(_parity_args "")
 foreach(_binding python julia matlab)
@@ -36,7 +36,7 @@ if(_parity_bindings)
   list(JOIN _parity_bindings "," _parity_list)
   add_test(NAME test_api_parity
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_api_parity.py"
-            --bindings "${_parity_list}" ${_parity_args}
+            --bindings "${_parity_list}" ${_parity_args} --surface enforce
   )
 endif()
 

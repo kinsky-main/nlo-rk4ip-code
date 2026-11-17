@@ -51,6 +51,7 @@
 - Do keep GPU-to-host transfers minimized and efficient.
 - Do keep allocations static in hot paths; do not introduce per-step allocations.
 - Do keep C API, Python, MATLAB, and Julia surfaces aligned when changing shared behavior.
+- Do change the bindings' public surface through `tests/api_surface.json` and `docs/binding_api_vocabulary.md` first: the three bindings share one vocabulary (one `propagate` entry point, plain-function operators, lowercase string enum values, no client class) and `tools/check_api_parity.py` fails on any difference.
 - Do update `README.md` build/test/docs or binding usage sections when CMake options, targets, staging flows, or public workflows change.
 - Don't reformat unrelated code.
 - Don't change public APIs without explicit request.
@@ -87,3 +88,4 @@
 - Only `BUMP_PATCH_ON_BUILD=ON` makes a build rewrite the repo version; it is off by default.
 - `test_sbom_pins_match` fails when `sbom.cdx.json` is behind `CMakeLists.txt` or the dependency pins. Fix it with `python tools/release/check_versions.py --write`, not by editing the file by hand.
 - `tools/check_api_parity.py` fails with a missing-source error when a binding submodule is not checked out; run `git submodule update --init`.
+- `test_api_parity` fails when a mounted binding differs from `tests/api_surface.json`; the output names each difference. `--surface report` prints them without failing.
