@@ -294,7 +294,7 @@ def check_examples(diffs, manifest, language, root):
             continue
         bare = stem[:-len("_rk4ip")] if stem.endswith("_rk4ip") else None
         if stem in dropped:
-            diffs.add("examples", f"examples/{stem}{suffix} should go: covered by {dropped[stem]}")
+            diffs.add("examples", f"examples/{stem}{suffix} should go: {dropped[stem]}")
         elif bare in shared or bare in on_demand:
             diffs.add("examples", f"examples/{stem}{suffix} should be renamed {bare}{suffix}")
         else:

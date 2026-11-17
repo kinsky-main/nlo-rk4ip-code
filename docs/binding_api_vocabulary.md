@@ -455,10 +455,11 @@ Known issue in `grin_soliton_fission`, block unchanged: past about 30 mm a
 fast component reaches the edge of the 2560 fs time window and wraps around.
 
 Kept on demand in one binding, not run by default: `tensor_backend_scaling*`,
-`fixed_step_soliton_convergence`, `two_mode_linear_beating` (Python);
-`mmtools_*` (MATLAB). Dropped: `spm_dispersion_comparison`,
+`fixed_step_soliton_convergence`, `two_mode_linear_beating` (Python).
+Dropped: `spm_dispersion_comparison`,
 `coupled_dispersion_nonlinearity_diffraction`, `grin_fiber_xy`,
-`unsaturable_grin_filamentation_fission`, `runtime_temporal_demo`. The
+`unsaturable_grin_filamentation_fission`, `runtime_temporal_demo`, and the
+MATLAB `mmtools_*` examples, which need MMTools and are not required. The
 `_rk4ip` suffix is gone.
 
 ## 10. Known gaps

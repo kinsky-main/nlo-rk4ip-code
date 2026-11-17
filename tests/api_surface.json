@@ -797,22 +797,23 @@
       "_comment": "Single-binding, not part of the shared set, not run by default. Listed so the checker does not report them as strays.",
       "python": ["fixed_step_soliton_convergence", "tensor_backend_scaling", "tensor_backend_scaling_nlolib",
                  "two_mode_linear_beating"],
-      "matlab": ["mmtools_modal_vs_profile_grid", "mmtools_tensor_scaling_for_python_benchmark",
-                 "setup_matlab_example_environment"],
+      "matlab": ["setup_matlab_example_environment"],
       "julia": []
     },
     "dropped": {
-      "_comment": "Old example -> what covers it now.",
-      "runtime_callable_operator_rk4ip": "quickstart",
-      "runtime_temporal_demo": "quickstart",
-      "spm_dispersion_comparison_rk4ip": "spm + linear_drift",
-      "coupled_dispersion_nonlinearity_diffraction_rk4ip": "spatiotemporal_kerr_bullet",
-      "grin_fiber_xy_rk4ip": "transverse_grin_beam",
-      "standalone_transverse_grin_beam": "transverse_grin_beam",
-      "standalone_spatiotemporal_kerr_bullet": "spatiotemporal_kerr_bullet",
-      "grin_fiber_soliton_fission": "grin_soliton_fission",
-      "unsaturable_grin_filamentation_fission_rk4ip": "grin_soliton_fission",
-      "sqlite_snapshot_chunking_demo": "sqlite_storage"
+      "_comment": "Old example -> why it goes.",
+      "runtime_callable_operator_rk4ip": "covered by quickstart",
+      "runtime_temporal_demo": "covered by quickstart",
+      "spm_dispersion_comparison_rk4ip": "covered by spm + linear_drift",
+      "coupled_dispersion_nonlinearity_diffraction_rk4ip": "covered by spatiotemporal_kerr_bullet",
+      "grin_fiber_xy_rk4ip": "covered by transverse_grin_beam",
+      "standalone_transverse_grin_beam": "covered by transverse_grin_beam",
+      "standalone_spatiotemporal_kerr_bullet": "covered by spatiotemporal_kerr_bullet",
+      "grin_fiber_soliton_fission": "covered by grin_soliton_fission",
+      "unsaturable_grin_filamentation_fission_rk4ip": "covered by grin_soliton_fission",
+      "sqlite_snapshot_chunking_demo": "covered by sqlite_storage",
+      "mmtools_modal_vs_profile_grid_rk4ip": "needs MMTools, which is not installed; not a required example",
+      "mmtools_tensor_scaling_for_python_benchmark": "needs MMTools, which is not installed; not a required example"
     }
   }
 }
