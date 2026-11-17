@@ -224,7 +224,8 @@ NLOLIB_API nlolib_status nlolib_query_runtime_limits(
 typedef enum {
     /** Return all requested records. */
     PROPAGATE_OUTPUT_DENSE = 0,
-    /** Return only the final output field record. */
+    /** Return only the final output field record, unless explicit record
+     *  positions are given; those are always followed. */
     PROPAGATE_OUTPUT_FINAL_ONLY = 1
 } propagate_output_mode;
 
@@ -232,14 +233,26 @@ typedef enum {
  * @ingroup c_api
  * @brief Unified propagation request options.
  *
- * @param num_recorded_samples Number of records to compute.
- * @param output_mode Record output mode.
+ * @param num_recorded_samples Number of records to compute when
+ *        explicit_record_z is not given: evenly spaced from z = 0 to the
+ *        propagation distance, or, for a count of one, the final field only.
+ *        Ignored when explicit_record_z is given.
+ * @param output_mode Record output mode. PROPAGATE_OUTPUT_FINAL_ONLY forces a
+ *        single record holding the final field. It has no effect when
+ *        explicit_record_z is given.
  * @param return_records Nonzero to write records to output buffer.
  * @param exec_options Optional runtime backend selection/options.
  * @param storage_options Optional storage configuration.
- * @param explicit_record_z Optional monotonic z-sample locations for exact
- *        record capture. When provided with explicit_record_z_count > 0, these
- *        override uniform record spacing.
+ * @param explicit_record_z Optional non-decreasing record positions in
+ *        [0, propagation distance], in the units of the propagation distance.
+ *        Caller-owned; must stay valid for the duration of the call. When
+ *        provided with explicit_record_z_count > 0 the records are the field
+ *        at exactly these positions, for any count including one, whatever
+ *        num_recorded_samples and output_mode say: a single position z0
+ *        returns the field at z0, which is the input field for z0 = 0 and the
+ *        final field for z0 equal to the propagation distance. Step control is
+ *        not altered: a position inside an accepted step is interpolated
+ *        between the fields at the two ends of that step.
  * @param explicit_record_z_count Number of entries in explicit_record_z.
  * @param progress_callback Optional per-event progress callback.
  *        Returning zero aborts propagation.

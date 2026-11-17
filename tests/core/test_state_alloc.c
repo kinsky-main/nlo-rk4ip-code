@@ -865,6 +865,87 @@ static void check_dense_limit_boundary(
     free_sim_config(config);
 }
 
+/* A caller that has already touched its buffers: the memory they occupy has
+ * left the available reading and is reported resident instead. The limit must
+ * be the one the query gave before they existed -- not one record more. */
+static void test_dense_output_limit_same_for_resident_buffers(void)
+{
+    const size_t num_time_samples = 16u;
+    const size_t per_record_bytes = num_time_samples * sizeof(nlo_complex);
+    sim_config* config = create_sim_config(num_time_samples);
+    STATE_CHECK(config != NULL);
+    config->propagation.propagation_distance = 0.02;
+    config->propagation.starting_step_size = 0.01;
+    config->propagation.max_step_size = 0.01;
+    config->propagation.min_step_size = 0.001;
+    config->propagation.error_tolerance = 1e-6;
+
+    simulation_config sim_section;
+    sim_section.propagation = config->propagation;
+    sim_section.tensor = config->tensor;
+    sim_section.time = config->time;
+    sim_section.frequency = config->frequency;
+    sim_section.spatial = config->spatial;
+    physics_config physics_section = config->runtime;
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
+
+    runtime_limits limits;
+    set_available_system_memory_override_bytes((size_t)1u << 30);
+    STATE_CHECK(nlolib_query_runtime_limits(&sim_section, &physics_section, &exec_options, &limits) ==
+                NLOLIB_STATUS_OK);
+    const size_t working_set = limits.estimated_required_working_set_bytes;
+
+    /* Room for 20 records and half of a 21st, before anything is allocated.
+     * Twenty is enough for a credit that skips the headroom to be worth
+     * several whole records. */
+    const size_t max_records = 20u;
+    const size_t host_bytes =
+        ((working_set + max_records * per_record_bytes + per_record_bytes / 2u) / 8u) * 10u;
+    set_available_system_memory_override_bytes(host_bytes);
+    STATE_CHECK(nlolib_query_runtime_limits(&sim_section, &physics_section, &exec_options, &limits) ==
+                NLOLIB_STATUS_OK);
+    STATE_CHECK(limits.max_num_recorded_samples_in_memory == max_records);
+
+    nlo_complex input[16];
+    for (size_t i = 0u; i < num_time_samples; ++i) {
+        input[i] = make(0.1 * (double)i, 0.0);
+    }
+    nlo_complex* records = (nlo_complex*)calloc((max_records + 1u) * num_time_samples, sizeof(nlo_complex));
+    STATE_CHECK(records != NULL);
+
+    propagate_options options = nlolib_propagate_options_default();
+    options.return_records = 1;
+    options.exec_options = &exec_options;
+    size_t records_written = 99u;
+    propagate_output out = nlolib_propagate_output_default();
+    out.output_records = records;
+    out.output_record_capacity = max_records + 1u;
+    out.records_written = &records_written;
+
+    set_resident_bytes_override_fully_resident(1);
+    for (size_t requested = max_records; requested <= max_records + 1u; ++requested) {
+        /* The request's output buffer and the input field are resident. */
+        set_available_system_memory_override_bytes(host_bytes - (requested + 1u) * per_record_bytes);
+        records_written = 99u;
+        options.num_recorded_samples = requested;
+        const nlolib_status status =
+            nlolib_propagate(&sim_section, &physics_section, num_time_samples, input, &options, &out);
+        if (requested == max_records) {
+            STATE_CHECK(status == NLOLIB_STATUS_OK);
+            STATE_CHECK(records_written == max_records);
+        } else {
+            STATE_CHECK(status == NLOLIB_STATUS_INVALID_ARGUMENT);
+            STATE_CHECK(records_written == 0u);
+        }
+    }
+    set_resident_bytes_override_fully_resident(0);
+    set_available_system_memory_override_bytes(0u);
+
+    free(records);
+    free_sim_config(config);
+    printf("test_dense_output_limit_same_for_resident_buffers: touched buffers do not raise the limit.\n");
+}
+
 static void test_dense_output_limit_matches_runtime_limits(void)
 {
     runtime_limits limits;
@@ -910,6 +991,190 @@ static void test_dense_output_limit_matches_runtime_limits(void)
     STATE_CHECK(limits.max_num_recorded_samples_in_memory == 0u);
 
     printf("test_dense_output_limit_matches_runtime_limits: query and propagate agree at the boundary.\n");
+}
+
+#define RECORD_TEST_SAMPLES 32u
+
+/* Runs a short nonlinear propagation and returns the records asked for.
+ * record_z == NULL requests num_records evenly spaced records. */
+static void run_record_schedule(
+    vector_backend_type backend_type,
+    const double* record_z,
+    size_t num_records,
+    propagate_output_mode output_mode,
+    const storage_options* storage,
+    nlo_complex* out_records,
+    size_t* out_records_written,
+    storage_result* out_storage_result
+)
+{
+    sim_config* config = create_sim_config(RECORD_TEST_SAMPLES);
+    STATE_CHECK(config != NULL);
+    config->propagation.propagation_distance = 0.5;
+    config->propagation.starting_step_size = 0.01;
+    config->propagation.max_step_size = 0.2;
+    config->propagation.min_step_size = 1e-6;
+    config->propagation.error_tolerance = 1e-9;
+
+    simulation_config sim_section;
+    sim_section.propagation = config->propagation;
+    sim_section.tensor = config->tensor;
+    sim_section.time = config->time;
+    sim_section.frequency = config->frequency;
+    sim_section.spatial = config->spatial;
+    physics_config physics_section = config->runtime;
+
+    nlo_complex input[RECORD_TEST_SAMPLES];
+    for (size_t i = 0u; i < RECORD_TEST_SAMPLES; ++i) {
+        const double t = ((double)i - 0.5 * (double)RECORD_TEST_SAMPLES) / 4.0;
+        input[i] = make(exp(-t * t), 0.2 * exp(-0.5 * t * t));
+    }
+
+    execution_options exec_options = execution_options_default(backend_type);
+    propagate_options options = nlolib_propagate_options_default();
+    options.num_recorded_samples = num_records;
+    options.output_mode = output_mode;
+    options.return_records = (out_records != NULL) ? 1 : 0;
+    options.exec_options = &exec_options;
+    options.storage_options = storage;
+    if (record_z != NULL) {
+        options.explicit_record_z = record_z;
+        options.explicit_record_z_count = num_records;
+    }
+
+    propagate_output out = nlolib_propagate_output_default();
+    out.output_records = out_records;
+    out.output_record_capacity = (out_records != NULL) ? num_records : 0u;
+    out.records_written = out_records_written;
+    out.storage_result = out_storage_result;
+
+    STATE_CHECK(nlolib_propagate(&sim_section,
+                                 &physics_section,
+                                 RECORD_TEST_SAMPLES,
+                                 input,
+                                 &options,
+                                 &out) == NLOLIB_STATUS_OK);
+    free_sim_config(config);
+}
+
+static int records_equal(const nlo_complex* lhs, const nlo_complex* rhs)
+{
+    return (memcmp(lhs, rhs, RECORD_TEST_SAMPLES * sizeof(nlo_complex)) == 0) ? 1 : 0;
+}
+
+static double record_distance(const nlo_complex* lhs, const nlo_complex* rhs)
+{
+    double worst = 0.0;
+    for (size_t i = 0u; i < RECORD_TEST_SAMPLES; ++i) {
+        worst = fmax(worst, fabs(lhs[i].re - rhs[i].re));
+        worst = fmax(worst, fabs(lhs[i].im - rhs[i].im));
+    }
+    return worst;
+}
+
+/* Explicit record positions are returned as given for any count, including
+ * one. One record with no explicit position is the final field. */
+static void check_single_record_rules(vector_backend_type backend_type, const char* label)
+{
+    const double distance = 0.5;
+    const double interior = 0.23;
+    const double schedule[3] = {0.1, interior, distance};
+    size_t written = 99u;
+
+    nlo_complex reference[3u * RECORD_TEST_SAMPLES];
+    run_record_schedule(backend_type, schedule, 3u, PROPAGATE_OUTPUT_DENSE, NULL, reference, &written, NULL);
+    STATE_CHECK(written == 3u);
+    const nlo_complex* reference_interior = reference + RECORD_TEST_SAMPLES;
+    const nlo_complex* reference_final = reference + 2u * RECORD_TEST_SAMPLES;
+    /* The run must evolve, or the cases below could not tell records apart. */
+    STATE_CHECK(record_distance(reference_interior, reference_final) > 1e-6);
+
+    nlo_complex single[RECORD_TEST_SAMPLES];
+
+    /* One interior explicit position: the field there, in either output mode. */
+    memset(single, 0, sizeof(single));
+    written = 99u;
+    run_record_schedule(backend_type, &interior, 1u, PROPAGATE_OUTPUT_DENSE, NULL, single, &written, NULL);
+    STATE_CHECK(written == 1u);
+    STATE_CHECK(records_equal(single, reference_interior));
+
+    memset(single, 0, sizeof(single));
+    written = 99u;
+    run_record_schedule(backend_type, &interior, 1u, PROPAGATE_OUTPUT_FINAL_ONLY, NULL, single, &written, NULL);
+    STATE_CHECK(written == 1u);
+    STATE_CHECK(records_equal(single, reference_interior));
+
+    /* One explicit position at the end: the final field. */
+    memset(single, 0, sizeof(single));
+    written = 99u;
+    run_record_schedule(backend_type, &distance, 1u, PROPAGATE_OUTPUT_DENSE, NULL, single, &written, NULL);
+    STATE_CHECK(written == 1u);
+    STATE_CHECK(records_equal(single, reference_final));
+
+    /* One explicit position at the start: the input field. */
+    const double start = 0.0;
+    nlo_complex at_start[2u * RECORD_TEST_SAMPLES];
+    const double start_schedule[2] = {0.0, distance};
+    run_record_schedule(backend_type, start_schedule, 2u, PROPAGATE_OUTPUT_DENSE, NULL, at_start, &written, NULL);
+    memset(single, 0, sizeof(single));
+    written = 99u;
+    run_record_schedule(backend_type, &start, 1u, PROPAGATE_OUTPUT_DENSE, NULL, single, &written, NULL);
+    STATE_CHECK(written == 1u);
+    STATE_CHECK(records_equal(single, at_start));
+
+    /* One record, no explicit position: the final field, in either mode. */
+    memset(single, 0, sizeof(single));
+    written = 99u;
+    run_record_schedule(backend_type, NULL, 1u, PROPAGATE_OUTPUT_DENSE, NULL, single, &written, NULL);
+    STATE_CHECK(written == 1u);
+    STATE_CHECK(records_equal(single, reference_final));
+
+    memset(single, 0, sizeof(single));
+    written = 99u;
+    run_record_schedule(backend_type, NULL, 1u, PROPAGATE_OUTPUT_FINAL_ONLY, NULL, single, &written, NULL);
+    STATE_CHECK(written == 1u);
+    STATE_CHECK(records_equal(single, reference_final));
+
+    /* Storage-backed: the stored record and the returned one are both the
+     * field at the explicit position, and a storage-only run captures it. */
+    if (snapshot_store_is_available()) {
+        const char* const db_path = test_db_path("test_single_explicit_record");
+        storage_options storage = storage_options_default();
+        storage.sqlite_path = db_path;
+        storage.run_id = "test-single-explicit-record";
+        storage.chunk_records = 1u;
+        storage.log_final_output_field_to_db = 1;
+        storage_result result;
+
+        memset(single, 0, sizeof(single));
+        written = 99u;
+        run_record_schedule(backend_type, &interior, 1u, PROPAGATE_OUTPUT_DENSE, &storage, single, &written, &result);
+        STATE_CHECK(written == 1u);
+        STATE_CHECK(records_equal(single, reference_interior));
+        STATE_CHECK(result.records_captured == 1u);
+
+        storage.run_id = "test-single-explicit-record-storage-only";
+        written = 99u;
+        run_record_schedule(backend_type, &interior, 1u, PROPAGATE_OUTPUT_DENSE, &storage, NULL, &written, &result);
+        STATE_CHECK(written == 0u);
+        STATE_CHECK(result.records_captured == 1u);
+    }
+
+    printf("test_single_record_rules (%s): explicit positions are honoured for one record.\n", label);
+}
+
+static void test_single_record_rules(void)
+{
+    check_single_record_rules(VECTOR_BACKEND_CPU, "cpu");
+#if ENABLE_VULKAN_BACKEND
+    vector_backend* probe = vector_backend_create_vulkan(NULL);
+    if (probe != NULL) {
+        vector_backend_destroy(probe);
+        check_single_record_rules(VECTOR_BACKEND_VULKAN, "vulkan");
+        return;
+    }
+#endif
+    printf("test_single_record_rules (vulkan): skipped (Vulkan unavailable).\n");
 }
 
 static void test_storage_only_propagate_without_dense_output(void)
@@ -987,7 +1252,9 @@ int main(void)
     test_snapshot_store_dense_readback();
     test_dense_output_limit_rejects_before_init();
     test_dense_output_limit_matches_runtime_limits();
+    test_dense_output_limit_same_for_resident_buffers();
     test_storage_only_propagate_without_dense_output();
+    test_single_record_rules();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;
 }

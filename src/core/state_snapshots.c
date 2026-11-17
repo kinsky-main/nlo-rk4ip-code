@@ -25,7 +25,7 @@ vec_status simulation_state_upload_initial_field(simulation_state* state, const 
     }
 
     int captured_initial_record = 0;
-    if (state->num_recorded_samples > 1u) {
+    if (state->num_recorded_samples > 1u || state->explicit_record_schedule_active != 0) {
         int should_capture_initial = 1;
         if (state->explicit_record_schedule_active != 0) {
             should_capture_initial = 0;

@@ -518,8 +518,13 @@ NLOLIB_API nlolib_status nlolib_propagate(
         return propagate_fail("snapshot_capture", NLOLIB_STATUS_ALLOCATION_FAILED);
     }
 
+    /* One record with no explicit position is the final field, read back from
+     * the device below. Any explicit schedule, including a single position,
+     * is captured by the solver at those positions and left as captured. */
+    const int final_field_only =
+        (num_recorded_samples == 1u && state->explicit_record_schedule_active == 0) ? 1 : 0;
     size_t records_available = num_recorded_samples;
-    if (num_recorded_samples > 1u) {
+    if (final_field_only == 0) {
         if (progress_aborted != 0 ||
             state->explicit_record_schedule_active != 0 ||
             fixed_step_requested(config, NULL)) {
@@ -539,7 +544,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
     int final_downloaded = 0;
     const nlo_complex* final_output_field_cached = NULL;
-    if (num_recorded_samples == 1u && state->snapshot_store != NULL) {
+    if (final_field_only != 0 && state->snapshot_store != NULL) {
         nlo_complex* final_record = local_output.output_records;
         if (final_record == NULL) {
             final_record = state->snapshot_scratch_record;
@@ -574,7 +579,7 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
     if (local_options.return_records != 0 &&
         local_output.output_records != NULL &&
-        num_recorded_samples == 1u) {
+        final_field_only != 0) {
         if (!final_downloaded &&
             simulation_state_download_current_field(state, local_output.output_records) != VEC_STATUS_OK) {
             free_simulation_state(state);
@@ -582,7 +587,15 @@ NLOLIB_API nlolib_status nlolib_propagate(
         }
         final_output_field_cached = local_output.output_records;
     } else if (local_options.return_records != 0 && local_output.output_records != NULL) {
-        if (records_available > 0u) {
+        /* The last record doubles as the final field only when it was taken
+         * at the end of the run; an explicit schedule may stop short of it. */
+        const int last_record_is_final =
+            (state->explicit_record_schedule_active == 0 ||
+             local_options.explicit_record_z[local_options.explicit_record_z_count - 1u] ==
+                 config->propagation.propagation_distance)
+                ? 1
+                : 0;
+        if (records_available > 0u && last_record_is_final != 0) {
             final_output_field_cached =
                 local_output.output_records + ((records_available - 1u) * state->num_time_samples);
         }

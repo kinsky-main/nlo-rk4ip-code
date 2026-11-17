@@ -632,18 +632,18 @@ void solve_rk4(simulation_state *state)
     double record_spacing = 0.0;
     double next_record_z = z_end;
     const double record_capture_eps = record_capture_tolerance(z_end);
-    if (state->num_recorded_samples > 1u)
-    {
-        if (has_explicit_schedule) {
-            if (state->current_record_index < state->explicit_record_z_count) {
-                next_record_z = state->explicit_record_z[state->current_record_index];
-            } else {
-                next_record_z = z_end;
-            }
+    /* An explicit schedule is followed for any count, including a single
+     * position. Without one, a single record is the final field, which the
+     * caller reads back after the solve, so nothing is scheduled here. */
+    if (has_explicit_schedule) {
+        if (state->current_record_index < state->explicit_record_z_count) {
+            next_record_z = state->explicit_record_z[state->current_record_index];
         } else {
-            record_spacing = z_end / (double)(state->num_recorded_samples - 1u);
-            next_record_z = record_spacing * (double)state->current_record_index;
+            next_record_z = z_end;
         }
+    } else if (state->num_recorded_samples > 1u) {
+        record_spacing = z_end / (double)(state->num_recorded_samples - 1u);
+        next_record_z = record_spacing * (double)state->current_record_index;
     }
 
     size_t rk4_step_index = 0u;

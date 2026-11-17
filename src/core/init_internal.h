@@ -36,8 +36,8 @@ typedef struct {
  * @param num_time_samples Flattened samples per record.
  * @param resident_credit_bytes Bytes the caller already holds resident for
  *        this run (see query_resident_bytes()), or 0. Such pages no longer
- *        show up as available memory, so they are credited back to the record
- *        budget.
+ *        show up as available memory, so they are added back to the
+ *        available reading before the headroom is applied.
  * @param out_limit Destination; zeroed with derivable=0 when not derivable.
  * @return int 0 on success, nonzero on invalid arguments or overflow.
  */
@@ -56,8 +56,7 @@ int resolve_dense_record_limit(
  * @param address Start of the buffer, or NULL.
  * @param length Buffer length in bytes.
  * @return size_t Resident bytes, at most @p length; 0 where the platform
- *         cannot tell or while the available-memory override is set, which
- *         only makes the limit more conservative.
+ *         cannot tell, which only makes the limit more conservative.
  */
 size_t query_resident_bytes(const void* address, size_t length);
 
@@ -68,6 +67,18 @@ size_t query_resident_bytes(const void* address, size_t length);
  *
  * @param bytes Value query_available_system_memory_bytes() reports from now
  *        on; zero restores the real reading. While set,
- *        query_resident_bytes() reports 0.
+ *        query_resident_bytes() reports 0, or the whole buffer after
+ *        set_resident_bytes_override_fully_resident(1).
  */
 void set_available_system_memory_override_bytes(size_t bytes);
+
+/**
+ * @brief Choose what query_resident_bytes() reports under the memory override.
+ *
+ * Lets a test stand for a caller that has already touched its buffers. Not
+ * part of the public API and not thread-safe.
+ *
+ * @param fully_resident Nonzero: every buffer is reported fully resident while
+ *        the available-memory override is set. Zero (default): none is.
+ */
+void set_resident_bytes_override_fully_resident(int fully_resident);
