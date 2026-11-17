@@ -886,8 +886,22 @@ static void test_dense_output_limit_matches_runtime_limits(void)
     check_dense_limit_boundary(VECTOR_BACKEND_CPU, (budget_five / 8u) * 10u, 5u);
     check_dense_limit_boundary(VECTOR_BACKEND_CPU, ((budget_five + per_record_bytes) / 8u) * 10u - 10u, 5u);
     check_dense_limit_boundary(VECTOR_BACKEND_CPU, ((budget_five + per_record_bytes) / 8u) * 10u, 6u);
-    /* The host rule does not depend on the backend AUTO resolves to. */
-    check_dense_limit_boundary(VECTOR_BACKEND_AUTO, (budget_five / 8u) * 10u, 5u);
+    /* The host rule does not depend on the backend AUTO resolves to. The query
+     * falls back to CPU without a Vulkan device, but propagate with AUTO needs
+     * one, so the propagate half only runs where a device exists. */
+    execution_options auto_options = execution_options_default(VECTOR_BACKEND_AUTO);
+    probe.time.nt = 16u;
+    set_available_system_memory_override_bytes((budget_five / 8u) * 10u);
+    STATE_CHECK(nlolib_query_runtime_limits(&probe, NULL, &auto_options, &limits) == NLOLIB_STATUS_OK);
+    set_available_system_memory_override_bytes(0u);
+    STATE_CHECK(limits.max_num_recorded_samples_in_memory == 5u);
+#if ENABLE_VULKAN_BACKEND
+    vector_backend* vulkan_probe = vector_backend_create_vulkan(NULL);
+    if (vulkan_probe != NULL) {
+        vector_backend_destroy(vulkan_probe);
+        check_dense_limit_boundary(VECTOR_BACKEND_AUTO, (budget_five / 8u) * 10u, 5u);
+    }
+#endif
 
     /* Without a stated sample count the capacity is not derivable. */
     simulation_config unsized;

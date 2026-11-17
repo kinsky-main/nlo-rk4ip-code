@@ -400,11 +400,21 @@ NLOLIB_API nlolib_status nlolib_propagate(
             if (record_bytes == 0u) {
                 return propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
             }
+            /* The output buffer and the input field are allocations the caller
+             * has to make between querying the limits and this call. Whatever
+             * part of them is already resident has left the available-memory
+             * reading, so it is credited back; otherwise a count the query
+             * just reported could be refused here. */
+            const size_t output_resident =
+                query_resident_bytes(local_output.output_records, record_bytes);
+            const size_t input_resident =
+                query_resident_bytes(input_field, compute_input_bytes(num_time_samples, sizeof(nlo_complex)));
             dense_record_limit dense_limit;
             if (resolve_dense_record_limit(config,
                                            num_time_samples,
-                                           local_output.output_records,
-                                           record_bytes,
+                                           (output_resident > SIZE_MAX - input_resident)
+                                               ? SIZE_MAX
+                                               : (output_resident + input_resident),
                                            &dense_limit) != 0) {
                 return propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
             }

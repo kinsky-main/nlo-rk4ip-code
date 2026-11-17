@@ -144,12 +144,9 @@ size_t apply_memory_headroom(size_t available_bytes)
     return (available_bytes / MEMORY_HEADROOM_DEN) * MEMORY_HEADROOM_NUM;
 }
 
-/* Bytes of [address, address + length) that are already backed by physical
- * memory. Returns 0 where the platform cannot tell, which only makes the limit
- * more conservative. Runs once per propagate call, never per step. */
-static size_t query_resident_bytes(const void* address, size_t length)
+size_t query_resident_bytes(const void* address, size_t length)
 {
-    if (address == NULL || length == 0u) {
+    if (address == NULL || length == 0u || available_system_memory_override_bytes > 0u) {
         return 0u;
     }
 #if defined(__linux__)
@@ -302,8 +299,7 @@ static size_t resolve_runtime_num_time_samples_from_config(const sim_config* con
 int resolve_dense_record_limit(
     const sim_config* config,
     size_t num_time_samples,
-    const void* output_records,
-    size_t output_bytes,
+    size_t resident_credit_bytes,
     dense_record_limit* out_limit
 )
 {
@@ -347,13 +343,12 @@ int resolve_dense_record_limit(
         (out_limit->host_budget_bytes > out_limit->working_set_bytes)
             ? (out_limit->host_budget_bytes - out_limit->working_set_bytes)
             : 0u;
-    /* A buffer the caller has already touched is no longer counted as
-     * available, so without this credit a count the query reported before the
-     * buffer was allocated would be refused once it exists. */
-    if (available_system_memory_override_bytes == 0u) {
-        const size_t resident = query_resident_bytes(output_records, output_bytes);
-        record_budget = (record_budget > SIZE_MAX - resident) ? SIZE_MAX : (record_budget + resident);
-    }
+    /* Buffers the caller has already touched are no longer counted as
+     * available, so without this credit a count the query reported before
+     * they were allocated would be refused once they exist. */
+    record_budget = (record_budget > SIZE_MAX - resident_credit_bytes)
+                        ? SIZE_MAX
+                        : (record_budget + resident_credit_bytes);
     out_limit->record_budget_bytes = record_budget;
 
     size_t max_records = record_budget / out_limit->bytes_per_record;
@@ -406,7 +401,7 @@ int query_runtime_limits_internal(
      * platform does not report available memory -- in which case propagate
      * enforces no dense limit either. */
     dense_record_limit dense_limit;
-    (void)resolve_dense_record_limit(config, requested_num_time_samples, NULL, 0u, &dense_limit);
+    (void)resolve_dense_record_limit(config, requested_num_time_samples, 0u, &dense_limit);
     out_limits->max_num_recorded_samples_in_memory = dense_limit.max_records;
     if (host_available > 0u) {
         const size_t host_limit = host_available / bytes_per_sample;

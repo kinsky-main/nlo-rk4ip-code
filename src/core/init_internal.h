@@ -34,20 +34,32 @@ typedef struct {
  *
  * @param config Merged configuration; selects the working-vector count.
  * @param num_time_samples Flattened samples per record.
- * @param output_records Caller's record buffer when it already exists, else
- *        NULL. Pages of it that are already resident no longer show up as
- *        available memory, so they are credited back to the record budget.
- * @param output_bytes Bytes of @p output_records the request will fill.
+ * @param resident_credit_bytes Bytes the caller already holds resident for
+ *        this run (see query_resident_bytes()), or 0. Such pages no longer
+ *        show up as available memory, so they are credited back to the record
+ *        budget.
  * @param out_limit Destination; zeroed with derivable=0 when not derivable.
  * @return int 0 on success, nonzero on invalid arguments or overflow.
  */
 int resolve_dense_record_limit(
     const sim_config* config,
     size_t num_time_samples,
-    const void* output_records,
-    size_t output_bytes,
+    size_t resident_credit_bytes,
     dense_record_limit* out_limit
 );
+
+/**
+ * @brief Bytes of a caller buffer that are already backed by physical memory.
+ *
+ * Runs once per propagate call, never per step.
+ *
+ * @param address Start of the buffer, or NULL.
+ * @param length Buffer length in bytes.
+ * @return size_t Resident bytes, at most @p length; 0 where the platform
+ *         cannot tell or while the available-memory override is set, which
+ *         only makes the limit more conservative.
+ */
+size_t query_resident_bytes(const void* address, size_t length);
 
 /**
  * @brief Replace the host's available-memory reading, for deterministic tests.
@@ -55,7 +67,7 @@ int resolve_dense_record_limit(
  * Not part of the public API and not thread-safe.
  *
  * @param bytes Value query_available_system_memory_bytes() reports from now
- *        on; zero restores the real reading. While set, the resident-page
- *        credit of resolve_dense_record_limit is disabled.
+ *        on; zero restores the real reading. While set,
+ *        query_resident_bytes() reports 0.
  */
 void set_available_system_memory_override_bytes(size_t bytes);

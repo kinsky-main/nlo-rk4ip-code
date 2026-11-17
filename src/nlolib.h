@@ -192,10 +192,10 @@ NLOLIB_API nlolib_status nlolib_perf_profile_read_gpu_phases(
  * records into `output_records`: it accepts up to the reported count and
  * rejects more with NLOLIB_STATUS_INVALID_ARGUMENT, re-derived from the memory
  * available when propagate is called, so the answer can move between the two
- * calls if other allocations do. Pages of the output buffer that are already
- * resident are credited back (Linux and Windows), so allocating and zeroing
- * the buffer between the query and the run does not turn an accepted count
- * into a rejected one. Zero means no record fits, or that the capacity is not
+ * calls if other allocations do. Pages of the output buffer and of the input
+ * field that are already resident are credited back (Linux and Windows), so
+ * allocating and filling those two buffers between the query and the run does
+ * not turn an accepted count into a rejected one. Zero means no record fits, or that the capacity is not
  * derivable (sample count not stated, or available memory not reported by the
  * platform); in the latter case propagate enforces no dense limit.
  *
