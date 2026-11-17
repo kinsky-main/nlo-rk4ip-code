@@ -1925,7 +1925,8 @@ static void test_same_key(const char* root)
     check_runs_contract(db_path);
 }
 
-/* Exactly representable run used for the cross-binding key check (same values in the Julia and Python tests). */
+/* Exactly representable run whose key is pinned; the Julia and Python tests pin their own keys for the
+   same values, which differ from this one because each binding writes the operators differently. */
 #define KEY_REFERENCE_N 16u
 static const char* const k_reference_key = "a29aa53a4be7d5f7";
 

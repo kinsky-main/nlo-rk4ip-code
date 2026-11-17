@@ -611,8 +611,9 @@ bytes; nothing is formatted through the C locale. The execution backend, FFT
 backend, device settings, the Vulkan operator JIT (`NLO_OPERATOR_JIT`), the
 fused RK step (`NLO_DISABLE_VK_FUSED_STEP`), profiling, chunk size, size cap,
 `run_id`, `defer_merge` and file path are not part of the key: the same run on
-CPU, on Vulkan with JIT kernels and on Vulkan with the interpreter has one key. The C, Julia and Python tests pin one exactly representable run to the
-same key (`a29aa53a4be7d5f7`).
+CPU, on Vulkan with JIT kernels and on Vulkan with the interpreter has one key.
+Each of the C, Julia and Python tests pins one exactly representable run to a
+key, and checks that the key does not depend on the backend.
 
 The key is therefore the same on Windows and Linux for the same bits of input.
 It can differ when the inputs themselves differ in their last bits: an input
@@ -622,11 +623,21 @@ the field digest, and the key, differ. Grids built from `+ - * /` and decimal
 literals (such as the bindings' default frequency grids) are identical
 everywhere.
 
-Operators given as host-language callables never reach the key as code: the
-Python binding translates them into runtime expressions (capturing their
-constants) before calling the C library, MATLAB translates function handles the
-same way, and the Julia binding accepts expressions only. The key hashes the
-translated expressions and constants, so no caller-supplied label is needed.
+Operators given as host-language callables never reach the key as code: each
+binding translates its Python callables, MATLAB function handles or Julia
+functions into runtime expressions (capturing their constants) before calling
+the C library. The key hashes the translated expressions and constants, so no
+caller-supplied label is needed.
+
+**Keys do not match across bindings.** The key hashes the expression text, and
+each binding's translator writes the same operator differently. For
+`i·(−0.04·w·w)`, Python writes `(i*((c0*w)*w))` with `c0 = -0.04` captured,
+and Julia writes `i*(-0.040000000000000001*w*w)`, or `i*(c0*w*w)` when `-0.04`
+is bound with `constant_bindings`. A run made from Python and the same run made from
+Julia are therefore stored under two keys, and `storage_has_run` in one binding
+does not find the other's run. Within one binding the same operators always
+give the same key. Runs stored with string operators before the bindings took
+callables only have keys that their callable rewrite will not reproduce.
 
 **The same key twice.** Two runs with the same key (for example two users
 running the same parameters) are the same run; the database keeps one. When a
