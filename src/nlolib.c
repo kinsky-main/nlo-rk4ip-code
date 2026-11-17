@@ -8,6 +8,7 @@
 
 #include "nlolib.h"
 #include "backend/nlo_complex.h"
+#include "core/init_internal.h"
 #include "core/sim_dimensions_internal.h"
 #include "io/log_sink.h"
 #include "io/propagate_log.h"
@@ -18,10 +19,6 @@
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
-
-#ifndef NLOLIB_DENSE_OUTPUT_MAX_BYTES
-#define NLOLIB_DENSE_OUTPUT_MAX_BYTES ((size_t)2u * 1024u * 1024u * 1024u)
-#endif
 
 static nlolib_status propagate_fail(const char* stage, nlolib_status status)
 {
@@ -403,13 +400,38 @@ NLOLIB_API nlolib_status nlolib_propagate(
             if (record_bytes == 0u) {
                 return propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
             }
-            if (record_bytes > (size_t)NLOLIB_DENSE_OUTPUT_MAX_BYTES) {
+            /* The output buffer and the input field are allocations the caller
+             * has to make between querying the limits and this call. Whatever
+             * part of them is already resident has left the available-memory
+             * reading, so it is credited back; otherwise a count the query
+             * just reported could be refused here. */
+            const size_t output_resident =
+                query_resident_bytes(local_output.output_records, record_bytes);
+            const size_t input_resident =
+                query_resident_bytes(input_field, compute_input_bytes(num_time_samples, sizeof(nlo_complex)));
+            dense_record_limit dense_limit;
+            if (resolve_dense_record_limit(config,
+                                           num_time_samples,
+                                           (output_resident > SIZE_MAX - input_resident)
+                                               ? SIZE_MAX
+                                               : (output_resident + input_resident),
+                                           &dense_limit) != 0) {
+                return propagate_fail("validate.record_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
+            }
+            if (dense_limit.derivable != 0 && num_recorded_samples > dense_limit.max_records) {
                 log_emit(
                     LOG_LEVEL_ERROR,
-                    "[nlolib] dense output request requires %zu bytes, above the %zu byte safety cap. "
+                    "[nlolib] dense output request requires %zu bytes (%zu records of %zu bytes), above the "
+                    "current limit of %zu bytes (%zu records): %zu bytes of host memory are budgeted and "
+                    "%zu of them are reserved for the solver working set. "
                     "Use storage_options with return_records=0 for large recorded outputs.",
                     record_bytes,
-                    (size_t)NLOLIB_DENSE_OUTPUT_MAX_BYTES);
+                    num_recorded_samples,
+                    dense_limit.bytes_per_record,
+                    dense_limit.max_records * dense_limit.bytes_per_record,
+                    dense_limit.max_records,
+                    dense_limit.host_budget_bytes,
+                    dense_limit.working_set_bytes);
                 return propagate_fail("validate.dense_output_bytes", NLOLIB_STATUS_INVALID_ARGUMENT);
             }
         }

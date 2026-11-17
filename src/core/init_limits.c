@@ -8,15 +8,25 @@
 #include <limits.h>
 
 #if defined(_WIN32)
+#ifndef PSAPI_VERSION
+#define PSAPI_VERSION 2
+#endif
 #include <windows.h>
+#include <psapi.h>
 #elif defined(__linux__)
+#include <stdint.h>
 #include <stdio.h>
+#include <sys/mman.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #elif defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
 #include <unistd.h>
 #endif
 
+/* Safety margin on host memory: only 8/10 of what the OS reports as available
+ * is budgeted. The remaining fifth absorbs what the estimate cannot see --
+ * allocator and driver overhead, the FFT plan, the caller's own copies of the
+ * records, and other processes allocating between the query and the run. */
 #ifndef MEMORY_HEADROOM_NUM
 #define MEMORY_HEADROOM_NUM 8u
 #endif
@@ -34,6 +44,13 @@
 #endif
 
 static size_t estimate_active_vector_count(const sim_config* config);
+
+static size_t available_system_memory_override_bytes = 0u;
+
+void set_available_system_memory_override_bytes(size_t bytes)
+{
+    available_system_memory_override_bytes = bytes;
+}
 
 int checked_mul_size_t(size_t a, size_t b, size_t* out)
 {
@@ -56,6 +73,9 @@ int checked_mul_size_t(size_t a, size_t b, size_t* out)
 
 size_t query_available_system_memory_bytes(void)
 {
+    if (available_system_memory_override_bytes > 0u) {
+        return available_system_memory_override_bytes;
+    }
 #if defined(_WIN32)
     MEMORYSTATUSEX mem_status;
     mem_status.dwLength = sizeof(mem_status);
@@ -122,6 +142,81 @@ size_t apply_memory_headroom(size_t available_bytes)
     }
 
     return (available_bytes / MEMORY_HEADROOM_DEN) * MEMORY_HEADROOM_NUM;
+}
+
+size_t query_resident_bytes(const void* address, size_t length)
+{
+    if (address == NULL || length == 0u || available_system_memory_override_bytes > 0u) {
+        return 0u;
+    }
+#if defined(__linux__)
+    const long page_size_l = sysconf(_SC_PAGESIZE);
+    if (page_size_l <= 0) {
+        return 0u;
+    }
+    const size_t page_size = (size_t)page_size_l;
+    const uintptr_t begin = (uintptr_t)address & ~((uintptr_t)page_size - 1u);
+    if (length > UINTPTR_MAX - (uintptr_t)address) {
+        return 0u;
+    }
+    const uintptr_t end = (uintptr_t)address + length;
+    unsigned char page_state[4096];
+    size_t resident = 0u;
+    uintptr_t cursor = begin;
+    while (cursor < end) {
+        size_t pages = (size_t)((end - cursor + page_size - 1u) / page_size);
+        if (pages > sizeof(page_state)) {
+            pages = sizeof(page_state);
+        }
+        if (mincore((void*)cursor, pages * page_size, page_state) != 0) {
+            break;
+        }
+        for (size_t i = 0u; i < pages; ++i) {
+            if ((page_state[i] & 1u) != 0u) {
+                resident += page_size;
+            }
+        }
+        cursor += (uintptr_t)(pages * page_size);
+    }
+    return (resident < length) ? resident : length;
+#elif defined(_WIN32)
+    SYSTEM_INFO system_info;
+    GetSystemInfo(&system_info);
+    const size_t page_size = (size_t)system_info.dwPageSize;
+    if (page_size == 0u || length > UINTPTR_MAX - (uintptr_t)address) {
+        return 0u;
+    }
+    const uintptr_t begin = (uintptr_t)address & ~((uintptr_t)page_size - 1u);
+    const uintptr_t end = (uintptr_t)address + length;
+    PSAPI_WORKING_SET_EX_INFORMATION page_state[256];
+    const size_t page_state_count = sizeof(page_state) / sizeof(page_state[0]);
+    const HANDLE process = GetCurrentProcess();
+    size_t resident = 0u;
+    uintptr_t cursor = begin;
+    while (cursor < end) {
+        size_t pages = (size_t)((end - cursor + page_size - 1u) / page_size);
+        if (pages > page_state_count) {
+            pages = page_state_count;
+        }
+        for (size_t i = 0u; i < pages; ++i) {
+            page_state[i].VirtualAddress = (PVOID)(cursor + (uintptr_t)(i * page_size));
+        }
+        if (QueryWorkingSetEx(process,
+                              page_state,
+                              (DWORD)(pages * sizeof(page_state[0]))) == 0) {
+            break;
+        }
+        for (size_t i = 0u; i < pages; ++i) {
+            if (page_state[i].VirtualAttributes.Valid != 0u) {
+                resident += page_size;
+            }
+        }
+        cursor += (uintptr_t)(pages * page_size);
+    }
+    return (resident < length) ? resident : length;
+#else
+    return 0u;
+#endif
 }
 
 static size_t estimate_active_vector_count(const sim_config* config)
@@ -201,6 +296,70 @@ static size_t resolve_runtime_num_time_samples_from_config(const sim_config* con
     return total;
 }
 
+int resolve_dense_record_limit(
+    const sim_config* config,
+    size_t num_time_samples,
+    size_t resident_credit_bytes,
+    dense_record_limit* out_limit
+)
+{
+    if (out_limit == NULL) {
+        return -1;
+    }
+    *out_limit = (dense_record_limit){0};
+
+    const size_t active_vec_count = estimate_active_vector_count(config);
+    size_t bytes_per_sample = 0u;
+    if (active_vec_count == SIZE_MAX ||
+        checked_mul_size_t(active_vec_count, sizeof(nlo_complex), &bytes_per_sample) != 0 ||
+        bytes_per_sample == 0u) {
+        return -1;
+    }
+    if (num_time_samples == 0u) {
+        return 0;
+    }
+    if (checked_mul_size_t(num_time_samples, sizeof(nlo_complex), &out_limit->bytes_per_record) != 0 ||
+        checked_mul_size_t(num_time_samples, bytes_per_sample, &out_limit->working_set_bytes) != 0) {
+        *out_limit = (dense_record_limit){0};
+        return -1;
+    }
+
+    /* Dense recording keeps every record resident in the caller's buffer, and
+     * the solver downloads each record straight into it: the core holds no
+     * second host copy, so a record costs exactly bytes_per_record. Beside the
+     * records the host must hold the working vectors. On the CPU backend that
+     * is literally the working set. On Vulkan the vectors live on the device,
+     * but the reserve is kept: it covers the host-visible staging and driver
+     * mappings, and it keeps the answer independent of which backend AUTO
+     * resolves to, so validating a request never has to create a device. */
+    const size_t host_available = query_available_system_memory_bytes();
+    if (host_available == 0u) {
+        return 0;
+    }
+    out_limit->derivable = 1;
+    out_limit->host_budget_bytes = apply_memory_headroom(host_available);
+
+    size_t record_budget =
+        (out_limit->host_budget_bytes > out_limit->working_set_bytes)
+            ? (out_limit->host_budget_bytes - out_limit->working_set_bytes)
+            : 0u;
+    /* Buffers the caller has already touched are no longer counted as
+     * available, so without this credit a count the query reported before
+     * they were allocated would be refused once they exist. */
+    record_budget = (record_budget > SIZE_MAX - resident_credit_bytes)
+                        ? SIZE_MAX
+                        : (record_budget + resident_credit_bytes);
+    out_limit->record_budget_bytes = record_budget;
+
+    size_t max_records = record_budget / out_limit->bytes_per_record;
+    const size_t precision_ceiling = runtime_limits_default().max_num_recorded_samples_with_storage;
+    if (max_records > precision_ceiling) {
+        max_records = precision_ceiling;
+    }
+    out_limit->max_records = max_records;
+    return 0;
+}
+
 int query_runtime_limits_internal(
     const sim_config* config,
     const execution_options* exec_options,
@@ -236,38 +395,6 @@ int query_runtime_limits_internal(
     size_t runtime_limit = max_samples_by_element_size;
     const size_t host_available = apply_memory_headroom(query_available_system_memory_bytes());
 
-    /* In-memory recording keeps every record resident, one field snapshot each,
-     * so its capacity is the host memory left after the working set divided by
-     * the size of a record. This figure describes that mode only. A run
-     * streaming to the snapshot store keeps a ring window of
-     * `record_ring_target` records resident instead of all of them, so its
-     * ceiling is max_num_recorded_samples_with_storage -- a precision ceiling,
-     * not a memory one -- and this field does not apply to it. Neither field is
-     * enforced from here: propagate validates the requested record count
-     * against the storage ceiling alone, so a streaming run is never clamped
-     * by this.
-     *
-     * It used to be assigned max_num_recorded_samples_with_storage, which made
-     * the two fields equal and this one say nothing: the documented
-     * min(wanted, max_num_recorded_samples_in_memory) could never reduce
-     * anything. Zero still means "not derivable", which is the case when the
-     * config does not state its sample count. */
-    if (requested_num_time_samples > 0u && host_available > 0u) {
-        size_t bytes_per_record = 0u;
-        if (checked_mul_size_t(requested_num_time_samples,
-                               sizeof(nlo_complex),
-                               &bytes_per_record) == 0 &&
-            bytes_per_record > 0u) {
-            const size_t working_set = out_limits->estimated_required_working_set_bytes;
-            const size_t record_budget =
-                (host_available > working_set) ? (host_available - working_set) : 0u;
-            size_t in_memory = record_budget / bytes_per_record;
-            if (in_memory > out_limits->max_num_recorded_samples_with_storage) {
-                in_memory = out_limits->max_num_recorded_samples_with_storage;
-            }
-            out_limits->max_num_recorded_samples_in_memory = in_memory;
-        }
-    }
     if (host_available > 0u) {
         const size_t host_limit = host_available / bytes_per_sample;
         if (host_limit > 0u && host_limit < runtime_limit) {
@@ -328,7 +455,18 @@ int query_runtime_limits_internal(
         runtime_limit = max_samples_by_element_size;
     }
 
+    /* The in-memory record capacity comes from the same derivation propagate
+     * validates a dense request against. Zero means no record fits, or that it
+     * is not derivable -- the config does not state its sample count, or the
+     * platform does not report available memory -- in which case propagate
+     * enforces no dense limit either. It is read last: probing the backend
+     * above loads the Vulkan driver into the process, which stays loaded and
+     * is memory propagate will no longer see as available. Reading before the
+     * probe reported a count propagate then refused. */
+    dense_record_limit dense_limit;
+    (void)resolve_dense_record_limit(config, requested_num_time_samples, 0u, &dense_limit);
+    out_limits->max_num_recorded_samples_in_memory = dense_limit.max_records;
+
     out_limits->max_num_time_samples_runtime = runtime_limit;
     return 0;
 }
-

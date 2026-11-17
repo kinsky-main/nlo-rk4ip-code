@@ -181,13 +181,29 @@ NLOLIB_API nlolib_status nlolib_perf_profile_read_gpu_phases(
  * the config does not state the count; the remaining limits do not depend on
  * it. The Python and MATLAB bindings fill it in for this call.
  *
- * `max_num_recorded_samples_in_memory` describes in-memory recording, where
- * every record stays resident: host memory less the working set, divided by the
- * size of one record. It does not apply to a run streaming to the snapshot
- * store, which keeps only a ring window of records in host memory; that run's
- * ceiling is `max_num_recorded_samples_with_storage`, which is a precision
- * ceiling rather than a memory one, and is the only one propagate enforces.
- * Pick between them on whether storage is configured, not on which is smaller.
+ * `max_num_recorded_samples_in_memory` describes in-memory (dense) recording,
+ * where every record stays resident in the caller's buffer. It is derived from
+ * host memory at the time of the call: 8/10 of the memory the operating system
+ * reports as available, less `estimated_required_working_set_bytes`, divided by
+ * the size of one record (16 bytes per sample). The unbudgeted fifth is the
+ * safety margin. The core writes each record straight into the caller's buffer
+ * and holds no second copy, so copies made by the caller are not counted.
+ * nlolib_propagate() enforces this same figure on a request that returns
+ * records into `output_records`: it accepts up to the reported count and
+ * rejects more with NLOLIB_STATUS_INVALID_ARGUMENT, re-derived from the memory
+ * available when propagate is called, so the answer can move between the two
+ * calls if other allocations do. Pages of the output buffer and of the input
+ * field that are already resident are credited back (Linux and Windows), so
+ * allocating and filling those two buffers between the query and the run does
+ * not turn an accepted count into a rejected one. Zero means no record fits, or that the capacity is not
+ * derivable (sample count not stated, or available memory not reported by the
+ * platform); in the latter case propagate enforces no dense limit.
+ *
+ * The field does not apply to a run streaming to the snapshot store, which
+ * keeps only a ring window of records in host memory; that run's ceiling is
+ * `max_num_recorded_samples_with_storage`, a precision ceiling rather than a
+ * memory one, which propagate enforces on every request. Pick between them on
+ * whether records are returned in memory, not on which is smaller.
  *
  * @param simulation_config Optional simulation configuration used to estimate
  *        required working-set bytes and in-memory record capacity.
@@ -248,6 +264,8 @@ typedef struct {
  *
  * @param output_records Optional destination records buffer.
  *        When omitted, records may still be captured through storage.
+ *        The record count it may receive is limited by host memory; see
+ *        `max_num_recorded_samples_in_memory` of nlolib_query_runtime_limits().
  * @param output_record_capacity Maximum records available in output_records.
  * @param records_written Number of records actually written.
  * @param storage_result Optional storage summary output.
