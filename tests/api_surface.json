@@ -541,7 +541,8 @@
       "_comment": "Recorded, not resolved: the owner decides whether the rule or the core changes.",
       "rule": "record_z with one position returns the field at that position.",
       "core": "Core 9417e92 (src/nlolib.c, the num_recorded_samples == 1u branches) downloads the current field, which is the final field at propagation_distance, into the only record whenever exactly one record is requested, in either output mode.",
-      "effect": "Today a single record_z position p returns the field at propagation_distance, not at p, unless p equals propagation_distance. z_axis must report what was returned."
+      "effect": "Today a single record_z position p returns the field at propagation_distance, not at p, unless p equals propagation_distance.",
+      "until_resolved": "While this stands, a single record_z position reports z_axis = [propagation_distance] in every binding, so z_axis says what was returned."
     },
     "c_mapping": {
       "record_z": {"output_mode": "PROPAGATE_OUTPUT_DENSE", "c_value": 0, "explicit_record_z": "record_z"},
@@ -654,10 +655,15 @@
       "use backend 'auto' and print 'metrics' with the same labels.",
       "record_bytes = samples x records x 16.",
       "",
-      "Not validated by a run: the reduced grids of tensor_dispersion_3d and",
-      "high_order_grin_soliton and the raman_scattering grid are sized by",
-      "arithmetic. The Python implementation runs each once and may correct",
-      "the numbers here before the other two bindings copy them."
+      "'metrics' are the labels each example prints, with the unit in",
+      "brackets where there is one; a label without a unit is a dimensionless",
+      "ratio (errors and drifts are fractions, not percent).",
+      "",
+      "'reference' holds the values the Python example printed with backend",
+      "'auto' when every block was run. It is informational: the checker does",
+      "not read it, and another machine or backend will differ in the last",
+      "digits. Every block held as written except raman_scattering, whose",
+      "error_tolerance was tightened."
     ],
     "shared": {
       "quickstart": {
@@ -665,21 +671,24 @@
         "params": {"n": 1024, "dt": 0.01, "sigma": 0.20, "chirp": 12.0, "beta2": 0.05, "gamma": 0.0,
                    "z_final": 1.0, "num_records": 2},
         "solver": {"preset": "balanced"},
-        "metrics": ["initial power", "final power"]
+        "metrics": ["initial power", "final power"],
+        "reference": {"final power": 25.06628}
       },
       "linear_drift": {
         "basis": "python/examples/linear_drift_rk4ip.py",
         "params": {"n": 1024, "dt": 0.01, "sigma": 0.20, "chirp": 12.0, "beta2": 0.05, "gamma": 0.0,
                    "z_final": 1.0, "num_records": 180},
         "solver": {"preset": "accuracy"},
-        "metrics": ["centroid slope relative error"]
+        "metrics": ["centroid slope relative error"],
+        "reference": {"centroid slope relative error": 0.0008802231}
       },
       "spm": {
         "basis": "python/examples/spm_rk4ip.py",
         "params": {"n": 1024, "dt": 0.01, "pulse_width": 0.2, "beta2": 0.0, "gamma": 80.0,
                    "z_final": 0.5, "num_records": 100},
         "solver": {"preset": "accuracy"},
-        "metrics": ["final mean pointwise relative error", "power drift"]
+        "metrics": ["final mean pointwise relative error", "power drift"],
+        "reference": {"final mean pointwise relative error": 4.078752e-08}
       },
       "second_order_soliton": {
         "basis": "python/examples/second_order_soliton_rk4ip.py",
@@ -688,7 +697,8 @@
                    "min_step_size": 1e-9, "error_tolerance": 1e-10},
         "derived": {"t0": "tfwhm / (2 acosh(sqrt(2)))", "dt": "40 t0 / n", "z_final": "(pi / 2) t0^2 / |beta2|"},
         "solver": "explicit",
-        "metrics": ["epsilon (relative L2 intensity error at z_final)"]
+        "metrics": ["epsilon (relative L2 intensity error at z_final)"],
+        "reference": {"epsilon (relative L2 intensity error at z_final)": 6.859559e-10}
       },
       "conservation_checks": {
         "basis": "python/examples/conservation_checks_rk4ip.py",
@@ -698,17 +708,20 @@
                     "starting_step_size": "z_final / 1000", "max_step_size": "z_final / 600",
                     "min_step_size": "z_final / 15000"},
         "solver": "explicit",
-        "metrics": ["max energy drift", "max momentum drift", "max Hamiltonian drift"]
+        "metrics": ["max energy drift", "max momentum drift", "max Hamiltonian drift"],
+        "reference": {"max energy drift": 7.464746e-09}
       },
       "raman_scattering": {
         "basis": "julia/examples/raman_scattering_rk4ip.jl (grid), python/examples/raman_scattering_rk4ip.py (physics)",
         "params": {"n": 4096, "dt": 0.002, "beta2": -0.01, "gamma": 1.40, "pulse_width": 0.08,
                    "z_final": 0.40, "num_records": 80, "f_r": 0.18, "tau1": 0.0522, "tau2": 0.0320,
-                   "shock_omega0": 0.0, "error_tolerance": 2e-6},
+                   "shock_omega0": 0.0, "error_tolerance": 2e-8},
         "derived": {"starting_step_size": "z_final / 500", "max_step_size": "z_final / 80",
                     "min_step_size": "z_final / 20000"},
         "solver": "explicit",
-        "metrics": ["centroid-curve relative error vs prediction"]
+        "metrics": ["centroid-curve relative error vs prediction"],
+        "reference": {"centroid-curve relative error vs prediction": 0.003758375},
+        "note": "error_tolerance was 2e-6 in the first draft: there the centroid curve goes noisy past z / L_D of about 0.45 and the metric is 4.3%."
       },
       "tensor_dispersion_3d": {
         "basis": "python/examples/tensor_dispersion_3d_rk4ip.py (physics), smaller grid",
@@ -718,7 +731,8 @@
                    "min_step_size": 1e-5, "error_tolerance": 1e-7},
         "solver": "explicit",
         "record_bytes": 201326592,
-        "metrics": ["final field relative error vs exact linear solution", "power drift"]
+        "metrics": ["final field relative error vs exact linear solution", "power drift"],
+        "reference": {"final field relative error vs exact linear solution": 4.766324e-12}
       },
       "transverse_grin_beam": {
         "basis": "matlab/examples/standalone_transverse_grin_beam.m",
@@ -728,7 +742,8 @@
                     "w_matched": "sqrt(2 / (k0 g_grin))", "beta_t": "-1 / (2 k0)"},
         "solver": {"preset": "accuracy"},
         "record_bytes": 25165824,
-        "metrics": ["power drift", "max centroid deviation from x_offset cos(g_grin z)"]
+        "metrics": ["power drift", "max centroid deviation from x_offset cos(g_grin z) [um]"],
+        "reference": {"power drift": 9.536675e-08, "max centroid deviation from x_offset cos(g_grin z) [um]": 0.00359188}
       },
       "spatiotemporal_kerr_bullet": {
         "basis": "matlab/examples/standalone_spatiotemporal_kerr_bullet.m",
@@ -737,7 +752,8 @@
         "derived": {"z_final": "1.5 l0", "gamma_kerr": "0.6 / l0", "beta_t": "-1 / (2 k0)"},
         "solver": {"preset": "accuracy"},
         "record_bytes": 100663296,
-        "metrics": ["linear-run width error vs analytic Gaussian", "linear-run radius error vs analytic Gaussian", "energy drift"]
+        "metrics": ["linear-run width error vs analytic Gaussian", "linear-run radius error vs analytic Gaussian", "energy drift (Kerr run)"],
+        "reference": {"linear-run width error vs analytic Gaussian": 0.0001335085, "energy drift (Kerr run)": 7.15094e-10}
       },
       "grin_soliton_fission": {
         "basis": "matlab/examples/grin_fiber_soliton_fission.m",
@@ -749,7 +765,9 @@
                     "min_step_size": "z_final / 1e5"},
         "solver": {"preset": "balanced", "overrides": ["error_tolerance", "starting_step_size", "max_step_size", "min_step_size"]},
         "record_bytes": 452984832,
-        "metrics": ["energy drift", "peak power in", "peak power out", "accepted steps"]
+        "metrics": ["energy drift", "peak power in [MW]", "peak power out [MW]", "accepted steps"],
+        "reference": {"energy drift": 4.158124e-06, "peak power in [MW]": 0.8925, "peak power out [MW]": 1.4678},
+        "note": "Known issue, block unchanged: past about 30 mm a fast component reaches the edge of the 2560 fs time window and wraps around."
       },
       "high_order_grin_soliton": {
         "basis": "python/examples/high_order_grin_soliton_rk4ip.py (physics), smaller grid and half the distance",
@@ -762,7 +780,8 @@
                    "min_step_size": 1e-8, "error_tolerance": 1e-5},
         "solver": "explicit",
         "record_bytes": 805306368,
-        "metrics": ["final radius / launch radius", "min overlap fidelity", "power drift"]
+        "metrics": ["final radius / launch radius", "min overlap fidelity", "power drift"],
+        "reference": {"final radius / launch radius": 1.526428, "min overlap fidelity": 0.5588525}
       },
       "sqlite_storage": {
         "basis": "python/examples/sqlite_snapshot_chunking_demo.py",
@@ -770,7 +789,8 @@
                    "chunk_records": 6, "sqlite_max_bytes": 53687091200},
         "solver": {"preset": "balanced"},
         "options": {"return_records": false},
-        "metrics": ["records captured", "chunks written", "db size bytes"]
+        "metrics": ["records captured", "chunks written", "db size bytes"],
+        "reference": {"records captured": 24, "chunks written": 4}
       }
     },
     "on_demand": {

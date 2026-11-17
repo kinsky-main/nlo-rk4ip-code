@@ -110,8 +110,9 @@ downloads the current field, which is the final field at
 `propagation_distance`, into the only record whenever exactly one record is
 requested, in either output mode. So today a single position `p` returns the
 field at `propagation_distance` unless `p` equals it. Either the rule or the
-core has to change; until then a binding must report in `z_axis` what was
-actually returned.
+core has to change. While this stands, a single `record_z` position reports
+`z_axis = [propagation_distance]` in every binding, so `z_axis` says what was
+returned.
 
 ## 3. Types
 
@@ -416,7 +417,7 @@ metric labels.
 | `spm` | n=1024, 100 records | `accuracy` | Python |
 | `second_order_soliton` | n=4096, 160 records | explicit, tolerance 1e-10 | Python |
 | `conservation_checks` | n=1024, 100 records | explicit, tolerance 1e-6 | Python |
-| `raman_scattering` | n=4096, dt=0.002, 80 records | explicit, tolerance 2e-6 | Julia grid, Python physics |
+| `raman_scattering` | n=4096, dt=0.002, 80 records | explicit, tolerance 2e-8 | Julia grid, Python physics |
 | `tensor_dispersion_3d` | 128 x 64 x 64, 24 records (201 MB) | explicit, tolerance 1e-7 | Python physics |
 | `transverse_grin_beam` | 128 x 128, 96 records (25 MB) | `accuracy` | MATLAB `standalone_transverse_grin_beam` |
 | `spatiotemporal_kerr_bullet` | 32 x 64 x 64, 48 records (101 MB) | `accuracy` | MATLAB `standalone_spatiotemporal_kerr_bullet` |
@@ -424,10 +425,34 @@ metric labels.
 | `high_order_grin_soliton` | 512 x 64 x 64, 24 records (805 MB) | explicit, tolerance 1e-5 | Python physics |
 | `sqlite_storage` | n=128, 24 records to SQLite | `balanced` | Python `sqlite_snapshot_chunking_demo` |
 
-The reduced grids of `tensor_dispersion_3d` and `high_order_grin_soliton` and
-the `raman_scattering` grid are sized by arithmetic and have not been run. The
-Python implementation runs each once and may correct the numbers in the
-manifest before the other two bindings copy them.
+Every block has been run by the Python implementation with backend `"auto"`.
+All held as written except `raman_scattering`, whose `error_tolerance` went
+from 2e-6 to 2e-8: at 2e-6 the centroid curve goes noisy past z / L_D of
+about 0.45 and the metric is 4.3%.
+
+Each example prints these metrics with these labels. A label without a unit is
+a dimensionless ratio (errors and drifts are fractions, not percent). The
+reference values are what Python printed; they are informational, the checker
+does not read them, and another machine or backend will differ in the last
+digits.
+
+| Example | Metrics printed | Reference value |
+|---|---|---|
+| `quickstart` | initial power, final power | final power 2.506628e+01 |
+| `linear_drift` | centroid slope relative error | 8.802231e-04 |
+| `spm` | final mean pointwise relative error, power drift | error 4.078752e-08 |
+| `second_order_soliton` | epsilon (relative L2 intensity error at z_final) | 6.859559e-10 |
+| `conservation_checks` | max energy drift, max momentum drift, max Hamiltonian drift | energy drift 7.464746e-09 |
+| `raman_scattering` | centroid-curve relative error vs prediction | 3.758375e-03 |
+| `tensor_dispersion_3d` | final field relative error vs exact linear solution, power drift | error 4.766324e-12 |
+| `transverse_grin_beam` | power drift, max centroid deviation [um] | 9.536675e-08, 3.591880e-03 |
+| `spatiotemporal_kerr_bullet` | linear-run width error, linear-run radius error, energy drift (Kerr run) | width error 1.335085e-04, energy drift 7.150940e-10 |
+| `grin_soliton_fission` | energy drift, peak power in [MW], peak power out [MW], accepted steps | 4.158124e-06, 0.8925, 1.4678 |
+| `high_order_grin_soliton` | final radius / launch radius, min overlap fidelity, power drift | 1.526428, 0.5588525 |
+| `sqlite_storage` | records captured, chunks written, db size bytes | 24 records, 4 chunks |
+
+Known issue in `grin_soliton_fission`, block unchanged: past about 30 mm a
+fast component reaches the edge of the 2560 fs time window and wraps around.
 
 Kept on demand in one binding, not run by default: `tensor_backend_scaling*`,
 `fixed_step_soliton_convergence`, `two_mode_linear_beating` (Python);
