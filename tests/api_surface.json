@@ -1,0 +1,819 @@
+{
+  "_comment": [
+    "The public surface every nlolib binding (Python, MATLAB, Julia) is expected",
+    "to expose: one vocabulary and one structure, each in its language's idiom.",
+    "docs/binding_api_vocabulary.md is the prose version of this file.",
+    "",
+    "tools/check_api_parity.py compares the three binding sources with this",
+    "file, text-only. It reports the differences and exits 0 unless run with",
+    "--surface enforce. tests/api_parity.json (the integer constants) is the",
+    "older, still enforcing check; it goes away once the bindings have dropped",
+    "the integer constants.",
+    "",
+    "Conventions: a default of null means unset. A parameter with kind",
+    "'positional' is passed by position; kind 'option' is passed by name",
+    "(Python keyword, Julia keyword after ';', MATLAB name=value). 'enum' names",
+    "an entry of 'enums': the public value is the lowercase string, and the",
+    "binding maps it to the C integer privately."
+  ],
+  "version": 1,
+
+  "functions": {
+    "load": {
+      "params": [{"name": "path", "kind": "positional", "default": null}],
+      "returns": "nothing; loads the nlolib shared library, from path when given"
+    },
+    "loaded_library_path": {
+      "params": [],
+      "returns": "path of the loaded shared library"
+    },
+    "propagate": {
+      "params": [
+        {"name": "pulse", "kind": "positional", "required": true, "type": "PulseSpec"},
+        {"name": "linear_operator", "kind": "positional", "required": true},
+        {"name": "nonlinear_operator", "kind": "positional", "required": true},
+        {"name": "propagation_distance", "kind": "option", "required": true},
+        {"name": "preset", "kind": "option", "default": "balanced"},
+        {"name": "starting_step_size", "kind": "option", "default": null},
+        {"name": "max_step_size", "kind": "option", "default": null},
+        {"name": "min_step_size", "kind": "option", "default": null},
+        {"name": "error_tolerance", "kind": "option", "default": null},
+        {"name": "num_records", "kind": "option", "default": null},
+        {"name": "record_z", "kind": "option", "default": null},
+        {"name": "return_records", "kind": "option", "default": true},
+        {"name": "potential_operator", "kind": "option", "default": null},
+        {"name": "linear_step_operator", "kind": "option", "default": null},
+        {"name": "constant_bindings", "kind": "option", "default": null},
+        {"name": "nonlinear_model", "kind": "option", "default": "expr", "enum": "nonlinear_model"},
+        {"name": "nonlinear_gamma", "kind": "option", "default": 0.0},
+        {"name": "raman_fraction", "kind": "option", "default": 0.0},
+        {"name": "raman_tau1", "kind": "option", "default": 0.0122},
+        {"name": "raman_tau2", "kind": "option", "default": 0.0320},
+        {"name": "shock_omega0", "kind": "option", "default": 0.0},
+        {"name": "raman_response_time", "kind": "option", "default": null},
+        {"name": "exec_options", "kind": "option", "default": null, "type": "ExecutionOptions"},
+        {"name": "storage", "kind": "option", "default": null, "type": "StorageOptions"},
+        {"name": "capture_step_history", "kind": "option", "default": false},
+        {"name": "step_history_capacity", "kind": "option", "default": 200000},
+        {"name": "progress_callback", "kind": "option", "default": null}
+      ],
+      "returns": "PropagationResult",
+      "notes": [
+        "pulse must be the PulseSpec type (in MATLAB a struct with the PulseSpec field names). A dict, mapping or NamedTuple is the 'bad pulse' error.",
+        "The same holds for exec_options and storage: ExecutionOptions and StorageOptions, a struct in MATLAB."
+      ]
+    },
+    "query_runtime_limits": {
+      "params": [
+        {"name": "pulse", "kind": "option", "default": null, "type": "PulseSpec"},
+        {"name": "exec_options", "kind": "option", "default": null, "type": "ExecutionOptions"}
+      ],
+      "returns": "RuntimeLimits"
+    },
+    "storage_is_available": {"params": [], "returns": "boolean"},
+    "tensor_record_view": {
+      "params": [
+        {"name": "record", "kind": "positional", "required": true},
+        {"name": "nt", "kind": "positional", "required": true},
+        {"name": "nx", "kind": "positional", "required": true},
+        {"name": "ny", "kind": "positional", "required": true}
+      ],
+      "returns": "the one flat record reshaped to (t, y, x), t fastest; Python returns nested lists"
+    },
+    "set_log_file": {
+      "params": [
+        {"name": "path", "kind": "positional", "required": true},
+        {"name": "append", "kind": "option", "default": false}
+      ]
+    },
+    "set_log_buffer": {
+      "params": [{"name": "capacity_bytes", "kind": "positional", "default": 262144}]
+    },
+    "clear_log_buffer": {"params": []},
+    "read_log_buffer": {
+      "params": [
+        {"name": "consume", "kind": "option", "default": true},
+        {"name": "max_bytes", "kind": "option", "default": 262144}
+      ],
+      "returns": "string"
+    },
+    "set_log_level": {
+      "params": [{"name": "level", "kind": "positional", "default": "info", "enum": "log_level"}]
+    },
+    "set_progress_options": {
+      "params": [
+        {"name": "enabled", "kind": "option", "default": true},
+        {"name": "milestone_percent", "kind": "option", "default": 5},
+        {"name": "emit_on_step_adjust", "kind": "option", "default": false}
+      ]
+    },
+    "set_progress_stream": {
+      "params": [{"name": "stream_mode", "kind": "positional", "default": "stderr", "enum": "progress_stream"}]
+    },
+    "perf_profile_set_enabled": {
+      "params": [{"name": "enabled", "kind": "positional", "default": true}]
+    },
+    "perf_profile_is_enabled": {"params": [], "returns": "boolean"},
+    "perf_profile_reset": {"params": []},
+    "perf_profile_read": {"params": [], "returns": "PerfProfileSnapshot"}
+  },
+
+  "types": {
+    "_comment": [
+      "Python: dataclasses / exception classes. Julia: structs. MATLAB: plain",
+      "structs with these field names (no class), so 'matlab' is null and only",
+      "the field words are checked there. Errors are in 'errors'.",
+      "",
+      "Not checked by the tool: field value types. Every flag is a boolean in",
+      "every binding (marked 'type': 'boolean'); PerfProfileSnapshot has none,",
+      "its fields are milliseconds and counts."
+    ],
+    "PulseSpec": {
+      "names": {"python": "PulseSpec", "julia": "PulseSpec", "matlab": null},
+      "fields": [
+        {"name": "samples", "required": true},
+        {"name": "delta_time", "required": true},
+        {"name": "pulse_period", "default": null},
+        {"name": "frequency_grid", "default": null},
+        {"name": "tensor_nt", "default": null},
+        {"name": "tensor_nx", "default": null},
+        {"name": "tensor_ny", "default": null},
+        {"name": "delta_x", "default": 1.0},
+        {"name": "delta_y", "default": 1.0},
+        {"name": "spatial_frequency_grid", "default": null},
+        {"name": "potential_grid", "default": null},
+        {"name": "wt_axis", "default": null},
+        {"name": "kx_axis", "default": null},
+        {"name": "ky_axis", "default": null}
+      ]
+    },
+    "ExecutionOptions": {
+      "names": {"python": "ExecutionOptions", "julia": "ExecutionOptions", "matlab": null},
+      "fields": [
+        {"name": "backend_type", "default": "auto", "enum": "vector_backend"},
+        {"name": "fft_backend", "default": "auto", "enum": "fft_backend"},
+        {"name": "device_heap_fraction", "default": 0.70},
+        {"name": "record_ring_target", "default": 0},
+        {"name": "forced_device_budget_bytes", "default": 0}
+      ]
+    },
+    "StorageOptions": {
+      "names": {"python": "StorageOptions", "julia": "StorageOptions", "matlab": null},
+      "fields": [
+        {"name": "sqlite_path", "required": true},
+        {"name": "run_id", "default": null},
+        {"name": "sqlite_max_bytes", "default": 0},
+        {"name": "chunk_records", "default": 0},
+        {"name": "cap_policy", "default": "stop_writes", "enum": "storage_cap_policy"},
+        {"name": "log_final_output_field_to_db", "default": false}
+      ]
+    },
+    "PropagationResult": {
+      "names": {"python": "PropagationResult", "julia": "PropagationResult", "matlab": null},
+      "fields": [
+        {"name": "records"},
+        {"name": "z_axis"},
+        {"name": "final"},
+        {"name": "step_history"},
+        {"name": "storage_result"},
+        {"name": "meta"}
+      ],
+      "notes": [
+        "records layout is the language's own: Python list of rows, MATLAB records x samples, Julia samples x records.",
+        "step_history is unset unless capture_step_history; storage_result is unset unless storage was given.",
+        "meta holds exactly: preset, records_requested, records_written, backend_requested, coupled, status."
+      ],
+      "meta": [
+        {"name": "preset"},
+        {"name": "records_requested"},
+        {"name": "records_written"},
+        {"name": "backend_requested", "enum": "vector_backend"},
+        {"name": "coupled", "type": "boolean"},
+        {"name": "status", "enum": "status"}
+      ]
+    },
+    "StepHistory": {
+      "names": {"python": "StepHistory", "julia": "StepHistory", "matlab": null},
+      "fields": [
+        {"name": "step_index"}, {"name": "z"}, {"name": "step_size"},
+        {"name": "next_step_size"}, {"name": "error"}, {"name": "dropped"}, {"name": "capacity"}
+      ]
+    },
+    "StorageResult": {
+      "names": {"python": "StorageResult", "julia": "StorageResult", "matlab": null},
+      "fields": [
+        {"name": "run_id"}, {"name": "records_captured"}, {"name": "records_spilled"},
+        {"name": "chunks_written"}, {"name": "db_size_bytes"}, {"name": "truncated", "type": "boolean"}
+      ],
+      "notes": ["truncated is a boolean in every binding, not the C int."]
+    },
+    "ProgressInfo": {
+      "names": {"python": "ProgressInfo", "julia": "ProgressInfo", "matlab": null},
+      "fields": [
+        {"name": "event_type", "enum": "progress_event"},
+        {"name": "step_index"}, {"name": "reject_attempt"}, {"name": "z"}, {"name": "z_end"},
+        {"name": "percent"}, {"name": "step_size"}, {"name": "next_step_size"}, {"name": "error"},
+        {"name": "elapsed_seconds"}, {"name": "eta_seconds"}
+      ]
+    },
+    "RuntimeLimits": {
+      "names": {"python": "RuntimeLimits", "julia": "RuntimeLimits", "matlab": null},
+      "fields": [
+        {"name": "max_num_time_samples_runtime"},
+        {"name": "max_num_recorded_samples_in_memory"},
+        {"name": "max_num_recorded_samples_with_storage"},
+        {"name": "estimated_required_working_set_bytes"},
+        {"name": "estimated_device_budget_bytes"},
+        {"name": "storage_available", "type": "boolean"}
+      ],
+      "notes": ["storage_available is a boolean in every binding, not the C int."]
+    },
+    "PerfProfileSnapshot": {
+      "names": {"python": "PerfProfileSnapshot", "julia": "PerfProfileSnapshot", "matlab": null},
+      "fields": [
+        {"name": "dispersion_ms"}, {"name": "nonlinear_ms"},
+        {"name": "dispersion_calls"}, {"name": "nonlinear_calls"},
+        {"name": "gpu_dispatch_count"}, {"name": "gpu_copy_count"},
+        {"name": "gpu_device_copy_count"}, {"name": "gpu_device_copy_bytes"},
+        {"name": "gpu_host_transfer_copy_count"}, {"name": "gpu_host_transfer_copy_bytes"},
+        {"name": "gpu_memory_pass_count"}, {"name": "gpu_memory_pass_bytes"},
+        {"name": "gpu_upload_count"}, {"name": "gpu_download_count"},
+        {"name": "gpu_upload_bytes"}, {"name": "gpu_download_bytes"},
+        {"name": "operator_jit_programs"}, {"name": "operator_jit_fallbacks"}
+      ]
+    }
+  },
+
+  "enums": {
+    "_comment": [
+      "Every enum-style value on the public surface is a lowercase string. The",
+      "binding maps it to the C integer privately; the integer constants are in",
+      "'removed'. An unknown string is the 'bad option value' error. Values",
+      "listed under 'direction': 'output' are strings the binding hands back."
+    ],
+    "vector_backend": {
+      "c_type": "vector_backend_type",
+      "direction": "input",
+      "used_by": ["ExecutionOptions.backend_type", "PropagationResult.meta.backend_requested"],
+      "default": "auto",
+      "values": {
+        "cpu": {"c_name": "VECTOR_BACKEND_CPU", "c_value": 0},
+        "vulkan": {"c_name": "VECTOR_BACKEND_VULKAN", "c_value": 1},
+        "auto": {"c_name": "VECTOR_BACKEND_AUTO", "c_value": 2}
+      }
+    },
+    "fft_backend": {
+      "c_type": "fft_backend_type",
+      "direction": "input",
+      "used_by": ["ExecutionOptions.fft_backend"],
+      "default": "auto",
+      "values": {
+        "auto": {"c_name": "FFT_BACKEND_AUTO", "c_value": 0},
+        "fftw": {"c_name": "FFT_BACKEND_FFTW", "c_value": 1},
+        "vkfft": {"c_name": "FFT_BACKEND_VKFFT", "c_value": 2}
+      }
+    },
+    "nonlinear_model": {
+      "c_type": "nonlinear_model",
+      "direction": "input",
+      "used_by": ["propagate.nonlinear_model"],
+      "default": "expr",
+      "values": {
+        "expr": {"c_name": "NONLINEAR_MODEL_EXPR", "c_value": 0},
+        "kerr_raman": {"c_name": "NONLINEAR_MODEL_KERR_RAMAN", "c_value": 1}
+      }
+    },
+    "storage_cap_policy": {
+      "c_type": "storage_db_cap_policy",
+      "direction": "input",
+      "used_by": ["StorageOptions.cap_policy"],
+      "default": "stop_writes",
+      "values": {
+        "stop_writes": {"c_name": "STORAGE_DB_CAP_POLICY_STOP_WRITES", "c_value": 0},
+        "fail": {"c_name": "STORAGE_DB_CAP_POLICY_FAIL", "c_value": 1}
+      }
+    },
+    "log_level": {
+      "c_type": "nlolib_log_level",
+      "direction": "input",
+      "used_by": ["set_log_level.level"],
+      "default": "info",
+      "values": {
+        "error": {"c_name": "NLOLIB_LOG_LEVEL_ERROR", "c_value": 0},
+        "warn": {"c_name": "NLOLIB_LOG_LEVEL_WARN", "c_value": 1},
+        "info": {"c_name": "NLOLIB_LOG_LEVEL_INFO", "c_value": 2},
+        "debug": {"c_name": "NLOLIB_LOG_LEVEL_DEBUG", "c_value": 3}
+      }
+    },
+    "progress_stream": {
+      "c_type": "nlolib_progress_stream_mode",
+      "direction": "input",
+      "used_by": ["set_progress_stream.stream_mode"],
+      "default": "stderr",
+      "values": {
+        "stderr": {"c_name": "NLOLIB_PROGRESS_STREAM_STDERR", "c_value": 0},
+        "stdout": {"c_name": "NLOLIB_PROGRESS_STREAM_STDOUT", "c_value": 1},
+        "both": {"c_name": "NLOLIB_PROGRESS_STREAM_BOTH", "c_value": 2}
+      }
+    },
+    "progress_event": {
+      "c_type": "progress event_type",
+      "direction": "output",
+      "used_by": ["ProgressInfo.event_type"],
+      "values": {
+        "accepted": {"c_name": "PROGRESS_EVENT_ACCEPTED", "c_value": 0},
+        "rejected": {"c_name": "PROGRESS_EVENT_REJECTED", "c_value": 1},
+        "finish": {"c_name": "PROGRESS_EVENT_FINISH", "c_value": 2}
+      }
+    },
+    "status": {
+      "c_type": "nlolib_status",
+      "direction": "output",
+      "used_by": ["PropagationResult.meta.status", "NlolibError.status"],
+      "values": {
+        "ok": {"c_name": "NLOLIB_STATUS_OK", "c_value": 0},
+        "invalid_argument": {"c_name": "NLOLIB_STATUS_INVALID_ARGUMENT", "c_value": 1},
+        "allocation_failed": {"c_name": "NLOLIB_STATUS_ALLOCATION_FAILED", "c_value": 2},
+        "not_implemented": {"c_name": "NLOLIB_STATUS_NOT_IMPLEMENTED", "c_value": 3},
+        "aborted": {"c_name": "NLOLIB_STATUS_ABORTED", "c_value": 4}
+      }
+    }
+  },
+
+  "presets": {
+    "_comment": [
+      "Step sizes are propagation_distance divided by the listed divisor. An",
+      "explicit option overrides the preset's value."
+    ],
+    "fast": {
+      "starting_step_divisor": 120, "max_step_divisor": 12, "min_step_divisor": 4000,
+      "error_tolerance": 5e-6, "num_records": 64
+    },
+    "balanced": {
+      "starting_step_divisor": 200, "max_step_divisor": 25, "min_step_divisor": 20000,
+      "error_tolerance": 1e-6, "num_records": 128
+    },
+    "accuracy": {
+      "starting_step_divisor": 400, "max_step_divisor": 50, "min_step_divisor": 80000,
+      "error_tolerance": 1e-7, "num_records": 192
+    }
+  },
+
+  "errors": {
+    "_comment": [
+      "Same conditions, each language's own type. 'classes' are the public",
+      "exception types a binding defines; MATLAB uses the seven ids in",
+      "'matlab_ids' (plus its own name=value error) and no other 'nlolib:'",
+      "identifier."
+    ],
+    "classes": {
+      "python": {
+        "NlolibError": {"base": "RuntimeError", "fields": ["status"]},
+        "PropagationAbortedError": {"base": "NlolibError", "fields": ["result"]}
+      },
+      "julia": {
+        "NLOLibError": {"base": "Exception", "fields": ["status", "context"]},
+        "PropagationAbortedError": {"base": "Exception", "fields": ["result"]}
+      }
+    },
+    "status": {
+      "_comment": [
+        "What the error's status field holds. It is a 'status' enum string when",
+        "a C call returned it. When no C call happened it is as listed here;",
+        "'unset' is None in Python and nothing in Julia. MATLAB errors carry",
+        "no status field: the identifier says which case it is, and",
+        "nlolib:statusFailed names the status string in its message."
+      ],
+      "C call returned a non-OK status": "that status string",
+      "feature not in this build": "not_implemented",
+      "library not found or not loadable": "unset (Python raises OSError, which has no status field)"
+    },
+    "matlab_ids": [
+      "nlolib:invalidOperator",
+      "nlolib:invalidPulse",
+      "nlolib:invalidOption",
+      "nlolib:libraryLoadFailed",
+      "nlolib:unavailable",
+      "nlolib:statusFailed",
+      "nlolib:propagationAborted"
+    ],
+    "conditions": [
+      {"condition": "operator is not a function (strings included)",
+       "python": "TypeError", "julia": "ArgumentError", "matlab": "nlolib:invalidOperator"},
+      {"condition": "operator body cannot be translated, or uses a symbol its context does not allow",
+       "python": "ValueError", "julia": "ArgumentError", "matlab": "nlolib:invalidOperator"},
+      {"condition": "bad pulse",
+       "python": "ValueError", "julia": "ArgumentError", "matlab": "nlolib:invalidPulse"},
+      {"condition": "bad option value (includes an unknown enum string)",
+       "python": "ValueError", "julia": "ArgumentError", "matlab": "nlolib:invalidOption"},
+      {"condition": "unknown option name",
+       "python": "TypeError (native)", "julia": "MethodError (native)", "matlab": "MATLAB's own name=value error"},
+      {"condition": "library not found or not loadable",
+       "python": "OSError", "julia": "NLOLibError", "matlab": "nlolib:libraryLoadFailed"},
+      {"condition": "feature not in this build",
+       "python": "NlolibError", "julia": "NLOLibError", "matlab": "nlolib:unavailable"},
+      {"condition": "C call returned a non-OK status",
+       "python": "NlolibError", "julia": "NLOLibError", "matlab": "nlolib:statusFailed"},
+      {"condition": "aborted by progress callback",
+       "python": "PropagationAbortedError", "julia": "PropagationAbortedError", "matlab": "nlolib:propagationAborted"}
+    ]
+  },
+
+  "operator_lowering": {
+    "_comment": [
+      "Established from src/physics/operator_program_compile.c",
+      "(context_allows_symbol_*) and src/core/init_state_builder.c, which",
+      "compiles dispersion_factor_expr + dispersion_expr for a temporal run and",
+      "linear_factor_expr + linear_expr + potential_expr for a tensor run, and",
+      "nothing else. The other slots are ignored for that run type."
+    ],
+    "run_type": {
+      "temporal": "pulse.tensor_nt is unset",
+      "tensor": "pulse.tensor_nt, tensor_nx and tensor_ny are set"
+    },
+    "rule": [
+      "The binding picks the C context by run type and writes the lowered text to the one C field the core compiles for that run type; it leaves the other field unset.",
+      "potential_operator on a temporal run is a bad option value: the core does not compile it there. Use pulse.potential_grid.",
+      "potential_operator is ignored by the core when pulse.potential_grid is set; passing both is a bad option value."
+    ],
+    "runtime_symbols": ["A", "I", "D", "V", "h", "w", "wt", "kx", "ky", "x", "y", "t"],
+    "parameter_binding": {
+      "_comment": [
+        "How an operator function's parameters become runtime symbols. 'The",
+        "context's symbols' are its 'parameters' list plus its 'aliases'. The",
+        "error in (c) and (d) is 'operator cannot be translated', raised by the",
+        "binding before the C call."
+      ],
+      "steps": [
+        "(a) First, every parameter whose name is one of the context's symbols binds to that symbol, wherever it stands in the parameter list.",
+        "(b) Then the remaining parameters bind, left to right, to the next symbol of the context's parameter order that is not bound yet. More parameters than symbols is the error.",
+        "(c) A parameter named after a runtime symbol the context does not provide (kx in dispersion_factor, I in linear_factor) is the error. It is never rebound positionally.",
+        "(d) Two parameters that resolve to the same symbol are the error.",
+        "(e) w and wt are one symbol in the four linear contexts. The binding emits the context's own spelling: w for a temporal run, wt for a tensor run. So (A, w, wt) is error (d).",
+        "(f) Runtime symbols enter only through parameters. A free name in the body is a captured constant, whatever it is called."
+      ],
+      "examples": [
+        {"signature": "(B, A)", "context": "dispersion_factor",
+         "result": "A binds to A by name (a); B takes the next unused symbol, w (b)."},
+        {"signature": "(A, omega)", "context": "dispersion_factor or linear_factor",
+         "result": "omega is not a runtime symbol, so it takes the next unused symbol: w in a temporal run, wt in a tensor run (b)."},
+        {"signature": "(A, w, wt, kx, ky)", "context": "linear_factor",
+         "result": "error (d): w and wt resolve to the same symbol."},
+        {"signature": "(A, w, kx, ky)", "context": "linear_factor",
+         "result": "A, wt, kx, ky: w is rewritten to wt (e)."},
+        {"signature": "(A, kx)", "context": "dispersion_factor",
+         "result": "error (c): kx is a runtime symbol a temporal run does not provide."}
+      ]
+    },
+    "slots": {
+      "linear_operator": {
+        "temporal": {"c_field": "dispersion_factor_expr", "context": "dispersion_factor"},
+        "tensor": {"c_field": "linear_factor_expr", "context": "linear_factor"}
+      },
+      "linear_step_operator": {
+        "temporal": {"c_field": "dispersion_expr", "context": "dispersion"},
+        "tensor": {"c_field": "linear_expr", "context": "linear"}
+      },
+      "potential_operator": {
+        "temporal": null,
+        "tensor": {"c_field": "potential_expr", "context": "potential"}
+      },
+      "nonlinear_operator": {
+        "temporal": {"c_field": "nonlinear_expr", "context": "nonlinear"},
+        "tensor": {"c_field": "nonlinear_expr", "context": "nonlinear"}
+      }
+    },
+    "contexts": {
+      "dispersion_factor": {
+        "c_enum": 0, "run_type": "temporal",
+        "parameters": ["A", "w"],
+        "aliases": {"wt": "w"},
+        "c_allows": ["A", "w", "wt"]
+      },
+      "dispersion": {
+        "c_enum": 1, "run_type": "temporal",
+        "parameters": ["A", "D", "h", "w", "V"],
+        "aliases": {"wt": "w"},
+        "c_allows": ["A", "D", "h", "V", "w", "wt"]
+      },
+      "linear_factor": {
+        "c_enum": 3, "run_type": "tensor",
+        "parameters": ["A", "wt", "kx", "ky", "x", "y", "t"],
+        "aliases": {"w": "wt"},
+        "c_allows": ["A", "wt", "kx", "ky", "x", "y", "t"],
+        "c_note": "context_allows_symbol_w is false here, but the parser's branch for the identifier w then tests context_allows_symbol_wt and emits the wt opcode, so C does compile w as wt in this context. The bindings rewrite w to wt themselves and do not depend on that."
+      },
+      "linear": {
+        "c_enum": 4, "run_type": "tensor",
+        "parameters": ["A", "D", "h", "wt", "kx", "ky", "x", "y", "t", "V"],
+        "aliases": {"w": "wt"},
+        "c_allows": ["A", "D", "h", "V", "wt", "kx", "ky", "x", "y", "t"],
+        "c_note": "context_allows_symbol_w is false here, but the parser's branch for the identifier w then tests context_allows_symbol_wt and emits the wt opcode, so C does compile w as wt in this context. The bindings rewrite w to wt themselves and do not depend on that."
+      },
+      "potential": {
+        "c_enum": 5, "run_type": "tensor",
+        "parameters": ["x", "y", "t"],
+        "aliases": {},
+        "c_allows": ["A", "x", "y", "t"],
+        "c_note": "wt, kx and ky are rejected by the C compiler here although all three bindings list them today"
+      },
+      "nonlinear": {
+        "c_enum": 2, "run_type": "both",
+        "parameters": ["A", "I", "V"],
+        "aliases": {},
+        "c_allows": ["A", "I", "V", "x", "y", "t"],
+        "c_note": "x, y and t compile in any run but only have grids in a tensor run; the bindings do not expose them"
+      }
+    },
+    "functions": ["exp", "log", "sqrt", "sin", "cos"],
+    "imaginary_unit": "i",
+    "constants": {"prefix": "c", "max": 16}
+  },
+
+  "output_mode_rule": {
+    "_comment": "Replaces the 'output' option. The C output mode is private.",
+    "rules": [
+      "record_z given: dense output at exactly those positions, for any length including one. num_records must be unset or equal to its length, otherwise bad option value.",
+      "record_z unset and num_records == 1: final field only; records holds that one field and z_axis is [propagation_distance].",
+      "otherwise: dense output at num_records uniformly spaced positions from 0 to propagation_distance (num_records from the preset when unset)."
+    ],
+    "known_core_discrepancy": {
+      "_comment": "Recorded, not resolved: the owner decides whether the rule or the core changes.",
+      "rule": "record_z with one position returns the field at that position.",
+      "core": "Core 9417e92 (src/nlolib.c, the num_recorded_samples == 1u branches) downloads the current field, which is the final field at propagation_distance, into the only record whenever exactly one record is requested, in either output mode.",
+      "effect": "Today a single record_z position p returns the field at propagation_distance, not at p, unless p equals propagation_distance.",
+      "until_resolved": "While this stands, a single record_z position reports z_axis = [propagation_distance] in every binding, so z_axis says what was returned."
+    },
+    "c_mapping": {
+      "record_z": {"output_mode": "PROPAGATE_OUTPUT_DENSE", "c_value": 0, "explicit_record_z": "record_z"},
+      "num_records_1": {"output_mode": "PROPAGATE_OUTPUT_FINAL_ONLY", "c_value": 1},
+      "uniform": {"output_mode": "PROPAGATE_OUTPUT_DENSE", "c_value": 0}
+    }
+  },
+
+  "removed": {
+    "_comment": [
+      "'names' must not be exported (Python __all__, Julia export) nor exist as",
+      "a public MATLAB package file. 'words' must not occur anywhere in the",
+      "binding's package source: they are option or field spellings with no",
+      "private use left. C struct field names (num_recorded_samples,",
+      "explicit_record_z, output_mode) are not listed because the private C",
+      "layer still uses them."
+    ],
+    "names": {
+      "all": [
+        "NLolib", "OperatorSpec", "RuntimeOperators", "PropagateResult",
+        "PreparedSimConfig", "prepare_sim_config",
+        "default_execution_options", "default_storage_options",
+        "NT_MAX", "STORAGE_RUN_ID_MAX", "TENSOR_LAYOUT_XYT_T_FAST",
+        "VECTOR_BACKEND_CPU", "VECTOR_BACKEND_VULKAN", "VECTOR_BACKEND_AUTO",
+        "FFT_BACKEND_AUTO", "FFT_BACKEND_FFTW", "FFT_BACKEND_VKFFT",
+        "NONLINEAR_MODEL_EXPR", "NONLINEAR_MODEL_KERR_RAMAN",
+        "STORAGE_DB_CAP_POLICY_STOP_WRITES", "STORAGE_DB_CAP_POLICY_FAIL",
+        "PROPAGATE_OUTPUT_DENSE", "PROPAGATE_OUTPUT_FINAL_ONLY",
+        "NLOLIB_STATUS_OK", "NLOLIB_STATUS_INVALID_ARGUMENT", "NLOLIB_STATUS_ALLOCATION_FAILED",
+        "NLOLIB_STATUS_NOT_IMPLEMENTED", "NLOLIB_STATUS_ABORTED",
+        "NLOLIB_LOG_LEVEL_ERROR", "NLOLIB_LOG_LEVEL_WARN", "NLOLIB_LOG_LEVEL_INFO", "NLOLIB_LOG_LEVEL_DEBUG",
+        "NLOLIB_PROGRESS_STREAM_STDERR", "NLOLIB_PROGRESS_STREAM_STDOUT", "NLOLIB_PROGRESS_STREAM_BOTH",
+        "PROGRESS_EVENT_ACCEPTED", "PROGRESS_EVENT_REJECTED", "PROGRESS_EVENT_FINISH"
+      ],
+      "python": [
+        "NLO_VECTOR_BACKEND_CPU", "NLO_VECTOR_BACKEND_VULKAN", "NLO_VECTOR_BACKEND_AUTO",
+        "NLO_FFT_BACKEND_AUTO", "NLO_FFT_BACKEND_FFTW", "NLO_FFT_BACKEND_VKFFT",
+        "NloComplex", "NloExecutionOptions", "NloPerfProfileSnapshot", "NloRuntimeLimits",
+        "NloStorageOptions", "NloStorageResult", "NloTensor3dDesc", "NloVkBackendConfig",
+        "make_complex_array", "complex_array_to_list"
+      ],
+      "julia": [
+        "NLOComplex", "PropagationParams", "TimeGrid", "FrequencyGrid", "SpatialGrid",
+        "Tensor3DDesc", "RuntimeOperatorParams", "SimulationConfig", "PhysicsConfig",
+        "VulkanBackendConfig", "StepEvent", "CProgressInfo", "PreparedValue",
+        "physics_config", "storage_options", "propagate!", "wrap_records", "final_record"
+      ],
+      "matlab": [
+        "constants", "pack_complex_array", "unpack_records", "debug_probe_complex_ptr"
+      ]
+    },
+    "words": {
+      "all": [
+        "t_eval", "t_span", "first_step", "max_step", "min_step", "rtol", "dense_output",
+        "auto_capture_constants",
+        "linear_factor_fn", "linear_fn", "potential_fn", "nonlinear_fn",
+        "dispersion_factor_fn", "dispersion_fn"
+      ],
+      "python": ["tensor_layout"],
+      "julia": ["tensor_layout"],
+      "matlab": [
+        "tail_logs", "matlab_stream_logs", "matlab_live_progress",
+        "matlab_progress_style", "matlab_log_buffer_bytes", "matlab_progress_stream", "matlab_debug",
+        "step_history_dropped"
+      ]
+    }
+  },
+
+  "binding_extras": {
+    "_comment": "Public names one binding has and the others do not need, each with the reason.",
+    "matlab": {
+      "functions": {
+        "unload": "MATLAB keeps the shared library loaded until told otherwise; needed to rebuild it in a session"
+      },
+      "propagate_options": {
+        "live_progress": "print progress in the Command Window during the call (progress_mex)",
+        "progress_style": "\"inline\" or \"lines\" for live_progress",
+        "stream_logs": "drain the log buffer to the Command Window after the call"
+      },
+      "top_level": {
+        "nlolib_setup": "adds the toolbox to the path; lives outside the package"
+      }
+    }
+  },
+
+  "known_gaps": {
+    "_comment": [
+      "Parts of the target a binding is allowed not to have yet, each with the",
+      "reason. Keys are '<function>.<parameter>', 'types.<Type>' or",
+      "'enums.<enum>'. A parameter gap that has since been closed is reported,",
+      "so this list cannot outlive the gap it describes."
+    ],
+    "python": {},
+    "julia": {},
+    "matlab": {
+      "propagate.progress_callback": "progress_mex cannot forward to a function handle yet; separate task",
+      "types.ProgressInfo": "only reaches the caller through progress_callback",
+      "enums.progress_event": "only reaches the caller through ProgressInfo.event_type"
+    }
+  },
+
+  "examples": {
+    "_comment": [
+      "One problem definition per example, the same in each binding. The file",
+      "is examples/<name>.py|.jl|.m. Each file carries its numbers in a",
+      "parameter block: plain 'name = number' lines between a comment line",
+      "containing 'nlolib-example-parameters: begin' and one containing",
+      "'nlolib-example-parameters: end'. The block must hold exactly 'params'.",
+      "'derived' is computed below the block and is not checked. All examples",
+      "use backend 'auto' and print 'metrics' with the same labels.",
+      "record_bytes = samples x records x 16.",
+      "",
+      "'metrics' are the labels each example prints, with the unit in",
+      "brackets where there is one; a label without a unit is a dimensionless",
+      "ratio (errors and drifts are fractions, not percent).",
+      "",
+      "'reference' holds the values the Python example printed with backend",
+      "'auto' when every block was run. It is informational: the checker does",
+      "not read it, and another machine or backend will differ in the last",
+      "digits. Every block held as written except raman_scattering, whose",
+      "error_tolerance was tightened."
+    ],
+    "shared": {
+      "quickstart": {
+        "basis": "matlab/examples/runtime_callable_operator_rk4ip.m",
+        "params": {"n": 1024, "dt": 0.01, "sigma": 0.20, "chirp": 12.0, "beta2": 0.05, "gamma": 0.0,
+                   "z_final": 1.0, "num_records": 2},
+        "solver": {"preset": "balanced"},
+        "metrics": ["initial power", "final power"],
+        "reference": {"final power": 25.06628}
+      },
+      "linear_drift": {
+        "basis": "python/examples/linear_drift_rk4ip.py",
+        "params": {"n": 1024, "dt": 0.01, "sigma": 0.20, "chirp": 12.0, "beta2": 0.05, "gamma": 0.0,
+                   "z_final": 1.0, "num_records": 180},
+        "solver": {"preset": "accuracy"},
+        "metrics": ["centroid slope relative error"],
+        "reference": {"centroid slope relative error": 0.0008802231}
+      },
+      "spm": {
+        "basis": "python/examples/spm_rk4ip.py",
+        "params": {"n": 1024, "dt": 0.01, "pulse_width": 0.2, "beta2": 0.0, "gamma": 80.0,
+                   "z_final": 0.5, "num_records": 100},
+        "solver": {"preset": "accuracy"},
+        "metrics": ["final mean pointwise relative error", "power drift"],
+        "reference": {"final mean pointwise relative error": 4.078752e-08}
+      },
+      "second_order_soliton": {
+        "basis": "python/examples/second_order_soliton_rk4ip.py",
+        "params": {"n": 4096, "tfwhm": 0.1, "beta2": -0.01, "gamma": 0.01, "soliton_order": 2,
+                   "num_records": 160, "starting_step_size": 1e-4, "max_step_size": 0.01,
+                   "min_step_size": 1e-9, "error_tolerance": 1e-10},
+        "derived": {"t0": "tfwhm / (2 acosh(sqrt(2)))", "dt": "40 t0 / n", "z_final": "(pi / 2) t0^2 / |beta2|"},
+        "solver": "explicit",
+        "metrics": ["epsilon (relative L2 intensity error at z_final)"],
+        "reference": {"epsilon (relative L2 intensity error at z_final)": 6.859559e-10}
+      },
+      "conservation_checks": {
+        "basis": "python/examples/conservation_checks_rk4ip.py",
+        "params": {"n": 1024, "tfwhm": 0.1, "beta2": -0.01, "gamma": 0.01, "carrier": 12.0,
+                   "num_records": 100, "error_tolerance": 1e-6},
+        "derived": {"dt": "16 t0 / n", "z_final": "0.2 t0^2 / |beta2|",
+                    "starting_step_size": "z_final / 1000", "max_step_size": "z_final / 600",
+                    "min_step_size": "z_final / 15000"},
+        "solver": "explicit",
+        "metrics": ["max energy drift", "max momentum drift", "max Hamiltonian drift"],
+        "reference": {"max energy drift": 7.464746e-09}
+      },
+      "raman_scattering": {
+        "basis": "julia/examples/raman_scattering_rk4ip.jl (grid), python/examples/raman_scattering_rk4ip.py (physics)",
+        "params": {"n": 4096, "dt": 0.002, "beta2": -0.01, "gamma": 1.40, "pulse_width": 0.08,
+                   "z_final": 0.40, "num_records": 80, "f_r": 0.18, "tau1": 0.0522, "tau2": 0.0320,
+                   "shock_omega0": 0.0, "error_tolerance": 2e-8},
+        "derived": {"starting_step_size": "z_final / 500", "max_step_size": "z_final / 80",
+                    "min_step_size": "z_final / 20000"},
+        "solver": "explicit",
+        "metrics": ["centroid-curve relative error vs prediction"],
+        "reference": {"centroid-curve relative error vs prediction": 0.003758375},
+        "note": "error_tolerance was 2e-6 in the first draft: there the centroid curve goes noisy past z / L_D of about 0.45 and the metric is 4.3%."
+      },
+      "tensor_dispersion_3d": {
+        "basis": "python/examples/tensor_dispersion_3d_rk4ip.py (physics), smaller grid",
+        "params": {"nt": 128, "nx": 64, "ny": 64, "dt": 0.04, "dx": 0.15, "dy": 0.15,
+                   "temporal_width": 0.24, "x_width": 0.60, "y_width": 0.70, "beta2": 0.08, "beta_t": -0.20,
+                   "z_final": 0.80, "num_records": 24, "starting_step_size": 2e-2, "max_step_size": 8e-2,
+                   "min_step_size": 1e-5, "error_tolerance": 1e-7},
+        "solver": "explicit",
+        "record_bytes": 201326592,
+        "metrics": ["final field relative error vs exact linear solution", "power drift"],
+        "reference": {"final field relative error vs exact linear solution": 4.766324e-12}
+      },
+      "transverse_grin_beam": {
+        "basis": "matlab/examples/standalone_transverse_grin_beam.m",
+        "params": {"lambda0": 1.03, "n0": 1.45, "g_grin": 2.0e-3, "nx": 128, "ny": 128, "dx": 1.5, "dy": 1.5,
+                   "x_offset": 20.0, "num_records": 96},
+        "derived": {"k0": "2 pi n0 / lambda0", "z_final": "2 pi / g_grin",
+                    "w_matched": "sqrt(2 / (k0 g_grin))", "beta_t": "-1 / (2 k0)"},
+        "solver": {"preset": "accuracy"},
+        "record_bytes": 25165824,
+        "metrics": ["power drift", "max centroid deviation from x_offset cos(g_grin z) [um]"],
+        "reference": {"power drift": 9.536675e-08, "max centroid deviation from x_offset cos(g_grin z) [um]": 0.00359188}
+      },
+      "spatiotemporal_kerr_bullet": {
+        "basis": "matlab/examples/standalone_spatiotemporal_kerr_bullet.m",
+        "params": {"lambda0": 1.55, "n0": 1.444, "beta2": -0.028, "l0": 1.0e5, "nt": 32, "nx": 64, "ny": 64,
+                   "dt": 20.0, "dx": 32.0, "dy": 32.0, "num_records": 48},
+        "derived": {"z_final": "1.5 l0", "gamma_kerr": "0.6 / l0", "beta_t": "-1 / (2 k0)"},
+        "solver": {"preset": "accuracy"},
+        "record_bytes": 100663296,
+        "metrics": ["linear-run width error vs analytic Gaussian", "linear-run radius error vs analytic Gaussian", "energy drift (Kerr run)"],
+        "reference": {"linear-run width error vs analytic Gaussian": 0.0001335085, "energy drift (Kerr run)": 7.15094e-10}
+      },
+      "grin_soliton_fission": {
+        "basis": "matlab/examples/grin_fiber_soliton_fission.m",
+        "params": {"lambda0": 1.55, "n0": 1.45, "beta2": -0.028, "beta3": 0.3, "n2": 2.6e-8,
+                   "soliton_order": 4, "t0": 30.0, "nt": 1024, "dt": 2.5, "nx": 24, "ny": 24, "dx": 2.0,
+                   "t_launch": -400.0, "num_records": 48, "error_tolerance": 1e-6},
+        "derived": {"g_grin": "sqrt(2 * 0.01) / 25", "z_final": "1.2 t0^2 / |beta2|",
+                    "starting_step_size": "z_final / 500", "max_step_size": "z_final / 50",
+                    "min_step_size": "z_final / 1e5"},
+        "solver": {"preset": "balanced", "overrides": ["error_tolerance", "starting_step_size", "max_step_size", "min_step_size"]},
+        "record_bytes": 452984832,
+        "metrics": ["energy drift", "peak power in [MW]", "peak power out [MW]", "accepted steps"],
+        "reference": {"energy drift": 4.158124e-06, "peak power in [MW]": 0.8925, "peak power out [MW]": 1.4678},
+        "note": "Known issue, block unchanged: past about 30 mm a fast component reaches the edge of the 2560 fs time window and wraps around."
+      },
+      "high_order_grin_soliton": {
+        "basis": "python/examples/high_order_grin_soliton_rk4ip.py (physics), smaller grid and half the distance",
+        "params": {"soliton_order": 4.5, "saturation_intensity": 2.0, "propagation_periods": 4.0,
+                   "azimuthal_amplitude": 0.25, "azimuthal_order": 4, "noise_amplitude": 0.01, "noise_seed": 12345,
+                   "nt": 512, "nx": 64, "ny": 64, "dt": 0.02, "dx": 0.06, "dy": 0.06,
+                   "temporal_width": 0.30, "mode_width_x": 0.55, "mode_width_y": 0.75, "spatial_chirp": 1.5,
+                   "beta2": -0.08, "beta_t": -0.08, "grin_strength": 1.5e-3, "gamma_nonlinear": 1.5,
+                   "num_records": 24, "starting_step_size": 5e-3, "max_step_size": 0.2,
+                   "min_step_size": 1e-8, "error_tolerance": 1e-5},
+        "solver": "explicit",
+        "record_bytes": 805306368,
+        "metrics": ["final radius / launch radius", "min overlap fidelity", "power drift"],
+        "reference": {"final radius / launch radius": 1.526428, "min overlap fidelity": 0.5588525}
+      },
+      "sqlite_storage": {
+        "basis": "python/examples/sqlite_snapshot_chunking_demo.py",
+        "params": {"nt": 128, "dt": 0.0078125, "pulse_period": 1.0, "z_final": 0.2, "num_records": 24,
+                   "chunk_records": 6, "sqlite_max_bytes": 53687091200},
+        "solver": {"preset": "balanced"},
+        "options": {"return_records": false},
+        "metrics": ["records captured", "chunks written", "db size bytes"],
+        "reference": {"records captured": 24, "chunks written": 4}
+      }
+    },
+    "on_demand": {
+      "_comment": "Single-binding, not part of the shared set, not run by default. Listed so the checker does not report them as strays.",
+      "python": ["fixed_step_soliton_convergence", "tensor_backend_scaling", "tensor_backend_scaling_nlolib",
+                 "two_mode_linear_beating"],
+      "matlab": ["setup_matlab_example_environment"],
+      "julia": []
+    },
+    "dropped": {
+      "_comment": "Old example -> why it goes.",
+      "runtime_callable_operator_rk4ip": "covered by quickstart",
+      "runtime_temporal_demo": "covered by quickstart",
+      "spm_dispersion_comparison_rk4ip": "covered by spm + linear_drift",
+      "coupled_dispersion_nonlinearity_diffraction_rk4ip": "covered by spatiotemporal_kerr_bullet",
+      "grin_fiber_xy_rk4ip": "covered by transverse_grin_beam",
+      "standalone_transverse_grin_beam": "covered by transverse_grin_beam",
+      "standalone_spatiotemporal_kerr_bullet": "covered by spatiotemporal_kerr_bullet",
+      "grin_fiber_soliton_fission": "covered by grin_soliton_fission",
+      "unsaturable_grin_filamentation_fission_rk4ip": "covered by grin_soliton_fission",
+      "sqlite_snapshot_chunking_demo": "covered by sqlite_storage",
+      "mmtools_modal_vs_profile_grid_rk4ip": "needs MMTools, which is not installed; not a required example",
+      "mmtools_tensor_scaling_for_python_benchmark": "needs MMTools, which is not installed; not a required example"
+    }
+  }
+}

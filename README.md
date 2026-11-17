@@ -59,6 +59,10 @@ every push to `main`:
   python tools/check_api_parity.py
   ```
 
+  `check_api_parity.py` also compares the three bindings with the shared
+  surface in `tests/api_surface.json` (see `docs/binding_api_vocabulary.md`).
+  That part only reports for now; `--surface enforce` makes a difference fail.
+
 - a Linux job that configures and builds with the Vulkan backend on, then runs
   the native test suite:
 
