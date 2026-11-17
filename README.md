@@ -132,6 +132,11 @@ library:
 nlolib_store_merge --watch 60 /path/to/store
 ```
 
+After each merge transaction the merger leaves a gap as long as that
+transaction took, up to 4 s, so that readers on other hosts can read in
+between (`--pause SECONDS` or `NLOLIB_STORE_MERGE_PAUSE_S` for the cap, 0 for
+no gaps).
+
 On Linux and macOS, run databases are written with SQLite's `unix-none` VFS
 under Nlolib's own writer lock, because SQLite's Unix locking cannot commit on
 SMB mounts (`NLOLIB_STORE_VFS` overrides). Do not open the database read-write

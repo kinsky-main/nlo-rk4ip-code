@@ -33,6 +33,9 @@ static void usage(FILE* out)
             "                         and the data of interrupted merges whose staging file is gone\n"
             "  --min-age SECONDS      only discard incomplete files at least this old (default 86400)\n"
             "  --watch SECONDS        repeat every SECONDS until interrupted\n"
+            "  --pause SECONDS        longest gap left for readers on other hosts after each merge\n"
+            "                         transaction; a gap is as long as the transaction before it,\n"
+            "                         up to this (default 4, 0: no gaps; sets NLOLIB_STORE_MERGE_PAUSE_S)\n"
             "  -q, --quiet            print only errors\n"
             "  -h, --help             show this help\n");
 }
@@ -78,6 +81,18 @@ int main(int argc, char** argv)
             min_age = strtod(argv[++i], NULL);
         } else if (strcmp(argv[i], "--watch") == 0 && i + 1 < argc) {
             watch = strtod(argv[++i], NULL);
+        } else if (strcmp(argv[i], "--pause") == 0 && i + 1 < argc) {
+            const char* pause = argv[++i];
+            char* end = NULL;
+            if (strtod(pause, &end) < 0.0 || end == pause || *end != '\0') {
+                fprintf(stderr, "nlolib_store_merge: --pause needs a number of seconds >= 0\n");
+                return 2;
+            }
+#if defined(_WIN32)
+            (void)_putenv_s("NLOLIB_STORE_MERGE_PAUSE_S", pause);
+#else
+            (void)setenv("NLOLIB_STORE_MERGE_PAUSE_S", pause, 1);
+#endif
         } else if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quiet") == 0) {
             quiet = 1;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {

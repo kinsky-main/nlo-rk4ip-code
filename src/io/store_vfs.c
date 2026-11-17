@@ -101,6 +101,24 @@ static int take_fault(int op)
     return err;
 }
 
+/* Milliseconds NLOLIB_STORE_TEST_IO_DELAY_MS ("op:ms,...") adds before each call of @p op. */
+static long take_delay_ms(int op)
+{
+    const char* spec = getenv("NLOLIB_STORE_TEST_IO_DELAY_MS");
+    if (spec == NULL || spec[0] == '\0') {
+        return 0;
+    }
+    const size_t len = strlen(g_op_names[op]);
+    for (const char* item = spec; item != NULL && *item != '\0';) {
+        if (strncmp(item, g_op_names[op], len) == 0 && item[len] == ':') {
+            return strtol(item + len + 1u, NULL, 10);
+        }
+        item = strchr(item, ',');
+        item = (item != NULL) ? item + 1 : NULL;
+    }
+    return 0;
+}
+
 static int fault_result(int op)
 {
     switch (op) {
@@ -172,6 +190,10 @@ static int run_with_retry(int op, const char* path, int creating, int (*call)(vo
     double delay = 0.02;
     int attempts = 0;
     int first_err = 0;
+    const long delay_ms = take_delay_ms(op);
+    if (delay_ms > 0) {
+        sleep_seconds(1e-3 * (double)delay_ms);
+    }
     for (;;) {
         int err = take_fault(op);
         int rc = 0;

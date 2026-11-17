@@ -1491,9 +1491,74 @@ static sqlite3_int64 merge_batch_bytes(void)
     return (value >= 1.0) ? (sqlite3_int64)value : RUN_STORE_MERGE_BATCH_BYTES;
 }
 
+/*
+ * Pacing of the merge transactions of one pass. While a transaction is open,
+ * readers on other hosts cannot read (they meet the journal or torn pages).
+ * So a transaction starts only once the gap since the previous commit is as
+ * long as the previous transaction took, at most pause_s: readers get at
+ * least half the time, and the longest they are shut out is one transaction.
+ * Time that passed between transactions anyway (checking the next staging
+ * file) counts toward the gap, so merges of small runs, which already have
+ * such gaps, are hardly slowed. The wait is taken before a transaction,
+ * never after the last one of a pass.
+ */
+#define RUN_STORE_MERGE_PAUSE_S 4.0
+#define RUN_STORE_MERGE_PAUSE_MAX_S 60.0
+
+typedef struct {
+    double pause_s;
+    double txn_from;
+    double txn_s;
+    double last_commit;
+    unsigned commits;
+    unsigned pauses;
+    double paused_s;
+} merge_pacer;
+
+static void pacer_init(merge_pacer* p)
+{
+    memset(p, 0, sizeof(*p));
+    p->pause_s = env_seconds_allow_zero("NLOLIB_STORE_MERGE_PAUSE_S", RUN_STORE_MERGE_PAUSE_S);
+    if (p->pause_s > RUN_STORE_MERGE_PAUSE_MAX_S) {
+        p->pause_s = RUN_STORE_MERGE_PAUSE_MAX_S;
+    }
+}
+
+/* Before a merge transaction: returns 1 when it paused (the caller refreshes its lock). */
+static int pacer_wait(merge_pacer* p)
+{
+    if (p == NULL) {
+        return 0;
+    }
+    int paused = 0;
+    if (p->commits > 0u && p->pause_s > 0.0) {
+        const double need = (p->txn_s < p->pause_s) ? p->txn_s : p->pause_s;
+        const double wait = need - (rs_monotonic_seconds() - p->last_commit);
+        if (wait >= 0.001) {
+            log_emit(LOG_LEVEL_DEBUG, "[nlolib][store] pausing %.3f s between merge transactions for readers", wait);
+            rs_sleep_ms((unsigned)(wait * 1000.0 + 0.5));
+            p->pauses += 1u;
+            p->paused_s += wait;
+            paused = 1;
+        }
+    }
+    p->txn_from = rs_monotonic_seconds();
+    return paused;
+}
+
+static void pacer_committed(merge_pacer* p)
+{
+    if (p != NULL) {
+        p->last_commit = rs_monotonic_seconds();
+        p->txn_s = p->last_commit - p->txn_from;
+        p->commits += 1u;
+    }
+}
+
 typedef struct {
     sqlite3* db;
     run_lock* lock;
+    merge_pacer* pacer;
     const char* run_id;
     int in_txn;
     sqlite3_int64 txn_bytes;
@@ -1505,6 +1570,9 @@ static int merge_begin(merge_txn* m)
 {
     if (m->in_txn) {
         return 0;
+    }
+    if (pacer_wait(m->pacer) && lock_refresh(m->lock) != 0) {
+        return -1;
     }
     if (db_exec(m->db, "BEGIN IMMEDIATE;") != 0) {
         return -1;
@@ -1529,6 +1597,7 @@ static int merge_commit(merge_txn* m)
     }
     m->in_txn = 0;
     m->commits += 1u;
+    pacer_committed(m->pacer);
     const char* crash = getenv("NLOLIB_STORE_TEST_CRASH_AFTER_COMMITS");
     if (crash != NULL && crash[0] != '\0' && (unsigned)strtoul(crash, NULL, 10) == m->commits) {
         /* Test hook: die like a killed writer between two merge transactions. */
@@ -1654,13 +1723,14 @@ static long long stg_count(sqlite3* db, const char* schema, const char* table, c
  * staging file again starts over from step 1, and nlolib_storage_recover_staging
  * deletes such data when its staging file is gone.
  */
-static run_store_status merge_locked(sqlite3* db, run_lock* lock, const char* key, const char* run_id,
-                                     const char* index_file)
+static run_store_status merge_locked(sqlite3* db, run_lock* lock, merge_pacer* pacer, const char* key,
+                                     const char* run_id, const char* index_file)
 {
     merge_txn m;
     memset(&m, 0, sizeof(m));
     m.db = db;
     m.lock = lock;
+    m.pacer = pacer;
     m.run_id = run_id;
     m.budget = merge_batch_bytes();
 
@@ -2044,7 +2114,15 @@ typedef struct {
     run_lock lock;
     double taken_at;
     int fresh;
+    merge_pacer pacer;
 } merge_session;
+
+static void session_init(merge_session* s, const char* shared_path)
+{
+    memset(s, 0, sizeof(*s));
+    s->shared_path = shared_path;
+    pacer_init(&s->pacer);
+}
 
 static run_store_status session_lock(merge_session* s)
 {
@@ -2072,6 +2150,11 @@ static void session_end(merge_session* s)
 {
     lock_release(&s->lock);
     s->fresh = 0;
+    if (s->pacer.pauses > 0u) {
+        log_emit(LOG_LEVEL_INFO,
+                 "[nlolib][store] merge pass on %s: %u transactions, %u pauses for readers (%.1f s)",
+                 s->shared_path, s->pacer.commits, s->pacer.pauses, s->pacer.paused_s);
+    }
 }
 
 /* Merge one complete staging file within a session; the lock is kept on return. */
@@ -2140,7 +2223,8 @@ static run_store_status session_merge(merge_session* s, const char* staging_path
                         status = (taken > 0) ? RUN_STORE_CONFLICT : RUN_STORE_ERROR;
                     } else {
                         superseded = staged_run_superseded(db, key);
-                        status = superseded ? RUN_STORE_OK : merge_locked(db, &s->lock, key, run_id, index_file);
+                        status = superseded ? RUN_STORE_OK
+                                            : merge_locked(db, &s->lock, &s->pacer, key, run_id, index_file);
                     }
                     (void)sqlite3_exec(db, "DETACH DATABASE stg;", NULL, NULL, NULL);
                 }
@@ -2188,8 +2272,7 @@ run_store_status run_store_merge(const char* staging_path, const char* shared_pa
         return RUN_STORE_ERROR;
     }
     merge_session session;
-    memset(&session, 0, sizeof(session));
-    session.shared_path = shared_path;
+    session_init(&session, shared_path);
     const run_store_status status = session_merge(&session, staging_path);
     session_end(&session);
     return status;
@@ -2233,8 +2316,12 @@ static size_t discard_orphans(merge_session* s, const char* staging_dir, const c
             if (staging_has_prefix(staging_dir, pattern)) {
                 continue;
             }
+            if (pacer_wait(&s->pacer) && lock_refresh(&s->lock) != 0) {
+                break;
+            }
             if (db_exec(db, "BEGIN IMMEDIATE;") == 0 && delete_run(db, keys[i], ids[i]) == 0 &&
                 lock_owned(&s->lock) && db_exec(db, "COMMIT;") == 0) {
+                pacer_committed(&s->pacer);
                 removed += 1u;
                 log_emit(LOG_LEVEL_INFO, "[nlolib][store] removed data of interrupted merge %s", keys[i]);
             } else {
@@ -2428,7 +2515,7 @@ run_store_status run_store_recover(
     recover_ctx ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.shared_path = shared_path;
-    ctx.session.shared_path = shared_path;
+    session_init(&ctx.session, shared_path);
     ctx.discard_incomplete = discard_incomplete;
     ctx.min_age_seconds = (min_age_seconds > 0.0) ? min_age_seconds : 0.0;
     rs_stem(shared_path, ctx.stem, sizeof(ctx.stem));

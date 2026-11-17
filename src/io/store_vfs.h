@@ -26,6 +26,8 @@
  * Tests can inject failures with NLOLIB_STORE_TEST_IO_FAULTS, a comma-separated
  * list of `op:count:errno` (op one of open, write, sync, truncate, delete): the
  * next @c count calls of that kind fail with @c errno before reaching the file.
+ * NLOLIB_STORE_TEST_IO_DELAY_MS, a comma-separated list of `op:ms`, makes every
+ * call of that kind wait @c ms first, as a slow network share would.
  *
  * @return VFS name for sqlite3_open_v2(); NULL for SQLite's default VFS.
  */

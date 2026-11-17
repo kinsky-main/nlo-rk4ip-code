@@ -333,11 +333,12 @@ later with `nlolib_storage_recover_staging`, the `nlolib_store_merge` tool, or
 `NLOLib.storage_recover_staging`:
 
 ```
-nlolib_store_merge [--discard-incomplete] [--min-age SECONDS] [--watch SECONDS] <store-folder | db.sqlite>...
+nlolib_store_merge [--discard-incomplete] [--min-age SECONDS] [--watch SECONDS] [--pause SECONDS] <store-folder | db.sqlite>...
 ```
 
 A store folder means `<folder>/nlolib/nlolib.sqlite`; `--watch 60` repeats every
-minute. Both arrangements work at once: complete staging files are merged by
+minute; `--pause` is described under "Reading during a merge pass" below.
+Both arrangements work at once: complete staging files are merged by
 whoever gets to them first, under the lock, and a file merged by one writer is
 gone (deleted under the lock) when the next one looks.
 
@@ -411,13 +412,57 @@ Python's `sqlite3` module):
 - Reads in one short transaction and, on `SQLITE_READONLY` ("attempt to write
   a readonly database"), `SQLITE_BUSY` or `SQLITE_CORRUPT` ("database disk
   image is malformed"), closes or rolls back and retries after a pause of
-  tens of milliseconds, for as long as a merge may take (Nlolib waits up to
-  60 s). A busy timeout alone does not help: `SQLITE_READONLY` is not a busy
+  at most 0.5 s, for at least 30 s (Nlolib's own reads wait up to 60 s). A
+  busy timeout alone does not help: `SQLITE_READONLY` is not a busy
   condition.
+- Keeps each read transaction short, under a second on the share: during a
+  merge the gaps between transactions are about as long as one transaction
+  (see below). A longer read, such as every map of a large run, is split
+  into several short transactions (by run or by range of `record_index`).
 - Never opens it read-write with the default VFS on the share while a writer
   may be active, not even for a `SELECT`. A read-write connection that meets
   the merge's `-journal` takes it for a hot journal and rolls it back while
   the writer is still writing, which can corrupt the database.
+
+**Reading during a merge pass.** While a merge transaction is open, a reader
+on another host cannot read: it gets one of the errors above, and a read that
+a commit overlaps can fail with "malformed" even though it started cleanly.
+No read returned wrong data in measurements on the share, and nothing failed
+outside a merge. Merging small runs leaves gaps on its own (checking the next
+staging file): with 400 small runs merged in 36 s, a reader polling every
+0.5 s never went more than 2 s without a successful read. A large run,
+however, is merged in transactions of 16 MiB that used to follow each other
+at once: with 40 runs of about 100 MB (11.5 s each), readers were shut out
+for up to 16 s at a time, about one run.
+
+So the merger leaves a gap after each transaction as long as that
+transaction took, up to the pause: the next transaction starts only once that
+much time has passed since the last commit, when the journal is truncated and
+nothing is being written. Time that passes between transactions anyway counts
+toward the gap. As a result:
+
+- a reader is shut out for at most one transaction (on the share about
+  1.5 s for 16 MiB; `NLOLIB_STORE_MERGE_BATCH_BYTES` makes them shorter) and
+  then gets a gap at least as long;
+- small runs, whose short transactions are already followed by such gaps,
+  merge about as fast as before; a large run takes up to twice as long;
+- the batch transactions of one run are spaced like those of different runs,
+  also when a run merges its own staging file at its end; a run still
+  becomes visible only with its `runs` row in its last transaction;
+- nothing waits after the last transaction of a pass, so a merge of one
+  transaction is not slowed;
+- the writer lock stays held through the gaps (refreshed after each), so
+  other writers wait as before.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `NLOLIB_STORE_MERGE_PAUSE_S`, `nlolib_store_merge --pause SECONDS` | 4 | Longest gap after one transaction; 0 for no gaps; at most 60 |
+| `NLOLIB_STORE_MERGE_BATCH_BYTES` | 16 MiB | Payload written per transaction, which sets how long a reader is shut out |
+
+The cap only matters for transactions longer than 4 s (a slow share or a
+larger batch), where it keeps the merge from more than doubling in time
+while still leaving readers 4 s gaps. A reader should keep retrying for at
+least 30 s; with `--pause 0` it may have to wait for a whole large run.
 
 **Merge.** Nlolib takes the writer lock and then makes sure it sees the latest
 committed state:
@@ -455,6 +500,8 @@ other writer commits. It refreshes the lock before each file, and after
 holding it for 30 s it releases it and takes it again (settling again), so
 that a run finishing elsewhere during a long pass waits at most about that
 long. After a failed merge it checks the view again before the next file.
+Its transactions are spaced for readers as described under "Reading during
+a merge pass" above.
 
 **Staging files from elsewhere.** A complete staging file can be moved to
 another store: copy it into that store's `staging/` folder and merge there;

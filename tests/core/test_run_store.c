@@ -1160,8 +1160,9 @@ static void test_recovery_pass_settles_once(const char* root)
     case_free(&rc);
     CHECK(count_files(sdir, ".sqlite") == runs, "deferred staging files");
 
-    /* A settle of 0.5 s per file would make the pass take at least 3 s. */
+    /* A settle of 0.5 s per file would make the pass take at least 3 s; gaps for readers are tested apart. */
     setenv("NLOLIB_STORE_SETTLE_S", "0.5", 1);
+    setenv("NLOLIB_STORE_MERGE_PAUSE_S", "0", 1);
     struct timespec t0;
     struct timespec t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -1169,6 +1170,7 @@ static void test_recovery_pass_settles_once(const char* root)
     const nlolib_status status = nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     unsetenv("NLOLIB_STORE_SETTLE_S");
+    unsetenv("NLOLIB_STORE_MERGE_PAUSE_S");
     const double elapsed = (double)(t1.tv_sec - t0.tv_sec) + 1e-9 * (double)(t1.tv_nsec - t0.tv_nsec);
     CHECK(status == NLOLIB_STATUS_OK && merged == runs, "pass merged %zu of %zu", merged, runs);
     CHECK(elapsed >= 0.5 && elapsed < 2.0, "pass took %.2f s; expected one 0.5 s settle", elapsed);
@@ -1176,6 +1178,182 @@ static void test_recovery_pass_settles_once(const char* root)
     char lock[1100];
     (void)snprintf(lock, sizeof(lock), "%s.writer-lock", db_path);
     CHECK(access(lock, F_OK) != 0, "writer lock kept after the pass");
+    check_runs_contract(db_path);
+}
+
+static double mono_seconds(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + 1e-9 * (double)ts.tv_nsec;
+}
+
+/*
+ * Child that records when the database's journal is non-empty (a merge
+ * transaction writing) until killed: it appends (time, busy) to @p log_path at
+ * each change.
+ */
+static pid_t watch_journal(const char* db_path, const char* log_path)
+{
+    const pid_t pid = fork();
+    if (pid != 0) {
+        return pid;
+    }
+    char journal[1100];
+    (void)snprintf(journal, sizeof(journal), "%s-journal", db_path);
+    FILE* out = fopen(log_path, "wb");
+    int last = 0;
+    for (;;) {
+        struct stat st;
+        const int busy = (stat(journal, &st) == 0 && st.st_size > 0);
+        if (busy != last && out != NULL) {
+            const double rec[2] = {mono_seconds(), (double)busy};
+            (void)fwrite(rec, sizeof(rec), 1u, out);
+            (void)fflush(out);
+            last = busy;
+        }
+        (void)usleep(200);
+    }
+}
+
+static double median_of(const double* values, size_t n)
+{
+    double sorted[256];
+    n = (n < 256u) ? n : 256u;
+    memcpy(sorted, values, n * sizeof(double));
+    for (size_t i = 1u; i < n; ++i) {
+        for (size_t j = i; j > 0u && sorted[j - 1u] > sorted[j]; --j) {
+            const double tmp = sorted[j];
+            sorted[j] = sorted[j - 1u];
+            sorted[j - 1u] = tmp;
+        }
+    }
+    return (n == 0u) ? 0.0 : sorted[n / 2u];
+}
+
+typedef struct {
+    size_t n;            /* transactions seen */
+    double busy[256];    /* how long each kept the journal non-empty */
+    double quiet[256];   /* gap after each one, until the next (n - 1 entries) */
+    double tail;         /* from the last one's end to the return of the pass */
+    double elapsed;
+} pass_trace;
+
+/* Stage @p runs deferred runs of @p rc, then merge them in one pass while a child records each transaction. */
+static void traced_pass(run_case* rc, const char* db_path, size_t runs, pass_trace* t)
+{
+    char log_path[1100];
+    (void)snprintf(log_path, sizeof(log_path), "%s.trace", db_path);
+    for (size_t i = 0u; i < runs; ++i) {
+        rc->field[1].re += 0.25;
+        CHECK(case_run(rc, NULL, 0u, NULL) == NLOLIB_STATUS_OK, "deferred run %zu", i);
+    }
+    const pid_t watcher = watch_journal(db_path, log_path);
+    (void)usleep(50000);
+    setenv("NLOLIB_STORE_TEST_IO_DELAY_MS", "sync:20,write:1", 1);
+    const double t0 = mono_seconds();
+    size_t merged = 0u;
+    const nlolib_status status = nlolib_storage_recover_staging(db_path, 0, 0.0, &merged, NULL, NULL);
+    const double t1 = mono_seconds();
+    unsetenv("NLOLIB_STORE_TEST_IO_DELAY_MS");
+    (void)usleep(20000);
+    (void)kill(watcher, SIGKILL);
+    (void)waitpid(watcher, NULL, 0);
+    CHECK(status == NLOLIB_STATUS_OK && merged == runs, "pass merged %zu of %zu", merged, runs);
+    memset(t, 0, sizeof(*t));
+    t->elapsed = t1 - t0;
+    FILE* f = fopen(log_path, "rb");
+    double rec[2];
+    double began = -1.0;
+    double ended = -1.0;
+    while (f != NULL && fread(rec, sizeof(rec), 1u, f) == 1u && t->n < 256u) {
+        if (rec[1] != 0.0) {
+            if (ended >= 0.0 && t->n > 0u) {
+                t->quiet[t->n - 1u] = rec[0] - ended;
+            }
+            began = rec[0];
+        } else if (began >= 0.0) {
+            t->busy[t->n] = rec[0] - began;
+            t->n += 1u;
+            ended = rec[0];
+            began = -1.0;
+        }
+    }
+    if (f != NULL) {
+        fclose(f);
+    }
+    (void)remove(log_path);
+    t->tail = (ended >= 0.0) ? t1 - ended : -1.0;
+}
+
+/*
+ * Merge transactions are spaced so that readers on other hosts find gaps: the
+ * gap after each transaction, until the next one writes, is at least as long
+ * as that transaction kept the journal non-empty, capped at the pause; nothing
+ * is paused after the last one; a pause of 0 turns spacing off. One run split
+ * over several transactions (16 MiB batches on the share) is spaced like
+ * several runs. The merge's syncs are slowed to 20 ms and its writes to
+ * 1 ms, so that a transaction takes much longer than the commit's own
+ * journal sync, as on a share.
+ */
+static void test_merge_pacing(const char* root)
+{
+    char db_path[1024];
+    make_store(root, db_path, sizeof(db_path));
+    run_case rc;
+    case_init_1d(&rc, 4096u, 1.0, 32u, db_path);
+    rc.storage.record_mode = STORAGE_RECORD_MODE_REDUCED_AND_RAW;
+    CHECK(case_run(&rc, NULL, 0u, NULL) == NLOLIB_STATUS_OK, "first run (creates the shared database)");
+    rc.storage.defer_merge = 1;
+    setenv("NLOLIB_STORE_MERGE_BATCH_BYTES", "524288", 1);
+    pass_trace t;
+
+    /* Pause 0: the batches of one run follow each other after only the commit's own journal sync. */
+    setenv("NLOLIB_STORE_MERGE_PAUSE_S", "0", 1);
+    traced_pass(&rc, db_path, 1u, &t);
+    const double natural = median_of(t.quiet, (t.n > 0u) ? t.n - 1u : 0u);
+    const double natural_busy = median_of(t.busy, t.n);
+    printf("merge_pacing: pause 0: %zu transactions of median %.3f s, median gap %.3f s\n", t.n, natural_busy,
+           natural);
+    CHECK(t.n >= 3u && natural < 0.5 * natural_busy,
+          "pause 0: %zu transactions of median %.3f s, median gap %.3f s (spacing not off?)", t.n, natural_busy,
+          natural);
+
+    /* A run of several batch transactions and a small run after it, pause cap 2 s. */
+    setenv("NLOLIB_STORE_MERGE_PAUSE_S", "2", 1);
+    traced_pass(&rc, db_path, 1u, &t);
+    double worst = 1e9;
+    double longest_busy = 0.0;
+    for (size_t i = 0u; i + 1u < t.n; ++i) {
+        const double margin = t.quiet[i] - t.busy[i];
+        worst = (margin < worst) ? margin : worst;
+        longest_busy = (t.busy[i] > longest_busy) ? t.busy[i] : longest_busy;
+    }
+    printf("merge_pacing: %zu transactions, longest %.3f s, smallest gap minus transaction %.3f s, "
+           "%.3f s from the last to return, pass %.2f s\n", t.n, longest_busy, worst, t.tail, t.elapsed);
+    CHECK(t.n >= 3u, "a batched run merged in %zu transactions; expected several", t.n);
+    CHECK(worst >= -0.002, "a gap was %.3f s shorter than the transaction before it", -worst);
+    CHECK(t.tail >= 0.0 && t.n > 0u && t.tail < t.busy[t.n - 1u],
+          "pass returned %.3f s after its last transaction (paused after it?)", t.tail);
+
+    /* A cap below the transaction length: gaps of the cap on top of the commit's own sync, not of a transaction. */
+    setenv("NLOLIB_STORE_MERGE_PAUSE_S", "0.02", 1);
+    traced_pass(&rc, db_path, 1u, &t);
+    double shortest = 1e9;
+    for (size_t i = 0u; i + 1u < t.n; ++i) {
+        shortest = (t.quiet[i] < shortest) ? t.quiet[i] : shortest;
+    }
+    const double typical = median_of(t.quiet, (t.n > 0u) ? t.n - 1u : 0u);
+    const double typical_busy = median_of(t.busy, t.n);
+    printf("merge_pacing: pause 0.02 s: %zu transactions of median %.3f s, gaps from %.3f s, median %.3f s\n", t.n,
+           typical_busy, shortest, typical);
+    CHECK(t.n >= 3u && shortest >= 0.02 && typical < 0.5 * typical_busy,
+          "pause 0.02: %zu transactions of median %.3f s, gaps from %.3f s, median %.3f s (not capped?)", t.n,
+          typical_busy, shortest, typical);
+
+    unsetenv("NLOLIB_STORE_MERGE_PAUSE_S");
+    unsetenv("NLOLIB_STORE_MERGE_BATCH_BYTES");
+    case_free(&rc);
     check_runs_contract(db_path);
 }
 
@@ -2293,6 +2471,7 @@ int main(int argc, char** argv)
         {"vfs_choices", test_vfs_choices},
         {"deferred_merge", test_deferred_merge},
         {"recovery_pass_settles_once", test_recovery_pass_settles_once},
+        {"merge_pacing", test_merge_pacing},
         {"run_id_conflict", test_run_id_conflict},
         {"write_failure_logged", test_write_failure_logged},
         {"truncate_journal", test_truncate_journal},
