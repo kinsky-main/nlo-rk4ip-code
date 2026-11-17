@@ -105,6 +105,9 @@ def julia_binding(root):
 
 
 def matlab_binding(root):
+    # A binding on the shared surface has no public constants class at all.
+    if not (root / "+nlolib" / "constants.m").exists():
+        return {}, set()
     return collect(MATLAB_DEFINE, read(root / "+nlolib" / "constants.m")), None
 
 
@@ -765,6 +768,7 @@ def main() -> int:
 
     problems = []
     checked = 0
+    constants_checked = []
 
     for language in selected:
         defined, exported = BINDINGS[language](
@@ -772,6 +776,14 @@ def main() -> int:
         )
         allowed = gaps.get(language, {})
         allowed = {k: v for k, v in allowed.items() if not k.startswith("_")}
+
+        # A binding moved to the shared surface exports no integer constants:
+        # its enum values are strings, covered by the surface manifest. The
+        # constants are checked only while a binding still exports them.
+        if exported is not None and not any(name in exported for name in canonical):
+            print(f"api parity: {language} exports no integer constants; constants check skipped")
+            continue
+        constants_checked.append(language)
 
         for name, want in canonical.items():
             excused = name in allowed
@@ -810,9 +822,11 @@ def main() -> int:
             f"Canonical names live in {args.manifest}.",
             file=sys.stderr,
         )
-        return 1
-
-    print(f"api parity: {len(canonical)} constants agree across {', '.join(selected)}")
+    elif constants_checked:
+        print(
+            f"api parity: {len(canonical)} constants agree across "
+            f"{', '.join(constants_checked)}"
+        )
 
     if args.surface != "off":
         directories = {
@@ -828,12 +842,12 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        if differences:
+        if differences and not problems:
             print(
                 f"api surface: {differences} difference(s) reported, not enforced "
                 "(--surface enforce makes them fail)"
             )
-    return 0
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":
