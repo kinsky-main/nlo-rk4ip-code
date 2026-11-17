@@ -6,14 +6,13 @@ reference for that surface. The same content as data is
 [`tests/api_surface.json`](../tests/api_surface.json), which
 `tools/check_api_parity.py` compares with the three binding sources.
 
-Status: this is the approved target. The bindings are being moved to it; until
-they are, the checker reports the differences without failing
-(`--surface report`, the default). `--surface enforce` makes them fail.
+All three bindings implement this surface, and the checker fails on any
+difference. It runs in CI and as the `test_api_parity` ctest case.
 
 ```bash
-python tools/check_api_parity.py                     # constants enforced, surface reported
+python tools/check_api_parity.py                     # fail on any difference
 python tools/check_api_parity.py --surface-summary   # difference counts only
-python tools/check_api_parity.py --surface enforce   # fail on any surface difference
+python tools/check_api_parity.py --surface report    # print differences, exit 0
 ```
 
 ## 1. Shape
@@ -469,14 +468,9 @@ MATLAB `mmtools_*` examples, which need MMTools and are not required. The
   `"finish"` event strings reach a caller only through that callback, so they
   are part of the same gap and are not counted as MATLAB differences.
 
-## 11. Order of work
+## 11. Changing the surface
 
-1. Each binding moves to this surface on its own branch: API and tests, then
-   its own docs and README.
-2. Examples follow, Python first, since it fixes the grids and records the
-   reference metric values.
-3. The superproject then moves the three submodule pins, switches the checker
-   to `--surface enforce`, removes `tests/api_parity.json` and the constants
-   check, and rewrites `docs/doxygen/`.
-
-Every binding breaks its public API, so each takes a major version.
+A change to the shared surface lands in this order: `tests/api_surface.json`
+and this page in the core, then each binding (with its `CORE_REF` moved), then
+the submodule pointers here. The checker does not see field value types or the
+C integer behind each enum string; the bindings' own tests cover those.
