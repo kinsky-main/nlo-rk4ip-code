@@ -395,14 +395,6 @@ int query_runtime_limits_internal(
     size_t runtime_limit = max_samples_by_element_size;
     const size_t host_available = apply_memory_headroom(query_available_system_memory_bytes());
 
-    /* The in-memory record capacity comes from the same derivation propagate
-     * validates a dense request against. Zero means no record fits, or that it
-     * is not derivable -- the config does not state its sample count, or the
-     * platform does not report available memory -- in which case propagate
-     * enforces no dense limit either. */
-    dense_record_limit dense_limit;
-    (void)resolve_dense_record_limit(config, requested_num_time_samples, 0u, &dense_limit);
-    out_limits->max_num_recorded_samples_in_memory = dense_limit.max_records;
     if (host_available > 0u) {
         const size_t host_limit = host_available / bytes_per_sample;
         if (host_limit > 0u && host_limit < runtime_limit) {
@@ -463,7 +455,18 @@ int query_runtime_limits_internal(
         runtime_limit = max_samples_by_element_size;
     }
 
+    /* The in-memory record capacity comes from the same derivation propagate
+     * validates a dense request against. Zero means no record fits, or that it
+     * is not derivable -- the config does not state its sample count, or the
+     * platform does not report available memory -- in which case propagate
+     * enforces no dense limit either. It is read last: probing the backend
+     * above loads the Vulkan driver into the process, which stays loaded and
+     * is memory propagate will no longer see as available. Reading before the
+     * probe reported a count propagate then refused. */
+    dense_record_limit dense_limit;
+    (void)resolve_dense_record_limit(config, requested_num_time_samples, 0u, &dense_limit);
+    out_limits->max_num_recorded_samples_in_memory = dense_limit.max_records;
+
     out_limits->max_num_time_samples_runtime = runtime_limit;
     return 0;
 }
-
