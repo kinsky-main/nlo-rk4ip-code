@@ -102,16 +102,11 @@ One rule, in every binding; there is no `output` option.
 3. Otherwise: `num_records` uniformly spaced positions from 0 to
    `propagation_distance`.
 
-Known core discrepancy, not resolved: for a `record_z` with exactly one
-position, rule 1 says the field at that position comes back. Core `9417e92`
-does not do that. `src/nlolib.c` (the `num_recorded_samples == 1u` branches)
-downloads the current field, which is the final field at
-`propagation_distance`, into the only record whenever exactly one record is
-requested, in either output mode. So today a single position `p` returns the
-field at `propagation_distance` unless `p` equals it. Either the rule or the
-core has to change. While this stands, a single `record_z` position reports
-`z_axis = [propagation_distance]` in every binding, so `z_axis` says what was
-returned.
+The core follows this rule. A `record_z` with one position `p` returns the
+field at `p`, and `z_axis` is `[p]`; `p = 0` gives the input field and
+`p = propagation_distance` the final field. The core's explicit positions take
+precedence over its private output mode, so a binding passes `record_z`
+through unchanged for every length.
 
 ## 3. Types
 

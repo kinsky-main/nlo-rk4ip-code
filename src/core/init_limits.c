@@ -46,6 +46,12 @@
 static size_t estimate_active_vector_count(const sim_config* config);
 
 static size_t available_system_memory_override_bytes = 0u;
+static int resident_override_fully_resident = 0;
+
+void set_resident_bytes_override_fully_resident(int fully_resident)
+{
+    resident_override_fully_resident = fully_resident;
+}
 
 void set_available_system_memory_override_bytes(size_t bytes)
 {
@@ -144,10 +150,26 @@ size_t apply_memory_headroom(size_t available_bytes)
     return (available_bytes / MEMORY_HEADROOM_DEN) * MEMORY_HEADROOM_NUM;
 }
 
+#if defined(__linux__) || defined(_WIN32)
+/* Bytes of the page starting at page_begin that lie inside [begin, end). The
+ * first and last page of a buffer are only partly the buffer's, and crediting
+ * them whole would credit memory the request does not own. */
+static size_t resident_page_overlap(uintptr_t page_begin, size_t page_size, uintptr_t begin, uintptr_t end)
+{
+    const uintptr_t lo = (page_begin > begin) ? page_begin : begin;
+    const uintptr_t page_end = page_begin + (uintptr_t)page_size;
+    const uintptr_t hi = (page_end < end) ? page_end : end;
+    return (hi > lo) ? (size_t)(hi - lo) : 0u;
+}
+#endif
+
 size_t query_resident_bytes(const void* address, size_t length)
 {
-    if (address == NULL || length == 0u || available_system_memory_override_bytes > 0u) {
+    if (address == NULL || length == 0u) {
         return 0u;
+    }
+    if (available_system_memory_override_bytes > 0u) {
+        return (resident_override_fully_resident != 0) ? length : 0u;
     }
 #if defined(__linux__)
     const long page_size_l = sysconf(_SC_PAGESIZE);
@@ -173,7 +195,10 @@ size_t query_resident_bytes(const void* address, size_t length)
         }
         for (size_t i = 0u; i < pages; ++i) {
             if ((page_state[i] & 1u) != 0u) {
-                resident += page_size;
+                resident += resident_page_overlap(cursor + (uintptr_t)(i * page_size),
+                                                  page_size,
+                                                  (uintptr_t)address,
+                                                  end);
             }
         }
         cursor += (uintptr_t)(pages * page_size);
@@ -208,7 +233,10 @@ size_t query_resident_bytes(const void* address, size_t length)
         }
         for (size_t i = 0u; i < pages; ++i) {
             if (page_state[i].VirtualAttributes.Valid != 0u) {
-                resident += page_size;
+                resident += resident_page_overlap(cursor + (uintptr_t)(i * page_size),
+                                                  page_size,
+                                                  (uintptr_t)address,
+                                                  end);
             }
         }
         cursor += (uintptr_t)(pages * page_size);
@@ -332,23 +360,26 @@ int resolve_dense_record_limit(
      * but the reserve is kept: it covers the host-visible staging and driver
      * mappings, and it keeps the answer independent of which backend AUTO
      * resolves to, so validating a request never has to create a device. */
-    const size_t host_available = query_available_system_memory_bytes();
+    size_t host_available = query_available_system_memory_bytes();
     if (host_available == 0u) {
         return 0;
     }
+    /* Buffers the caller has already touched are no longer counted as
+     * available. They go back into the reading itself, before the headroom is
+     * taken: that restores exactly what the query saw before they existed, so
+     * the limit is the same whether or not the buffers have been touched.
+     * Adding them to the budget after the headroom credited them in full
+     * while their absence had only cost 8/10, which let extra records in. */
+    host_available = (host_available > SIZE_MAX - resident_credit_bytes)
+                         ? SIZE_MAX
+                         : (host_available + resident_credit_bytes);
     out_limit->derivable = 1;
     out_limit->host_budget_bytes = apply_memory_headroom(host_available);
 
-    size_t record_budget =
+    const size_t record_budget =
         (out_limit->host_budget_bytes > out_limit->working_set_bytes)
             ? (out_limit->host_budget_bytes - out_limit->working_set_bytes)
             : 0u;
-    /* Buffers the caller has already touched are no longer counted as
-     * available, so without this credit a count the query reported before
-     * they were allocated would be refused once they exist. */
-    record_budget = (record_budget > SIZE_MAX - resident_credit_bytes)
-                        ? SIZE_MAX
-                        : (record_budget + resident_credit_bytes);
     out_limit->record_budget_bytes = record_budget;
 
     size_t max_records = record_budget / out_limit->bytes_per_record;

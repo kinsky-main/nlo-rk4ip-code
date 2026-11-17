@@ -535,12 +535,10 @@
       "record_z unset and num_records == 1: final field only; records holds that one field and z_axis is [propagation_distance].",
       "otherwise: dense output at num_records uniformly spaced positions from 0 to propagation_distance (num_records from the preset when unset)."
     ],
-    "known_core_discrepancy": {
-      "_comment": "Recorded, not resolved: the owner decides whether the rule or the core changes.",
-      "rule": "record_z with one position returns the field at that position.",
-      "core": "Core 9417e92 (src/nlolib.c, the num_recorded_samples == 1u branches) downloads the current field, which is the final field at propagation_distance, into the only record whenever exactly one record is requested, in either output mode.",
-      "effect": "Today a single record_z position p returns the field at propagation_distance, not at p, unless p equals propagation_distance.",
-      "until_resolved": "While this stands, a single record_z position reports z_axis = [propagation_distance] in every binding, so z_axis says what was returned."
+    "core_behaviour": {
+      "_comment": "The core follows the rules above; there is no discrepancy to work around.",
+      "single_record_z": "record_z with one position p returns the field at p and z_axis is [p]; p == 0 is the input field and p == propagation_distance is the final field.",
+      "precedence": "explicit_record_z takes precedence over output_mode and num_recorded_samples in the core, for any length including one."
     },
     "c_mapping": {
       "record_z": {"output_mode": "PROPAGATE_OUTPUT_DENSE", "c_value": 0, "explicit_record_z": "record_z"},
