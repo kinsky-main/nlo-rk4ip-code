@@ -10,3 +10,52 @@
 int checked_mul_size_t(size_t a, size_t b, size_t* out);
 size_t query_available_system_memory_bytes(void);
 size_t apply_memory_headroom(size_t available_bytes);
+
+/**
+ * @brief Host-memory capacity for dense (in-memory) record output.
+ *
+ * One derivation, shared by nlolib_query_runtime_limits and the propagate
+ * validation, so the two cannot disagree.
+ */
+typedef struct {
+    size_t bytes_per_record;      /**< One record: num_time_samples complex values. */
+    size_t working_set_bytes;     /**< Host reserve for the solver's working vectors. */
+    size_t host_budget_bytes;     /**< Available host memory after the headroom margin. */
+    size_t record_budget_bytes;   /**< Bytes the records may occupy in total. */
+    size_t max_records;           /**< record_budget_bytes / bytes_per_record, capped
+                                       at the storage (precision) ceiling. */
+    int derivable;                /**< Zero when the sample count or the host's
+                                       available memory is unknown; nothing is
+                                       enforced then. */
+} dense_record_limit;
+
+/**
+ * @brief Derive the dense record capacity from host memory available now.
+ *
+ * @param config Merged configuration; selects the working-vector count.
+ * @param num_time_samples Flattened samples per record.
+ * @param output_records Caller's record buffer when it already exists, else
+ *        NULL. Pages of it that are already resident no longer show up as
+ *        available memory, so they are credited back to the record budget.
+ * @param output_bytes Bytes of @p output_records the request will fill.
+ * @param out_limit Destination; zeroed with derivable=0 when not derivable.
+ * @return int 0 on success, nonzero on invalid arguments or overflow.
+ */
+int resolve_dense_record_limit(
+    const sim_config* config,
+    size_t num_time_samples,
+    const void* output_records,
+    size_t output_bytes,
+    dense_record_limit* out_limit
+);
+
+/**
+ * @brief Replace the host's available-memory reading, for deterministic tests.
+ *
+ * Not part of the public API and not thread-safe.
+ *
+ * @param bytes Value query_available_system_memory_bytes() reports from now
+ *        on; zero restores the real reading. While set, the resident-page
+ *        credit of resolve_dense_record_limit is disabled.
+ */
+void set_available_system_memory_override_bytes(size_t bytes);

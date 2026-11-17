@@ -5,6 +5,7 @@
 
 #include "backend/nlo_complex.h"
 #include "core/init.h"
+#include "core/init_internal.h"
 #include "core/state.h"
 #include "io/snapshot_store.h"
 #include "nlolib.h"
@@ -751,7 +752,7 @@ static void test_snapshot_store_dense_readback(void)
     printf("test_snapshot_store_dense_readback: validates dense record reconstruction from chunks.\n");
 }
 
-static void test_dense_output_safety_cap_rejects_before_init(void)
+static void test_dense_output_limit_rejects_before_init(void)
 {
     simulation_config config;
     memset(&config, 0, sizeof(config));
@@ -772,8 +773,11 @@ static void test_dense_output_safety_cap_rejects_before_init(void)
     out.output_record_capacity = 1u;
     out.records_written = &records_written;
 
-    const size_t oversized_samples =
-        (((size_t)2u * 1024u * 1024u * 1024u) / sizeof(nlo_complex)) + 1u;
+    /* One record larger than everything the host is said to have. The check
+     * must fire before any state is built: the buffers here hold one sample. */
+    const size_t host_bytes = (size_t)64u * 1024u * 1024u;
+    set_available_system_memory_override_bytes(host_bytes);
+    const size_t oversized_samples = (host_bytes / sizeof(nlo_complex)) + 1u;
     const nlolib_status status = nlolib_propagate(
         &config,
         NULL,
@@ -781,11 +785,117 @@ static void test_dense_output_safety_cap_rejects_before_init(void)
         &input,
         &options,
         &out);
+    set_available_system_memory_override_bytes(0u);
 
     STATE_CHECK(status == NLOLIB_STATUS_INVALID_ARGUMENT);
     STATE_CHECK(records_written == 0u);
 
-    printf("test_dense_output_safety_cap_rejects_before_init: rejects oversized dense output.\n");
+    printf("test_dense_output_limit_rejects_before_init: rejects oversized dense output.\n");
+}
+
+static void check_dense_limit_boundary(
+    vector_backend_type backend_type,
+    size_t host_bytes,
+    size_t expected_max_records
+)
+{
+    const size_t num_time_samples = 16u;
+    sim_config* config = create_sim_config(num_time_samples);
+    STATE_CHECK(config != NULL);
+    config->propagation.propagation_distance = 0.02;
+    config->propagation.starting_step_size = 0.01;
+    config->propagation.max_step_size = 0.01;
+    config->propagation.min_step_size = 0.001;
+    config->propagation.error_tolerance = 1e-6;
+
+    simulation_config sim_section;
+    sim_section.propagation = config->propagation;
+    sim_section.tensor = config->tensor;
+    sim_section.time = config->time;
+    sim_section.frequency = config->frequency;
+    sim_section.spatial = config->spatial;
+    physics_config physics_section = config->runtime;
+
+    /* create_sim_config states the sample count (spatial.nx), so the query can
+     * size a record from the same config propagate is given. */
+    execution_options exec_options = execution_options_default(backend_type);
+    set_available_system_memory_override_bytes(host_bytes);
+
+    runtime_limits limits;
+    STATE_CHECK(nlolib_query_runtime_limits(&sim_section, &physics_section, &exec_options, &limits) ==
+                NLOLIB_STATUS_OK);
+    const size_t max_records = limits.max_num_recorded_samples_in_memory;
+    STATE_CHECK(max_records == expected_max_records);
+
+    /* Exactly the host budget (8/10 of the reading) less the working set. */
+    const size_t per_record_bytes = num_time_samples * sizeof(nlo_complex);
+    STATE_CHECK(max_records ==
+                ((host_bytes / 10u) * 8u - limits.estimated_required_working_set_bytes) / per_record_bytes);
+
+    nlo_complex input[16];
+    for (size_t i = 0u; i < num_time_samples; ++i) {
+        input[i] = make(0.1 * (double)i, 0.0);
+    }
+    nlo_complex* records = (nlo_complex*)calloc((max_records + 1u) * num_time_samples, sizeof(nlo_complex));
+    STATE_CHECK(records != NULL);
+
+    propagate_options options = nlolib_propagate_options_default();
+    options.return_records = 1;
+    options.exec_options = &exec_options;
+
+    size_t records_written = 99u;
+    propagate_output out = nlolib_propagate_output_default();
+    out.output_records = records;
+    out.output_record_capacity = max_records + 1u;
+    out.records_written = &records_written;
+
+    options.num_recorded_samples = max_records;
+    STATE_CHECK(nlolib_propagate(&sim_section, &physics_section, num_time_samples, input, &options, &out) ==
+                NLOLIB_STATUS_OK);
+    STATE_CHECK(records_written == max_records);
+
+    records_written = 99u;
+    options.num_recorded_samples = max_records + 1u;
+    STATE_CHECK(nlolib_propagate(&sim_section, &physics_section, num_time_samples, input, &options, &out) ==
+                NLOLIB_STATUS_INVALID_ARGUMENT);
+    STATE_CHECK(records_written == 0u);
+
+    set_available_system_memory_override_bytes(0u);
+    free(records);
+    free_sim_config(config);
+}
+
+static void test_dense_output_limit_matches_runtime_limits(void)
+{
+    runtime_limits limits;
+    simulation_config probe;
+    memset(&probe, 0, sizeof(probe));
+    probe.time.nt = 16u;
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
+    set_available_system_memory_override_bytes((size_t)1u << 30);
+    STATE_CHECK(nlolib_query_runtime_limits(&probe, NULL, &exec_options, &limits) == NLOLIB_STATUS_OK);
+    set_available_system_memory_override_bytes(0u);
+    const size_t working_set = limits.estimated_required_working_set_bytes;
+    STATE_CHECK(working_set > 0u);
+
+    /* Host readings whose 8/10 budget is the working set plus room for exactly
+     * 5 records, then one byte short of a 6th, then exactly 6: the limit moves
+     * with the memory reading, and propagate moves with it. */
+    const size_t per_record_bytes = 16u * sizeof(nlo_complex);
+    const size_t budget_five = working_set + 5u * per_record_bytes;
+    check_dense_limit_boundary(VECTOR_BACKEND_CPU, (budget_five / 8u) * 10u, 5u);
+    check_dense_limit_boundary(VECTOR_BACKEND_CPU, ((budget_five + per_record_bytes) / 8u) * 10u - 10u, 5u);
+    check_dense_limit_boundary(VECTOR_BACKEND_CPU, ((budget_five + per_record_bytes) / 8u) * 10u, 6u);
+    /* The host rule does not depend on the backend AUTO resolves to. */
+    check_dense_limit_boundary(VECTOR_BACKEND_AUTO, (budget_five / 8u) * 10u, 5u);
+
+    /* Without a stated sample count the capacity is not derivable. */
+    simulation_config unsized;
+    memset(&unsized, 0, sizeof(unsized));
+    STATE_CHECK(nlolib_query_runtime_limits(&unsized, NULL, &exec_options, &limits) == NLOLIB_STATUS_OK);
+    STATE_CHECK(limits.max_num_recorded_samples_in_memory == 0u);
+
+    printf("test_dense_output_limit_matches_runtime_limits: query and propagate agree at the boundary.\n");
 }
 
 static void test_storage_only_propagate_without_dense_output(void)
@@ -861,7 +971,8 @@ int main(void)
     test_tensor_mode_linear_factor_literal_power_vulkan();
     test_tensor_mode_compact_axis_symbols_vulkan();
     test_snapshot_store_dense_readback();
-    test_dense_output_safety_cap_rejects_before_init();
+    test_dense_output_limit_rejects_before_init();
+    test_dense_output_limit_matches_runtime_limits();
     test_storage_only_propagate_without_dense_output();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;
