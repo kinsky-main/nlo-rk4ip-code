@@ -29,9 +29,10 @@ python tools/check_api_parity.py --surface report    # print differences, exit 0
 - The raw C structs, the config builders and the pack/unpack helpers are
   private.
 
-The public surface is 28 names, the same in each binding: 17 functions, 9 data
-types and 2 error types. MATLAB has the 17 functions plus `unload`, uses plain
-structs for the data types and error identifiers for the errors.
+The public surface is 32 names, the same in each binding: 20 functions, 10 data
+types and 2 error types. MATLAB has the 20 functions plus `unload`, uses plain
+structs for the data types and error identifiers for the errors. Julia also has
+`read_stored_run` and `StoredRun` (section 3a).
 
 ## 2. Functions
 
@@ -42,6 +43,9 @@ structs for the data types and error identifiers for the errors.
 | `propagate` | `pulse`, `linear_operator`, `nonlinear_operator`; options below | `PropagationResult` |
 | `query_runtime_limits` | options `pulse`, `exec_options` | `RuntimeLimits` |
 | `storage_is_available` | | boolean |
+| `storage_run_key` | `pulse`, `linear_operator`, `nonlinear_operator`; `propagate`'s options from `propagation_distance` to `raman_response_time`, without `return_records`, then `storage` | string: the 16 lowercase hex digit run key |
+| `storage_has_run` | `sqlite_path`, `key` | boolean |
+| `storage_recover_staging` | `sqlite_path`; options `discard_incomplete=false`, `min_age_seconds=86400.0` | `StagingRecovery` |
 | `tensor_record_view` | `record`, `nt`, `nx`, `ny` | one record reshaped to (t, y, x) |
 | `set_log_file` | `path`; option `append=false` | |
 | `set_log_buffer` | `capacity_bytes=262144` | |
@@ -119,11 +123,12 @@ returned.
 |---|---|
 | `PulseSpec` | `samples`, `delta_time`, `pulse_period`, `frequency_grid`, `tensor_nt`, `tensor_nx`, `tensor_ny`, `delta_x`, `delta_y`, `spatial_frequency_grid`, `potential_grid`, `wt_axis`, `kx_axis`, `ky_axis` |
 | `ExecutionOptions` | `backend_type="auto"`, `fft_backend="auto"`, `device_heap_fraction=0.70`, `record_ring_target=0`, `forced_device_budget_bytes=0` |
-| `StorageOptions` | `sqlite_path`, `run_id`, `sqlite_max_bytes=0`, `chunk_records=0`, `cap_policy="stop_writes"`, `log_final_output_field_to_db=false` |
+| `StorageOptions` | `sqlite_path`, `run_id`, `sqlite_max_bytes=0`, `chunk_records=0`, `cap_policy="stop_writes"`, `log_final_output_field_to_db=true`, `record_mode="reduced"`, `raw_stride_t=1`, `raw_stride_x=1`, `raw_stride_y=1`, `defer_merge=false` |
 | `PropagationResult` | `records`, `z_axis`, `final`, `step_history`, `storage_result`, `meta` |
 | `meta` | `preset`, `records_requested`, `records_written`, `backend_requested`, `coupled`, `status` |
 | `StepHistory` | `step_index`, `z`, `step_size`, `next_step_size`, `error`, `dropped`, `capacity` |
-| `StorageResult` | `run_id`, `records_captured`, `records_spilled`, `chunks_written`, `db_size_bytes`, `truncated` |
+| `StorageResult` | `run_id`, `records_captured`, `records_spilled`, `chunks_written`, `db_size_bytes`, `truncated`, `key`, `merged`, `deferred` |
+| `StagingRecovery` | `merged`, `discarded`, `skipped` |
 | `ProgressInfo` | `event_type`, `step_index`, `reject_attempt`, `z`, `z_end`, `percent`, `step_size`, `next_step_size`, `error`, `elapsed_seconds`, `eta_seconds` |
 | `RuntimeLimits` | the six fields of the C `runtime_limits` |
 | `PerfProfileSnapshot` | the eighteen fields of the C `nlo_perf_profile_snapshot` |
@@ -135,11 +140,34 @@ samples in MATLAB, samples x records in Julia. `step_history` is unset unless
 The checker compares field names, not value types, so these are stated here:
 
 - Flags are booleans in every binding, not the C `int`:
-  `RuntimeLimits.storage_available`, `StorageResult.truncated`, `meta.coupled`.
+  `RuntimeLimits.storage_available`, `StorageResult.truncated`,
+  `StorageResult.merged`, `StorageResult.deferred`, `meta.coupled`.
   `PerfProfileSnapshot` has no flags; its fields are milliseconds and counts.
 - `pulse` must be the `PulseSpec` type, which in MATLAB is a struct with the
   `PulseSpec` field names. A dict, mapping or NamedTuple is the "bad pulse"
   error. The same holds for `exec_options` and `storage`.
+
+### 3a. The run store
+
+`StorageOptions.sqlite_path` names the shared run database
+(`<store>/nlolib/nlolib.sqlite`). A run streams into `<dir>/staging/` and is
+merged into the database when it completes, unless `defer_merge` leaves that to
+`storage_recover_staging` or the `nlolib_store_merge` tool;
+[the run database layout](nlolib_run_database.md) has the tables. The final
+field is kept by default, as `storage_options_default()` does in C.
+
+`storage_run_key` takes `propagate`'s arguments that define the run, in
+`propagate`'s order. It leaves out the ones that do not enter the key:
+`exec_options`, `return_records`, `capture_step_history`,
+`step_history_capacity` and `progress_callback`. Without `storage`, the key is
+the one the default `StorageOptions` give; `sqlite_path` is not part of it.
+Keys do not match across bindings, because each binding writes the same
+operator as different text ([the run key](nlolib_run_database.md#the-run-key)).
+
+Julia also exports `read_stored_run(sqlite_path, key)`, which returns a
+`StoredRun` (axes, reduced maps, final field and raw records) read through the
+C API. Python and MATLAB read the database with their own SQLite. The manifest
+lists the two names under `binding_extras.julia`.
 
 ## 4. Enum values are strings
 
@@ -152,16 +180,17 @@ privately, and an unknown string is the "bad option value" error.
 | `ExecutionOptions.fft_backend` | `"auto"` (0), `"fftw"` (1), `"vkfft"` (2) |
 | `propagate` `nonlinear_model` | `"expr"` (0), `"kerr_raman"` (1) |
 | `StorageOptions.cap_policy` | `"stop_writes"` (0), `"fail"` (1) |
+| `StorageOptions.record_mode` | `"reduced"` (0), `"raw"` (1), `"reduced_and_raw"` (2) |
 | `set_log_level` `level` | `"error"` (0), `"warn"` (1), `"info"` (2), `"debug"` (3) |
 | `set_progress_stream` `stream_mode` | `"stderr"` (0), `"stdout"` (1), `"both"` (2) |
 | `ProgressInfo.event_type` (returned) | `"accepted"` (0), `"rejected"` (1), `"finish"` (2) |
 | `meta.status`, error `status` (returned) | `"ok"` (0), `"invalid_argument"` (1), `"allocation_failed"` (2), `"not_implemented"` (3), `"aborted"` (4) |
 
 The integer constants (`VECTOR_BACKEND_*`, `FFT_BACKEND_*`,
-`NONLINEAR_MODEL_*`, `STORAGE_DB_CAP_POLICY_*`, `NLOLIB_LOG_LEVEL_*`,
+`NONLINEAR_MODEL_*`, `STORAGE_DB_CAP_POLICY_*`, `STORAGE_RECORD_MODE_*`, `NLOLIB_LOG_LEVEL_*`,
 `NLOLIB_PROGRESS_STREAM_*`, `PROGRESS_EVENT_*`, `NLOLIB_STATUS_*`,
 `PROPAGATE_OUTPUT_*`, `TENSOR_LAYOUT_XYT_T_FAST`) and the two limits
-(`NT_MAX`, `STORAGE_RUN_ID_MAX`) are no longer public. `query_runtime_limits`
+(`NT_MAX`, `STORAGE_RUN_ID_MAX`) are no longer public, nor is `STORAGE_KEY_MAX`. `query_runtime_limits`
 replaces `NT_MAX`; a `run_id` longer than 63 characters is a bad option value.
 
 ## 5. Errors
@@ -454,7 +483,8 @@ Known issue in `grin_soliton_fission`, block unchanged: past about 30 mm a
 fast component reaches the edge of the 2560 fs time window and wraps around.
 
 Kept on demand in one binding, not run by default: `tensor_backend_scaling*`,
-`fixed_step_soliton_convergence`, `two_mode_linear_beating` (Python).
+`fixed_step_soliton_convergence`, `two_mode_linear_beating` (Python),
+`store_sample_database` (Julia).
 Dropped: `spm_dispersion_comparison`,
 `coupled_dispersion_nonlinearity_diffraction`, `grin_fiber_xy`,
 `unsaturable_grin_filamentation_fission`, `runtime_temporal_demo`, and the

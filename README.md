@@ -110,8 +110,9 @@ Generated output:
 
 ## Stored Runs
 
-Passing `sqlite_path` (C `storage_options`, or the `sqlite_path` keyword of the
-bindings) stores the run in a shared run database, normally
+Passing `storage_options.sqlite_path` in C, or
+`storage = StorageOptions(sqlite_path = ...)` in the bindings, stores the run in
+a shared run database, normally
 `<store>/nlolib/nlolib.sqlite`. Each run streams into
 `<store>/nlolib/staging/` and is merged into the shared file under a lock file
 when it completes, so many machines can write to one database on a network

@@ -80,6 +80,12 @@ def word(name):
     return re.compile(r'(?<![A-Za-z0-9_])' + re.escape(name) + r'(?![A-Za-z0-9_])')
 
 
+def extras_for(manifest, language):
+    """Public function and type names only this binding has (binding_extras)."""
+    extras = manifest["binding_extras"].get(language, {})
+    return list(public(extras.get("functions", {}))) + list(public(extras.get("types", {})))
+
+
 def gaps_for(manifest, language):
     return set(public(manifest["known_gaps"].get(language, {})))
 
@@ -303,7 +309,7 @@ def python_surface(root, manifest):
         spec["names"]["python"]: spec
         for spec in public(manifest["types"]).values() if spec["names"]["python"]
     }
-    want_exports = list(manifest["functions"]) + list(types) + list(errors)
+    want_exports = list(manifest["functions"]) + list(types) + list(errors) + extras_for(manifest, "python")
     removed = set(manifest["removed"]["names"]["all"] + manifest["removed"]["names"]["python"])
     for name in want_exports:
         if name not in exported:
@@ -487,7 +493,7 @@ def julia_surface(root, manifest):
         spec["names"]["julia"]: spec
         for spec in public(manifest["types"]).values() if spec["names"]["julia"]
     }
-    want_exports = list(manifest["functions"]) + list(types) + list(errors)
+    want_exports = list(manifest["functions"]) + list(types) + list(errors) + extras_for(manifest, "julia")
     removed = set(manifest["removed"]["names"]["all"] + manifest["removed"]["names"]["julia"])
     for name in want_exports:
         if name not in exported:

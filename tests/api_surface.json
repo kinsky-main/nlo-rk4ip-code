@@ -69,6 +69,52 @@
       "returns": "RuntimeLimits"
     },
     "storage_is_available": {"params": [], "returns": "boolean"},
+    "storage_run_key": {
+      "params": [
+        {"name": "pulse", "kind": "positional", "required": true, "type": "PulseSpec"},
+        {"name": "linear_operator", "kind": "positional", "required": true},
+        {"name": "nonlinear_operator", "kind": "positional", "required": true},
+        {"name": "propagation_distance", "kind": "option", "required": true},
+        {"name": "preset", "kind": "option", "default": "balanced"},
+        {"name": "starting_step_size", "kind": "option", "default": null},
+        {"name": "max_step_size", "kind": "option", "default": null},
+        {"name": "min_step_size", "kind": "option", "default": null},
+        {"name": "error_tolerance", "kind": "option", "default": null},
+        {"name": "num_records", "kind": "option", "default": null},
+        {"name": "record_z", "kind": "option", "default": null},
+        {"name": "potential_operator", "kind": "option", "default": null},
+        {"name": "linear_step_operator", "kind": "option", "default": null},
+        {"name": "constant_bindings", "kind": "option", "default": null},
+        {"name": "nonlinear_model", "kind": "option", "default": "expr", "enum": "nonlinear_model"},
+        {"name": "nonlinear_gamma", "kind": "option", "default": 0.0},
+        {"name": "raman_fraction", "kind": "option", "default": 0.0},
+        {"name": "raman_tau1", "kind": "option", "default": 0.0122},
+        {"name": "raman_tau2", "kind": "option", "default": 0.0320},
+        {"name": "shock_omega0", "kind": "option", "default": 0.0},
+        {"name": "raman_response_time", "kind": "option", "default": null},
+        {"name": "storage", "kind": "option", "default": null, "type": "StorageOptions"}
+      ],
+      "returns": "string: the 16 lowercase hex digit key under which propagate with the same arguments stores the run",
+      "notes": [
+        "The propagate parameters that define the run, in propagate's order; the ones that do not enter the key (exec_options, return_records, capture_step_history, step_history_capacity, progress_callback) are not taken.",
+        "storage unset means StorageOptions defaults (its record_mode, raw strides and final-field flag enter the key; sqlite_path does not)."
+      ]
+    },
+    "storage_has_run": {
+      "params": [
+        {"name": "sqlite_path", "kind": "positional", "required": true},
+        {"name": "key", "kind": "positional", "required": true}
+      ],
+      "returns": "boolean: whether the shared run database has a runs row for key; a missing file holds no runs"
+    },
+    "storage_recover_staging": {
+      "params": [
+        {"name": "sqlite_path", "kind": "positional", "required": true},
+        {"name": "discard_incomplete", "kind": "option", "default": false},
+        {"name": "min_age_seconds", "kind": "option", "default": 86400.0}
+      ],
+      "returns": "StagingRecovery"
+    },
     "tensor_record_view": {
       "params": [
         {"name": "record", "kind": "positional", "required": true},
@@ -163,7 +209,16 @@
         {"name": "sqlite_max_bytes", "default": 0},
         {"name": "chunk_records", "default": 0},
         {"name": "cap_policy", "default": "stop_writes", "enum": "storage_cap_policy"},
-        {"name": "log_final_output_field_to_db", "default": false}
+        {"name": "log_final_output_field_to_db", "default": true},
+        {"name": "record_mode", "default": "reduced", "enum": "storage_record_mode"},
+        {"name": "raw_stride_t", "default": 1},
+        {"name": "raw_stride_x", "default": 1},
+        {"name": "raw_stride_y", "default": 1},
+        {"name": "defer_merge", "default": false}
+      ],
+      "notes": [
+        "sqlite_path names the shared run database (<store>/nlolib/nlolib.sqlite); a run streams into <dir>/staging/ and is merged when it completes, unless defer_merge. docs/nlolib_run_database.md is the layout.",
+        "The final field is kept by default, as storage_options_default() does in C."
       ]
     },
     "PropagationResult": {
@@ -201,9 +256,15 @@
       "names": {"python": "StorageResult", "julia": "StorageResult", "matlab": null},
       "fields": [
         {"name": "run_id"}, {"name": "records_captured"}, {"name": "records_spilled"},
-        {"name": "chunks_written"}, {"name": "db_size_bytes"}, {"name": "truncated", "type": "boolean"}
+        {"name": "chunks_written"}, {"name": "db_size_bytes"}, {"name": "truncated", "type": "boolean"},
+        {"name": "key"}, {"name": "merged", "type": "boolean"}, {"name": "deferred", "type": "boolean"}
       ],
-      "notes": ["truncated is a boolean in every binding, not the C int."]
+      "notes": ["truncated, merged and deferred are booleans in every binding, not the C int."]
+    },
+    "StagingRecovery": {
+      "names": {"python": "StagingRecovery", "julia": "StagingRecovery", "matlab": null},
+      "fields": [{"name": "merged"}, {"name": "discarded"}, {"name": "skipped"}],
+      "notes": ["Counts of staging files storage_recover_staging merged, deleted and left in place."]
     },
     "ProgressInfo": {
       "names": {"python": "ProgressInfo", "julia": "ProgressInfo", "matlab": null},
@@ -289,6 +350,17 @@
       "values": {
         "stop_writes": {"c_name": "STORAGE_DB_CAP_POLICY_STOP_WRITES", "c_value": 0},
         "fail": {"c_name": "STORAGE_DB_CAP_POLICY_FAIL", "c_value": 1}
+      }
+    },
+    "storage_record_mode": {
+      "c_type": "storage_record_mode",
+      "direction": "input",
+      "used_by": ["StorageOptions.record_mode"],
+      "default": "reduced",
+      "values": {
+        "reduced": {"c_name": "STORAGE_RECORD_MODE_REDUCED", "c_value": 0},
+        "raw": {"c_name": "STORAGE_RECORD_MODE_RAW", "c_value": 1},
+        "reduced_and_raw": {"c_name": "STORAGE_RECORD_MODE_REDUCED_AND_RAW", "c_value": 2}
       }
     },
     "log_level": {
@@ -568,6 +640,8 @@
         "FFT_BACKEND_AUTO", "FFT_BACKEND_FFTW", "FFT_BACKEND_VKFFT",
         "NONLINEAR_MODEL_EXPR", "NONLINEAR_MODEL_KERR_RAMAN",
         "STORAGE_DB_CAP_POLICY_STOP_WRITES", "STORAGE_DB_CAP_POLICY_FAIL",
+        "STORAGE_RECORD_MODE_REDUCED", "STORAGE_RECORD_MODE_RAW", "STORAGE_RECORD_MODE_REDUCED_AND_RAW",
+        "STORAGE_KEY_MAX", "record_mode_value",
         "PROPAGATE_OUTPUT_DENSE", "PROPAGATE_OUTPUT_FINAL_ONLY",
         "NLOLIB_STATUS_OK", "NLOLIB_STATUS_INVALID_ARGUMENT", "NLOLIB_STATUS_ALLOCATION_FAILED",
         "NLOLIB_STATUS_NOT_IMPLEMENTED", "NLOLIB_STATUS_ABORTED",
@@ -611,6 +685,14 @@
 
   "binding_extras": {
     "_comment": "Public names one binding has and the others do not need, each with the reason.",
+    "julia": {
+      "functions": {
+        "read_stored_run": "reads a stored run's axes, maps and fields into Julia arrays through the C API; Python and MATLAB read the run database with their own SQLite (docs/nlolib_run_database.md)"
+      },
+      "types": {
+        "StoredRun": "what read_stored_run returns"
+      }
+    },
     "matlab": {
       "functions": {
         "unload": "MATLAB keeps the shared library loaded until told otherwise; needed to rebuild it in a session"
@@ -796,7 +878,7 @@
       "python": ["fixed_step_soliton_convergence", "tensor_backend_scaling", "tensor_backend_scaling_nlolib",
                  "two_mode_linear_beating"],
       "matlab": ["setup_matlab_example_environment"],
-      "julia": []
+      "julia": ["store_sample_database"]
     },
     "dropped": {
       "_comment": "Old example -> why it goes.",

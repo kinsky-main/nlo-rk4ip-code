@@ -660,15 +660,17 @@ points are in the binding repositories, mounted in the core repository as the
 against a core that has them; the `CORE_REF` file of a binding names the core
 commit it is built and tested with.
 
-| C | Julia | Python | MATLAB |
-|---|---|---|---|
-| `storage_options.record_mode`, `raw_stride_t/x/y`, `binding` | `record_mode`, `raw_stride_t/x/y` keywords | same keywords | `storage.record_mode`, `storage.raw_stride_*` |
-| `nlolib_storage_run_key` | `storage_run_key` | `storage_run_key` | (via `calllib`) |
-| `nlolib_storage_has_run` | `storage_has_run` | `storage_has_run` | `api.storage_has_run` |
-| `nlolib_storage_recover_staging`, tool `nlolib_store_merge` | `storage_recover_staging` | `storage_recover_staging` | `api.storage_recover_staging` |
-| `storage_options.defer_merge` | `defer_merge` keyword | `defer_merge` keyword | `storage.defer_merge` |
-| `nlolib_storage_read_run_layout`, `nlolib_storage_read_run_array` | `read_stored_run` | (via ctypes) | (via `calllib`) |
+| C | Julia, Python, MATLAB |
+|---|---|
+| `storage_options.record_mode`, `raw_stride_t/x/y`, `defer_merge` | `StorageOptions` fields of the same names (a `storage` struct in MATLAB); `record_mode` is `"reduced"`, `"raw"` or `"reduced_and_raw"` |
+| `storage_options.binding` | set by each binding to `"julia"`, `"python"` or `"matlab"` |
+| `nlolib_storage_run_key` | `storage_run_key(pulse, linear_operator, nonlinear_operator; <propagate options>)` |
+| `nlolib_storage_has_run` | `storage_has_run(sqlite_path, key)` |
+| `nlolib_storage_recover_staging`, tool `nlolib_store_merge` | `storage_recover_staging(sqlite_path; discard_incomplete, min_age_seconds)`, returning `StagingRecovery` (`merged`, `discarded`, `skipped`) |
+| `nlolib_storage_read_run_layout`, `nlolib_storage_read_run_array` | Julia only: `read_stored_run(sqlite_path, key)`, returning `StoredRun`. Python and MATLAB read the database with their own SQLite, as in [Reading a run](#reading-a-run) and [Example queries](#example-queries) |
 
+The bindings share these names through the shared binding vocabulary
+([binding_api_vocabulary.md](binding_api_vocabulary.md)).
 `storage_result.key`, `storage_result.merged` and `storage_result.deferred`
 report the stored key, whether the run reached the shared database, and whether
 its merge was left to a later `nlolib_store_merge`.

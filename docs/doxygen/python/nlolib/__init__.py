@@ -81,11 +81,13 @@ class ExecutionOptions:
 
 class StorageOptions:
     """\ingroup python_binding
-    SQLite snapshot storage for a run.
+    Store the run in the shared run database ``sqlite_path``.
 
     Fields: ``sqlite_path`` (required), ``run_id``, ``sqlite_max_bytes`` (0),
     ``chunk_records`` (0), ``cap_policy`` (``"stop_writes"``),
-    ``log_final_output_field_to_db`` (False).
+    ``log_final_output_field_to_db`` (True), ``record_mode`` (``"reduced"``,
+    ``"raw"`` or ``"reduced_and_raw"``), ``raw_stride_t``, ``raw_stride_x``,
+    ``raw_stride_y`` (1), ``defer_merge`` (False).
     """
 
 
@@ -118,7 +120,16 @@ class StorageResult:
     Outcome of a storage-backed run.
 
     Fields: ``run_id``, ``records_captured``, ``records_spilled``,
-    ``chunks_written``, ``db_size_bytes``, ``truncated`` (bool).
+    ``chunks_written``, ``db_size_bytes``, ``truncated`` (bool), ``key`` (the
+    run key), ``merged`` and ``deferred`` (bool).
+    """
+
+
+class StagingRecovery:
+    """\ingroup python_binding
+    Staging files ``storage_recover_staging`` handled.
+
+    Fields: ``merged``, ``discarded``, ``skipped``.
     """
 
 
@@ -312,6 +323,40 @@ def query_runtime_limits(pulse=None, exec_options=None):
 def storage_is_available():
     """\ingroup python_binding
     True when this build has SQLite snapshot storage.
+    """
+
+
+def storage_run_key(pulse, linear_operator, nonlinear_operator, *, propagation_distance,
+                    preset="balanced", starting_step_size=None, max_step_size=None,
+                    min_step_size=None, error_tolerance=None, num_records=None, record_z=None,
+                    potential_operator=None, linear_step_operator=None, constant_bindings=None,
+                    nonlinear_model="expr", nonlinear_gamma=0.0, raman_fraction=0.0,
+                    raman_tau1=0.0122, raman_tau2=0.0320, shock_omega0=0.0,
+                    raman_response_time=None, storage=None):
+    """\ingroup python_binding
+    Run key under which ``propagate`` with the same arguments stores the run.
+
+    Takes ``propagate``'s arguments that enter the key; without ``storage`` the
+    default ``StorageOptions`` apply. The key does not depend on the backend.
+
+    \return 16 lowercase hex digits.
+    """
+
+
+def storage_has_run(sqlite_path, key):
+    """\ingroup python_binding
+    True when the shared run database ``sqlite_path`` has a run with ``key``.
+    """
+
+
+def storage_recover_staging(sqlite_path, *, discard_incomplete=False, min_age_seconds=86400.0):
+    """\ingroup python_binding
+    Merge the staging files left for the shared run database ``sqlite_path``.
+
+    With ``discard_incomplete``, delete incomplete files at least
+    ``min_age_seconds`` old.
+
+    \return StagingRecovery.
     """
 
 

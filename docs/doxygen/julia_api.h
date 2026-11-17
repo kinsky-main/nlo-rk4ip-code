@@ -88,11 +88,13 @@ struct ExecutionOptions {};
 
 /**
  * @ingroup julia_binding
- * @brief SQLite snapshot storage for a run.
+ * @brief Store the run in the shared run database `sqlite_path`.
  *
  * Fields: `sqlite_path` (required), `run_id`, `sqlite_max_bytes` (0),
  * `chunk_records` (0), `cap_policy` (`"stop_writes"`),
- * `log_final_output_field_to_db` (false). Built with keywords.
+ * `log_final_output_field_to_db` (true), `record_mode` (`"reduced"`, `"raw"`
+ * or `"reduced_and_raw"`), `raw_stride_t`, `raw_stride_x`, `raw_stride_y` (1),
+ * `defer_merge` (false). Built with keywords.
  */
 struct StorageOptions {};
 
@@ -125,9 +127,28 @@ struct StepHistory {};
  * @brief Outcome of a storage-backed run.
  *
  * Fields: `run_id`, `records_captured`, `records_spilled`, `chunks_written`,
- * `db_size_bytes`, `truncated` (Bool).
+ * `db_size_bytes`, `truncated` (Bool), `key` (the run key), `merged` and
+ * `deferred` (Bool).
  */
 struct StorageResult {};
+
+/**
+ * @ingroup julia_binding
+ * @brief Staging files `storage_recover_staging` handled.
+ *
+ * Fields: `merged`, `discarded`, `skipped`.
+ */
+struct StagingRecovery {};
+
+/**
+ * @ingroup julia_binding
+ * @brief A run read back with `read_stored_run` (Julia only).
+ *
+ * Fields: `key`, `run_id`, `record_mode`, `nt`, `nx`, `ny`, `delta_time`,
+ * `delta_x`, `delta_y`, axes `z`, `t`, `omega`, `x`, `y`, maps `power`,
+ * `spectrum`, `fluence_x`, `fluence_y`, `final_field`, `raw`, `raw_strides`.
+ */
+struct StoredRun {};
 
 /**
  * @ingroup julia_binding
@@ -328,6 +349,45 @@ RuntimeLimits query_runtime_limits(Any pulse = Any(), Any exec_options = Any());
  * @brief True when this build has SQLite snapshot storage.
  */
 bool storage_is_available();
+
+/**
+ * @ingroup julia_binding
+ * @brief Run key under which `propagate` with the same arguments stores the run.
+ *
+ * Julia signature: `storage_run_key(pulse, linear_operator, nonlinear_operator;
+ * propagation_distance, ..., storage = nothing)`, taking `propagate`'s keywords
+ * that enter the key. The key does not depend on the backend.
+ *
+ * @return 16 lowercase hex digits.
+ */
+const char* storage_run_key(const PulseSpec& pulse, Any linear_operator, Any nonlinear_operator);
+
+/**
+ * @ingroup julia_binding
+ * @brief True when the shared run database `sqlite_path` has a run with `key`.
+ */
+bool storage_has_run(const char* sqlite_path, const char* key);
+
+/**
+ * @ingroup julia_binding
+ * @brief Merge the staging files left for the shared run database `sqlite_path`.
+ *
+ * Julia signature: `storage_recover_staging(sqlite_path; discard_incomplete = false,
+ * min_age_seconds = 86400.0)`.
+ *
+ * @return StagingRecovery.
+ */
+StagingRecovery storage_recover_staging(const char* sqlite_path,
+                                        bool discard_incomplete = false,
+                                        double min_age_seconds = 86400.0);
+
+/**
+ * @ingroup julia_binding
+ * @brief Read a stored run's axes, maps and fields (Julia only).
+ *
+ * @return StoredRun.
+ */
+StoredRun read_stored_run(const char* sqlite_path, const char* key);
 
 /**
  * @ingroup julia_binding

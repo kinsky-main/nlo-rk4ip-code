@@ -107,7 +107,9 @@ struct ExecutionOptions {};
  *
  * MATLAB fields: `sqlite_path` (required), `run_id`, `sqlite_max_bytes` (0),
  * `chunk_records` (0), `cap_policy` (`"stop_writes"`),
- * `log_final_output_field_to_db` (false).
+ * `log_final_output_field_to_db` (true), `record_mode` (`"reduced"`, `"raw"`
+ * or `"reduced_and_raw"`), `raw_stride_t`, `raw_stride_x`, `raw_stride_y` (1),
+ * `defer_merge` (false).
  */
 struct StorageOptions {};
 
@@ -147,9 +149,18 @@ struct StepHistory {};
  * @brief Outcome of a storage-backed run.
  *
  * MATLAB fields: `run_id`, `records_captured`, `records_spilled`,
- * `chunks_written`, `db_size_bytes`, `truncated` (logical).
+ * `chunks_written`, `db_size_bytes`, `truncated` (logical), `key` (the run
+ * key), `merged` and `deferred` (logical).
  */
 struct StorageResult {};
+
+/**
+ * @ingroup matlab_binding
+ * @brief What `storage_recover_staging` returns.
+ *
+ * MATLAB fields: `merged`, `discarded`, `skipped`.
+ */
+struct StagingRecovery {};
 
 /**
  * @ingroup matlab_binding
@@ -349,6 +360,38 @@ RuntimeLimits query_runtime_limits(const PulseSpec& pulse = PulseSpec(),
  * Native MATLAB function name: \c %nlolib.storage_is_available.
  */
 bool storage_is_available();
+
+/**
+ * @ingroup matlab_binding
+ * @brief Run key under which `propagate` with the same arguments stores the run.
+ *
+ * Native MATLAB function name: \c %nlolib.storage_run_key. Takes
+ * `propagate`'s arguments that enter the key, as name=value options.
+ *
+ * @return 16 lowercase hex digits (string).
+ */
+const char* storage_run_key(const PulseSpec& pulse, Any linear_operator, Any nonlinear_operator);
+
+/**
+ * @ingroup matlab_binding
+ * @brief True when the shared run database `sqlite_path` has a run with `key`.
+ *
+ * Native MATLAB function name: \c %nlolib.storage_has_run.
+ */
+bool storage_has_run(const char* sqlite_path, const char* key);
+
+/**
+ * @ingroup matlab_binding
+ * @brief Merge the staging files left for the shared run database `sqlite_path`.
+ *
+ * Native MATLAB function name: \c %nlolib.storage_recover_staging; options
+ * `discard_incomplete` (false) and `min_age_seconds` (86400).
+ *
+ * @return StagingRecovery struct.
+ */
+StagingRecovery storage_recover_staging(const char* sqlite_path,
+                                        bool discard_incomplete = false,
+                                        double min_age_seconds = 86400.0);
 
 /**
  * @ingroup matlab_binding
