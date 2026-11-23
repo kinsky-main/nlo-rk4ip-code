@@ -2,6 +2,17 @@ function(configure_sqlite target_name)
   set(SQLITE_RUNTIME_HINTS "" CACHE INTERNAL
       "Candidate sqlite runtime library paths for packaging helpers" FORCE)
 
+  string(TOUPPER "${NLOLIB_SQLITE_PROVIDER}" _provider)
+  if(_provider STREQUAL "SYSTEM")
+    find_package(SQLite3 REQUIRED)
+    target_link_libraries(${target_name} PRIVATE SQLite::SQLite3)
+    target_compile_definitions(${target_name} PRIVATE HAVE_SQLITE3=1)
+    return()
+  elseif(NOT _provider STREQUAL "FETCH")
+    message(FATAL_ERROR
+      "NLOLIB_SQLITE_PROVIDER must be SYSTEM or FETCH (got '${NLOLIB_SQLITE_PROVIDER}').")
+  endif()
+
   include(FetchContent)
   include(NLODependencies)
 

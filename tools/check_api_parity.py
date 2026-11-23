@@ -479,7 +479,9 @@ def julia_surface(root, manifest):
     src = pathlib.Path(root) / "src"
     sources = {p.name: read(p) for p in sorted(src.glob("*.jl"))}
     joined = "\n".join(sources.values())
-    exported = JULIA_EXPORT.findall(sources["NLOLib.jl"])
+    # The module file is named after the package, which Project.toml names.
+    name = re.search(r'(?m)^name\s*=\s*"([^"]+)"', read(pathlib.Path(root) / "Project.toml"))
+    exported = JULIA_EXPORT.findall(sources[f"{name.group(1)}.jl"])
     structs = {m.group(1): (m.group(2), m.group(3)) for m in JULIA_STRUCT.finditer(joined)}
 
     errors = manifest["errors"]["classes"]["julia"]
