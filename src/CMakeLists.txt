@@ -91,7 +91,9 @@ if(ENABLE_VULKAN_BACKEND)
   )
 endif()
 
-if(WIN32)
+# file(GET_RUNTIME_DEPENDENCIES) inspects binaries with the host's tools, so it
+# cannot resolve a Windows DLL's imports when cross-compiling.
+if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
   set(runtime_hints "${SQLITE_RUNTIME_HINTS}")
   add_custom_command(TARGET nlolib POST_BUILD
     COMMAND ${CMAKE_COMMAND}
