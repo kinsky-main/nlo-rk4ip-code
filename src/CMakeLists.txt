@@ -71,7 +71,10 @@ endif()
 # Embed the C++ runtime (pulled in by glslang/VkFFT) so hosts that preload an
 # older libstdc++ -- notably MATLAB's sys/os/glnxa64 -- can still load nlolib.
 # --exclude-libs keeps the embedded runtime symbols private to nlolib.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+# NLOLIB_STATIC_LIBSTDCXX=OFF is for packagers that ship a matching runtime
+# alongside the library, such as the nlolib_jll build.
+if(NLOLIB_STATIC_LIBSTDCXX AND CMAKE_SYSTEM_NAME STREQUAL "Linux"
+   AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   target_link_options(nlolib PRIVATE
     -static-libstdc++
     -static-libgcc
@@ -88,7 +91,9 @@ if(ENABLE_VULKAN_BACKEND)
   )
 endif()
 
-if(WIN32)
+# file(GET_RUNTIME_DEPENDENCIES) inspects binaries with the host's tools, so it
+# cannot resolve a Windows DLL's imports when cross-compiling.
+if(WIN32 AND NOT CMAKE_CROSSCOMPILING)
   set(runtime_hints "${SQLITE_RUNTIME_HINTS}")
   add_custom_command(TARGET nlolib POST_BUILD
     COMMAND ${CMAKE_COMMAND}
@@ -104,3 +109,7 @@ target_compile_definitions(nlolib PUBLIC
   ENABLE_VKFFT=$<IF:$<BOOL:${ENABLE_VKFFT}>,1,0>
 )
 
+
+# Installs the shared library only: nlolib.h includes internal headers from
+# across src/, so it is not installable on its own yet.
+install(TARGETS nlolib)

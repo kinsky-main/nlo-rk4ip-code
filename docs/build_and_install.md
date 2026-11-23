@@ -55,18 +55,35 @@ Important top-level options:
 - `ENABLE_VKFFT`
 - `NLOLIB_GLSLANG_PROVIDER`
 - `GLSLANG_GIT_TAG`
+- `NLOLIB_FFTW_PROVIDER`
+- `NLOLIB_SQLITE_PROVIDER`
+- `NLOLIB_STATIC_LIBSTDCXX`
 - `BUILD_TESTING`
 
 `NLOLIB_GLSLANG_PROVIDER` controls how the runtime glslang dependency, shared
 by VkFFT and the Vulkan operator JIT, is resolved:
 
-- `AUTO` first uses an installed Vulkan/glslang development package, then
-  fetches glslang if needed.
+- `AUTO` first uses an installed glslang CMake package (`glslang-config.cmake`,
+  found through `CMAKE_PREFIX_PATH`), then a Vulkan/glslang development
+  package, then fetches glslang if needed.
 - `SYSTEM` requires installed glslang development files and fails with an
   actionable error if they are missing.
 - `FETCH` always builds glslang through CMake `FetchContent`.
 
 `GLSLANG_GIT_TAG` defaults to `12.3.1` and is used only by the fetch provider.
+
+`NLOLIB_FFTW_PROVIDER` and `NLOLIB_SQLITE_PROVIDER` take `FETCH` (the default)
+or `SYSTEM`. `FETCH` builds the release pinned in `cmake/NLODependencies.cmake`
+into nlolib statically. `SYSTEM` links an installed `libfftw3` (found through
+`cmake/FindFFTW3.cmake`; `FFTW3_ROOT` points it at a prefix) or `libsqlite3`
+(CMake's `FindSQLite3`) instead, and the library then needs that shared
+library at runtime. Package builds that supply both from their own dependency
+tree, such as the `nlolib_jll` recipe, use `SYSTEM`.
+
+`NLOLIB_STATIC_LIBSTDCXX` (default `ON`) embeds libstdc++ and libgcc in nlolib
+on Linux with GCC and hides their symbols, so a host that preloads an older C++
+runtime, such as MATLAB, can still load the library. Turn it off when the
+package ships a matching C++ runtime alongside the library.
 
 ## Bindings {#bindings}
 

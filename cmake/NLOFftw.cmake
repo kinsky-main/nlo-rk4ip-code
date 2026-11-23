@@ -9,6 +9,14 @@ function(get_target_interface_includes target out_var)
 endfunction()
 
 function(configure_fftw out_target out_include_dirs)
+  string(TOUPPER "${NLOLIB_FFTW_PROVIDER}" _provider)
+  if(_provider STREQUAL "SYSTEM")
+    find_package(FFTW3 REQUIRED)
+  elseif(NOT _provider STREQUAL "FETCH")
+    message(FATAL_ERROR
+      "NLOLIB_FFTW_PROVIDER must be SYSTEM or FETCH (got '${NLOLIB_FFTW_PROVIDER}').")
+  endif()
+
   if(NOT TARGET FFTW3::fftw3)
     include(FetchContent)
 

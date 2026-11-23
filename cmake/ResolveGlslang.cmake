@@ -113,6 +113,26 @@ function(nlolib_define_manual_glslang target_name out_found)
   set(${out_found} ON PARENT_SCOPE)
 endfunction()
 
+# The CMake package glslang installs (glslang-config.cmake), e.g. from a
+# distribution package or glslang_jll.
+function(nlolib_define_config_glslang target_name out_found)
+  find_package(glslang CONFIG QUIET)
+  if(NOT TARGET glslang::glslang OR NOT TARGET glslang::SPIRV)
+    set(${out_found} OFF PARENT_SCOPE)
+    return()
+  endif()
+
+  # VkFFT includes glslang_c_interface.h without its directory.
+  get_target_property(_glslang_include_dirs glslang::glslang INTERFACE_INCLUDE_DIRECTORIES)
+  add_library(${target_name} INTERFACE)
+  foreach(_include_dir IN LISTS _glslang_include_dirs)
+    target_include_directories(${target_name} INTERFACE "${_include_dir}/glslang/Include")
+  endforeach()
+  target_link_libraries(${target_name} INTERFACE glslang::SPIRV glslang::glslang)
+
+  set(${out_found} ON PARENT_SCOPE)
+endfunction()
+
 function(nlolib_define_fetched_glslang target_name out_found)
   include(FetchContent)
 
@@ -165,6 +185,10 @@ function(resolve_glslang_for_vkfft out_target out_found)
   set(_found OFF)
 
   if(NOT _provider STREQUAL "FETCH")
+    nlolib_define_config_glslang(${_target_name} _found)
+  endif()
+
+  if(NOT _found AND NOT _provider STREQUAL "FETCH")
     find_package(Vulkan QUIET COMPONENTS glslang)
     if(TARGET Vulkan::glslang)
       nlolib_find_glslang_c_include(_glslang_c_include_dir)

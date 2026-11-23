@@ -26,6 +26,15 @@ option(SQLITE_USE_FETCHCONTENT "Deprecated: SQLite amalgamation is always used" 
 set(NLOLIB_GLSLANG_PROVIDER "FETCH" CACHE STRING
   "glslang provider for VkFFT: AUTO, SYSTEM, or FETCH")
 set_property(CACHE NLOLIB_GLSLANG_PROVIDER PROPERTY STRINGS AUTO SYSTEM FETCH)
+set(NLOLIB_FFTW_PROVIDER "FETCH" CACHE STRING
+  "FFTW provider: FETCH (pinned release, built in-tree) or SYSTEM (installed libfftw3)")
+set_property(CACHE NLOLIB_FFTW_PROVIDER PROPERTY STRINGS SYSTEM FETCH)
+set(NLOLIB_SQLITE_PROVIDER "FETCH" CACHE STRING
+  "SQLite provider: FETCH (pinned amalgamation, compiled in) or SYSTEM (installed libsqlite3)")
+set_property(CACHE NLOLIB_SQLITE_PROVIDER PROPERTY STRINGS SYSTEM FETCH)
+option(NLOLIB_STATIC_LIBSTDCXX
+  "On Linux with GCC, embed libstdc++/libgcc in nlolib and hide their symbols"
+  ON)
 
 if(NOT ENABLE_VULKAN_BACKEND)
   set(ENABLE_VKFFT OFF CACHE BOOL "Enable VkFFT backend integration for Vulkan FFT execution" FORCE)
