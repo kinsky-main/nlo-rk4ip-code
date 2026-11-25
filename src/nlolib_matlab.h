@@ -432,6 +432,10 @@ typedef struct
     double error;
     double elapsed_seconds;
     double eta_seconds;
+    size_t accepted_steps;
+    size_t rejected_steps;
+    double min_step_size;
+    double max_step_size;
 } progress_info;
 
 /*
@@ -445,8 +449,8 @@ typedef struct
  * usable." and degrades the whole enclosing structure.  The field is
  * therefore mirrored as uint64_t below, which is layout-compatible on the
  * 64-bit platforms nlolib supports and lets MATLAB store a callback address.
- * MATLAB functions cannot be callbacks; the wrapper passes the C callback
- * from its progress_mex MEX file, or 0 (no callback).
+ * MATLAB functions cannot be callbacks; the wrapper passes 0 (no callback)
+ * and reads progress with nlolib_propagate_poll() instead.
  */
 
 /**
@@ -552,6 +556,52 @@ nlolib_status nlolib_propagate(
     const nlo_complex *input_field,
     const propagate_options *options,
     propagate_output *output);
+
+/*
+ * Asynchronous propagation. The canonical header passes the job as an opaque
+ * nlolib_propagate_job*; it is mirrored as uint64_t, which is
+ * layout-compatible on the 64-bit platforms nlolib supports and needs no
+ * incomplete struct type in loadlibrary().
+ */
+
+/**
+ * @brief MATLAB FFI mirror of nlolib_propagate_start().
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_propagate_start(
+    const simulation_config *simulation_config,
+    const physics_config *physics_config,
+    size_t num_time_samples,
+    const nlo_complex *input_field,
+    const propagate_options *options,
+    propagate_output *output,
+    uint64_t *out_job);
+
+/**
+ * @brief MATLAB FFI mirror of nlolib_propagate_poll().
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_propagate_poll(
+    uint64_t job,
+    uint32_t timeout_ms,
+    progress_info *out_info,
+    int *out_done);
+
+/**
+ * @brief MATLAB FFI mirror of nlolib_propagate_cancel().
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_propagate_cancel(uint64_t job);
+
+/**
+ * @brief MATLAB FFI mirror of nlolib_propagate_finish().
+ *
+ * See `nlolib.h` for full parameter and return-value semantics.
+ */
+nlolib_status nlolib_propagate_finish(uint64_t job);
 
 /**
  * @brief MATLAB FFI mirror of nlolib_query_runtime_limits().

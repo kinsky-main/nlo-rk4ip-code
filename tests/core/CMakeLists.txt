@@ -76,6 +76,8 @@ endif()
 if(UNIX)
   target_link_libraries(test_core_state_alloc PRIVATE m)
 endif()
+find_package(Threads REQUIRED)
+target_link_libraries(test_core_state_alloc PRIVATE Threads::Threads)
 
 add_test(NAME test_core_state_alloc COMMAND test_core_state_alloc)
 
@@ -101,6 +103,7 @@ target_compile_definitions(test_core_log_sink PRIVATE
 if(UNIX)
   target_link_libraries(test_core_log_sink PRIVATE m)
 endif()
+target_link_libraries(test_core_log_sink PRIVATE Threads::Threads)
 
 add_test(NAME test_core_log_sink COMMAND test_core_log_sink)
 
@@ -135,3 +138,14 @@ if(UNIX)
 endif()
 
 add_test(NAME test_core_operator_lowering COMMAND test_core_operator_lowering)
+
+add_executable(test_core_propagate_async
+  ${CMAKE_CURRENT_LIST_DIR}/test_propagate_async.c
+)
+target_link_libraries(test_core_propagate_async PRIVATE nlolib)
+
+add_test(NAME test_core_propagate_async COMMAND test_core_propagate_async)
+set_tests_properties(test_core_propagate_async PROPERTIES
+  ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:nlolib>"
+  TIMEOUT 120
+)

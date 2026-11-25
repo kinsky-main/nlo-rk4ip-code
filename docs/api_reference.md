@@ -7,6 +7,9 @@ documentation.
 
 - @ref c_api
 - @ref nlolib_propagate
+- @ref nlolib_propagate_start, @ref nlolib_propagate_poll,
+  @ref nlolib_propagate_cancel, @ref nlolib_propagate_finish — the same run
+  on a worker thread, for hosts that poll for progress
 - @ref nlolib_query_runtime_limits
 - @ref simulation_config
 - @ref physics_config

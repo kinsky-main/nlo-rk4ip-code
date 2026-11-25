@@ -627,7 +627,7 @@ void solve_rk4(simulation_state *state)
         }
     }
 
-    log_progress_begin(state->current_z, z_end);
+    log_progress_begin(state->current_z, z_end, min_step, max_step);
 
     double record_spacing = 0.0;
     double next_record_z = z_end;

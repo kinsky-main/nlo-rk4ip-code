@@ -22,6 +22,11 @@ typedef enum {
 
 /**
  * @brief Per-event propagation progress payload for caller callbacks.
+ *
+ * accepted_steps and rejected_steps count the step attempts of the run so
+ * far, this event included; the rejection rate is
+ * rejected_steps / (accepted_steps + rejected_steps). min_step_size and
+ * max_step_size are the configured step bounds, in the units of z.
  */
 typedef struct {
     progress_event_type event_type;
@@ -35,6 +40,10 @@ typedef struct {
     double error;
     double elapsed_seconds;
     double eta_seconds;
+    size_t accepted_steps;
+    size_t rejected_steps;
+    double min_step_size;
+    double max_step_size;
 } progress_info;
 
 /**

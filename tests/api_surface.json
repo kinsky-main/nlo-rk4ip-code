@@ -211,7 +211,9 @@
         {"name": "event_type", "enum": "progress_event"},
         {"name": "step_index"}, {"name": "reject_attempt"}, {"name": "z"}, {"name": "z_end"},
         {"name": "percent"}, {"name": "step_size"}, {"name": "next_step_size"}, {"name": "error"},
-        {"name": "elapsed_seconds"}, {"name": "eta_seconds"}
+        {"name": "elapsed_seconds"}, {"name": "eta_seconds"},
+        {"name": "accepted_steps"}, {"name": "rejected_steps"},
+        {"name": "min_step_size"}, {"name": "max_step_size"}
       ]
     },
     "RuntimeLimits": {
@@ -614,9 +616,9 @@
         "unload": "MATLAB keeps the shared library loaded until told otherwise; needed to rebuild it in a session"
       },
       "propagate_options": {
-        "live_progress": "print progress in the Command Window during the call (progress_mex)",
+        "live_progress": "print progress in the Command Window during the call",
         "progress_style": "\"inline\" or \"lines\" for live_progress",
-        "stream_logs": "drain the log buffer to the Command Window after the call"
+        "stream_logs": "drain the log buffer to the Command Window during the call"
       },
       "top_level": {
         "nlolib_setup": "adds the toolbox to the path; lives outside the package"
@@ -634,7 +636,7 @@
     "python": {},
     "julia": {},
     "matlab": {
-      "propagate.progress_callback": "progress_mex cannot forward to a function handle yet; separate task",
+      "propagate.progress_callback": "the poll loop does not forward progress to a function handle yet; separate task",
       "types.ProgressInfo": "only reaches the caller through progress_callback",
       "enums.progress_event": "only reaches the caller through ProgressInfo.event_type"
     }
