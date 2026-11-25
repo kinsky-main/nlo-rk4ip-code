@@ -13,9 +13,9 @@
     ],
     "component": {
       "type": "library",
-      "bom-ref": "nlolib@0.2.0",
+      "bom-ref": "nlolib@0.2.1",
       "name": "nlolib",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "description": "C99 nonlinear-optics RK4IP solver with CPU (FFTW) and Vulkan (VkFFT) backends; SPIR-V kernels embedded, third-party code linked statically, Python/MATLAB/Julia bindings.",
       "licenses": [
         {
@@ -24,7 +24,7 @@
           }
         }
       ],
-      "purl": "pkg:github/kinsky-main/nlo-rk4ip-code@0.2.0",
+      "purl": "pkg:github/kinsky-main/nlo-rk4ip-code@0.2.1",
       "externalReferences": [
         {
           "type": "vcs",
@@ -622,7 +622,7 @@
   ],
   "dependencies": [
     {
-      "ref": "nlolib@0.2.0",
+      "ref": "nlolib@0.2.1",
       "dependsOn": [
         "fftw@3.3.10",
         "sqlite@3.49.2",

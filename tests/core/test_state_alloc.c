@@ -1237,6 +1237,105 @@ static void test_storage_only_propagate_without_dense_output(void)
     printf("test_storage_only_propagate_without_dense_output: accepts storage-only propagation.\n");
 }
 
+/* Step controller: the accept test is the tolerance itself, and the next step
+ * is aimed below it (safety factor 0.95, scale clamped to [0.5, 2]). Without
+ * that margin about every other attempt on this run is rejected. */
+#define STEP_TEST_SAMPLES 256u
+#define STEP_TEST_SAFETY 0.95
+
+typedef struct {
+    double tolerance;
+    double min_step;
+    double max_step;
+    size_t accepted;
+    size_t rejected;
+    size_t violations;
+} step_controller_probe;
+
+static int step_controller_callback(const progress_info* info, void* user_data)
+{
+    step_controller_probe* probe = (step_controller_probe*)user_data;
+    if (info->event_type == PROGRESS_EVENT_REJECTED) {
+        probe->rejected += 1u;
+        return 1;
+    }
+    if (info->event_type != PROGRESS_EVENT_ACCEPTED) {
+        return 1;
+    }
+
+    probe->accepted += 1u;
+    if (!(info->error <= probe->tolerance)) {
+        probe->violations += 1u;
+        return 1;
+    }
+    if (info->error > 0.0) {
+        double scale = STEP_TEST_SAFETY * pow(probe->tolerance / info->error, 0.25);
+        scale = fmin(fmax(scale, 0.5), 2.0);
+        const double expected = fmin(fmax(info->step_size * scale, probe->min_step), probe->max_step);
+        if (fabs(info->next_step_size - expected) > 1e-9 * expected) {
+            probe->violations += 1u;
+        }
+    }
+    return 1;
+}
+
+static void test_adaptive_step_controller_safety_factor(void)
+{
+    sim_config* config = create_sim_config(STEP_TEST_SAMPLES);
+    STATE_CHECK(config != NULL);
+    config->propagation.propagation_distance = 2.0;
+    config->propagation.starting_step_size = 1e-3;
+    config->propagation.max_step_size = 0.5;
+    config->propagation.min_step_size = 1e-9;
+    config->propagation.error_tolerance = 1e-8;
+
+    simulation_config sim_section;
+    sim_section.propagation = config->propagation;
+    sim_section.tensor = config->tensor;
+    sim_section.time = config->time;
+    sim_section.frequency = config->frequency;
+    sim_section.spatial = config->spatial;
+    physics_config physics_section = config->runtime;
+
+    nlo_complex input[STEP_TEST_SAMPLES];
+    for (size_t i = 0u; i < STEP_TEST_SAMPLES; ++i) {
+        const double t = ((double)i - 0.5 * (double)STEP_TEST_SAMPLES) / 8.0;
+        input[i] = make(2.0 / cosh(t), 0.0);
+    }
+
+    step_controller_probe probe = {0};
+    probe.tolerance = config->propagation.error_tolerance;
+    probe.min_step = config->propagation.min_step_size;
+    probe.max_step = config->propagation.max_step_size;
+
+    execution_options exec_options = execution_options_default(VECTOR_BACKEND_CPU);
+    propagate_options options = nlolib_propagate_options_default();
+    options.num_recorded_samples = 1u;
+    options.return_records = 1;
+    options.exec_options = &exec_options;
+    options.progress_callback = step_controller_callback;
+    options.progress_user_data = &probe;
+
+    nlo_complex final_field[STEP_TEST_SAMPLES];
+    size_t written = 0u;
+    propagate_output out = nlolib_propagate_output_default();
+    out.output_records = final_field;
+    out.output_record_capacity = 1u;
+    out.records_written = &written;
+
+    STATE_CHECK(nlolib_propagate(&sim_section, &physics_section, STEP_TEST_SAMPLES, input, &options, &out) ==
+                NLOLIB_STATUS_OK);
+    free_sim_config(config);
+
+    printf("test_adaptive_step_controller_safety_factor: accepted=%zu rejected=%zu.\n",
+           probe.accepted,
+           probe.rejected);
+    STATE_CHECK(written == 1u);
+    STATE_CHECK(probe.accepted >= 50u);
+    STATE_CHECK(probe.violations == 0u);
+    STATE_CHECK(probe.rejected * 10u <= probe.accepted);
+}
+
 int main(void)
 {
     test_init_state_success();
@@ -1255,6 +1354,7 @@ int main(void)
     test_dense_output_limit_same_for_resident_buffers();
     test_storage_only_propagate_without_dense_output();
     test_single_record_rules();
+    test_adaptive_step_controller_safety_factor();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;
 }
