@@ -27,6 +27,13 @@
 #define RK4_STEP_SCALE_MAX 2.0
 #endif
 
+/* Aim the next step at RK4_STEP_SAFETY^4 of the tolerance. Without a margin
+ * the proposed step lands on the tolerance itself and about every other
+ * attempt is rejected by a few percent. The accept test is unchanged. */
+#ifndef RK4_STEP_SAFETY
+#define RK4_STEP_SAFETY 0.95
+#endif
+
 #ifndef RK4_REL_ERROR_ATOL_FLOOR
 #define RK4_REL_ERROR_ATOL_FLOOR 1e-14
 #endif
@@ -727,7 +734,7 @@ void solve_rk4(simulation_state *state)
                 }
 
                 if (error > 0.0 && isfinite(error)) {
-                    scale = pow(tol / error, 0.25);
+                    scale = RK4_STEP_SAFETY * pow(tol / error, 0.25);
                 } else if (error == 0.0) {
                     scale = RK4_STEP_SCALE_MAX;
                 } else {
