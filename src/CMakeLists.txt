@@ -2,6 +2,7 @@
 
 set(NLOLIB_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/nlolib.c
+  ${CMAKE_CURRENT_LIST_DIR}/nlolib_async.c
   ${CMAKE_CURRENT_LIST_DIR}/core/init.c
   ${CMAKE_CURRENT_LIST_DIR}/core/init_defaults.c
   ${CMAKE_CURRENT_LIST_DIR}/core/init_limits.c
@@ -67,6 +68,10 @@ configure_sqlite(nlolib)
 if(UNIX)
   target_link_libraries(nlolib PUBLIC m)
 endif()
+
+# Asynchronous propagation jobs and the log ring lock.
+find_package(Threads REQUIRED)
+target_link_libraries(nlolib PRIVATE Threads::Threads)
 
 # Embed the C++ runtime (pulled in by glslang/VkFFT) so hosts that preload an
 # older libstdc++ -- notably MATLAB's sys/os/glnxa64 -- can still load nlolib.

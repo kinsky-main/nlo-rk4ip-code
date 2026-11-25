@@ -117,7 +117,7 @@ static void test_progress_entries(void)
     LOG_CHECK(log_set_level(LOG_LEVEL_INFO) == 0);
     LOG_CHECK(log_set_progress_options(1, 25, 1) == 0);
 
-    log_progress_begin(0.0, 1.0);
+    log_progress_begin(0.0, 1.0, 0.001, 0.1);
     log_progress_step_rejected(0u, 0.0, 1.0, 0.1, 10.0, 0.02, 1u);
     log_progress_step_accepted(0u, 0.30, 1.0, 0.02, 0.5, 0.01);
     log_progress_finish(1.0, 1.0, 1);
@@ -140,7 +140,7 @@ static void test_progress_callback_abort(void)
     LOG_CHECK(log_set_progress_options(0, 25, 0) == 0);
     LOG_CHECK(log_set_progress_callback(test_progress_callback, &abort_after_first) == 0);
 
-    log_progress_begin(0.0, 1.0);
+    log_progress_begin(0.0, 1.0, 0.001, 0.1);
     log_progress_step_accepted(0u, 0.25, 1.0, 0.02, 0.0, 0.02);
     LOG_CHECK(g_progress_callback_calls == 1);
     LOG_CHECK(log_progress_abort_requested() != 0);

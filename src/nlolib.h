@@ -344,6 +344,93 @@ NLOLIB_API nlolib_status nlolib_propagate(
 
 /**
  * @ingroup c_api
+ * @brief Opaque handle of one asynchronous propagation; see
+ *        nlolib_propagate_start().
+ */
+typedef struct nlolib_propagate_job nlolib_propagate_job;
+
+/**
+ * @ingroup c_api
+ * @brief Start nlolib_propagate() on a worker thread and return at once.
+ *
+ * The arguments are those of nlolib_propagate(). The structs themselves
+ * (both configs, options, its exec_options and storage_options, output) are
+ * copied; every buffer and string they point to, and input_field, stay
+ * caller-owned and must remain valid and unmodified until
+ * nlolib_propagate_finish() returns. The output buffers are complete only
+ * after that call.
+ *
+ * One job runs at a time, and no other nlolib function may be called while it
+ * runs except nlolib_propagate_poll(), nlolib_propagate_cancel(),
+ * nlolib_propagate_finish(), nlolib_read_log_buffer() and
+ * nlolib_clear_log_buffer(). A progress_callback in @p options is still
+ * invoked, on the worker thread.
+ *
+ * @param out_job Receives the job handle; NULL on failure. Every started job
+ *        must be released with nlolib_propagate_finish().
+ * @return nlolib_status NLOLIB_STATUS_OK when the job started,
+ *         NLOLIB_STATUS_INVALID_ARGUMENT when @p out_job is NULL or another
+ *         job is running, NLOLIB_STATUS_ALLOCATION_FAILED when the thread
+ *         could not be created. Argument errors of the propagation itself are
+ *         reported by nlolib_propagate_finish().
+ */
+NLOLIB_API nlolib_status nlolib_propagate_start(
+    const simulation_config* simulation_config,
+    const physics_config* physics_config,
+    size_t num_time_samples,
+    const nlo_complex* input_field,
+    const propagate_options* options,
+    propagate_output* output,
+    nlolib_propagate_job** out_job
+);
+
+/**
+ * @ingroup c_api
+ * @brief Wait for a job and read its latest progress.
+ *
+ * Progress is sampled, not queued: however many steps the solver took since
+ * the last poll, one payload is returned.
+ *
+ * @param job Job from nlolib_propagate_start().
+ * @param timeout_ms Longest time to block waiting for the job to end, in
+ *        milliseconds; 0 returns immediately.
+ * @param out_info Optional; receives the most recent progress event, all
+ *        zero before the first one.
+ * @param out_done Optional; receives nonzero once the propagation has ended.
+ * @return nlolib_status NLOLIB_STATUS_INVALID_ARGUMENT when @p job is NULL.
+ */
+NLOLIB_API nlolib_status nlolib_propagate_poll(
+    nlolib_propagate_job* job,
+    uint32_t timeout_ms,
+    progress_info* out_info,
+    int* out_done
+);
+
+/**
+ * @ingroup c_api
+ * @brief Ask a job to stop at its next step. Returns without waiting; the job
+ *        then ends with NLOLIB_STATUS_ABORTED.
+ *
+ * @param job Job from nlolib_propagate_start().
+ * @return nlolib_status NLOLIB_STATUS_INVALID_ARGUMENT when @p job is NULL.
+ */
+NLOLIB_API nlolib_status nlolib_propagate_cancel(nlolib_propagate_job* job);
+
+/**
+ * @ingroup c_api
+ * @brief Wait for a job to end, release it, and return its result.
+ *
+ * Blocks until the propagation has ended; call nlolib_propagate_cancel()
+ * first to cut it short. @p job is invalid afterwards.
+ *
+ * @param job Job from nlolib_propagate_start().
+ * @return nlolib_status The status nlolib_propagate() returned on the worker
+ *         thread, or NLOLIB_STATUS_INVALID_ARGUMENT when @p job is NULL.
+ */
+NLOLIB_API nlolib_status nlolib_propagate_finish(nlolib_propagate_job* job);
+
+/**
+ * @ingroup c_api
  * @brief Returns nonzero when SQLite storage support is available.
  *
  * @return int Nonzero when storage backend support is compiled in.
@@ -402,6 +489,12 @@ NLOLIB_API nlolib_status nlolib_set_log_level(int level);
 
 /**
  * @brief Configure runtime progress TUI behavior.
+ *
+ * On a terminal the display is three rows redrawn in place: progress in z,
+ * the share of step attempts rejected so far, and the current step between
+ * min_step_size and max_step_size on a logarithmic scale. Colour is used
+ * unless the NO_COLOR environment variable is set. A stream that is not a
+ * terminal receives the same values on one line per refresh.
  *
  * @param enabled Nonzero enables progress rendering.
  * @param milestone_percent Refresh milestone cadence in [1, 100] percent.

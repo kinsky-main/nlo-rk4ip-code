@@ -12,8 +12,20 @@
 #include <string.h>
 #if defined(_WIN32)
   #include <windows.h>
+  #include <io.h>
+/* The ring is appended to by the propagation thread of an asynchronous job
+ * while the caller's thread reads it, so every ring access takes this lock. */
+static SRWLOCK g_ring_lock = SRWLOCK_INIT;
+static void ring_lock(void) { AcquireSRWLockExclusive(&g_ring_lock); }
+static void ring_unlock(void) { ReleaseSRWLockExclusive(&g_ring_lock); }
 #else
+  #include <pthread.h>
+  #include <sys/ioctl.h>
   #include <sys/time.h>
+  #include <unistd.h>
+static pthread_mutex_t g_ring_lock = PTHREAD_MUTEX_INITIALIZER;
+static void ring_lock(void) { (void)pthread_mutex_lock(&g_ring_lock); }
+static void ring_unlock(void) { (void)pthread_mutex_unlock(&g_ring_lock); }
 #endif
 
 #define LOG_STATUS_OK 0
@@ -22,6 +34,10 @@
 
 #define LOG_BUFFER_MIN_BYTES 4096u
 #define PROGRESS_BAR_WIDTH 30u
+#define PROGRESS_MIN_BAR_WIDTH 10u
+#define PROGRESS_SUB_BAR_WIDTH 10u
+/* ENABLE_VIRTUAL_TERMINAL_PROCESSING, absent from older Windows SDKs. */
+#define PROGRESS_ENABLE_VT 0x0004u
 #define PROGRESS_RENDER_MIN_SECONDS 0.2
 
 typedef struct
@@ -49,6 +65,11 @@ typedef struct
     progress_callback progress_callback;
     void* progress_callback_user_data;
     int progress_abort_requested;
+    size_t progress_accepted_steps;
+    size_t progress_rejected_steps;
+    double progress_min_step_size;
+    double progress_max_step_size;
+    double progress_last_step_size;
 } log_state;
 
 static log_state g_nlo_log_state = {
@@ -149,23 +170,142 @@ static void progress_format_duration(double seconds, char* out, size_t out_len)
     }
 }
 
-static void progress_make_bar(double percent, char* out, size_t out_len)
+/* What one output stream can show, queried at every render so that a resized
+ * terminal is followed. */
+typedef struct
 {
-    if (out == NULL || out_len <= PROGRESS_BAR_WIDTH) {
+    int cursor;    /* ANSI cursor movement is interpreted */
+    int color;     /* colour is wanted as well (NO_COLOR unset) */
+    int utf8;      /* box-drawing glyphs can be written */
+    int columns;   /* terminal width, 0 when unknown or not a terminal */
+    void* console; /* Windows console handle, NULL elsewhere */
+} progress_stream_caps;
+
+static void progress_query_caps(FILE* stream, progress_stream_caps* caps)
+{
+    memset(caps, 0, sizeof(*caps));
+#if defined(_WIN32)
+    const int fd = _fileno(stream);
+    if (fd < 0 || _isatty(fd) == 0) {
         return;
     }
-
-    int filled = (int)floor((percent / 100.0) * (double)PROGRESS_BAR_WIDTH);
-    if (filled < 0) {
-        filled = 0;
-    } else if (filled > (int)PROGRESS_BAR_WIDTH) {
-        filled = (int)PROGRESS_BAR_WIDTH;
+    const HANDLE handle = (HANDLE)_get_osfhandle(fd);
+    DWORD mode = 0u;
+    if (handle == INVALID_HANDLE_VALUE || GetConsoleMode(handle, &mode) == 0) {
+        return;
     }
-
-    for (size_t idx = 0u; idx < PROGRESS_BAR_WIDTH; ++idx) {
-        out[idx] = (idx < (size_t)filled) ? '#' : '-';
+    /* Written with WriteConsoleW, so glyphs do not depend on the code page. */
+    caps->console = handle;
+    caps->utf8 = 1;
+    if ((mode & PROGRESS_ENABLE_VT) != 0u || SetConsoleMode(handle, mode | PROGRESS_ENABLE_VT) != 0) {
+        caps->cursor = 1;
     }
-    out[PROGRESS_BAR_WIDTH] = '\0';
+    CONSOLE_SCREEN_BUFFER_INFO screen;
+    if (GetConsoleScreenBufferInfo(handle, &screen) != 0) {
+        caps->columns = (int)(screen.srWindow.Right - screen.srWindow.Left) + 1;
+    }
+#else
+    const int fd = fileno(stream);
+    if (fd < 0 || isatty(fd) == 0) {
+        return;
+    }
+    const char* term = getenv("TERM");
+    caps->cursor = (term != NULL && strcmp(term, "dumb") != 0) ? 1 : 0;
+    const char* locale_names[3] = {"LC_ALL", "LC_CTYPE", "LANG"};
+    for (size_t idx = 0u; idx < 3u; ++idx) {
+        const char* value = getenv(locale_names[idx]);
+        if (value != NULL && value[0] != '\0') {
+            caps->utf8 = (strstr(value, "UTF-8") != NULL || strstr(value, "utf8") != NULL ||
+                          strstr(value, "UTF8") != NULL || strstr(value, "utf-8") != NULL)
+                             ? 1
+                             : 0;
+            break;
+        }
+    }
+    struct winsize size;
+    if (ioctl(fd, TIOCGWINSZ, &size) == 0 && size.ws_col > 0) {
+        caps->columns = (int)size.ws_col;
+    }
+#endif
+    const char* no_color = getenv("NO_COLOR");
+    caps->color = (caps->cursor != 0 && (no_color == NULL || no_color[0] == '\0')) ? 1 : 0;
+}
+
+static void progress_stream_write(FILE* stream, const progress_stream_caps* caps, const char* text, size_t text_len)
+{
+#if defined(_WIN32)
+    if (caps->console != NULL) {
+        wchar_t wide[2048];
+        const int wide_len = MultiByteToWideChar(CP_UTF8, 0, text, (int)text_len, wide, 2048);
+        if (wide_len > 0) {
+            DWORD written = 0u;
+            fflush(stream);
+            (void)WriteConsoleW((HANDLE)caps->console, wide, (DWORD)wide_len, &written, NULL);
+            return;
+        }
+    }
+#else
+    (void)caps;
+#endif
+    (void)fwrite(text, 1u, text_len, stream);
+    fflush(stream);
+}
+
+static size_t progress_append(char* out, size_t out_len, size_t pos, const char* fmt, ...)
+{
+    if (pos >= out_len) {
+        return pos;
+    }
+    va_list args;
+    va_start(args, fmt);
+    const int written = vsnprintf(out + pos, out_len - pos, fmt, args);
+    va_end(args);
+    if (written < 0) {
+        return pos;
+    }
+    pos += (size_t)written;
+    return (pos < out_len) ? pos : (out_len - 1u);
+}
+
+/* One bar of `width` cells, `fraction` of them filled. With colour the filled
+ * part takes `color` (a 256-colour index) and the rest is dim; without it the
+ * two parts differ by glyph. */
+static size_t progress_append_bar(
+    char* out,
+    size_t out_len,
+    size_t pos,
+    const progress_stream_caps* caps,
+    size_t width,
+    double fraction,
+    int color
+)
+{
+    if (!(fraction > 0.0)) {
+        fraction = 0.0;
+    } else if (fraction > 1.0) {
+        fraction = 1.0;
+    }
+    const size_t filled = (size_t)(fraction * (double)width + 0.5);
+    const char* heavy = "#";
+    const char* light = "-";
+    if (caps->color != 0) {
+        heavy = (caps->utf8 != 0) ? "\xE2\x94\x81" : "=";
+        light = heavy;
+        pos = progress_append(out, out_len, pos, "\x1b[38;5;%dm", color);
+    }
+    for (size_t idx = 0u; idx < filled; ++idx) {
+        pos = progress_append(out, out_len, pos, "%s", heavy);
+    }
+    if (caps->color != 0) {
+        pos = progress_append(out, out_len, pos, "\x1b[38;5;240m");
+    }
+    for (size_t idx = filled; idx < width; ++idx) {
+        pos = progress_append(out, out_len, pos, "%s", light);
+    }
+    if (caps->color != 0) {
+        pos = progress_append(out, out_len, pos, "\x1b[0m");
+    }
+    return pos;
 }
 
 static void progress_end_console_line(void)
@@ -180,28 +320,172 @@ static void progress_end_console_line(void)
     g_nlo_log_state.progress_last_line_len = 0u;
 }
 
+/* Position of the current step between the step bounds, on a log scale since
+ * the bounds are usually decades apart: 0 at min_step_size, 1 at max. */
+static double progress_step_fraction(double step_size)
+{
+    const double min_step = g_nlo_log_state.progress_min_step_size;
+    const double max_step = g_nlo_log_state.progress_max_step_size;
+    if (!(step_size > 0.0)) {
+        return 0.0;
+    }
+    if (!(min_step > 0.0) || !(max_step > min_step)) {
+        return 1.0;
+    }
+    return log(step_size / min_step) / log(max_step / min_step);
+}
+
+/* One row of the stacked display: a label column, a bar, then text. The bar
+ * narrows and then the text is cut to keep the row inside `limit` columns,
+ * because a wrapped row cannot be redrawn in place. */
+static size_t progress_append_row(
+    char* out,
+    size_t out_len,
+    size_t pos,
+    const progress_stream_caps* caps,
+    size_t limit,
+    const char* label,
+    int bold_label,
+    double fraction,
+    int color,
+    const char* text
+)
+{
+    const size_t label_len = strlen(label);
+    size_t text_len = strlen(text);
+    size_t bar_width = PROGRESS_BAR_WIDTH;
+    while (label_len + bar_width + text_len > limit && bar_width > PROGRESS_MIN_BAR_WIDTH) {
+        bar_width -= 1u;
+    }
+    if (label_len + bar_width + text_len > limit) {
+        text_len = (limit > label_len + bar_width) ? (limit - label_len - bar_width) : 0u;
+    }
+
+    pos = progress_append(out, out_len, pos,
+                          (bold_label != 0 && caps->color != 0) ? "\x1b[1m%s\x1b[0m" : "%s", label);
+    pos = progress_append_bar(out, out_len, pos, caps, bar_width, fraction, color);
+    pos = progress_append(out, out_len, pos, "%.*s\x1b[K", (int)text_len, text);
+    return pos;
+}
+
+/* Draw the progress display on one stream. A terminal gets three rows redrawn
+ * in place:
+ *
+ *   nlolib     ==========----------  34.5%  step 5,181  elapsed 00:07  eta 00:12
+ *   rejected   ==------------------  12.5%  740 of 5,921 attempts
+ *   step size  =============-------  0.0331 um  (min 1e-05, max 0.5)
+ *
+ * Anything else (a pipe, a file, a console without cursor control) gets the
+ * same values on one line, which needs only a carriage return. `redraw` is
+ * nonzero when the previous display is still the last thing on the stream.
+ * Returns the visible length of the one-line form, 0 for the stacked form. */
+static size_t progress_draw(
+    FILE* stream,
+    size_t step_index,
+    double percent,
+    double elapsed_seconds,
+    double remaining_seconds,
+    const char* final_state,
+    int redraw
+)
+{
+    progress_stream_caps caps;
+    progress_query_caps(stream, &caps);
+
+    char step_text[48];
+    char eta_text[24];
+    char elapsed_text[24];
+    char main_text[160];
+    (void)log_format_u64_grouped(step_text, sizeof(step_text), (uint64_t)step_index);
+    progress_format_duration(remaining_seconds, eta_text, sizeof(eta_text));
+    progress_format_duration(elapsed_seconds, elapsed_text, sizeof(elapsed_text));
+    if (final_state != NULL) {
+        (void)snprintf(main_text, sizeof(main_text), " %5.1f%%  step %s  %s in %s",
+                       percent, step_text, final_state, elapsed_text);
+    } else {
+        (void)snprintf(main_text, sizeof(main_text), " %5.1f%%  step %s  elapsed %s  eta %s",
+                       percent, step_text, elapsed_text, eta_text);
+    }
+
+    const size_t rejected = g_nlo_log_state.progress_rejected_steps;
+    const size_t attempts = g_nlo_log_state.progress_accepted_steps + rejected;
+    const double reject_fraction = (attempts > 0u) ? ((double)rejected / (double)attempts) : 0.0;
+    const double step_size = g_nlo_log_state.progress_last_step_size;
+    const double step_fraction = progress_step_fraction(step_size);
+    int main_color = 208;
+    if (final_state != NULL) {
+        main_color = (percent >= 100.0) ? 40 : 196;
+    }
+
+    char line[2048];
+    size_t pos = 0u;
+    if (caps.cursor != 0) {
+        char rejected_text[48];
+        char attempts_text[48];
+        char reject_text[160];
+        char size_text[160];
+        (void)log_format_u64_grouped(rejected_text, sizeof(rejected_text), (uint64_t)rejected);
+        (void)log_format_u64_grouped(attempts_text, sizeof(attempts_text), (uint64_t)attempts);
+        (void)snprintf(reject_text, sizeof(reject_text), " %5.1f%%  %s of %s attempts",
+                       100.0 * reject_fraction, rejected_text, attempts_text);
+        if (step_size > 0.0) {
+            (void)snprintf(size_text, sizeof(size_text), "  %.3g um  (min %.3g, max %.3g)",
+                           step_size,
+                           g_nlo_log_state.progress_min_step_size,
+                           g_nlo_log_state.progress_max_step_size);
+        } else {
+            (void)snprintf(size_text, sizeof(size_text), "  -- um  (min %.3g, max %.3g)",
+                           g_nlo_log_state.progress_min_step_size,
+                           g_nlo_log_state.progress_max_step_size);
+        }
+
+        const size_t limit = (caps.columns > 1) ? (size_t)(caps.columns - 1) : (size_t)120u;
+        pos = progress_append(line, sizeof(line), pos, (redraw != 0) ? "\r\x1b[2A" : "\r");
+        pos = progress_append_row(line, sizeof(line), pos, &caps, limit,
+                                  "nlolib     ", 1, percent / 100.0, main_color, main_text);
+        pos = progress_append(line, sizeof(line), pos, "\n");
+        pos = progress_append_row(line, sizeof(line), pos, &caps, limit,
+                                  "rejected   ", 0, reject_fraction, 197, reject_text);
+        pos = progress_append(line, sizeof(line), pos, "\n");
+        pos = progress_append_row(line, sizeof(line), pos, &caps, limit,
+                                  "step size  ", 0, step_fraction, 39, size_text);
+        progress_stream_write(stream, &caps, line, pos);
+        return 0u;
+    }
+
+    char tail_text[160];
+    if (step_size > 0.0) {
+        (void)snprintf(tail_text, sizeof(tail_text), "  rejected %.1f%%  step size %.3g um",
+                       100.0 * reject_fraction, step_size);
+    } else {
+        (void)snprintf(tail_text, sizeof(tail_text), "  rejected %.1f%%  step size -- um",
+                       100.0 * reject_fraction);
+    }
+    static const char k_name[] = "nlolib ";
+    const size_t visible = (sizeof(k_name) - 1u) + PROGRESS_BAR_WIDTH + strlen(main_text) + strlen(tail_text);
+    pos = progress_append(line, sizeof(line), pos, "\r%s", k_name);
+    pos = progress_append_bar(line, sizeof(line), pos, &caps, PROGRESS_BAR_WIDTH, percent / 100.0, main_color);
+    pos = progress_append(line, sizeof(line), pos, "%s%s", main_text, tail_text);
+    /* Blank what is left of a longer previous line. */
+    for (size_t idx = visible; idx < g_nlo_log_state.progress_last_line_len; ++idx) {
+        pos = progress_append(line, sizeof(line), pos, " ");
+    }
+    progress_stream_write(stream, &caps, line, pos);
+    return visible;
+}
+
 static void progress_render(
     size_t step_index,
     double percent,
     double now_seconds,
-    const char* state_text,
-    size_t reject_attempt
+    const char* final_state
 )
 {
-    char bar[PROGRESS_BAR_WIDTH + 1u];
-    char step_text[48];
-    char eta_text[24];
-    char elapsed_text[24];
-    char line[320];
-
     if (percent < 0.0) {
         percent = 0.0;
     } else if (percent > 100.0) {
         percent = 100.0;
     }
-
-    progress_make_bar(percent, bar, sizeof(bar));
-    (void)log_format_u64_grouped(step_text, sizeof(step_text), (uint64_t)step_index);
 
     double elapsed_seconds = 0.0;
     if (g_nlo_log_state.progress_start_seconds > 0.0 && now_seconds > g_nlo_log_state.progress_start_seconds) {
@@ -215,51 +499,18 @@ static void progress_render(
         remaining_seconds = elapsed_seconds * ((100.0 - percent) / percent);
     }
 
-    progress_format_duration(remaining_seconds, eta_text, sizeof(eta_text));
-    progress_format_duration(elapsed_seconds, elapsed_text, sizeof(elapsed_text));
-
-    if (reject_attempt > 0u) {
-        const int written = snprintf(line,
-                                     sizeof(line),
-                                     "[nlolib] [%s] %6.2f%% |%s| step %s eta %s elapsed %s retry#%llu",
-                                     (state_text != NULL) ? state_text : "progress",
-                                     percent,
-                                     bar,
-                                     step_text,
-                                     eta_text,
-                                     elapsed_text,
-                                     (unsigned long long)reject_attempt);
-        if (written < 0) {
-            return;
-        }
-    } else {
-        const int written = snprintf(line,
-                                     sizeof(line),
-                                     "[nlolib] [%s] %6.2f%% |%s| step %s eta %s elapsed %s",
-                                     (state_text != NULL) ? state_text : "progress",
-                                     percent,
-                                     bar,
-                                     step_text,
-                                     eta_text,
-                                     elapsed_text);
-        if (written < 0) {
-            return;
-        }
+    const int redraw = g_nlo_log_state.progress_line_visible;
+    size_t visible = 0u;
+    if (g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_STDOUT ||
+        g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_BOTH) {
+        visible = progress_draw(stdout, step_index, percent, elapsed_seconds, remaining_seconds, final_state, redraw);
+    }
+    if (g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_STDERR ||
+        g_nlo_log_state.progress_stream_mode == LOG_PROGRESS_STREAM_BOTH) {
+        visible = progress_draw(stderr, step_index, percent, elapsed_seconds, remaining_seconds, final_state, redraw);
     }
 
-    size_t line_len = strlen(line);
-    progress_write_bytes("\r", 1u);
-    progress_write_bytes(line, line_len);
-
-    if (g_nlo_log_state.progress_last_line_len > line_len) {
-        const size_t extra = g_nlo_log_state.progress_last_line_len - line_len;
-        for (size_t idx = 0u; idx < extra; ++idx) {
-            progress_write_bytes(" ", 1u);
-        }
-    }
-    progress_flush();
-
-    g_nlo_log_state.progress_last_line_len = line_len;
+    g_nlo_log_state.progress_last_line_len = visible;
     g_nlo_log_state.progress_line_visible = 1;
     g_nlo_log_state.progress_last_render_seconds = now_seconds;
     g_nlo_log_state.progress_last_percent = percent;
@@ -326,7 +577,11 @@ static void progress_notify_callback(
         next_step_size,
         error,
         elapsed_seconds,
-        isfinite(eta_seconds) ? eta_seconds : -1.0
+        isfinite(eta_seconds) ? eta_seconds : -1.0,
+        g_nlo_log_state.progress_accepted_steps,
+        g_nlo_log_state.progress_rejected_steps,
+        g_nlo_log_state.progress_min_step_size,
+        g_nlo_log_state.progress_max_step_size
     };
 
     if (g_nlo_log_state.progress_callback(&info, g_nlo_log_state.progress_callback_user_data) == 0) {
@@ -433,11 +688,13 @@ int log_set_file(const char* path_utf8, int append)
 int log_set_buffer(size_t capacity_bytes)
 {
     if (capacity_bytes == 0u) {
+        ring_lock();
         free(g_nlo_log_state.ring);
         g_nlo_log_state.ring = NULL;
         g_nlo_log_state.ring_capacity = 0u;
         g_nlo_log_state.ring_start = 0u;
         g_nlo_log_state.ring_size = 0u;
+        ring_unlock();
         return LOG_STATUS_OK;
     }
 
@@ -451,18 +708,22 @@ int log_set_buffer(size_t capacity_bytes)
         return LOG_STATUS_ALLOCATION_FAILED;
     }
 
+    ring_lock();
     free(g_nlo_log_state.ring);
     g_nlo_log_state.ring = new_ring;
     g_nlo_log_state.ring_capacity = capacity;
     g_nlo_log_state.ring_start = 0u;
     g_nlo_log_state.ring_size = 0u;
+    ring_unlock();
     return LOG_STATUS_OK;
 }
 
 int log_clear_buffer(void)
 {
+    ring_lock();
     g_nlo_log_state.ring_start = 0u;
     g_nlo_log_state.ring_size = 0u;
+    ring_unlock();
     return LOG_STATUS_OK;
 }
 
@@ -474,7 +735,9 @@ int log_read_buffer(char* dst, size_t dst_bytes, size_t* out_written, int consum
 
     *out_written = 0u;
     dst[0] = '\0';
+    ring_lock();
     if (g_nlo_log_state.ring == NULL || g_nlo_log_state.ring_capacity == 0u || g_nlo_log_state.ring_size == 0u) {
+        ring_unlock();
         return LOG_STATUS_OK;
     }
 
@@ -497,6 +760,7 @@ int log_read_buffer(char* dst, size_t dst_bytes, size_t* out_written, int consum
         g_nlo_log_state.ring_start = (g_nlo_log_state.ring_start + to_copy) % g_nlo_log_state.ring_capacity;
         g_nlo_log_state.ring_size -= to_copy;
     }
+    ring_unlock();
 
     return LOG_STATUS_OK;
 }
@@ -556,10 +820,12 @@ void log_emit_raw(int level, const char* text, size_t text_len)
     }
 
     int wrote_to_sink = 0;
+    ring_lock();
     if (g_nlo_log_state.ring != NULL && g_nlo_log_state.ring_capacity > 0u) {
         log_ring_append(text, text_len);
         wrote_to_sink = 1;
     }
+    ring_unlock();
 
     if (g_nlo_log_state.file != NULL) {
         (void)fwrite(text, 1u, text_len, g_nlo_log_state.file);
@@ -623,7 +889,7 @@ static double progress_percent(double z, double z_start, double z_end)
     return 100.0 * ratio;
 }
 
-void log_progress_begin(double z_start, double z_end)
+void log_progress_begin(double z_start, double z_end, double min_step_size, double max_step_size)
 {
     if ((g_nlo_log_state.progress_enabled == 0 && g_nlo_log_state.progress_callback == NULL) ||
         !(z_end > z_start)) {
@@ -634,6 +900,11 @@ void log_progress_begin(double z_start, double z_end)
     g_nlo_log_state.progress_active = 1;
     g_nlo_log_state.progress_z_start = z_start;
     g_nlo_log_state.progress_z_end = z_end;
+    g_nlo_log_state.progress_accepted_steps = 0u;
+    g_nlo_log_state.progress_rejected_steps = 0u;
+    g_nlo_log_state.progress_min_step_size = min_step_size;
+    g_nlo_log_state.progress_max_step_size = max_step_size;
+    g_nlo_log_state.progress_last_step_size = 0.0;
     g_nlo_log_state.progress_next_milestone_percent = g_nlo_log_state.progress_milestone_percent;
     g_nlo_log_state.progress_start_seconds = log_now_seconds();
     g_nlo_log_state.progress_last_render_seconds = 0.0;
@@ -660,6 +931,8 @@ void log_progress_step_accepted(
     const double percent = progress_percent(z, g_nlo_log_state.progress_z_start, z_end);
     const double now_seconds = log_now_seconds();
     g_nlo_log_state.progress_last_step_index = step_index;
+    g_nlo_log_state.progress_accepted_steps += 1u;
+    g_nlo_log_state.progress_last_step_size = step_size;
 
     const double adjust_tol = fmax(fabs(step_size) * 1e-12, 1e-15);
     const int is_step_adjust = (fabs(next_step_size - step_size) > adjust_tol) ? 1 : 0;
@@ -667,11 +940,7 @@ void log_progress_step_accepted(
 
     if (g_nlo_log_state.progress_enabled != 0 &&
         progress_should_render(percent, now_seconds, force_render) != 0) {
-        progress_render(step_index,
-                            percent,
-                            now_seconds,
-                            (is_step_adjust != 0) ? "adjust" : "running",
-                            0u);
+        progress_render(step_index, percent, now_seconds, NULL);
         progress_advance_milestones(percent);
     } else if (g_nlo_log_state.progress_enabled != 0 &&
                percent + 1e-12 >= (double)g_nlo_log_state.progress_next_milestone_percent) {
@@ -707,9 +976,14 @@ void log_progress_step_rejected(
     const double percent = progress_percent(z, g_nlo_log_state.progress_z_start, z_end);
     const double now_seconds = log_now_seconds();
     g_nlo_log_state.progress_last_step_index = step_index;
-    if (g_nlo_log_state.progress_enabled != 0) {
-        progress_render(step_index, percent, now_seconds, "reject", reject_attempt);
-        progress_advance_milestones(percent);
+    g_nlo_log_state.progress_rejected_steps += 1u;
+    g_nlo_log_state.progress_last_step_size = attempted_step;
+    /* Rejections do not advance z, so they are drawn on the clock alone: a
+     * run of them must not redraw the line once per attempt. */
+    if (g_nlo_log_state.progress_enabled != 0 &&
+        (g_nlo_log_state.progress_last_percent < 0.0 ||
+         (now_seconds - g_nlo_log_state.progress_last_render_seconds) >= PROGRESS_RENDER_MIN_SECONDS)) {
+        progress_render(step_index, percent, now_seconds, NULL);
     }
     progress_notify_callback(PROGRESS_EVENT_REJECTED,
                                  step_index,
@@ -742,8 +1016,7 @@ void log_progress_finish(double z, double z_end, int success)
         progress_render(g_nlo_log_state.progress_last_step_index,
                             percent,
                             now_seconds,
-                            (success != 0) ? "complete" : "aborted",
-                            0u);
+                            (success != 0) ? "complete" : "aborted");
         progress_end_console_line();
         log_emit(LOG_LEVEL_INFO,
                      "[nlolib] progress_summary:\n"

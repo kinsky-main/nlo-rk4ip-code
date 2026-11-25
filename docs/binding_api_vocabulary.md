@@ -119,7 +119,7 @@ through unchanged for every length.
 | `meta` | `preset`, `records_requested`, `records_written`, `backend_requested`, `coupled`, `status` |
 | `StepHistory` | `step_index`, `z`, `step_size`, `next_step_size`, `error`, `dropped`, `capacity` |
 | `StorageResult` | `run_id`, `records_captured`, `records_spilled`, `chunks_written`, `db_size_bytes`, `truncated` |
-| `ProgressInfo` | `event_type`, `step_index`, `reject_attempt`, `z`, `z_end`, `percent`, `step_size`, `next_step_size`, `error`, `elapsed_seconds`, `eta_seconds` |
+| `ProgressInfo` | `event_type`, `step_index`, `reject_attempt`, `z`, `z_end`, `percent`, `step_size`, `next_step_size`, `error`, `elapsed_seconds`, `eta_seconds`, `accepted_steps`, `rejected_steps`, `min_step_size`, `max_step_size` |
 | `RuntimeLimits` | the six fields of the C `runtime_limits` |
 | `PerfProfileSnapshot` | the eighteen fields of the C `nlo_perf_profile_snapshot` |
 
@@ -458,8 +458,8 @@ MATLAB `mmtools_*` examples, which need MMTools and are not required. The
 
 ## 10. Known gaps
 
-- MATLAB has no `progress_callback`: `progress_mex` cannot forward to a
-  function handle yet. `ProgressInfo` and the `"accepted"`, `"rejected"`,
+- MATLAB has no `progress_callback`: its poll loop prints progress but does
+  not forward it to a function handle yet. `ProgressInfo` and the `"accepted"`, `"rejected"`,
   `"finish"` event strings reach a caller only through that callback, so they
   are part of the same gap and are not counted as MATLAB differences.
 

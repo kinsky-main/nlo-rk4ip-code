@@ -136,8 +136,10 @@ void log_emit_raw(int level, const char* text, size_t text_len);
  *
  * @param z_start Starting z-coordinate.
  * @param z_end Final z-coordinate.
+ * @param min_step_size Smallest step the solver may take, in z units.
+ * @param max_step_size Largest step the solver may take, in z units.
  */
-void log_progress_begin(double z_start, double z_end);
+void log_progress_begin(double z_start, double z_end, double min_step_size, double max_step_size);
 
 /**
  * @brief Emit progress state for an accepted step.

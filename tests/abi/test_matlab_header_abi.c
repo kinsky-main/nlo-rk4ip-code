@@ -87,6 +87,10 @@
 
 /* --- 3. Rename the function declarations. ------------------------------ */
 #define nlolib_propagate                mirror_nlolib_propagate
+#define nlolib_propagate_start          mirror_nlolib_propagate_start
+#define nlolib_propagate_poll           mirror_nlolib_propagate_poll
+#define nlolib_propagate_cancel         mirror_nlolib_propagate_cancel
+#define nlolib_propagate_finish         mirror_nlolib_propagate_finish
 #define nlolib_query_runtime_limits     mirror_nlolib_query_runtime_limits
 #define nlolib_perf_profile_set_enabled mirror_nlolib_perf_profile_set_enabled
 #define nlolib_perf_profile_is_enabled  mirror_nlolib_perf_profile_is_enabled
@@ -169,6 +173,10 @@
 #undef PROPAGATE_OUTPUT_FINAL_ONLY
 
 #undef nlolib_propagate
+#undef nlolib_propagate_start
+#undef nlolib_propagate_poll
+#undef nlolib_propagate_cancel
+#undef nlolib_propagate_finish
 #undef nlolib_query_runtime_limits
 #undef nlolib_perf_profile_set_enabled
 #undef nlolib_perf_profile_is_enabled
@@ -338,6 +346,10 @@ ASSERT_OFFSET(progress_info, next_step_size);
 ASSERT_OFFSET(progress_info, error);
 ASSERT_OFFSET(progress_info, elapsed_seconds);
 ASSERT_OFFSET(progress_info, eta_seconds);
+ASSERT_OFFSET(progress_info, accepted_steps);
+ASSERT_OFFSET(progress_info, rejected_steps);
+ASSERT_OFFSET(progress_info, min_step_size);
+ASSERT_OFFSET(progress_info, max_step_size);
 
 ASSERT_SIZE(storage_options);
 ASSERT_OFFSET(storage_options, sqlite_path);
@@ -394,6 +406,10 @@ ASSERT_OFFSET(propagate_output, step_events_dropped);
 STATIC_ASSERT(sizeof(((mirror_propagate_output *)0)->output_records) ==
                   sizeof(((propagate_output *)0)->output_records),
               "nlolib_matlab.h: output_records pointer size mismatch");
+
+/* The mirror passes the nlolib_propagate_job* handle as uint64_t. */
+STATIC_ASSERT(sizeof(uint64_t) == sizeof(nlolib_propagate_job *),
+              "nlolib_matlab.h: uint64_t is not layout-compatible with nlolib_propagate_job*");
 
 /* Bounds baked into struct layout. */
 STATIC_ASSERT(sizeof(((mirror_storage_result *)0)->run_id) ==
