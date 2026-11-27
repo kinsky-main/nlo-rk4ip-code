@@ -103,16 +103,42 @@ typedef enum {
 } vk_kernel_id;
 
 /**
+ * @brief Scalar type of Vulkan device buffers and push constants.
+ *
+ * Host-side buffers (vec_buffer::bytes, uploads, downloads) always hold
+ * doubles. With NLO_VK_FP32 the device copy holds floats and transfers
+ * convert at the staging buffer.
+ */
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+typedef float vk_real;
+#else
+typedef double vk_real;
+#endif
+
+/** Bytes of one real element in a Vulkan device buffer. */
+#define VK_REAL_BYTES ((size_t)sizeof(vk_real))
+/** Bytes of one complex element in a Vulkan device buffer. */
+#define VK_COMPLEX_BYTES ((size_t)(2u * sizeof(vk_real)))
+
+/**
+ * @brief Device byte size of a buffer whose host representation has @p host_bytes.
+ */
+static inline size_t vk_device_bytes(size_t host_bytes)
+{
+    return host_bytes / (sizeof(double) / sizeof(vk_real));
+}
+
+/**
  * @brief Common push-constant payload shared by vector kernels.
  */
 typedef struct {
     uint32_t count;
     uint32_t pad;
-    double scalar0;
-    double scalar1;
+    vk_real scalar0;
+    vk_real scalar1;
     /** Used only by kernels that take more than two scalars. */
-    double scalar2;
-    double scalar3;
+    vk_real scalar2;
+    vk_real scalar3;
 } vk_push_constants;
 
 /**

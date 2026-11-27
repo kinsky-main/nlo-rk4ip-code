@@ -7,6 +7,14 @@
 #include "backend/nlo_complex.h"
 #include "backend/vector_backend.h"
 #include <math.h>
+
+/* NLOLIB_VULKAN_FP32 computes on the device in single precision, so checks of
+ * Vulkan results get a tolerance floor a few orders above float epsilon. */
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+#define VK_TOL(tol) fmax((tol), 1e-5)
+#else
+#define VK_TOL(tol) (tol)
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -64,8 +72,8 @@ static void test_affine_comb_matches_cpu(vector_backend* vk)
                 for (size_t k = 0u; k < terms; ++k) {
                     ref_re += coeffs[k] * RE(host[k][i]);
                 }
-                VK_CHECK(fabs(RE(got[i]) - RE(want[i])) <= 1e-14);
-                VK_CHECK(fabs(IM(got[i]) - IM(want[i])) <= 1e-14);
+                VK_CHECK(fabs(RE(got[i]) - RE(want[i])) <= VK_TOL(1e-14));
+                VK_CHECK(fabs(IM(got[i]) - IM(want[i])) <= VK_TOL(1e-14));
                 VK_CHECK(fabs(RE(want[i]) - ref_re) <= 1e-14);
             }
         }

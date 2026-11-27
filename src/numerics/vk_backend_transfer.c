@@ -7,6 +7,36 @@
 #include "utility/perf_profile.h"
 #include <string.h>
 
+/* Host buffers hold doubles; device buffers hold vk_real. These convert one
+ * staged chunk, addressed by its device byte offset and length. */
+static void vk_stage_from_host(void* staging, const void* host, VkDeviceSize device_offset, VkDeviceSize device_chunk)
+{
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+    const double* src = (const double*)host + (size_t)(device_offset / VK_REAL_BYTES);
+    vk_real* dst = (vk_real*)staging;
+    const size_t count = (size_t)(device_chunk / VK_REAL_BYTES);
+    for (size_t i = 0u; i < count; ++i) {
+        dst[i] = (vk_real)src[i];
+    }
+#else
+    memcpy(staging, (const uint8_t*)host + (size_t)device_offset, (size_t)device_chunk);
+#endif
+}
+
+static void vk_stage_to_host(void* host, const void* staging, VkDeviceSize device_offset, VkDeviceSize device_chunk)
+{
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+    double* dst = (double*)host + (size_t)(device_offset / VK_REAL_BYTES);
+    const vk_real* src = (const vk_real*)staging;
+    const size_t count = (size_t)(device_chunk / VK_REAL_BYTES);
+    for (size_t i = 0u; i < count; ++i) {
+        dst[i] = (double)src[i];
+    }
+#else
+    memcpy((uint8_t*)host + (size_t)device_offset, staging, (size_t)device_chunk);
+#endif
+}
+
 vec_status vk_copy_buffer_chunked(
     vector_backend* backend,
     VkBuffer src_buffer,
@@ -52,7 +82,7 @@ vec_status vk_copy_buffer_chunked(
 vec_status vk_buffer_create(vector_backend* backend, vec_buffer* buffer)
 {
     return vk_create_buffer_raw(backend,
-                                    (VkDeviceSize)buffer->bytes,
+                                    (VkDeviceSize)vk_device_bytes(buffer->bytes),
                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
                                         VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                                         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -78,13 +108,12 @@ vec_status vk_upload(
         return status;
     }
 
-    const uint8_t* src = (const uint8_t*)data;
-    VkDeviceSize remaining = (VkDeviceSize)bytes;
+    VkDeviceSize remaining = (VkDeviceSize)vk_device_bytes(bytes);
     VkDeviceSize offset = 0u;
 
     while (remaining > 0u) {
         VkDeviceSize chunk = vk_min_size(remaining, backend->vk.staging_capacity);
-        memcpy(backend->vk.staging_mapped_ptr, src + (size_t)offset, (size_t)chunk);
+        vk_stage_from_host(backend->vk.staging_mapped_ptr, data, offset, chunk);
 
         status = vk_begin_commands(backend);
         if (status != VEC_STATUS_OK) {
@@ -125,8 +154,7 @@ vec_status vk_download(
         return status;
     }
 
-    uint8_t* dst = (uint8_t*)data;
-    VkDeviceSize remaining = (VkDeviceSize)bytes;
+    VkDeviceSize remaining = (VkDeviceSize)vk_device_bytes(bytes);
     VkDeviceSize offset = 0u;
 
     while (remaining > 0u) {
@@ -152,7 +180,7 @@ vec_status vk_download(
         perf_profile_add_gpu_host_transfer_copy(1u, (uint64_t)chunk);
         perf_profile_add_gpu_download(1u, (uint64_t)chunk);
 
-        memcpy(dst + (size_t)offset, backend->vk.staging_mapped_ptr, (size_t)chunk);
+        vk_stage_to_host(data, backend->vk.staging_mapped_ptr, offset, chunk);
         remaining -= chunk;
         offset += chunk;
     }

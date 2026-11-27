@@ -66,6 +66,11 @@ function(configure_vulkan_backend target target_source_dir target_binary_dir)
     complex_affine_comb_real
   )
 
+  set(vk_precision_flags "")
+  if(NLOLIB_VULKAN_FP32)
+    set(vk_precision_flags "-DNLO_VK_FP32=1")
+  endif()
+
   set(vk_spv_outputs "")
   foreach(vk_kernel IN LISTS vk_kernel_names)
     set(vk_kernel_src "${VK_KERNEL_SOURCE_DIR}/nlo_${vk_kernel}.comp")
@@ -75,13 +80,17 @@ function(configure_vulkan_backend target target_source_dir target_binary_dir)
       COMMAND "${GLSLANG_VALIDATOR}"
         -V
         --target-env vulkan1.2
+        ${vk_precision_flags}
         -I"${VK_KERNEL_SOURCE_DIR}"
         -o "${vk_kernel_spv}"
         "${vk_kernel_src}"
       DEPENDS
         "${vk_kernel_src}"
+        "${VK_KERNEL_SOURCE_DIR}/nlo_precision.glslinc"
         "${VK_KERNEL_SOURCE_DIR}/complex_device.glslinc"
+        "${VK_KERNEL_SOURCE_DIR}/nlo_complex_device.glslinc"
         "${VK_KERNEL_SOURCE_DIR}/double_math.glslinc"
+        "${VK_KERNEL_SOURCE_DIR}/nlo_double_math.glslinc"
       COMMENT "Compiling Vulkan compute shader ${vk_kernel}.comp"
       VERBATIM
     )
@@ -124,6 +133,7 @@ function(configure_vulkan_backend target target_source_dir target_binary_dir)
   # The operator JIT (numerics/vk_operator_jit.c) compiles GLSL at runtime and
   # #includes these helpers; embed them so installed builds can resolve them.
   set(VK_JIT_GLSL_FILES
+    "${VK_KERNEL_SOURCE_DIR}/nlo_precision.glslinc"
     "${VK_KERNEL_SOURCE_DIR}/complex_device.glslinc"
     "${VK_KERNEL_SOURCE_DIR}/nlo_complex_device.glslinc"
     "${VK_KERNEL_SOURCE_DIR}/double_math.glslinc"

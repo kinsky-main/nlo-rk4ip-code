@@ -1,9 +1,11 @@
 #ifndef COMPLEX_DEVICE_GLSLINC
 #define COMPLEX_DEVICE_GLSLINC
 
+#include "nlo_precision.glslinc"
+
 struct vk_complex64 {
-    double re;
-    double im;
+    nlo_real re;
+    nlo_real im;
 };
 
 #endif

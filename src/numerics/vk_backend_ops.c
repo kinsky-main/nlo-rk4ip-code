@@ -11,7 +11,7 @@ vec_status vk_op_real_fill(vector_backend* backend, vec_buffer* dst, double valu
                                   VK_KERNEL_REAL_FILL,
                                   dst,
                                   NULL,
-                                  sizeof(double),
+                                  VK_REAL_BYTES,
                                   dst->length,
                                   value,
                                   0.0);
@@ -19,7 +19,7 @@ vec_status vk_op_real_fill(vector_backend* backend, vec_buffer* dst, double valu
 
 vec_status vk_op_real_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
 {
-    return vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
+    return vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, vk_device_bytes(dst->bytes));
 }
 
 vec_status vk_op_real_mul_inplace(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
@@ -28,7 +28,7 @@ vec_status vk_op_real_mul_inplace(vector_backend* backend, vec_buffer* dst, cons
                                   VK_KERNEL_REAL_MUL_INPLACE,
                                   dst,
                                   src,
-                                  sizeof(double),
+                                  VK_REAL_BYTES,
                                   dst->length,
                                   0.0,
                                   0.0);
@@ -40,7 +40,7 @@ vec_status vk_op_complex_fill(vector_backend* backend, vec_buffer* dst, nlo_comp
                                   VK_KERNEL_COMPLEX_FILL,
                                   dst,
                                   NULL,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   RE(value),
                                   IM(value));
@@ -48,7 +48,7 @@ vec_status vk_op_complex_fill(vector_backend* backend, vec_buffer* dst, nlo_comp
 
 vec_status vk_op_complex_copy(vector_backend* backend, vec_buffer* dst, const vec_buffer* src)
 {
-    return vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, dst->bytes);
+    return vk_copy_buffer_chunked(backend, src->vk_buffer, dst->vk_buffer, vk_device_bytes(dst->bytes));
 }
 
 vec_status vk_op_complex_magnitude_squared(
@@ -61,7 +61,7 @@ vec_status vk_op_complex_magnitude_squared(
                                   VK_KERNEL_COMPLEX_MAGNITUDE_SQUARED,
                                   dst,
                                   src,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   0.0,
                                   0.0);
@@ -77,7 +77,7 @@ vec_status vk_op_complex_scalar_mul_inplace(
                                   VK_KERNEL_COMPLEX_SCALAR_MUL_INPLACE,
                                   dst,
                                   NULL,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   RE(alpha),
                                   IM(alpha));
@@ -93,7 +93,7 @@ vec_status vk_op_complex_mul_inplace(
                                   VK_KERNEL_COMPLEX_MUL_INPLACE,
                                   dst,
                                   src,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   0.0,
                                   0.0);
@@ -109,7 +109,7 @@ vec_status vk_op_complex_add_inplace(
                                   VK_KERNEL_COMPLEX_ADD_INPLACE,
                                   dst,
                                   src,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   0.0,
                                   0.0);
@@ -121,7 +121,7 @@ vec_status vk_op_complex_exp_inplace(vector_backend* backend, vec_buffer* dst)
                                   VK_KERNEL_COMPLEX_EXP_INPLACE,
                                   dst,
                                   NULL,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   0.0,
                                   0.0);
@@ -137,7 +137,7 @@ vec_status vk_op_complex_real_pow_inplace(
                                   VK_KERNEL_COMPLEX_REAL_POW_INPLACE,
                                   dst,
                                   NULL,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   exponent,
                                   0.0);
@@ -197,7 +197,7 @@ vec_status vk_op_complex_axis_unshifted_from_delta(
                                   VK_KERNEL_COMPLEX_AXIS_UNSHIFTED_FROM_DELTA,
                                   dst,
                                   NULL,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   delta,
                                   0.0);
@@ -218,7 +218,7 @@ vec_status vk_op_complex_axis_centered_from_delta(
                                   VK_KERNEL_COMPLEX_AXIS_CENTERED_FROM_DELTA,
                                   dst,
                                   NULL,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   delta,
                                   0.0);
@@ -278,7 +278,7 @@ vec_status vk_op_complex_mesh_from_axis_tfast(
                                   kernel_id,
                                   dst,
                                   axis,
-                                  sizeof(nlo_complex),
+                                  VK_COMPLEX_BYTES,
                                   dst->length,
                                   (double)nt,
                                   (double)ny);

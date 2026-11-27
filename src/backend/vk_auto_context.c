@@ -249,9 +249,11 @@ static int vk_auto_select_device(
     for (uint32_t i = 0u; i < device_count; ++i) {
         VkPhysicalDeviceFeatures features = {0};
         vkGetPhysicalDeviceFeatures(devices[i], &features);
+#if !(defined(NLO_VK_FP32) && NLO_VK_FP32)
         if (features.shaderFloat64 != VK_TRUE) {
             continue;
         }
+#endif
 
         uint32_t queue_family_index = 0u;
         if (vk_auto_find_compute_queue_family(devices[i], &queue_family_index) != 0) {
@@ -417,7 +419,11 @@ int vk_auto_context_init(
     };
 
     VkPhysicalDeviceFeatures device_features = {
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+        .shaderFloat64 = VK_FALSE
+#else
         .shaderFloat64 = VK_TRUE
+#endif
     };
 
     VkDeviceCreateInfo device_info = {

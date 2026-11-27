@@ -10,6 +10,13 @@
 #include "utility/perf_profile.h"
 #include "vk_jit_glsl_sources.h"
 #include <glslang_c_interface.h>
+
+/* Runtime glslang gets no -D flags, so the precision switch goes in the source. */
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+#define VK_JIT_PRECISION_DEFINE "#define NLO_VK_FP32 1\n"
+#else
+#define VK_JIT_PRECISION_DEFINE ""
+#endif
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -416,8 +423,9 @@ static int jit_build_operator_source(
 
     if (jit_str_builder_append(source,
                                "#version 460\n"
-                               "#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require\n"
-                               "#extension GL_GOOGLE_include_directive : require\n\n"
+                               "#extension GL_GOOGLE_include_directive : require\n"
+                               VK_JIT_PRECISION_DEFINE
+                               "#include \"nlo_precision.glslinc\"\n\n"
                                "#include \"complex_device.glslinc\"\n"
                                "#include \"double_math.glslinc\"\n"
                                "#include \"complex_math.glslinc\"\n\n") != 0 ||
@@ -428,8 +436,8 @@ static int jit_build_operator_source(
                                "layout(push_constant) uniform PushConstants {\n"
                                "    uint count;\n"
                                "    uint _pad;\n"
-                               "    double scalar0;\n"
-                               "    double scalar1;\n"
+                               "    nlo_real scalar0;\n"
+                               "    nlo_real scalar1;\n"
                                "} pc;\n\n"
                                "layout(set = 0, binding = 0, std430) buffer DstBuffer { vk_complex64 dst[]; };\n"
                                "layout(set = 0, binding = 1, std430) readonly buffer FieldBuffer { vk_complex64 field_vals[]; };\n"
@@ -1111,7 +1119,7 @@ vec_status operator_program_execute_jit(
     VkBuffer bound_buffers[VK_DESCRIPTOR_BINDING_COUNT] = {0};
     VkDeviceSize bound_ranges[VK_DESCRIPTOR_BINDING_COUNT] = {0};
     bound_buffers[VK_BINDING_DST] = out_vector->vk_buffer;
-    bound_ranges[VK_BINDING_DST] = (VkDeviceSize)out_vector->bytes;
+    bound_ranges[VK_BINDING_DST] = (VkDeviceSize)vk_device_bytes(out_vector->bytes);
 
     for (uint32_t binding = VK_BINDING_FIELD; binding < VK_DESCRIPTOR_BINDING_COUNT; ++binding) {
         const vec_buffer* source = jit_select_symbol_buffer(eval_ctx, (vk_descriptor_binding)binding);
@@ -1128,7 +1136,7 @@ vec_status operator_program_execute_jit(
                 return VEC_STATUS_INVALID_ARGUMENT;
             }
             bound_buffers[binding] = source->vk_buffer;
-            bound_ranges[binding] = (VkDeviceSize)source->bytes;
+            bound_ranges[binding] = (VkDeviceSize)vk_device_bytes(source->bytes);
             continue;
         }
 
@@ -1137,7 +1145,7 @@ vec_status operator_program_execute_jit(
             return VEC_STATUS_INVALID_ARGUMENT;
         }
         bound_buffers[binding] = out_vector->vk_buffer;
-        bound_ranges[binding] = (VkDeviceSize)out_vector->bytes;
+        bound_ranges[binding] = (VkDeviceSize)vk_device_bytes(out_vector->bytes);
     }
 
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
@@ -1191,8 +1199,8 @@ vec_status operator_program_execute_jit(
     vk_push_constants push = {
         .count = (uint32_t)out_vector->length,
         .pad = 0u,
-        .scalar0 = eval_ctx->half_step_size,
-        .scalar1 = 0.0
+        .scalar0 = (vk_real)eval_ctx->half_step_size,
+        .scalar1 = (vk_real)0.0
     };
     vkCmdPushConstants(cmd,
                        backend->vk.pipeline_layout,
@@ -1208,11 +1216,11 @@ vec_status operator_program_execute_jit(
     vk_cmd_compute_to_compute(cmd,
                                   out_vector->vk_buffer,
                                   0u,
-                                  (VkDeviceSize)out_vector->bytes);
+                                  (VkDeviceSize)vk_device_bytes(out_vector->bytes));
     vk_cmd_compute_to_transfer(cmd,
                                    out_vector->vk_buffer,
                                    0u,
-                                   (VkDeviceSize)out_vector->bytes);
+                                   (VkDeviceSize)vk_device_bytes(out_vector->bytes));
 
     status = vk_submit_commands(backend);
     if (status != VEC_STATUS_OK) {
@@ -1221,7 +1229,7 @@ vec_status operator_program_execute_jit(
 
     perf_profile_add_gpu_dispatch(1u,
                                       (uint64_t)unique_count + 1u,
-                                      ((uint64_t)unique_count + 1u) * (uint64_t)out_vector->bytes);
+                                      ((uint64_t)unique_count + 1u) * (uint64_t)vk_device_bytes(out_vector->bytes));
     return VEC_STATUS_OK;
 }
 

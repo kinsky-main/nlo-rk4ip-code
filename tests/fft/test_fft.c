@@ -7,6 +7,14 @@
 #include "backend/vector_backend.h"
 #include "fft/fft.h"
 #include <math.h>
+
+/* NLOLIB_VULKAN_FP32 computes on the device in single precision, so checks of
+ * Vulkan results get a tolerance floor a few orders above float epsilon. */
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+#define VK_TOL(tol) fmax((tol), 1e-5)
+#else
+#define VK_TOL(tol) (tol)
+#endif
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -252,8 +260,8 @@ static void test_fft_round_trip_vulkan_if_available(void)
     FFT_CHECK(vec_download(backend, out, round_trip, sizeof(round_trip)) == VEC_STATUS_OK);
 
     for (size_t i = 0u; i < n; ++i) {
-        FFT_CHECK(fabs(RE(round_trip[i]) - RE(time_domain[i])) < 1e-8);
-        FFT_CHECK(fabs(IM(round_trip[i]) - IM(time_domain[i])) < 1e-8);
+        FFT_CHECK(fabs(RE(round_trip[i]) - RE(time_domain[i])) < VK_TOL(1e-8));
+        FFT_CHECK(fabs(IM(round_trip[i]) - IM(time_domain[i])) < VK_TOL(1e-8));
     }
 
     fft_plan_destroy(plan);
@@ -303,8 +311,8 @@ static void test_fft_vulkan_rebinds_target_buffers(void)
         FFT_CHECK(vec_download(backend, out[k], host, sizeof(host)) == VEC_STATUS_OK);
         for (size_t i = 0u; i < n; ++i) {
             const double phase = -2.0 * 3.14159265358979323846 * (double)(i * k) / (double)n;
-            FFT_CHECK(fabs(RE(host[i]) - cos(phase)) < 1e-12);
-            FFT_CHECK(fabs(fabs(IM(host[i])) - fabs(sin(phase))) < 1e-12);
+            FFT_CHECK(fabs(RE(host[i]) - cos(phase)) < VK_TOL(1e-12));
+            FFT_CHECK(fabs(fabs(IM(host[i])) - fabs(sin(phase))) < VK_TOL(1e-12));
         }
     }
 

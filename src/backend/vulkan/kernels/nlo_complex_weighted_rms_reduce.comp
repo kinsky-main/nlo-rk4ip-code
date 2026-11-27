@@ -1,6 +1,6 @@
 #version 460
-#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
 #extension GL_GOOGLE_include_directive : require
+#include "nlo_precision.glslinc"
 
 #include "complex_device.glslinc"
 
@@ -9,13 +9,13 @@ layout(local_size_x = 64) in;
 layout(push_constant) uniform PushConstants {
     uint count;
     uint _pad;
-    double scalar0;
-    double scalar1;
+    nlo_real scalar0;
+    nlo_real scalar1;
 } pc;
 
 struct vk_error_pair {
-    double numerator;
-    double denominator;
+    nlo_real numerator;
+    nlo_real denominator;
 };
 
 layout(set = 0, binding = 0, std430) buffer DstBuffer {
@@ -30,8 +30,8 @@ layout(set = 0, binding = 2, std430) readonly buffer CoarseBuffer {
     vk_complex64 coarse_vals[];
 };
 
-shared double shared_num[64];
-shared double shared_den[64];
+shared nlo_real shared_num[64];
+shared nlo_real shared_den[64];
 
 void main()
 {
@@ -39,20 +39,20 @@ void main()
     uint local_idx = gl_LocalInvocationID.x;
     uint group_idx = gl_WorkGroupID.x;
 
-    double numerator = 0.0;
-    double denominator = 0.0;
+    nlo_real numerator = 0.0;
+    nlo_real denominator = 0.0;
     if (global_idx < pc.count) {
-        double fine_re = fine_vals[global_idx].re;
-        double fine_im = fine_vals[global_idx].im;
-        double coarse_re = coarse_vals[global_idx].re;
-        double coarse_im = coarse_vals[global_idx].im;
+        nlo_real fine_re = fine_vals[global_idx].re;
+        nlo_real fine_im = fine_vals[global_idx].im;
+        nlo_real coarse_re = coarse_vals[global_idx].re;
+        nlo_real coarse_im = coarse_vals[global_idx].im;
 
-        double diff_re = fine_re - coarse_re;
-        double diff_im = fine_im - coarse_im;
+        nlo_real diff_re = fine_re - coarse_re;
+        nlo_real diff_im = fine_im - coarse_im;
         numerator = diff_re * diff_re + diff_im * diff_im;
 
-        double fine_abs = sqrt(fine_re * fine_re + fine_im * fine_im);
-        double weight = pc.scalar0 + pc.scalar1 * fine_abs;
+        nlo_real fine_abs = sqrt(fine_re * fine_re + fine_im * fine_im);
+        nlo_real weight = pc.scalar0 + pc.scalar1 * fine_abs;
         denominator = weight * weight;
     }
 

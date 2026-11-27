@@ -1,24 +1,26 @@
 #ifndef DOUBLE_MATH_GLSLINC
 #define DOUBLE_MATH_GLSLINC
 
-const double PI = 3.14159265358979323846264338327950288;
-const double HALF_PI = 1.57079632679489661923132169163975144;
-const double QUARTER_PI = 0.78539816339744830961566084581987572;
-const double TWO_PI = 6.28318530717958647692528676655900576;
-const double INV_HALF_PI = 0.63661977236758134307553505349005745;
-const double TAN_PI_8 = 0.41421356237309504880168872420969808;
-const double TAN_3PI_8 = 2.41421356237309504880168872420969808;
-const double LN2 = 0.69314718055994530941723212145817657;
-const double INV_LN2 = 1.44269504088896340735992468100189214;
-const double SQRT_HALF = 0.70710678118654752440084436210484904;
-const double SQRT_TWO = 1.41421356237309504880168872420969808;
+#include "nlo_precision.glslinc"
 
-double abs_double(double x)
+const nlo_real PI = 3.14159265358979323846264338327950288;
+const nlo_real HALF_PI = 1.57079632679489661923132169163975144;
+const nlo_real QUARTER_PI = 0.78539816339744830961566084581987572;
+const nlo_real TWO_PI = 6.28318530717958647692528676655900576;
+const nlo_real INV_HALF_PI = 0.63661977236758134307553505349005745;
+const nlo_real TAN_PI_8 = 0.41421356237309504880168872420969808;
+const nlo_real TAN_3PI_8 = 2.41421356237309504880168872420969808;
+const nlo_real LN2 = 0.69314718055994530941723212145817657;
+const nlo_real INV_LN2 = 1.44269504088896340735992468100189214;
+const nlo_real SQRT_HALF = 0.70710678118654752440084436210484904;
+const nlo_real SQRT_TWO = 1.41421356237309504880168872420969808;
+
+nlo_real abs_double(nlo_real x)
 {
     return (x < 0.0) ? -x : x;
 }
 
-double pow2_int(int exponent)
+nlo_real pow2_int(int exponent)
 {
     if (exponent == 0) {
         return 1.0;
@@ -26,8 +28,8 @@ double pow2_int(int exponent)
 
     bool negative = (exponent < 0);
     uint power = uint(negative ? -exponent : exponent);
-    double base = 2.0;
-    double result = 1.0;
+    nlo_real base = 2.0;
+    nlo_real result = 1.0;
     while (power != 0u) {
         if ((power & 1u) != 0u) {
             result *= base;
@@ -40,17 +42,17 @@ double pow2_int(int exponent)
     return negative ? (1.0 / result) : result;
 }
 
-double exp_double(double x)
+nlo_real exp_double(nlo_real x)
 {
-    if (x > 709.0) {
-        x = 709.0;
-    } else if (x < -745.0) {
-        x = -745.0;
+    if (x > NLO_REAL_EXP_MAX) {
+        x = NLO_REAL_EXP_MAX;
+    } else if (x < NLO_REAL_EXP_MIN) {
+        x = NLO_REAL_EXP_MIN;
     }
 
     int k = int((x >= 0.0) ? (x * INV_LN2 + 0.5) : (x * INV_LN2 - 0.5));
-    double r = x - (double(k) * LN2);
-    double term = 1.0 / 39916800.0;
+    nlo_real r = x - (nlo_real(k) * LN2);
+    nlo_real term = 1.0 / 39916800.0;
     term = (term * r) + (1.0 / 3628800.0);
     term = (term * r) + (1.0 / 362880.0);
     term = (term * r) + (1.0 / 40320.0);
@@ -65,10 +67,10 @@ double exp_double(double x)
     return term * pow2_int(k);
 }
 
-double atan_small(double x)
+nlo_real atan_small(nlo_real x)
 {
-    double x2 = x * x;
-    double poly = -1.0 / 13.0;
+    nlo_real x2 = x * x;
+    nlo_real poly = -1.0 / 13.0;
     poly = (poly * x2) + (1.0 / 11.0);
     poly = (poly * x2) - (1.0 / 9.0);
     poly = (poly * x2) + (1.0 / 7.0);
@@ -78,10 +80,10 @@ double atan_small(double x)
     return x * poly * (-1.0);
 }
 
-double atan_double(double x)
+nlo_real atan_double(nlo_real x)
 {
-    double ax = abs_double(x);
-    double angle = 0.0;
+    nlo_real ax = abs_double(x);
+    nlo_real angle = 0.0;
     if (ax > TAN_3PI_8) {
         angle = HALF_PI - atan_small(1.0 / ax);
     } else if (ax > TAN_PI_8) {
@@ -92,7 +94,7 @@ double atan_double(double x)
     return (x < 0.0) ? -angle : angle;
 }
 
-double atan2_double(double y, double x)
+nlo_real atan2_double(nlo_real y, nlo_real x)
 {
     if (x > 0.0) {
         return atan_double(y / x);
@@ -110,14 +112,14 @@ double atan2_double(double y, double x)
     return 0.0;
 }
 
-double log_double(double x)
+nlo_real log_double(nlo_real x)
 {
     if (x <= 0.0) {
         return -1.0 / 0.0;
     }
 
     int exponent = 0;
-    double m = x;
+    nlo_real m = x;
     while (m > SQRT_TWO) {
         m *= 0.5;
         exponent += 1;
@@ -127,39 +129,39 @@ double log_double(double x)
         exponent -= 1;
     }
 
-    double y = (m - 1.0) / (m + 1.0);
-    double y2 = y * y;
-    double series = 1.0 / 11.0;
+    nlo_real y = (m - 1.0) / (m + 1.0);
+    nlo_real y2 = y * y;
+    nlo_real series = 1.0 / 11.0;
     series = (series * y2) + (1.0 / 9.0);
     series = (series * y2) + (1.0 / 7.0);
     series = (series * y2) + (1.0 / 5.0);
     series = (series * y2) + (1.0 / 3.0);
     series = (series * y2) + 1.0;
-    return (2.0 * y * series) + (double(exponent) * LN2);
+    return (2.0 * y * series) + (nlo_real(exponent) * LN2);
 }
 
-void sincos_double(double angle, out double s, out double c)
+void sincos_double(nlo_real angle, out nlo_real s, out nlo_real c)
 {
     int quadrant = int((angle >= 0.0) ? (angle * INV_HALF_PI + 0.5)
                                       : (angle * INV_HALF_PI - 0.5));
-    double reduced = angle - (double(quadrant) * HALF_PI);
-    double x2 = reduced * reduced;
+    nlo_real reduced = angle - (nlo_real(quadrant) * HALF_PI);
+    nlo_real x2 = reduced * reduced;
 
-    double sin_poly = -1.0 / 6227020800.0;
+    nlo_real sin_poly = -1.0 / 6227020800.0;
     sin_poly = (sin_poly * x2) + (1.0 / 39916800.0);
     sin_poly = (sin_poly * x2) - (1.0 / 362880.0);
     sin_poly = (sin_poly * x2) + (1.0 / 5040.0);
     sin_poly = (sin_poly * x2) - (1.0 / 120.0);
     sin_poly = (sin_poly * x2) + (1.0 / 6.0);
-    double sin_r = reduced * (((sin_poly * x2) - 1.0) * (-1.0));
+    nlo_real sin_r = reduced * (((sin_poly * x2) - 1.0) * (-1.0));
 
-    double cos_poly = -1.0 / 479001600.0;
+    nlo_real cos_poly = -1.0 / 479001600.0;
     cos_poly = (cos_poly * x2) + (1.0 / 3628800.0);
     cos_poly = (cos_poly * x2) - (1.0 / 40320.0);
     cos_poly = (cos_poly * x2) + (1.0 / 720.0);
     cos_poly = (cos_poly * x2) - (1.0 / 24.0);
     cos_poly = (cos_poly * x2) + 0.5;
-    double cos_r = ((cos_poly * x2) - 1.0) * (-1.0);
+    nlo_real cos_r = ((cos_poly * x2) - 1.0) * (-1.0);
 
     int mod_quadrant = quadrant % 4;
     if (mod_quadrant < 0) {
@@ -181,7 +183,7 @@ void sincos_double(double angle, out double s, out double c)
     }
 }
 
-double pow_double(double x, double exponent)
+nlo_real pow_double(nlo_real x, nlo_real exponent)
 {
     if (x == 0.0) {
         return (exponent == 0.0) ? 1.0 : 0.0;

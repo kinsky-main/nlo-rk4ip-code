@@ -1,6 +1,6 @@
 #version 460
-#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
 #extension GL_GOOGLE_include_directive : require
+#include "nlo_precision.glslinc"
 
 #include "complex_device.glslinc"
 #include "double_math.glslinc"
@@ -10,8 +10,8 @@ layout(local_size_x = 64) in;
 layout(push_constant) uniform PushConstants {
     uint count;
     uint _pad;
-    double scalar0;
-    double scalar1;
+    nlo_real scalar0;
+    nlo_real scalar1;
 } pc;
 
 layout(set = 0, binding = 0, std430) buffer DstBuffer {
@@ -25,10 +25,10 @@ void main()
         return;
     }
 
-    const double exponent = pc.scalar0;
-    const double re = dst[idx].re;
-    const double im = dst[idx].im;
-    const double radius = sqrt((re * re) + (im * im));
+    const nlo_real exponent = pc.scalar0;
+    const nlo_real re = dst[idx].re;
+    const nlo_real im = dst[idx].im;
+    const nlo_real radius = sqrt((re * re) + (im * im));
 
     if (radius == 0.0) {
         if (exponent == 0.0) {
@@ -41,11 +41,11 @@ void main()
         return;
     }
 
-    const double angle = atan2_double(im, re);
-    const double scaled_angle = exponent * angle;
-    const double scaled_radius = pow_double(radius, exponent);
-    double sin_angle = 0.0;
-    double cos_angle = 0.0;
+    const nlo_real angle = atan2_double(im, re);
+    const nlo_real scaled_angle = exponent * angle;
+    const nlo_real scaled_radius = pow_double(radius, exponent);
+    nlo_real sin_angle = 0.0;
+    nlo_real cos_angle = 0.0;
     sincos_double(scaled_angle, sin_angle, cos_angle);
 
     dst[idx].re = scaled_radius * cos_angle;

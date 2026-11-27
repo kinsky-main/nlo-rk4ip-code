@@ -219,7 +219,7 @@ static vec_status fft_vk_execute_inplace(
     }
 
     VkBuffer buffer = target->vk_buffer;
-    fft_vk_cmd_compute_barrier(cmd, buffer, (VkDeviceSize)target->bytes);
+    fft_vk_cmd_compute_barrier(cmd, buffer, (VkDeviceSize)vk_device_bytes(target->bytes));
 
     /* VkFFT rebinds its descriptors only when the buffer *pointer* changes. A
      * stack-local pointer can repeat its address with a different buffer, so
@@ -241,7 +241,7 @@ static vec_status fft_vk_execute_inplace(
         return VEC_STATUS_BACKEND_UNAVAILABLE;
     }
 
-    fft_vk_cmd_compute_barrier(cmd, buffer, (VkDeviceSize)target->bytes);
+    fft_vk_cmd_compute_barrier(cmd, buffer, (VkDeviceSize)vk_device_bytes(target->bytes));
     if (backend != NULL && backend->in_simulation) {
         vk_simulation_phase_mark_commands(backend);
         return VEC_STATUS_OK;
@@ -416,7 +416,7 @@ vec_status fft_plan_create_shaped_with_backend(
         }
 
         plan->vk_buffer_binding = plan->vk_placeholder_vec->vk_buffer;
-        plan->vk_buffer_size = (uint64_t)plan->vk_placeholder_vec->bytes;
+        plan->vk_buffer_size = (uint64_t)vk_device_bytes(plan->vk_placeholder_vec->bytes);
 
         VkCommandPoolCreateInfo pool_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -465,7 +465,7 @@ vec_status fft_plan_create_shaped_with_backend(
             configuration.size[i] = (uint64_t)plan->shape.dims[src_idx];
         }
         configuration.numberBatches = 1u;
-        configuration.doublePrecision = 1u;
+        configuration.doublePrecision = (sizeof(vk_real) == sizeof(double)) ? 1u : 0u;
         configuration.normalize = 0u;
 
         configuration.device = &backend->vk.device;

@@ -1,7 +1,7 @@
 #ifndef COMPLEX_MATH_GLSLINC
 #define COMPLEX_MATH_GLSLINC
 
-vk_complex64 jit_make_complex(double re, double im)
+vk_complex64 jit_make_complex(nlo_real re, nlo_real im)
 {
     vk_complex64 value;
     value.re = re;
@@ -9,7 +9,7 @@ vk_complex64 jit_make_complex(double re, double im)
     return value;
 }
 
-double jit_complex_abs_sq(vk_complex64 value)
+nlo_real jit_complex_abs_sq(vk_complex64 value)
 {
     return (value.re * value.re) + (value.im * value.im);
 }
@@ -30,7 +30,7 @@ vk_complex64 jit_complex_mul(vk_complex64 lhs, vk_complex64 rhs)
                                (lhs.re * rhs.im) + (lhs.im * rhs.re));
 }
 
-vk_complex64 jit_complex_scale(vk_complex64 value, double scale)
+vk_complex64 jit_complex_scale(vk_complex64 value, nlo_real scale)
 {
     return jit_make_complex(value.re * scale, value.im * scale);
 }
@@ -42,23 +42,23 @@ vk_complex64 jit_complex_magnitude_squared(vk_complex64 value)
 
 vk_complex64 jit_complex_exp(vk_complex64 value)
 {
-    double sin_im = 0.0;
-    double cos_im = 0.0;
-    double exp_re = exp_double(value.re);
+    nlo_real sin_im = 0.0;
+    nlo_real cos_im = 0.0;
+    nlo_real exp_re = exp_double(value.re);
     sincos_double(value.im, sin_im, cos_im);
     return jit_make_complex(exp_re * cos_im, exp_re * sin_im);
 }
 
 vk_complex64 jit_complex_log(vk_complex64 value)
 {
-    double radius = sqrt(jit_complex_abs_sq(value));
-    double angle = atan2_double(value.im, value.re);
+    nlo_real radius = sqrt(jit_complex_abs_sq(value));
+    nlo_real angle = atan2_double(value.im, value.re);
     return jit_make_complex(log_double(radius), angle);
 }
 
-vk_complex64 jit_complex_real_pow(vk_complex64 value, double exponent)
+vk_complex64 jit_complex_real_pow(vk_complex64 value, nlo_real exponent)
 {
-    double radius = sqrt(jit_complex_abs_sq(value));
+    nlo_real radius = sqrt(jit_complex_abs_sq(value));
     if (radius == 0.0) {
         if (exponent == 0.0) {
             return jit_make_complex(1.0, 0.0);
@@ -66,11 +66,11 @@ vk_complex64 jit_complex_real_pow(vk_complex64 value, double exponent)
         return jit_make_complex(0.0, 0.0);
     }
 
-    double angle = atan2_double(value.im, value.re);
-    double scaled_angle = exponent * angle;
-    double scaled_radius = pow_double(radius, exponent);
-    double sin_angle = 0.0;
-    double cos_angle = 0.0;
+    nlo_real angle = atan2_double(value.im, value.re);
+    nlo_real scaled_angle = exponent * angle;
+    nlo_real scaled_radius = pow_double(radius, exponent);
+    nlo_real sin_angle = 0.0;
+    nlo_real cos_angle = 0.0;
     sincos_double(scaled_angle, sin_angle, cos_angle);
     return jit_make_complex(scaled_radius * cos_angle,
                                scaled_radius * sin_angle);
@@ -78,7 +78,7 @@ vk_complex64 jit_complex_real_pow(vk_complex64 value, double exponent)
 
 vk_complex64 jit_complex_pow(vk_complex64 base, vk_complex64 exponent)
 {
-    double radius = sqrt(jit_complex_abs_sq(base));
+    nlo_real radius = sqrt(jit_complex_abs_sq(base));
     if (radius == 0.0) {
         if (exponent.re == 0.0 && exponent.im == 0.0) {
             return jit_make_complex(1.0, 0.0);
@@ -86,13 +86,13 @@ vk_complex64 jit_complex_pow(vk_complex64 base, vk_complex64 exponent)
         return jit_make_complex(0.0, 0.0);
     }
 
-    double theta = atan2_double(base.im, base.re);
-    double log_radius = log_double(radius);
-    double scaled_re = (exponent.re * log_radius) - (exponent.im * theta);
-    double scaled_im = (exponent.re * theta) + (exponent.im * log_radius);
-    double magnitude = exp_double(scaled_re);
-    double sin_angle = 0.0;
-    double cos_angle = 0.0;
+    nlo_real theta = atan2_double(base.im, base.re);
+    nlo_real log_radius = log_double(radius);
+    nlo_real scaled_re = (exponent.re * log_radius) - (exponent.im * theta);
+    nlo_real scaled_im = (exponent.re * theta) + (exponent.im * log_radius);
+    nlo_real magnitude = exp_double(scaled_re);
+    nlo_real sin_angle = 0.0;
+    nlo_real cos_angle = 0.0;
     sincos_double(scaled_im, sin_angle, cos_angle);
     return jit_make_complex(magnitude * cos_angle,
                                magnitude * sin_angle);
@@ -105,26 +105,26 @@ vk_complex64 jit_complex_div(vk_complex64 lhs, vk_complex64 rhs)
 
 vk_complex64 jit_complex_sin(vk_complex64 value)
 {
-    double sin_re = 0.0;
-    double cos_re = 0.0;
+    nlo_real sin_re = 0.0;
+    nlo_real cos_re = 0.0;
     sincos_double(value.re, sin_re, cos_re);
-    double exp_im = exp_double(value.im);
-    double exp_neg_im = exp_double(-value.im);
-    double cosh_im = 0.5 * (exp_im + exp_neg_im);
-    double sinh_im = 0.5 * (exp_im - exp_neg_im);
+    nlo_real exp_im = exp_double(value.im);
+    nlo_real exp_neg_im = exp_double(-value.im);
+    nlo_real cosh_im = 0.5 * (exp_im + exp_neg_im);
+    nlo_real sinh_im = 0.5 * (exp_im - exp_neg_im);
     return jit_make_complex(sin_re * cosh_im,
                                cos_re * sinh_im);
 }
 
 vk_complex64 jit_complex_cos(vk_complex64 value)
 {
-    double sin_re = 0.0;
-    double cos_re = 0.0;
+    nlo_real sin_re = 0.0;
+    nlo_real cos_re = 0.0;
     sincos_double(value.re, sin_re, cos_re);
-    double exp_im = exp_double(value.im);
-    double exp_neg_im = exp_double(-value.im);
-    double cosh_im = 0.5 * (exp_im + exp_neg_im);
-    double sinh_im = 0.5 * (exp_im - exp_neg_im);
+    nlo_real exp_im = exp_double(value.im);
+    nlo_real exp_neg_im = exp_double(-value.im);
+    nlo_real cosh_im = 0.5 * (exp_im + exp_neg_im);
+    nlo_real sinh_im = 0.5 * (exp_im - exp_neg_im);
     return jit_make_complex(cos_re * cosh_im,
                                -sin_re * sinh_im);
 }

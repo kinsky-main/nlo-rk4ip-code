@@ -18,6 +18,14 @@
 #include "physics/operator_program_jit.h"
 
 #include <math.h>
+
+/* NLOLIB_VULKAN_FP32 computes on the device in single precision, so checks of
+ * Vulkan results get a tolerance floor a few orders above float epsilon. */
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+#define VK_TOL(tol) fmax((tol), 1e-5)
+#else
+#define VK_TOL(tol) (tol)
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,8 +221,8 @@ int main(void)
         }
         printf("  %-40s tensor=%d  JIT vs Vulkan interpreter: %-9s  vs CPU: %.2e\n",
                k_cases[k].expr, k_cases[k].tensor, vk_text, err_cpu);
-        CHECK(err_vk <= 1e-12);
-        CHECK(err_cpu <= k_cases[k].cpu_tolerance);
+        CHECK(err_vk <= VK_TOL(1e-12));
+        CHECK(err_cpu <= VK_TOL(k_cases[k].cpu_tolerance));
     }
 
     /* A second backend reuses the cached SPIR-V: no new cache entries. */

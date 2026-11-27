@@ -494,6 +494,23 @@ NLOLIB_API nlolib_status nlolib_propagate(
                                          &allocation_info,
                                          &mem_info);
 
+    /* Checked after init because AUTO only resolves to a backend there. A
+     * tolerance below what the device arithmetic resolves would pin the
+     * adaptive solver at min_step_size for the whole run. */
+    const double min_tolerance = vector_backend_min_error_tolerance(state->backend);
+    const double requested_tolerance = config->propagation.error_tolerance;
+    if (min_tolerance > 0.0 && requested_tolerance > 0.0 &&
+        requested_tolerance < min_tolerance && !fixed_step_requested(config, NULL)) {
+        log_emit(LOG_LEVEL_ERROR,
+                 "[nlolib] error_tolerance=%.3e is below %.3e, the smallest local error the "
+                 "single-precision Vulkan backend resolves. Raise error_tolerance, use a fixed "
+                 "step, or run on the CPU backend.",
+                 requested_tolerance,
+                 min_tolerance);
+        free_simulation_state(state);
+        return propagate_fail("validate.error_tolerance_precision", NLOLIB_STATUS_INVALID_ARGUMENT);
+    }
+
     if (simulation_state_upload_initial_field(state, input_field) != VEC_STATUS_OK) {
         free_simulation_state(state);
         return propagate_fail("upload_initial_field", NLOLIB_STATUS_ALLOCATION_FAILED);

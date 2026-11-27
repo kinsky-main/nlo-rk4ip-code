@@ -17,6 +17,13 @@ option(NLOLIB_BUILD_EXAMPLES "Build example executables" ON)
 option(NLOLIB_BUILD_MATLAB_TESTS "Enable MATLAB runtime-handle parser tests when MATLAB is available" OFF)
 option(ENABLE_VULKAN_BACKEND "Enable Vulkan vector backend and shader compilation path" ON)
 option(ENABLE_VKFFT "Enable VkFFT backend integration for Vulkan FFT execution" ON)
+# Prototype: store Vulkan device buffers and run every kernel, the operator JIT
+# and VkFFT in single precision, so the backend runs on devices without
+# shaderFloat64 (Apple GPUs through MoltenVK). Host-side data stays double.
+option(NLOLIB_VULKAN_FP32 "Run the Vulkan backend in single precision (prototype)" OFF)
+if(NLOLIB_VULKAN_FP32)
+  add_compile_definitions(NLO_VK_FP32=1)
+endif()
 # Keep this OFF for a release build: the packaged version is read back from
 # CMakeLists.txt after the build, so a bump mid-build publishes a version that
 # does not match its tag. Bump deliberately with

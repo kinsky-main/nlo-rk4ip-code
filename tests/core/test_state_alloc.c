@@ -10,6 +10,14 @@
 #include "io/snapshot_store.h"
 #include "nlolib.h"
 #include <math.h>
+
+/* NLOLIB_VULKAN_FP32 computes on the device in single precision, so checks of
+ * Vulkan results get a tolerance floor a few orders above float epsilon. */
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+#define VK_TOL(tol) fmax((tol), 1e-5)
+#else
+#define VK_TOL(tol) (tol)
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -677,8 +685,8 @@ static void test_tensor_mode_compact_axis_symbols_vulkan(void)
     printf("test_tensor_mode_compact_axis_symbols_vulkan: potential diff %.2e, linear factor diff %.2e\n",
            potential_diff,
            factor_diff);
-    STATE_CHECK(potential_diff <= 1e-12);
-    STATE_CHECK(factor_diff <= 1e-12);
+    STATE_CHECK(potential_diff <= VK_TOL(1e-12));
+    STATE_CHECK(factor_diff <= VK_TOL(1e-12));
     /* The potential must actually vary along x and y for the check to mean anything. */
     STATE_CHECK(fabs(RE(mesh_potential[8]) - RE(mesh_potential[0])) > 0.1);
     STATE_CHECK(fabs(RE(mesh_potential[3 * 8]) - RE(mesh_potential[0])) > 0.1);
@@ -997,8 +1005,9 @@ static void test_dense_output_limit_matches_runtime_limits(void)
 
 /* Runs a short nonlinear propagation and returns the records asked for.
  * record_z == NULL requests num_records evenly spaced records. */
-static void run_record_schedule(
+static nlolib_status propagate_record_schedule(
     vector_backend_type backend_type,
+    double error_tolerance,
     const double* record_z,
     size_t num_records,
     propagate_output_mode output_mode,
@@ -1014,7 +1023,7 @@ static void run_record_schedule(
     config->propagation.starting_step_size = 0.01;
     config->propagation.max_step_size = 0.2;
     config->propagation.min_step_size = 1e-6;
-    config->propagation.error_tolerance = 1e-9;
+    config->propagation.error_tolerance = error_tolerance;
 
     simulation_config sim_section;
     sim_section.propagation = config->propagation;
@@ -1048,13 +1057,34 @@ static void run_record_schedule(
     out.records_written = out_records_written;
     out.storage_result = out_storage_result;
 
-    STATE_CHECK(nlolib_propagate(&sim_section,
-                                 &physics_section,
-                                 RECORD_TEST_SAMPLES,
-                                 input,
-                                 &options,
-                                 &out) == NLOLIB_STATUS_OK);
+    const nlolib_status status =
+        nlolib_propagate(&sim_section, &physics_section, RECORD_TEST_SAMPLES, input, &options, &out);
     free_sim_config(config);
+    return status;
+}
+
+static void run_record_schedule(
+    vector_backend_type backend_type,
+    const double* record_z,
+    size_t num_records,
+    propagate_output_mode output_mode,
+    const storage_options* storage,
+    nlo_complex* out_records,
+    size_t* out_records_written,
+    storage_result* out_storage_result
+)
+{
+    /* A single-precision Vulkan backend rejects 1e-9 as unreachable. */
+    const double tolerance = (backend_type == VECTOR_BACKEND_CPU) ? 1e-9 : VK_TOL(1e-9);
+    STATE_CHECK(propagate_record_schedule(backend_type,
+                                          tolerance,
+                                          record_z,
+                                          num_records,
+                                          output_mode,
+                                          storage,
+                                          out_records,
+                                          out_records_written,
+                                          out_storage_result) == NLOLIB_STATUS_OK);
 }
 
 static int records_equal(const nlo_complex* lhs, const nlo_complex* rhs)
@@ -1175,6 +1205,42 @@ static void test_single_record_rules(void)
     }
 #endif
     printf("test_single_record_rules (vulkan): skipped (Vulkan unavailable).\n");
+}
+
+/* A single-precision Vulkan backend rejects an adaptive tolerance below
+ * float epsilon instead of pinning the solver at min_step_size. */
+static void test_fp32_vulkan_rejects_unreachable_tolerance(void)
+{
+#if ENABLE_VULKAN_BACKEND && defined(NLO_VK_FP32) && NLO_VK_FP32
+    vector_backend* probe = vector_backend_create_vulkan(NULL);
+    if (probe == NULL) {
+        printf("test_fp32_vulkan_rejects_unreachable_tolerance: skipped (Vulkan unavailable).\n");
+        return;
+    }
+    const double tol_floor = vector_backend_min_error_tolerance(probe);
+    vector_backend_destroy(probe);
+    STATE_CHECK(tol_floor > 0.0);
+
+    nlo_complex record[RECORD_TEST_SAMPLES];
+    size_t written = 0u;
+    STATE_CHECK(propagate_record_schedule(VECTOR_BACKEND_VULKAN, 0.5 * tol_floor, NULL, 1u,
+                                          PROPAGATE_OUTPUT_DENSE, NULL, record, &written, NULL) ==
+                NLOLIB_STATUS_INVALID_ARGUMENT);
+    STATE_CHECK(propagate_record_schedule(VECTOR_BACKEND_AUTO, 0.5 * tol_floor, NULL, 1u,
+                                          PROPAGATE_OUTPUT_DENSE, NULL, record, &written, NULL) ==
+                NLOLIB_STATUS_INVALID_ARGUMENT);
+    /* The CPU backend has no floor. */
+    STATE_CHECK(propagate_record_schedule(VECTOR_BACKEND_CPU, 0.5 * tol_floor, NULL, 1u,
+                                          PROPAGATE_OUTPUT_DENSE, NULL, record, &written, NULL) ==
+                NLOLIB_STATUS_OK);
+    STATE_CHECK(propagate_record_schedule(VECTOR_BACKEND_VULKAN, 1e-5, NULL, 1u,
+                                          PROPAGATE_OUTPUT_DENSE, NULL, record, &written, NULL) ==
+                NLOLIB_STATUS_OK);
+    printf("test_fp32_vulkan_rejects_unreachable_tolerance: floor %.3e enforced on Vulkan only.\n", tol_floor);
+#else
+    STATE_CHECK(vector_backend_min_error_tolerance(NULL) == 0.0);
+    printf("test_fp32_vulkan_rejects_unreachable_tolerance: skipped (double-precision build).\n");
+#endif
 }
 
 static void test_storage_only_propagate_without_dense_output(void)
@@ -1354,6 +1420,7 @@ int main(void)
     test_dense_output_limit_same_for_resident_buffers();
     test_storage_only_propagate_without_dense_output();
     test_single_record_rules();
+    test_fp32_vulkan_rejects_unreachable_tolerance();
     test_adaptive_step_controller_safety_factor();
     printf("test_core_state_alloc: all subtests completed.\n");
     return 0;

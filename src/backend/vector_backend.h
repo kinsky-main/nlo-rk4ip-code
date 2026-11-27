@@ -117,6 +117,19 @@ void vector_backend_destroy(vector_backend* backend);
 vector_backend_type vector_backend_get_type(const vector_backend* backend);
 
 /**
+ * @brief Smallest adaptive error tolerance the backend's device arithmetic resolves.
+ *
+ * The RK4IP local error estimate cannot fall below the rounding error of the
+ * arithmetic that computes it. A single-precision Vulkan backend
+ * (NLOLIB_VULKAN_FP32) reports single-precision epsilon; double-precision
+ * backends report 0, meaning no floor applies.
+ *
+ * @param backend Backend handle (NULL reports 0).
+ * @return double Minimum relative error tolerance, or 0 when unconstrained.
+ */
+double vector_backend_min_error_tolerance(const vector_backend* backend);
+
+/**
  * @brief Returns true while backend transfers are guarded by simulation mode.
  *
  * @param backend Backend handle.

@@ -7,8 +7,8 @@
 #include "numerics/vk_vector_ops.h"
 
 typedef struct {
-    double numerator;
-    double denominator;
+    vk_real numerator;
+    vk_real denominator;
 } vk_error_pair;
 
 VkDeviceSize vk_min_size(VkDeviceSize a, VkDeviceSize b);

@@ -1,6 +1,6 @@
 #version 460
-#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
 #extension GL_GOOGLE_include_directive : require
+#include "nlo_precision.glslinc"
 
 #include "complex_device.glslinc"
 
@@ -11,10 +11,10 @@ layout(local_size_x = 64) in;
 layout(push_constant) uniform PushConstants {
     uint count;
     uint terms;
-    double scalar0;
-    double scalar1;
-    double scalar2;
-    double scalar3;
+    nlo_real scalar0;
+    nlo_real scalar1;
+    nlo_real scalar2;
+    nlo_real scalar3;
 } pc;
 
 layout(set = 0, binding = 0, std430) buffer DstBuffer {
@@ -44,8 +44,8 @@ void main()
         return;
     }
 
-    double re = (pc.scalar0 * a[idx].re) + (pc.scalar1 * b[idx].re);
-    double im = (pc.scalar0 * a[idx].im) + (pc.scalar1 * b[idx].im);
+    nlo_real re = (pc.scalar0 * a[idx].re) + (pc.scalar1 * b[idx].re);
+    nlo_real im = (pc.scalar0 * a[idx].im) + (pc.scalar1 * b[idx].im);
     if (pc.terms >= 3u) {
         re += pc.scalar2 * c[idx].re;
         im += pc.scalar2 * c[idx].im;

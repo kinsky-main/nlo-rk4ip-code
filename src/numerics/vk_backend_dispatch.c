@@ -186,8 +186,8 @@ vec_status vk_dispatch_kernel(
         vk_push_constants push = {
             .count = (uint32_t)chunk_elems,
             .pad = 0u,
-            .scalar0 = scalar0,
-            .scalar1 = scalar1
+            .scalar0 = (vk_real)scalar0,
+            .scalar1 = (vk_real)scalar1
         };
         vkCmdPushConstants(cmd,
                            backend->vk.pipeline_layout,
@@ -278,7 +278,7 @@ vec_status vk_op_complex_affine_comb_real(
     const double* coeffs
 )
 {
-    const size_t elem_size = sizeof(nlo_complex);
+    const size_t elem_size = VK_COMPLEX_BYTES;
     const size_t max_chunk_elems = vk_max_chunk_elements(backend, elem_size);
     if (max_chunk_elems == 0u) {
         return VEC_STATUS_BACKEND_UNAVAILABLE;
@@ -342,10 +342,10 @@ vec_status vk_op_complex_affine_comb_real(
         vk_push_constants push = {
             .count = (uint32_t)chunk_elems,
             .pad = (uint32_t)term_count,
-            .scalar0 = coeffs[0],
-            .scalar1 = coeffs[1],
-            .scalar2 = (term_count > 2u) ? coeffs[2] : 0.0,
-            .scalar3 = (term_count > 3u) ? coeffs[3] : 0.0
+            .scalar0 = (vk_real)coeffs[0],
+            .scalar1 = (vk_real)coeffs[1],
+            .scalar2 = (vk_real)((term_count > 2u) ? coeffs[2] : 0.0),
+            .scalar3 = (vk_real)((term_count > 3u) ? coeffs[3] : 0.0)
         };
         vkCmdPushConstants(cmd,
                            backend->vk.pipeline_layout,
@@ -405,7 +405,7 @@ vec_status vk_dispatch_complex_relative_error(
     if (status != VEC_STATUS_OK) {
         return status;
     }
-    status = vk_ensure_staging_capacity(backend, (VkDeviceSize)sizeof(double));
+    status = vk_ensure_staging_capacity(backend, (VkDeviceSize)VK_REAL_BYTES);
     if (status != VEC_STATUS_OK) {
         return status;
     }
@@ -422,8 +422,8 @@ vec_status vk_dispatch_complex_relative_error(
     }
 
     VkCommandBuffer cmd = backend->vk.command_buffer;
-    VkDeviceSize complex_bytes = (VkDeviceSize)current->bytes;
-    VkDeviceSize partial_bytes = (VkDeviceSize)groups * (VkDeviceSize)sizeof(double);
+    VkDeviceSize complex_bytes = (VkDeviceSize)vk_device_bytes(current->bytes);
+    VkDeviceSize partial_bytes = (VkDeviceSize)groups * (VkDeviceSize)VK_REAL_BYTES;
     uint64_t dispatch_count = 0u;
     uint64_t dispatch_pass_count = 0u;
     uint64_t dispatch_pass_bytes = 0u;
@@ -485,8 +485,8 @@ vec_status vk_dispatch_complex_relative_error(
         }
 
         uint32_t next_groups = vk_dispatch_groups_for_count((size_t)count);
-        VkDeviceSize src_bytes = (VkDeviceSize)count * (VkDeviceSize)sizeof(double);
-        VkDeviceSize dst_bytes = (VkDeviceSize)next_groups * (VkDeviceSize)sizeof(double);
+        VkDeviceSize src_bytes = (VkDeviceSize)count * (VkDeviceSize)VK_REAL_BYTES;
+        VkDeviceSize dst_bytes = (VkDeviceSize)next_groups * (VkDeviceSize)VK_REAL_BYTES;
 
         vk_update_descriptor_set(backend,
                                      descriptor_set,
@@ -533,15 +533,15 @@ vec_status vk_dispatch_complex_relative_error(
         count = next_groups;
     }
 
-    vk_cmd_compute_to_transfer(cmd, src_buffer, 0u, (VkDeviceSize)sizeof(double));
+    vk_cmd_compute_to_transfer(cmd, src_buffer, 0u, (VkDeviceSize)VK_REAL_BYTES);
 
     VkBufferCopy copy = {
         .srcOffset = 0u,
         .dstOffset = 0u,
-        .size = (VkDeviceSize)sizeof(double)
+        .size = (VkDeviceSize)VK_REAL_BYTES
     };
     vkCmdCopyBuffer(cmd, src_buffer, backend->vk.staging_buffer, 1u, &copy);
-    vk_cmd_transfer_to_host(cmd, backend->vk.staging_buffer, 0u, (VkDeviceSize)sizeof(double));
+    vk_cmd_transfer_to_host(cmd, backend->vk.staging_buffer, 0u, (VkDeviceSize)VK_REAL_BYTES);
 
     status = vk_submit_commands(backend);
     if (status != VEC_STATUS_OK) {
@@ -550,8 +550,8 @@ vec_status vk_dispatch_complex_relative_error(
     perf_profile_add_gpu_dispatch(dispatch_count,
                                       dispatch_pass_count,
                                       dispatch_pass_bytes);
-    perf_profile_add_gpu_host_transfer_copy(1u, (uint64_t)sizeof(double));
-    perf_profile_add_gpu_download(1u, (uint64_t)sizeof(double));
+    perf_profile_add_gpu_host_transfer_copy(1u, (uint64_t)VK_REAL_BYTES);
+    perf_profile_add_gpu_download(1u, (uint64_t)VK_REAL_BYTES);
     if (backend->in_simulation) {
         status = vk_simulation_phase_flush(backend);
         if (status != VEC_STATUS_OK) {
@@ -559,8 +559,9 @@ vec_status vk_dispatch_complex_relative_error(
         }
     }
 
-    double ratio = 0.0;
-    memcpy(&ratio, backend->vk.staging_mapped_ptr, sizeof(double));
+    vk_real device_ratio = 0;
+    memcpy(&device_ratio, backend->vk.staging_mapped_ptr, sizeof(device_ratio));
+    double ratio = (double)device_ratio;
     if (ratio < 0.0) {
         ratio = 0.0;
     }
@@ -616,7 +617,7 @@ vec_status vk_dispatch_complex_weighted_rms_error(
     }
 
     VkCommandBuffer cmd = backend->vk.command_buffer;
-    VkDeviceSize complex_bytes = (VkDeviceSize)fine->bytes;
+    VkDeviceSize complex_bytes = (VkDeviceSize)vk_device_bytes(fine->bytes);
     VkDeviceSize partial_bytes = (VkDeviceSize)groups * (VkDeviceSize)sizeof(vk_error_pair);
     uint64_t dispatch_count = 0u;
     uint64_t dispatch_pass_count = 0u;
@@ -753,7 +754,7 @@ vec_status vk_dispatch_complex_weighted_rms_error(
         }
     }
 
-    vk_error_pair pair = {0.0, 0.0};
+    vk_error_pair pair = {0, 0};
     memcpy(&pair, backend->vk.staging_mapped_ptr, sizeof(pair));
     if (pair.denominator <= 0.0) {
         *out_error = 0.0;

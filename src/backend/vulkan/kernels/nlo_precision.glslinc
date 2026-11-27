@@ -1,0 +1,21 @@
+#ifndef NLO_PRECISION_GLSLINC
+#define NLO_PRECISION_GLSLINC
+
+/*
+ * Device scalar type. Kernels are built in double precision unless the build
+ * passes -DNLO_VK_FP32=1 (CMake option NLOLIB_VULKAN_FP32), which selects
+ * single precision for devices without shaderFloat64, such as Apple GPUs
+ * through MoltenVK.
+ */
+#if defined(NLO_VK_FP32) && NLO_VK_FP32
+#define nlo_real float
+#define NLO_REAL_EXP_MAX 88.0
+#define NLO_REAL_EXP_MIN -103.0
+#else
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#define nlo_real double
+#define NLO_REAL_EXP_MAX 709.0
+#define NLO_REAL_EXP_MIN -745.0
+#endif
+
+#endif

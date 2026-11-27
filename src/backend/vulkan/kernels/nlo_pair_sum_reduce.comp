@@ -1,18 +1,19 @@
 #version 460
-#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#extension GL_GOOGLE_include_directive : require
+#include "nlo_precision.glslinc"
 
 layout(local_size_x = 64) in;
 
 layout(push_constant) uniform PushConstants {
     uint count;
     uint _pad;
-    double scalar0;
-    double scalar1;
+    nlo_real scalar0;
+    nlo_real scalar1;
 } pc;
 
 struct vk_error_pair {
-    double numerator;
-    double denominator;
+    nlo_real numerator;
+    nlo_real denominator;
 };
 
 layout(set = 0, binding = 0, std430) buffer DstBuffer {
@@ -23,8 +24,8 @@ layout(set = 0, binding = 1, std430) readonly buffer SrcBuffer {
     vk_error_pair src_pairs[];
 };
 
-shared double shared_num[64];
-shared double shared_den[64];
+shared nlo_real shared_num[64];
+shared nlo_real shared_den[64];
 
 void main()
 {
@@ -32,8 +33,8 @@ void main()
     uint local_idx = gl_LocalInvocationID.x;
     uint group_idx = gl_WorkGroupID.x;
 
-    double numerator = 0.0;
-    double denominator = 0.0;
+    nlo_real numerator = 0.0;
+    nlo_real denominator = 0.0;
     if (global_idx < pc.count) {
         numerator = src_pairs[global_idx].numerator;
         denominator = src_pairs[global_idx].denominator;

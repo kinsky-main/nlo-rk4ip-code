@@ -63,9 +63,13 @@ static bool vk_supports_required_features(
 
     VkPhysicalDeviceFeatures features;
     vkGetPhysicalDeviceFeatures(physical_device, &features);
+#if !(defined(NLO_VK_FP32) && NLO_VK_FP32)
     if (features.shaderFloat64 != VK_TRUE) {
         return false;
     }
+#else
+    (void)features;
+#endif
 
     VkPhysicalDeviceProperties properties;
     vkGetPhysicalDeviceProperties(physical_device, &properties);
@@ -637,7 +641,7 @@ vec_status vk_ensure_reduction_capacity(vector_backend* backend, VkDeviceSize mi
         capacity *= 2u;
     }
 
-    VkDeviceSize bytes = capacity * (VkDeviceSize)sizeof(double);
+    VkDeviceSize bytes = capacity * (VkDeviceSize)VK_REAL_BYTES;
     VkBuffer new_a = VK_NULL_HANDLE;
     VkDeviceMemory mem_a = VK_NULL_HANDLE;
     VkBuffer new_b = VK_NULL_HANDLE;
@@ -709,7 +713,7 @@ vec_status vk_backend_init(vector_backend* backend, const vk_backend_config* con
     backend->vk.instance = VK_NULL_HANDLE;
     backend->vk.owns_instance = false;
     backend->vk.owns_device = false;
-    backend->vk.shader_float64_supported = true;
+    backend->vk.shader_float64_supported = (sizeof(vk_real) == sizeof(double));
     backend->vk.limits = limits;
     backend->vk.device_type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
     backend->vk.device_local_bytes = 0u;

@@ -12,6 +12,7 @@
 #include "numerics/vector_ops.h"
 #include "utility/perf_profile.h"
 #include "numerics/vk_vector_ops.h"
+#include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -322,6 +323,15 @@ vector_backend_type vector_backend_get_type(const vector_backend* backend)
         return VECTOR_BACKEND_CPU;
     }
     return backend->type;
+}
+
+double vector_backend_min_error_tolerance(const vector_backend* backend)
+{
+    if (backend == NULL || backend->type != VECTOR_BACKEND_VULKAN ||
+        sizeof(vk_real) == sizeof(double)) {
+        return 0.0;
+    }
+    return (double)FLT_EPSILON;
 }
 
 bool vec_is_in_simulation(const vector_backend* backend)
